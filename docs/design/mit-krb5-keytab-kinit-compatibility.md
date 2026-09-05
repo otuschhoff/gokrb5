@@ -53,7 +53,7 @@ Numbered for traceability (`KT-n`).
 | KT-3 | `GetEncryptionKey` requires an exact `etype` match; no wildcard (`etype == 0` → any) as in MIT. MIT also treats "similar" enctypes (e.g. DES variants) as matching — document as unsupported (DES not implemented). | Medium |
 | KT-4 | `GetEncryptionKey` requires exact realm match. MIT matches any realm when the lookup principal's realm is empty. | Medium |
 | KT-5 | `GetEncryptionKey` has no 8-bit kvno wrap-around handling. MIT matches an entry whose stored kvno is `kvno & 0xff` when only the 8-bit field was written (legacy writers). | Low |
-| KT-6 | 32-bit kvno trailer is read for **v1** files too. MIT only reads the trailer for v2 (`KRB5_KT_VNO`). | Low |
+| KT-6 | 32-bit kvno trailer handling is not recorded explicitly. MIT reads the optional trailer for both v1 and v2, using native byte order for v1, and ignores a zero trailer value. | Low |
 | KT-7 | v1 round-trip is broken: `parsePrincipal` decrements `NumComponents` on read, `principal.marshal` writes it back unchanged, so v1 → marshal → v1 writes the wrong count. `NumComponents` should be derived from `len(Components)` at marshal time, not stored. | Medium |
 | KT-8 | `AddEntry` accepts `KVNO uint8`. kvnos > 255 are common (AD, long-lived service principals). MIT writes `vno & 0xff` to the 8-bit field and the full value to the 32-bit trailer. | High |
 | KT-9 | `entry.String()` prints `KVNO8`, not `KVNO`. For kvno ≥ 256 the display is wrong (MIT `klist -k` shows the 32-bit value). | Medium |
@@ -272,7 +272,7 @@ All generated once with a pinned MIT version (record `krb5-config --version`), f
 - `TestUnmarshal_AllFixtures` (table over every fixture; asserts entry count, kvno, etype, key bytes, principal, timestamp).
 - `TestUnmarshal_HoleSkipping`, `TestUnmarshal_HoleAtEOF`, `TestUnmarshal_ZeroLengthRecord`.
 - `TestUnmarshal_TruncatedPrincipalReturnsError` (KT-1).
-- `TestUnmarshal_V1RoundTrip` (KT-6, KT-7): v1 → Marshal(v1) bytes identical.
+- `TestUnmarshal_V1RoundTrip` (KT-6, KT-7): v1 → Marshal(v1) bytes identical, including an optional native-endian 32-bit kvno trailer.
 - `TestUnmarshal_ResetsEntries` (KT-13).
 - `TestMarshal_ByteExactVsKtutil` — extend existing test to every etype and to kvno 300 (KT-8).
 - `TestGetEntry_HighestKVNOWins` (KT-2), `TestGetEntry_EtypeWildcard` (KT-3), `TestGetEntry_EmptyRealmMatchesAny` (KT-4), `TestGetEntry_KVNO8Fallback` (KT-5), `TestGetEntry_ErrNotFound_vs_ErrKVNONotFound`.
@@ -386,7 +386,7 @@ Files: `v8/keytab/keytab.go`, `v8/keytab/keytab_test.go`.
 
 Steps:
 1. Capture and return the error from `parsePrincipal` in `Unmarshal`.
-2. Only read the 32-bit kvno trailer when `kt.version == 2`; record on the entry (unexported bool `kvno32Present`) whether it was present.
+2. Read the optional 32-bit kvno trailer for both versions, in the version's byte order; record on the entry (unexported bool `kvno32Present`) whether it was present.
 3. Stop storing `NumComponents`; compute in `principal.marshal` (`len(Components)`, `+1` if v1). Keep the struct field for one release but ignore it (`json:"-"`), or remove if no external usage — check with `grep -r NumComponents` in the module.
 4. `Unmarshal` sets `kt.Entries = nil` before parsing.
 5. Replace every `%s` of a byte slice in error messages with the length or offset only.

@@ -23,17 +23,19 @@ const (
 
 // Keytab struct.
 type Keytab struct {
-	version uint8
-	Entries []entry
+	version   uint8
+	byteOrder binary.ByteOrder
+	Entries   []entry
 }
 
 // Keytab entry struct.
 type entry struct {
-	Principal principal
-	Timestamp time.Time
-	KVNO8     uint8
-	Key       types.EncryptionKey
-	KVNO      uint32
+	Principal     principal
+	Timestamp     time.Time
+	KVNO8         uint8
+	Key           types.EncryptionKey
+	KVNO          uint32
+	kvno32Present bool
 }
 
 func (e entry) String() string {
@@ -62,8 +64,9 @@ func (p principal) String() string {
 func New() *Keytab {
 	var e []entry
 	return &Keytab{
-		version: 2,
-		Entries: e,
+		version:   2,
+		byteOrder: binary.BigEndian,
+		Entries:   e,
 	}
 }
 
@@ -181,8 +184,12 @@ func Load(ktPath string) (*Keytab, error) {
 // Marshal keytab into byte slice
 func (kt *Keytab) Marshal() ([]byte, error) {
 	b := []byte{keytabFirstByte, kt.version}
+	endian := kt.byteOrder
+	if endian == nil || kt.version == 2 {
+		endian = binary.BigEndian
+	}
 	for _, e := range kt.Entries {
-		eb, err := e.marshal(int(kt.version))
+		eb, err := e.marshal(int(kt.version), endian)
 		if err != nil {
 			return b, err
 		}
@@ -203,6 +210,7 @@ func (kt *Keytab) Write(w io.Writer) (int, error) {
 
 // Unmarshal byte slice of Keytab data into Keytab type.
 func (kt *Keytab) Unmarshal(b []byte) error {
+	kt.Entries = nil
 	if len(b) < 2 {
 		return fmt.Errorf("byte array is less than 2 bytes: %d", len(b))
 	}
@@ -218,10 +226,22 @@ func (kt *Keytab) Unmarshal(b []byte) error {
 		return errors.New("invalid keytab data. Keytab version is neither 1 nor 2")
 	}
 	//Version 1 of the file format uses native byte order for integer representations. Version 2 always uses big-endian byte order
-	var endian binary.ByteOrder
-	endian = binary.BigEndian
-	if kt.version == 1 && isNativeEndianLittle() {
-		endian = binary.LittleEndian
+	var endian binary.ByteOrder = binary.BigEndian
+	if kt.version == 1 {
+		endian = nativeByteOrder()
+		if len(b) >= 6 && !validRecordLength(b[2:6], endian, len(b)-6) {
+			other := binary.ByteOrder(binary.BigEndian)
+			if endian == binary.BigEndian {
+				other = binary.LittleEndian
+			}
+			if validRecordLength(b[2:6], other, len(b)-6) {
+				endian = other
+			}
+		}
+	}
+	kt.byteOrder = endian
+	if len(b) == 2 {
+		return nil
 	}
 	// n tracks position in the byte array
 	n := 2
@@ -231,23 +251,27 @@ func (kt *Keytab) Unmarshal(b []byte) error {
 	}
 	for l != 0 {
 		if l < 0 {
-			//Zero padded so skip over
-			l = l * -1
-			n = n + int(l)
-		} else {
-			if n < 0 {
-				return fmt.Errorf("%d can't be less than zero", n)
+			if l == -1<<31 {
+				return fmt.Errorf("invalid keytab hole length at offset %d", n-4)
 			}
-			if n+int(l) > len(b) {
-				return fmt.Errorf("%s's length is less than %d", b, n+int(l))
+			holeLength := int(-l)
+			if holeLength > len(b)-n {
+				return fmt.Errorf("keytab hole at offset %d exceeds remaining data", n-4)
+			}
+			n += holeLength
+		} else {
+			if int(l) > len(b)-n {
+				return fmt.Errorf("keytab record at offset %d has length %d with only %d bytes remaining", n-4, l, len(b)-n)
 			}
 			eb := b[n : n+int(l)]
 			n = n + int(l)
 			ke := newEntry()
 			// p keeps track as to where we are in the byte stream
 			var p int
+			if err := parsePrincipal(eb, &p, kt, &ke, &endian); err != nil {
+				return fmt.Errorf("invalid principal in keytab record at offset %d: %v", n-int(l)-4, err)
+			}
 			var err error
-			parsePrincipal(eb, &p, kt, &ke, &endian)
 			ke.Timestamp, err = readTimestamp(eb, &p, &endian)
 			if err != nil {
 				return err
@@ -280,7 +304,10 @@ func (kt *Keytab) Unmarshal(b []byte) error {
 				if err != nil {
 					return err
 				}
-				ke.KVNO = uint32(ri32)
+				if ri32 != 0 {
+					ke.KVNO = uint32(ri32)
+					ke.kvno32Present = true
+				}
 			}
 			if ke.KVNO == 0 {
 				// Handles if the value from the last 4 bytes was zero and also if there are not the 4 bytes present. Makes sense to put the same value here as KVNO8
@@ -303,19 +330,13 @@ func (kt *Keytab) Unmarshal(b []byte) error {
 	return nil
 }
 
-func (e entry) marshal(v int) ([]byte, error) {
+func (e entry) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
 	var b []byte
-	pb, err := e.Principal.marshal(v)
+	pb, err := e.Principal.marshal(v, endian)
 	if err != nil {
 		return b, err
 	}
 	b = append(b, pb...)
-
-	var endian binary.ByteOrder
-	endian = binary.BigEndian
-	if v == 1 && isNativeEndianLittle() {
-		endian = binary.LittleEndian
-	}
 
 	t := make([]byte, 9)
 	endian.PutUint32(t[0:4], uint32(e.Timestamp.Unix()))
@@ -331,9 +352,11 @@ func (e entry) marshal(v int) ([]byte, error) {
 	}
 	b = append(b, buf.Bytes()...)
 
-	t = make([]byte, 4)
-	endian.PutUint32(t, e.KVNO)
-	b = append(b, t...)
+	if v == 2 || e.kvno32Present {
+		t = make([]byte, 4)
+		endian.PutUint32(t, e.KVNO)
+		b = append(b, t...)
+	}
 
 	// Add the length header
 	t = make([]byte, 4)
@@ -352,6 +375,9 @@ func parsePrincipal(b []byte, p *int, kt *Keytab, ke *entry, e *binary.ByteOrder
 	if kt.version == 1 {
 		//In version 1 the number of components includes the realm. Minus 1 to make consistent with version 2
 		ke.Principal.NumComponents--
+	}
+	if ke.Principal.NumComponents <= 0 {
+		return fmt.Errorf("principal component count must be positive: %d", ke.Principal.NumComponents)
 	}
 	lenRealm, err := readInt16(b, p, e)
 	if err != nil {
@@ -383,22 +409,21 @@ func parsePrincipal(b []byte, p *int, kt *Keytab, ke *entry, e *binary.ByteOrder
 	return nil
 }
 
-func (p principal) marshal(v int) ([]byte, error) {
+func (p principal) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
 	//var b []byte
 	b := make([]byte, 2)
-	var endian binary.ByteOrder
-	endian = binary.BigEndian
-	if v == 1 && isNativeEndianLittle() {
-		endian = binary.LittleEndian
+	componentCount := len(p.Components)
+	if v == 1 {
+		componentCount++
 	}
-	endian.PutUint16(b[0:], uint16(p.NumComponents))
-	realm, err := marshalString(p.Realm, v)
+	endian.PutUint16(b[0:], uint16(componentCount))
+	realm, err := marshalString(p.Realm, endian)
 	if err != nil {
 		return b, err
 	}
 	b = append(b, realm...)
 	for _, c := range p.Components {
-		cb, err := marshalString(c, v)
+		cb, err := marshalString(c, endian)
 		if err != nil {
 			return b, err
 		}
@@ -412,14 +437,9 @@ func (p principal) marshal(v int) ([]byte, error) {
 	return b, nil
 }
 
-func marshalString(s string, v int) ([]byte, error) {
+func marshalString(s string, endian binary.ByteOrder) ([]byte, error) {
 	sb := []byte(s)
 	b := make([]byte, 2)
-	var endian binary.ByteOrder
-	endian = binary.BigEndian
-	if v == 1 && isNativeEndianLittle() {
-		endian = binary.LittleEndian
-	}
 	endian.PutUint16(b[0:], uint16(len(sb)))
 	buf := new(bytes.Buffer)
 	err := binary.Write(buf, endian, sb)
@@ -446,7 +466,7 @@ func readInt8(b []byte, p *int, e *binary.ByteOrder) (i int8, err error) {
 	}
 
 	if (*p + 1) > len(b) {
-		return 0, fmt.Errorf("%s's length is less than %d", b, *p+1)
+		return 0, fmt.Errorf("need 1 byte at offset %d, input length is %d", *p, len(b))
 	}
 	buf := bytes.NewBuffer(b[*p : *p+1])
 	binary.Read(buf, *e, &i)
@@ -461,7 +481,7 @@ func readInt16(b []byte, p *int, e *binary.ByteOrder) (i int16, err error) {
 	}
 
 	if (*p + 2) > len(b) {
-		return 0, fmt.Errorf("%s's length is less than %d", b, *p+2)
+		return 0, fmt.Errorf("need 2 bytes at offset %d, input length is %d", *p, len(b))
 	}
 
 	buf := bytes.NewBuffer(b[*p : *p+2])
@@ -477,7 +497,7 @@ func readInt32(b []byte, p *int, e *binary.ByteOrder) (i int32, err error) {
 	}
 
 	if (*p + 4) > len(b) {
-		return 0, fmt.Errorf("%s's length is less than %d", b, *p+4)
+		return 0, fmt.Errorf("need 4 bytes at offset %d, input length is %d", *p, len(b))
 	}
 
 	buf := bytes.NewBuffer(b[*p : *p+4])
@@ -487,13 +507,16 @@ func readInt32(b []byte, p *int, e *binary.ByteOrder) (i int32, err error) {
 }
 
 func readBytes(b []byte, p *int, s int, e *binary.ByteOrder) ([]byte, error) {
+	if *p < 0 {
+		return nil, fmt.Errorf("%d cannot be less than zero", *p)
+	}
 	if s < 0 {
 		return nil, fmt.Errorf("%d cannot be less than zero", s)
 	}
-	i := *p + s
-	if i > len(b) {
-		return nil, fmt.Errorf("%s's length is greater than %d", b, i)
+	if s > len(b)-*p {
+		return nil, fmt.Errorf("need %d bytes at offset %d, input length is %d", s, *p, len(b))
 	}
+	i := *p + s
 	buf := bytes.NewBuffer(b[*p:i])
 	r := make([]byte, s)
 	if err := binary.Read(buf, *e, &r); err != nil {
@@ -518,6 +541,27 @@ func isNativeEndianLittle() bool {
 		endian = false
 	}
 	return endian
+}
+
+func nativeByteOrder() binary.ByteOrder {
+	if isNativeEndianLittle() {
+		return binary.LittleEndian
+	}
+	return binary.BigEndian
+}
+
+func validRecordLength(b []byte, endian binary.ByteOrder, remaining int) bool {
+	l := int32(endian.Uint32(b))
+	if l == 0 {
+		return true
+	}
+	if l == -1<<31 {
+		return false
+	}
+	if l < 0 {
+		l = -l
+	}
+	return int64(l) <= int64(remaining)
 }
 
 // JSON return information about the keys held in the keytab in a JSON format.
