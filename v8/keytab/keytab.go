@@ -239,6 +239,24 @@ func (kt *Keytab) Principals() []Principal {
 	return principals
 }
 
+// ETypesForPrincipal returns the distinct encryption types available for p in
+// keytab entry order.
+func (kt *Keytab) ETypesForPrincipal(p Principal) []int32 {
+	etypes := make([]int32, 0)
+	seen := make(map[int32]struct{})
+	for _, entry := range kt.Entries {
+		if !principalMatches(entry.Principal, p) {
+			continue
+		}
+		if _, ok := seen[entry.Key.KeyType]; ok {
+			continue
+		}
+		seen[entry.Key.KeyType] = struct{}{}
+		etypes = append(etypes, entry.Key.KeyType)
+	}
+	return etypes
+}
+
 // GetEntry returns the best matching keytab entry using MIT Kerberos lookup semantics.
 // Enctype zero is a wildcard; similar enctype matching is not supported.
 func (kt *Keytab) GetEntry(p Principal, kvno uint32, etype int32) (Entry, error) {

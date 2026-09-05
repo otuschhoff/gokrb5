@@ -54,6 +54,67 @@ func TestClient_SuccessfulLogin_Keytab(t *testing.T) {
 	}
 }
 
+func TestClient_Login_Keytab_KDCPrefersEtypeNotInKeytab(t *testing.T) {
+	test.Integration(t)
+
+	b, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER1_TEST_GOKRB5)
+	allKeys := keytab.New()
+	if err := allKeys.Unmarshal(b); err != nil {
+		t.Fatal(err)
+	}
+	principal, err := keytab.ParsePrincipal("testuser1@TEST.GOKRB5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := allKeys.GetEntry(principal, 0, etypeID.AES128_CTS_HMAC_SHA1_96)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aes128Only := keytab.New()
+	if err := aes128Only.AddKey(principal, entry.KVNO, entry.Key, entry.Timestamp); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, _ := config.NewFromString(testdata.KRB5_CONF)
+	addr := os.Getenv("TEST_KDC_ADDR")
+	if addr == "" {
+		addr = testdata.KDC_IP_TEST_GOKRB5
+	}
+	cfg.Realms[0].KDC = []string{addr + ":" + testdata.KDC_PORT_TEST_GOKRB5}
+	cfg.LibDefaults.DefaultTktEnctypes = []string{"aes256-cts-hmac-sha1-96", "aes128-cts-hmac-sha1-96"}
+	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES256_CTS_HMAC_SHA1_96, etypeID.AES128_CTS_HMAC_SHA1_96}
+
+	cl := client.NewWithKeytab("testuser1", "TEST.GOKRB5", aes128Only, cfg)
+	if err := cl.Login(); err != nil {
+		t.Fatalf("error logging in with aes128-only keytab: %v", err)
+	}
+}
+
+func TestClient_Login_RenewLifetime(t *testing.T) {
+	test.Integration(t)
+
+	cfg, _ := config.NewFromString(testdata.KRB5_CONF)
+	addr := os.Getenv("TEST_KDC_ADDR")
+	if addr == "" {
+		addr = testdata.KDC_IP_TEST_GOKRB5
+	}
+	cfg.Realms[0].KDC = []string{addr + ":" + testdata.KDC_PORT_TEST_GOKRB5}
+	cfg.LibDefaults.RenewLifetime = 7 * 24 * time.Hour
+
+	cl := client.NewWithPassword("testuser1", "TEST.GOKRB5", "passwordvalue", cfg)
+	if err := cl.Login(); err != nil {
+		t.Fatalf("error logging in with renewable lifetime: %v", err)
+	}
+	cache, err := cl.CCache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := cache.GetEntries()
+	if assert.Len(t, entries, 1) {
+		assert.WithinDuration(t, time.Now().UTC().Add(7*24*time.Hour), entries[0].RenewTill, 5*time.Second)
+	}
+}
+
 func TestClient_SuccessfulLogin_Password(t *testing.T) {
 	test.Integration(t)
 
@@ -589,7 +650,7 @@ func login() error {
 
 	err = cmd.Wait()
 	if err != nil {
-		return fmt.Errorf("%s did not run successfully: %v stderr: %s", kinitCmd, err, string(errBuf.Bytes()))
+		return fmt.Errorf("%s did not run successfully: %v stderr: %s", kinitCmd, err, errBuf.String())
 	}
 	return nil
 }

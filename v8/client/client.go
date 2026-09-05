@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jcmturner/gokrb5/v8/config"
@@ -23,16 +25,22 @@ import (
 
 // Client side configuration and state.
 type Client struct {
-	Credentials *credentials.Credentials
-	Config      *config.Config
-	settings    *Settings
-	sessions    *sessions
-	cache       *Cache
+	Credentials   *credentials.Credentials
+	Config        *config.Config
+	settings      *Settings
+	sessions      *sessions
+	cache         *Cache
+	kdcTimeOffset time.Duration
+	kdcTimeMux    sync.RWMutex
+	sendToKDCFunc func([]byte, string) ([]byte, error)
 }
 
 // NewWithPassword creates a new client from a password credential.
 // Set the realm to empty string to use the default realm from config.
 func NewWithPassword(username, realm, password string, krb5conf *config.Config, settings ...func(*Settings)) *Client {
+	if realm == "" && krb5conf != nil {
+		realm = krb5conf.LibDefaults.DefaultRealm
+	}
 	creds := credentials.New(username, realm)
 	return &Client{
 		Credentials: creds.WithPassword(password),
@@ -47,6 +55,9 @@ func NewWithPassword(username, realm, password string, krb5conf *config.Config, 
 
 // NewWithKeytab creates a new client from a keytab credential.
 func NewWithKeytab(username, realm string, kt *keytab.Keytab, krb5conf *config.Config, settings ...func(*Settings)) *Client {
+	if realm == "" && krb5conf != nil {
+		realm = krb5conf.LibDefaults.DefaultRealm
+	}
 	creds := credentials.New(username, realm)
 	return &Client{
 		Credentials: creds.WithKeytab(kt),
@@ -57,6 +68,32 @@ func NewWithKeytab(username, realm string, kt *keytab.Keytab, krb5conf *config.C
 		},
 		cache: NewCache(),
 	}
+}
+
+// NewFromPrincipalString creates a client from an MIT-style principal string.
+// If the principal omits its realm, the configured default realm is used.
+func NewFromPrincipalString(princ string, krb5conf *config.Config, settings ...func(*Settings)) (*Client, error) {
+	parsed, err := keytab.ParsePrincipal(princ)
+	if err != nil {
+		return nil, fmt.Errorf("invalid client principal: %v", err)
+	}
+	if parsed.Realm == "" && krb5conf != nil {
+		parsed.Realm = krb5conf.LibDefaults.DefaultRealm
+	}
+	if parsed.Realm == "" {
+		return nil, errors.New("client principal does not specify a realm and no default realm is configured")
+	}
+	creds := credentials.NewFromPrincipalName(types.PrincipalName{
+		NameType:   parsed.NameType,
+		NameString: append([]string(nil), parsed.Components...),
+	}, parsed.Realm)
+	return &Client{
+		Credentials: creds,
+		Config:      krb5conf,
+		settings:    NewSettings(settings...),
+		sessions:    &sessions{Entries: make(map[string]*session)},
+		cache:       NewCache(),
+	}, nil
 }
 
 // NewFromCCache create a client from a populated client cache.
@@ -76,39 +113,84 @@ func NewFromCCache(c *credentials.CCache, krb5conf *config.Config, settings ...f
 		NameType:   nametype.KRB_NT_SRV_INST,
 		NameString: []string{"krbtgt", c.DefaultPrincipal.Realm},
 	}
-	cred, ok := c.GetEntry(spn)
+	tgtCredential, ok := c.GetEntry(spn)
 	if !ok {
 		return cl, errors.New("TGT not found in CCache")
 	}
 	var tgt messages.Ticket
-	err := tgt.Unmarshal(cred.Ticket)
+	err := tgt.Unmarshal(tgtCredential.Ticket)
 	if err != nil {
 		return cl, fmt.Errorf("TGT bytes in cache are not valid: %v", err)
 	}
 	cl.sessions.Entries[c.DefaultPrincipal.Realm] = &session{
-		realm:      c.DefaultPrincipal.Realm,
-		authTime:   cred.AuthTime,
-		endTime:    cred.EndTime,
-		renewTill:  cred.RenewTill,
-		tgt:        tgt,
-		sessionKey: cred.Key,
+		realm:        c.DefaultPrincipal.Realm,
+		authTime:     tgtCredential.AuthTime,
+		startTime:    tgtCredential.StartTime,
+		endTime:      tgtCredential.EndTime,
+		renewTill:    tgtCredential.RenewTill,
+		tgt:          tgt,
+		sessionKey:   tgtCredential.Key,
+		ticketFlags:  tgtCredential.TicketFlags,
+		addresses:    append([]types.HostAddress(nil), tgtCredential.Addresses...),
+		authData:     append([]types.AuthorizationDataEntry(nil), tgtCredential.AuthData...),
+		isSKey:       tgtCredential.IsSKey,
+		secondTicket: append([]byte(nil), tgtCredential.SecondTicket...),
+	}
+	if offset, ok := c.KDCTimeOffset(); ok {
+		cl.setKDCTimeOffset(offset)
+	}
+	configPrincipal := tgt.SName.PrincipalNameString() + "@" + tgt.Realm
+	if value, ok := c.GetConfig("pa_type", configPrincipal); ok {
+		paType, err := strconv.ParseInt(value, 10, 32)
+		if err != nil {
+			return cl, fmt.Errorf("invalid pa_type credential cache config value %q: %v", value, err)
+		}
+		cl.settings.preAuthType = int32(paType)
 	}
 	for _, cred := range c.GetEntries() {
+		if cred == tgtCredential {
+			continue
+		}
 		var tkt messages.Ticket
 		err = tkt.Unmarshal(cred.Ticket)
 		if err != nil {
 			return cl, fmt.Errorf("cache entry ticket bytes are not valid: %v", err)
 		}
-		cl.cache.addEntry(
+		cl.cache.addEntryWithDetails(
 			tkt,
 			cred.AuthTime,
 			cred.StartTime,
 			cred.EndTime,
 			cred.RenewTill,
 			cred.Key,
+			cred.TicketFlags,
+			cred.Addresses,
+			cred.AuthData,
+			cred.IsSKey,
+			cred.SecondTicket,
 		)
 	}
 	return cl, nil
+}
+
+// KDCTimeOffset returns the time offset learned from the KDC.
+func (cl *Client) KDCTimeOffset() time.Duration {
+	cl.kdcTimeMux.RLock()
+	defer cl.kdcTimeMux.RUnlock()
+	return cl.kdcTimeOffset
+}
+
+func (cl *Client) setKDCTimeOffset(offset time.Duration) {
+	cl.kdcTimeMux.Lock()
+	cl.kdcTimeOffset = offset
+	cl.kdcTimeMux.Unlock()
+}
+
+func (cl *Client) sendASRequest(request []byte, realm string) ([]byte, error) {
+	if cl.sendToKDCFunc != nil {
+		return cl.sendToKDCFunc(request, realm)
+	}
+	return cl.sendToKDC(request, realm)
 }
 
 // Key returns the client's encryption key for the specified encryption type and its kvno (kvno of zero will find latest).
@@ -120,7 +202,7 @@ func (cl *Client) Key(etype etype.EType, kvno int, krberr *messages.KRBError) (t
 	if cl.Credentials.HasKeytab() && etype != nil {
 		return cl.Credentials.Keytab().GetEncryptionKey(cl.Credentials.CName(), cl.Credentials.Domain(), kvno, etype.GetETypeID())
 	} else if cl.Credentials.HasPassword() {
-		if krberr != nil && krberr.ErrorCode == errorcode.KDC_ERR_PREAUTH_REQUIRED {
+		if krberr != nil && (krberr.ErrorCode == errorcode.KDC_ERR_PREAUTH_REQUIRED || krberr.ErrorCode == errorcode.KDC_ERR_PREAUTH_FAILED) {
 			var pas types.PADataSequence
 			err := pas.Unmarshal(krberr.EData)
 			if err != nil {
@@ -137,11 +219,17 @@ func (cl *Client) Key(etype etype.EType, kvno int, krberr *messages.KRBError) (t
 
 // IsConfigured indicates if the client has the values required set.
 func (cl *Client) IsConfigured() (bool, error) {
+	if cl.Config == nil {
+		return false, errors.New("client does not have a Kerberos configuration")
+	}
 	if cl.Credentials.UserName() == "" {
 		return false, errors.New("client does not have a username")
 	}
 	if cl.Credentials.Domain() == "" {
-		return false, errors.New("client does not have a define realm")
+		if cl.Config.LibDefaults.DefaultRealm == "" {
+			return false, errors.New("client does not have a defined realm")
+		}
+		cl.Credentials.SetDomain(cl.Config.LibDefaults.DefaultRealm)
 	}
 	// Client needs to have either a password, keytab or a session already (later when loading from CCache)
 	if !cl.Credentials.HasPassword() && !cl.Credentials.HasKeytab() {
@@ -179,7 +267,7 @@ func (cl *Client) Login() error {
 		// no credentials but there is a session with tgt already
 		return nil
 	}
-	ASReq, err := messages.NewASReqForTGT(cl.Credentials.Domain(), cl.Config, cl.Credentials.CName())
+	ASReq, err := cl.newASReq()
 	if err != nil {
 		return krberror.Errorf(err, krberror.KRBMsgError, "error generating new AS_REQ")
 	}
@@ -189,6 +277,37 @@ func (cl *Client) Login() error {
 	}
 	cl.addSession(ASRep.Ticket, ASRep.DecryptedEncPart)
 	return nil
+}
+
+func (cl *Client) newASReq() (messages.ASReq, error) {
+	req, err := messages.NewASReqForTGT(cl.Credentials.Domain(), cl.Config, cl.Credentials.CName())
+	if err != nil || !cl.Credentials.HasKeytab() {
+		return req, err
+	}
+	available := cl.Credentials.Keytab().ETypesForPrincipal(keytab.Principal{
+		Realm:      cl.Credentials.Domain(),
+		Components: cl.Credentials.CName().NameString,
+		NameType:   cl.Credentials.CName().NameType,
+	})
+	req.ReqBody.EType = intersectETypes(cl.Config.LibDefaults.DefaultTktEnctypeIDs, available)
+	if len(req.ReqBody.EType) == 0 {
+		return req, errors.New("no supported encryption types (config file error?)")
+	}
+	return req, nil
+}
+
+func intersectETypes(preferred, available []int32) []int32 {
+	availableSet := make(map[int32]struct{}, len(available))
+	for _, etypeID := range available {
+		availableSet[etypeID] = struct{}{}
+	}
+	result := make([]int32, 0, len(preferred))
+	for _, etypeID := range preferred {
+		if _, ok := availableSet[etypeID]; ok {
+			result = append(result, etypeID)
+		}
+	}
+	return result
 }
 
 // AffirmLogin will only perform an AS exchange with the KDC if the client does not already have a TGT.
@@ -300,7 +419,7 @@ func (cl *Client) Diagnostics(w io.Writer) error {
 		fmt.Fprintf(w, "TCP KDCs: %s\n", string(b))
 	}
 
-	if errs == nil || len(errs) < 1 {
+	if len(errs) < 1 {
 		return nil
 	}
 	err = fmt.Errorf(strings.Join(errs, "\n"))

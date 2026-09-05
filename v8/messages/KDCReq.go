@@ -46,6 +46,20 @@ type ASReq struct {
 	KDCReqFields
 }
 
+// ASReqOptions overrides krb5.conf defaults for a single AS request. Nil
+// pointer fields retain the configured value.
+type ASReqOptions struct {
+	Lifetime         *time.Duration
+	RenewLifetime    *time.Duration
+	Forwardable      *bool
+	Proxiable        *bool
+	Canonicalize     *bool
+	Addresses        []types.HostAddress
+	Enterprise       *bool
+	ServicePrincipal *types.PrincipalName
+	StartTime        *time.Time
+}
+
 // TGSReq implements RFC 4120 KRB_TGS_REQ: https://tools.ietf.org/html/rfc4120#section-5.4.1.
 type TGSReq struct {
 	KDCReqFields
@@ -92,6 +106,16 @@ func NewASReqForTGT(realm string, c *config.Config, cname types.PrincipalName) (
 	return NewASReq(realm, c, cname, sname)
 }
 
+// NewASReqForTGTWithOptions generates a new KRB_AS_REQ struct for a TGT request
+// with per-request overrides.
+func NewASReqForTGTWithOptions(realm string, c *config.Config, cname types.PrincipalName, options ASReqOptions) (ASReq, error) {
+	sname := types.PrincipalName{
+		NameType:   nametype.KRB_NT_SRV_INST,
+		NameString: []string{"krbtgt", realm},
+	}
+	return NewASReqWithOptions(realm, c, cname, sname, options)
+}
+
 // NewASReqForChgPasswd generates a new KRB_AS_REQ struct for a change password request.
 func NewASReqForChgPasswd(realm string, c *config.Config, cname types.PrincipalName) (ASReq, error) {
 	sname := types.PrincipalName{
@@ -103,6 +127,12 @@ func NewASReqForChgPasswd(realm string, c *config.Config, cname types.PrincipalN
 
 // NewASReq generates a new KRB_AS_REQ struct for a given SNAME.
 func NewASReq(realm string, c *config.Config, cname, sname types.PrincipalName) (ASReq, error) {
+	return NewASReqWithOptions(realm, c, cname, sname, ASReqOptions{})
+}
+
+// NewASReqWithOptions generates a new KRB_AS_REQ struct with per-request
+// overrides applied on top of krb5.conf defaults.
+func NewASReqWithOptions(realm string, c *config.Config, cname, sname types.PrincipalName, options ASReqOptions) (ASReq, error) {
 	nonce, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt32))
 	if err != nil {
 		return ASReq{}, err
@@ -112,6 +142,32 @@ func NewASReq(realm string, c *config.Config, cname, sname types.PrincipalName) 
 	kopts := types.NewKrbFlags()
 	copy(kopts.Bytes, c.LibDefaults.KDCDefaultOptions.Bytes)
 	kopts.BitLength = c.LibDefaults.KDCDefaultOptions.BitLength
+	lifetime := c.LibDefaults.TicketLifetime
+	if options.Lifetime != nil {
+		lifetime = *options.Lifetime
+	}
+	renewLifetime := c.LibDefaults.RenewLifetime
+	if options.RenewLifetime != nil {
+		renewLifetime = *options.RenewLifetime
+	}
+	forwardable := c.LibDefaults.Forwardable
+	if options.Forwardable != nil {
+		forwardable = *options.Forwardable
+	}
+	canonicalize := c.LibDefaults.Canonicalize
+	if options.Canonicalize != nil {
+		canonicalize = *options.Canonicalize
+	}
+	proxiable := c.LibDefaults.Proxiable
+	if options.Proxiable != nil {
+		proxiable = *options.Proxiable
+	}
+	if options.Enterprise != nil && *options.Enterprise {
+		cname.NameType = nametype.KRB_NT_ENTERPRISE
+	}
+	if options.ServicePrincipal != nil {
+		sname = *options.ServicePrincipal
+	}
 	a := ASReq{
 		KDCReqFields{
 			PVNO:    iana.PVNO,
@@ -122,27 +178,35 @@ func NewASReq(realm string, c *config.Config, cname, sname types.PrincipalName) 
 				Realm:      realm,
 				CName:      cname,
 				SName:      sname,
-				Till:       t.Add(c.LibDefaults.TicketLifetime),
+				Till:       t.Add(lifetime),
 				Nonce:      int(nonce.Int64()),
 				EType:      c.LibDefaults.DefaultTktEnctypeIDs,
 			},
 		},
 	}
-	if c.LibDefaults.Forwardable {
+	if forwardable {
 		types.SetFlag(&a.ReqBody.KDCOptions, flags.Forwardable)
 	}
-	if c.LibDefaults.Canonicalize {
+	if canonicalize {
 		types.SetFlag(&a.ReqBody.KDCOptions, flags.Canonicalize)
 	}
-	if c.LibDefaults.Proxiable {
+	if proxiable {
 		types.SetFlag(&a.ReqBody.KDCOptions, flags.Proxiable)
 	}
-	if c.LibDefaults.RenewLifetime != 0 {
+	if renewLifetime > 0 {
 		types.SetFlag(&a.ReqBody.KDCOptions, flags.Renewable)
-		a.ReqBody.RTime = t.Add(c.LibDefaults.RenewLifetime)
-		a.ReqBody.RTime = t.Add(time.Duration(48) * time.Hour)
+		a.ReqBody.RTime = t.Add(renewLifetime)
 	}
-	if !c.LibDefaults.NoAddresses {
+	if options.StartTime != nil {
+		a.ReqBody.From = options.StartTime.UTC()
+		a.ReqBody.Till = a.ReqBody.From.Add(lifetime)
+		if renewLifetime > 0 {
+			a.ReqBody.RTime = a.ReqBody.From.Add(renewLifetime)
+		}
+	}
+	if options.Addresses != nil {
+		a.ReqBody.Addresses = append([]types.HostAddress(nil), options.Addresses...)
+	} else if !c.LibDefaults.NoAddresses {
 		ha, err := types.LocalHostAddresses()
 		if err != nil {
 			return a, fmt.Errorf("could not get local addresses: %v", err)

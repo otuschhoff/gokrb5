@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/jcmturner/gokrb5/v8/messages"
 	"github.com/jcmturner/gokrb5/v8/types"
 )
@@ -19,13 +20,18 @@ type Cache struct {
 
 // CacheEntry holds details for a cache entry.
 type CacheEntry struct {
-	SPN        string
-	Ticket     messages.Ticket `json:"-"`
-	AuthTime   time.Time
-	StartTime  time.Time
-	EndTime    time.Time
-	RenewTill  time.Time
-	SessionKey types.EncryptionKey `json:"-"`
+	SPN          string
+	Ticket       messages.Ticket `json:"-"`
+	AuthTime     time.Time
+	StartTime    time.Time
+	EndTime      time.Time
+	RenewTill    time.Time
+	SessionKey   types.EncryptionKey            `json:"-"`
+	TicketFlags  asn1.BitString                 `json:"-"`
+	Addresses    []types.HostAddress            `json:"-"`
+	AuthData     []types.AuthorizationDataEntry `json:"-"`
+	IsSKey       bool                           `json:"-"`
+	SecondTicket []byte                         `json:"-"`
 }
 
 // NewCache creates a new client ticket cache instance.
@@ -65,17 +71,26 @@ func (c *Cache) JSON() (string, error) {
 
 // addEntry adds a ticket to the cache.
 func (c *Cache) addEntry(tkt messages.Ticket, authTime, startTime, endTime, renewTill time.Time, sessionKey types.EncryptionKey) CacheEntry {
+	return c.addEntryWithDetails(tkt, authTime, startTime, endTime, renewTill, sessionKey, types.NewKrbFlags(), nil, nil, false, nil)
+}
+
+func (c *Cache) addEntryWithDetails(tkt messages.Ticket, authTime, startTime, endTime, renewTill time.Time, sessionKey types.EncryptionKey, ticketFlags asn1.BitString, addresses []types.HostAddress, authData []types.AuthorizationDataEntry, isSKey bool, secondTicket []byte) CacheEntry {
 	spn := tkt.SName.PrincipalNameString()
 	c.mux.Lock()
 	defer c.mux.Unlock()
 	(*c).Entries[spn] = CacheEntry{
-		SPN:        spn,
-		Ticket:     tkt,
-		AuthTime:   authTime,
-		StartTime:  startTime,
-		EndTime:    endTime,
-		RenewTill:  renewTill,
-		SessionKey: sessionKey,
+		SPN:          spn,
+		Ticket:       tkt,
+		AuthTime:     authTime,
+		StartTime:    startTime,
+		EndTime:      endTime,
+		RenewTill:    renewTill,
+		SessionKey:   sessionKey,
+		TicketFlags:  ticketFlags,
+		Addresses:    append([]types.HostAddress(nil), addresses...),
+		AuthData:     append([]types.AuthorizationDataEntry(nil), authData...),
+		IsSKey:       isSKey,
+		SecondTicket: append([]byte(nil), secondTicket...),
 	}
 	return c.Entries[spn]
 }

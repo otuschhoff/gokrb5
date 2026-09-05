@@ -6,14 +6,72 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jcmturner/gokrb5/v8/config"
 	"github.com/jcmturner/gokrb5/v8/iana"
 	"github.com/jcmturner/gokrb5/v8/iana/addrtype"
+	"github.com/jcmturner/gokrb5/v8/iana/flags"
 	"github.com/jcmturner/gokrb5/v8/iana/msgtype"
 	"github.com/jcmturner/gokrb5/v8/iana/nametype"
 	"github.com/jcmturner/gokrb5/v8/iana/patype"
 	"github.com/jcmturner/gokrb5/v8/test/testdata"
+	"github.com/jcmturner/gokrb5/v8/types"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestNewASReqRenewLifetimeHonoured(t *testing.T) {
+	cfg := config.New()
+	cfg.LibDefaults.TicketLifetime = time.Hour
+	cfg.LibDefaults.RenewLifetime = 7 * 24 * time.Hour
+	req, err := NewASReq("EXAMPLE.ORG", cfg, types.PrincipalName{}, types.PrincipalName{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.WithinDuration(t, req.ReqBody.Till.Add(cfg.LibDefaults.RenewLifetime-cfg.LibDefaults.TicketLifetime), req.ReqBody.RTime, time.Millisecond)
+	assert.True(t, types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Renewable))
+
+	zero := time.Duration(0)
+	req, err = NewASReqWithOptions("EXAMPLE.ORG", cfg, types.PrincipalName{}, types.PrincipalName{}, ASReqOptions{RenewLifetime: &zero})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.True(t, req.ReqBody.RTime.IsZero())
+	assert.False(t, types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Renewable))
+}
+
+func TestNewASReqOptionsOverrideConfig(t *testing.T) {
+	cfg := config.New()
+	cfg.LibDefaults.Forwardable = true
+	cfg.LibDefaults.Proxiable = true
+	cfg.LibDefaults.Canonicalize = true
+	no := false
+	lifetime := 2 * time.Hour
+	start := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	service := types.PrincipalName{NameType: nametype.KRB_NT_SRV_INST, NameString: []string{"custom", "host"}}
+	addresses := []types.HostAddress{{AddrType: addrtype.IPv4, Address: []byte{127, 0, 0, 1}}}
+	req, err := NewASReqWithOptions("EXAMPLE.ORG", cfg, types.PrincipalName{}, types.PrincipalName{}, ASReqOptions{
+		Lifetime:         &lifetime,
+		Forwardable:      &no,
+		Proxiable:        &no,
+		Canonicalize:     &no,
+		Addresses:        addresses,
+		Enterprise:       boolPointer(true),
+		ServicePrincipal: &service,
+		StartTime:        &start,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, start.Add(lifetime), req.ReqBody.Till)
+	assert.False(t, types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Forwardable))
+	assert.False(t, types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Proxiable))
+	assert.False(t, types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Canonicalize))
+	assert.Equal(t, nametype.KRB_NT_ENTERPRISE, req.ReqBody.CName.NameType)
+	assert.Equal(t, service, req.ReqBody.SName)
+	assert.Equal(t, start, req.ReqBody.From)
+	assert.Equal(t, addresses, req.ReqBody.Addresses)
+}
+
+func boolPointer(value bool) *bool { return &value }
 
 func TestUnmarshalKDCReqBody(t *testing.T) {
 	t.Parallel()

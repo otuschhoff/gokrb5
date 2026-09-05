@@ -788,6 +788,17 @@ func TestVersionAndPrincipals(t *testing.T) {
 	assert.Equal(t, "one", kt.Entries[0].Principal.Components[0], "Principals should return defensive component copies")
 }
 
+func TestETypesForPrincipal(t *testing.T) {
+	kt := New()
+	p := Principal{Realm: "EXAMPLE.ORG", Components: []string{"user"}, NameType: nametype.KRB_NT_PRINCIPAL}
+	other := Principal{Realm: "OTHER.ORG", Components: []string{"user"}, NameType: nametype.KRB_NT_PRINCIPAL}
+	assert.NoError(t, kt.AddKey(p, 1, types.EncryptionKey{KeyType: 17, KeyValue: make([]byte, 16)}, time.Now()))
+	assert.NoError(t, kt.AddKey(p, 2, types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)}, time.Now()))
+	assert.NoError(t, kt.AddKey(p, 3, types.EncryptionKey{KeyType: 17, KeyValue: make([]byte, 16)}, time.Now()))
+	assert.NoError(t, kt.AddKey(other, 1, types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)}, time.Now()))
+	assert.Equal(t, []int32{17, 18}, kt.ETypesForPrincipal(p))
+}
+
 func TestAddKeyAndEntryWithSalt(t *testing.T) {
 	p := Principal{Realm: "TEST.GOKRB5", Components: []string{"host", "host.test.gokrb5"}, NameType: nametype.KRB_NT_SRV_HST}
 	key, err := hex.DecodeString("07b6b34bb7a9a1ed7cd964f21c09f7afcf77757dddd29e8e5ab4de2f2a8ea92e")

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/jcmturner/gokrb5/v8/iana/nametype"
 	"github.com/jcmturner/gokrb5/v8/krberror"
 	"github.com/jcmturner/gokrb5/v8/messages"
@@ -64,10 +65,16 @@ func (s *sessions) get(realm string) (*session, bool) {
 type session struct {
 	realm                string
 	authTime             time.Time
+	startTime            time.Time
 	endTime              time.Time
 	renewTill            time.Time
 	tgt                  messages.Ticket
 	sessionKey           types.EncryptionKey
+	ticketFlags          asn1.BitString
+	addresses            []types.HostAddress
+	authData             []types.AuthorizationDataEntry
+	isSKey               bool
+	secondTicket         []byte
 	sessionKeyExpiration time.Time
 	cancel               chan bool
 	mux                  sync.RWMutex
@@ -93,10 +100,13 @@ func (cl *Client) addSession(tgt messages.Ticket, dep messages.EncKDCRepPart) {
 	s := &session{
 		realm:                realm,
 		authTime:             dep.AuthTime,
+		startTime:            dep.StartTime,
 		endTime:              dep.EndTime,
 		renewTill:            dep.RenewTill,
 		tgt:                  tgt,
 		sessionKey:           dep.Key,
+		ticketFlags:          dep.Flags,
+		addresses:            append([]types.HostAddress(nil), dep.CAddr...),
 		sessionKeyExpiration: dep.KeyExpiration,
 	}
 	cl.sessions.update(s)
@@ -109,10 +119,13 @@ func (s *session) update(tgt messages.Ticket, dep messages.EncKDCRepPart) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	s.authTime = dep.AuthTime
+	s.startTime = dep.StartTime
 	s.endTime = dep.EndTime
 	s.renewTill = dep.RenewTill
 	s.tgt = tgt
 	s.sessionKey = dep.Key
+	s.ticketFlags = dep.Flags
+	s.addresses = append([]types.HostAddress(nil), dep.CAddr...)
 	s.sessionKeyExpiration = dep.KeyExpiration
 }
 

@@ -66,13 +66,18 @@ func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messa
 		}
 		return cl.TGSExchange(tgsReq, realm, tgsRep.Ticket, tgsRep.DecryptedEncPart.Key, referral)
 	}
-	cl.cache.addEntry(
+	cl.cache.addEntryWithDetails(
 		tgsRep.Ticket,
 		tgsRep.DecryptedEncPart.AuthTime,
 		tgsRep.DecryptedEncPart.StartTime,
 		tgsRep.DecryptedEncPart.EndTime,
 		tgsRep.DecryptedEncPart.RenewTill,
 		tgsRep.DecryptedEncPart.Key,
+		tgsRep.DecryptedEncPart.Flags,
+		tgsRep.DecryptedEncPart.CAddr,
+		nil,
+		false,
+		nil,
 	)
 	cl.Log("ticket added to cache for %s (EndTime: %v)", tgsRep.Ticket.SName.PrincipalNameString(), tgsRep.DecryptedEncPart.EndTime)
 	return tgsReq, tgsRep, err

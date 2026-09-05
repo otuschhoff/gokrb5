@@ -11,6 +11,7 @@ type Settings struct {
 	disablePAFXFast         bool
 	assumePreAuthentication bool
 	preAuthEType            int32
+	preAuthType             int32
 	logger                  *log.Logger
 }
 
@@ -29,18 +30,33 @@ func NewSettings(settings ...func(*Settings)) *Settings {
 	return s
 }
 
-// DisablePAFXFAST used to configure the client to not use PA_FX_FAST.
-//
-// s := NewSettings(DisablePAFXFAST(true))
-func DisablePAFXFAST(b bool) func(*Settings) {
+// DisablePAReqEncPARep configures the client not to request encrypted PA-REP.
+func DisablePAReqEncPARep(b bool) func(*Settings) {
 	return func(s *Settings) {
 		s.disablePAFXFast = b
 	}
 }
 
-// DisablePAFXFAST indicates is the client should disable the use of PA_FX_FAST.
-func (s *Settings) DisablePAFXFAST() bool {
+// DisablePAFXFAST used to configure the client to not use PA_FX_FAST.
+//
+// s := NewSettings(DisablePAFXFAST(true))
+//
+// Deprecated: use DisablePAReqEncPARep.
+func DisablePAFXFAST(b bool) func(*Settings) {
+	return DisablePAReqEncPARep(b)
+}
+
+// DisablePAReqEncPARep indicates whether the client should omit
+// PA-REQ-ENC-PA-REP.
+func (s *Settings) DisablePAReqEncPARep() bool {
 	return s.disablePAFXFast
+}
+
+// DisablePAFXFAST indicates is the client should disable the use of PA_FX_FAST.
+//
+// Deprecated: use DisablePAReqEncPARep.
+func (s *Settings) DisablePAFXFAST() bool {
+	return s.DisablePAReqEncPARep()
 }
 
 // AssumePreAuthentication used to configure the client to assume pre-authentication is required.
