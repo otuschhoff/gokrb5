@@ -50,7 +50,7 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 			return cl.ASExchange(e.CRealm, ASReq, referral+1)
 		}
 		if !skewRetried && cl.shouldRetryClockSkew(e) {
-			cl.setKDCTimeOffset(kdcErrorTime(e).Sub(time.Now().UTC()).Truncate(time.Microsecond))
+			cl.setKDCTimeOffset(kdcErrorTime(e).Sub(clientNow().UTC()).Truncate(time.Microsecond))
 			cl.settings.assumePreAuthentication = true
 			var hint *messages.KRBError
 			if e.ErrorCode == errorcode.KDC_ERR_PREAUTH_FAILED && len(e.EData) > 0 {
@@ -126,7 +126,7 @@ func setPAData(cl *Client, krberr *messages.KRBError, ASReq *messages.ASReq) err
 			}
 		}
 		// Generate the PA data
-		paTSb, err := types.GetPAEncTSEncAsnMarshalledAt(time.Now().UTC().Add(cl.KDCTimeOffset()))
+		paTSb, err := types.GetPAEncTSEncAsnMarshalledAt(clientNow().UTC().Add(cl.KDCTimeOffset()))
 		if err != nil {
 			return krberror.Errorf(err, krberror.KRBMsgError, "error creating PAEncTSEnc for Pre-Authentication")
 		}

@@ -843,6 +843,8 @@ func TestAddKeyAndEntryWithSalt(t *testing.T) {
 	assert.Error(t, kt.AddKey(Principal{Realm: "EXAMPLE.ORG", Components: []string{""}}, 1, types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)}, time.Time{}))
 	assert.Error(t, kt.AddKey(p, 1, types.EncryptionKey{KeyType: 999, KeyValue: make([]byte, 32)}, time.Time{}))
 	assert.Error(t, kt.AddKey(p, 1, types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 16)}, time.Time{}))
+	assert.NoError(t, kt.AddKey(p, 1, types.EncryptionKey{KeyType: 20, KeyValue: make([]byte, 32)}, time.Time{}))
+	assert.Error(t, kt.AddKey(p, 1, types.EncryptionKey{KeyType: 20, KeyValue: make([]byte, 24)}, time.Time{}))
 	assert.Error(t, derived.AddEntryWithSalt("user", "EXAMPLE.ORG", "password", "salt", "invalid", time.Time{}, 1, 18))
 }
 

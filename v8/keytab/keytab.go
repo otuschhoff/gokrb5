@@ -15,6 +15,7 @@ import (
 	"unsafe"
 
 	"github.com/jcmturner/gokrb5/v8/crypto"
+	"github.com/jcmturner/gokrb5/v8/iana/etypeID"
 	"github.com/jcmturner/gokrb5/v8/iana/nametype"
 	"github.com/jcmturner/gokrb5/v8/types"
 )
@@ -408,8 +409,12 @@ func (kt *Keytab) AddKey(p Principal, kvno uint32, key types.EncryptionKey, ts t
 	if err != nil {
 		return err
 	}
-	if len(key.KeyValue) != et.GetKeyByteSize() {
-		return fmt.Errorf("invalid key length %d for enctype %d: expected %d", len(key.KeyValue), key.KeyType, et.GetKeyByteSize())
+	keySize := et.GetKeyByteSize()
+	if key.KeyType == etypeID.AES256_CTS_HMAC_SHA384_192 {
+		keySize = 32
+	}
+	if len(key.KeyValue) != keySize {
+		return fmt.Errorf("invalid key length %d for enctype %d: expected %d", len(key.KeyValue), key.KeyType, keySize)
 	}
 	p.Components = append([]string(nil), p.Components...)
 	key.KeyValue = append([]byte(nil), key.KeyValue...)

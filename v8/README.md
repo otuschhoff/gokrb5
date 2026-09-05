@@ -11,9 +11,9 @@ Development will be focused on the latest major version. New features will only 
 
 
 #### Go Version Support
+![Go version](https://img.shields.io/badge/Go-1.20-brightgreen.svg)
+![Go version](https://img.shields.io/badge/Go-1.19-brightgreen.svg)
 ![Go version](https://img.shields.io/badge/Go-1.18-brightgreen.svg)
-![Go version](https://img.shields.io/badge/Go-1.17-brightgreen.svg)
-![Go version](https://img.shields.io/badge/Go-1.16-brightgreen.svg)
 
 gokrb5 may work with other versions of Go but they are not formally tested.
 It has been reported that gokrb5 also works with the [gollvm](https://go.googlesource.com/gollvm/) compiler but this is not formally tested.
@@ -30,9 +30,10 @@ It has been reported that gokrb5 also works with the [gollvm](https://go.googles
   * MIT-compatible `gokinit`, `goklist`, and `gokdestroy` command-line tools
 * General
   * Kerberos libraries for custom integration
-  * Parsing Keytab files
+  * Parsing, creating, modifying, and atomically writing MIT keytab files
   * Parsing krb5.conf files
-  * Parsing client credentials cache files such as `/tmp/krb5cc_$(id -u $(whoami))`
+  * Parsing and writing MIT FILE credential caches such as `/tmp/krb5cc_$(id -u $(whoami))`
+  * Tagged interoperability tests against MIT Kerberos command-line tools
   * Writing MIT FILE credential caches and keytabs
 
 #### Implemented Encryption & Checksum Types

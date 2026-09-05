@@ -80,13 +80,21 @@ func TestClient_Login_Keytab_KDCPrefersEtypeNotInKeytab(t *testing.T) {
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
 	}
-	cfg.Realms[0].KDC = []string{addr + ":" + testdata.KDC_PORT_TEST_GOKRB5}
 	cfg.LibDefaults.DefaultTktEnctypes = []string{"aes256-cts-hmac-sha1-96", "aes128-cts-hmac-sha1-96"}
 	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES256_CTS_HMAC_SHA1_96, etypeID.AES128_CTS_HMAC_SHA1_96}
 
-	cl := client.NewWithKeytab("testuser1", "TEST.GOKRB5", aes128Only, cfg)
-	if err := cl.Login(); err != nil {
-		t.Fatalf("error logging in with aes128-only keytab: %v", err)
+	for name, port := range map[string]string{
+		"default": testdata.KDC_PORT_TEST_GOKRB5,
+		"older":   testdata.KDC_PORT_TEST_GOKRB5_OLD,
+		"latest":  testdata.KDC_PORT_TEST_GOKRB5_LASTEST,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg.Realms[0].KDC = []string{addr + ":" + port}
+			cl := client.NewWithKeytab("testuser1", "TEST.GOKRB5", aes128Only, cfg)
+			if err := cl.Login(); err != nil {
+				t.Fatalf("error logging in with aes128-only keytab: %v", err)
+			}
+		})
 	}
 }
 

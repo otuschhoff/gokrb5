@@ -134,6 +134,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 func parseArgs(args []string, stderr io.Writer) (initOptions, error) {
 	var opts initOptions
+	args = expandKeytabArgs(args)
 	fs := flag.NewFlagSet("gokinit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { fmt.Fprintln(stderr, usageLine) }
@@ -175,6 +176,21 @@ func parseArgs(args []string, stderr io.Writer) (initOptions, error) {
 		return opts, errors.New("-R cannot be combined with credential acquisition options")
 	}
 	return opts, nil
+}
+
+func expandKeytabArgs(args []string) []string {
+	expanded := make([]string, 0, len(args)+1)
+	for _, arg := range args {
+		switch arg {
+		case "-kt":
+			expanded = append(expanded, "-k", "-t")
+		case "-ki":
+			expanded = append(expanded, "-k", "-i")
+		default:
+			expanded = append(expanded, arg)
+		}
+	}
+	return expanded
 }
 
 func asRequestOptions(opts initOptions, cfg *config.Config) (messages.ASReqOptions, error) {

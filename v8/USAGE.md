@@ -55,6 +55,36 @@ ktFromBytes, err := keytab.Parse(b)
 
 ```
 
+Keytabs can also be created, modified, and written atomically. `AddKey` accepts
+raw key material, while `AddEntry` and `AddEntryWithSalt` derive keys from a
+password. KVNO values use `uint32`, including values greater than 255.
+
+```go
+principal, err := keytab.ParsePrincipal("user@EXAMPLE.COM")
+kt := keytab.New()
+err = kt.AddKey(principal, 300, key, time.Now())
+err = kt.WriteFile("FILE:/path/to/user.keytab")
+```
+
+`LoadDefault` and `LoadDefaultClient` honor `KRB5_KTNAME`,
+`KRB5_CLIENT_KTNAME`, and their krb5.conf defaults. `AppendToFile` uses an
+advisory file lock where supported; external writers that ignore advisory
+locking must still be coordinated by the caller.
+
+### Credential caches
+
+MIT FILE credential caches can be created and exported for use by MIT tools:
+
+```go
+cache, err := cl.CCache()
+err = cache.WriteFile("FILE:/tmp/krb5cc_custom")
+```
+
+`credentials.NewCCache`, `AddCredential`, `SetConfig`, and `SetKDCTimeOffset`
+support constructing caches directly. `DefaultCCacheName` resolves
+`KRB5CCNAME`, `default_ccache_name`, and the platform fallback. Only FILE
+caches are currently supported for writing.
+
 ---
 
 ### Kerberos Client

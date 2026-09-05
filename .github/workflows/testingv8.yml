@@ -4,9 +4,11 @@ on:
   push:
     paths:
       - 'v8/**'
+      - '.github/workflows/testingv8.yml'
   pull_request:
     paths:
       - 'v8/**'
+      - '.github/workflows/testingv8.yml'
 
 jobs:
   build:
@@ -48,6 +50,7 @@ jobs:
         run: |
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq krb5-user
           sudo chmod 666 /etc/krb5.conf
+          sudo chmod 666 /var/run/docker.sock
           sudo docker run -d -h ns.test.gokrb5 -v /etc/localtime:/etc/localtime:ro -e "TEST_KDC_ADDR=${TEST_KDC_ADDR}" -e "TEST_HTTP_ADDR=${TEST_HTTP_ADDR}" -p ${DNSUTILS_OVERRIDE_NS}:53 -p ${DNSUTILS_OVERRIDE_NS}:53/udp --name dns jcmturner/gokrb5:dns
           sudo docker run -d -h kdc.test.gokrb5 -v /etc/localtime:/etc/localtime:ro -p 88:88 -p 88:88/udp -p 464:464 -p 464:464/udp --name krb5kdc jcmturner/gokrb5:kdc-centos-default
           sudo docker run -d -h kdc.test.gokrb5 -v /etc/localtime:/etc/localtime:ro -p 78:88 -p 78:88/udp --name krb5kdc-old jcmturner/gokrb5:kdc-older
@@ -74,6 +77,14 @@ jobs:
           TESTPRIVILEGED: 1
         id: intgTests
 
+      - name: MIT interoperability tests
+        run: |
+          cd ${GITHUB_WORKFLOW}
+          go test -race -tags interop ./test/interop/...
+        env:
+          INTEGRATION: 1
+        id: interopTests
+
       - name: Tests (32bit)
         run: |
           cd ${GITHUB_WORKFLOW}
@@ -83,3 +94,25 @@ jobs:
           INTEGRATION: 1
           TESTPRIVILEGED: 1
         id: test32
+
+  fuzz:
+    name: Fuzz parsers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v1
+        with:
+          go-version: '1.20.x'
+
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Fuzz keytab parser
+        run: |
+          cd v8
+          go test ./keytab -run '^$' -fuzz '^FuzzUnmarshal$' -fuzztime 60s
+
+      - name: Fuzz ccache parser
+        run: |
+          cd v8
+          go test ./credentials -run '^$' -fuzz '^FuzzCCacheUnmarshal$' -fuzztime 60s

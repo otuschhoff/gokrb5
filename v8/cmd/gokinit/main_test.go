@@ -65,6 +65,23 @@ func TestParseArgsRejectsConflicts(t *testing.T) {
 	assert.EqualError(t, err, "-R cannot be combined with credential acquisition options")
 }
 
+func TestParseArgsAcceptsCombinedKeytabFlags(t *testing.T) {
+	var stderr bytes.Buffer
+	opts, err := parseArgs([]string{"-kt", "client.keytab", "user@REALM"}, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.True(t, opts.useKeytab)
+	assert.Equal(t, "client.keytab", opts.keytabName)
+
+	opts, err = parseArgs([]string{"-ki", "user@REALM"}, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.True(t, opts.useKeytab)
+	assert.True(t, opts.clientKeytab)
+}
+
 func TestValidateIsExplicitlyUnsupported(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	assert.Equal(t, 1, run([]string{"-v"}, bytes.NewReader(nil), &stdout, &stderr))
