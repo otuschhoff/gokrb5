@@ -46,12 +46,12 @@ func New() *Config {
 type LibDefaults struct {
 	AllowWeakCrypto bool //default false
 	// ap_req_checksum_type int //unlikely to support this
-	Canonicalize bool          //default false
-	CCacheType   int           //default is 4. unlikely to implement older
-	Clockskew    time.Duration //max allowed skew in seconds, default 300
-	//Default_ccache_name string // default /tmp/krb5cc_%{uid} //Not implementing as will hold in memory
-	DefaultClientKeytabName string //default /var/kerberos/krb5/user/%{euid}/client.keytab
-	DefaultKeytabName       string //default /etc/krb5.keytab
+	Canonicalize            bool          //default false
+	CCacheType              int           //default is 4. unlikely to implement older
+	Clockskew               time.Duration //max allowed skew in seconds, default 300
+	DefaultCCacheName       string        //default FILE:/tmp/krb5cc_%{uid}
+	DefaultClientKeytabName string        //default /var/kerberos/krb5/user/%{euid}/client.keytab
+	DefaultKeytabName       string        //default /etc/krb5.keytab
 	DefaultRealm            string
 	DefaultTGSEnctypes      []string //default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4
 	DefaultTktEnctypes      []string //default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4
@@ -96,6 +96,7 @@ func newLibDefaults() LibDefaults {
 	l := LibDefaults{
 		CCacheType:              4,
 		Clockskew:               time.Duration(300) * time.Second,
+		DefaultCCacheName:       "FILE:/tmp/krb5cc_%{uid}",
 		DefaultClientKeytabName: "FILE:/var/kerberos/krb5/user/%{euid}/client.keytab",
 		DefaultKeytabName:       "/etc/krb5.keytab",
 		DefaultTGSEnctypes:      []string{"aes256-cts-hmac-sha1-96", "aes128-cts-hmac-sha1-96", "des3-cbc-sha1", "arcfour-hmac-md5", "camellia256-cts-cmac", "camellia128-cts-cmac", "des-cbc-crc", "des-cbc-md5", "des-cbc-md4"},
@@ -152,7 +153,7 @@ func (l *LibDefaults) parseLines(lines []string) error {
 		case "ccache_type":
 			p[1] = strings.TrimSpace(p[1])
 			v, err := strconv.ParseUint(p[1], 10, 32)
-			if err != nil || v < 0 || v > 4 {
+			if err != nil || v > 4 {
 				return InvalidErrorf("libdefaults section line (%s)", line)
 			}
 			l.CCacheType = int(v)
@@ -164,6 +165,8 @@ func (l *LibDefaults) parseLines(lines []string) error {
 			l.Clockskew = d
 		case "default_client_keytab_name":
 			l.DefaultClientKeytabName = strings.TrimSpace(p[1])
+		case "default_ccache_name":
+			l.DefaultCCacheName = strings.TrimSpace(p[1])
 		case "default_keytab_name":
 			l.DefaultKeytabName = strings.TrimSpace(p[1])
 		case "default_realm":

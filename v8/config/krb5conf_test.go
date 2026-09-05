@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -83,8 +84,9 @@ const (
     "AllowWeakCrypto": false,
     "Canonicalize": false,
     "CCacheType": 4,
-    "Clockskew": 300000000000,
-    "DefaultClientKeytabName": "FILE:/home/gokrb5/client.keytab",
+	"Clockskew": 300000000000,
+	"DefaultCCacheName": "FILE:/tmp/krb5cc_%{uid}",
+	"DefaultClientKeytabName": "FILE:/home/gokrb5/client.keytab",
     "DefaultKeytabName": "FILE:/etc/krb5.keytab",
     "DefaultRealm": "TEST.GOKRB5",
     "DefaultTGSEnctypes": [
@@ -663,6 +665,14 @@ func TestResolveRealm(t *testing.T) {
 	}
 }
 
+func TestDefaultCCacheName(t *testing.T) {
+	c, err := NewFromString("[libdefaults]\ndefault_ccache_name = FILE:/var/tmp/krb5cc_%{euid}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "FILE:/var/tmp/krb5cc_%{euid}", c.LibDefaults.DefaultCCacheName)
+}
+
 func TestJSON(t *testing.T) {
 	t.Parallel()
 	c, err := NewFromString(krb5Conf)
@@ -674,7 +684,14 @@ func TestJSON(t *testing.T) {
 	if err != nil {
 		t.Errorf("error marshaling krb config to JSON: %v", err)
 	}
-	assert.Equal(t, krb5ConfJson, j, "krb config marshaled json not as expected")
+	var expected, actual interface{}
+	if err := json.Unmarshal([]byte(krb5ConfJson), &expected); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(j), &actual); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, expected, actual, "krb config marshaled json not as expected")
 
 	t.Log(j)
 }
