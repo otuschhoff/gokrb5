@@ -50,7 +50,7 @@ type LibDefaults struct {
 	CCacheType              int           //default is 4. unlikely to implement older
 	Clockskew               time.Duration //max allowed skew in seconds, default 300
 	DefaultCCacheName       string        //default FILE:/tmp/krb5cc_%{uid}
-	DefaultClientKeytabName string        //default /var/kerberos/krb5/user/%{euid}/client.keytab
+	DefaultClientKeytabName string        //default is build-time configurable in MIT krb5
 	DefaultKeytabName       string        //default /etc/krb5.keytab
 	DefaultRealm            string
 	DefaultTGSEnctypes      []string //default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4

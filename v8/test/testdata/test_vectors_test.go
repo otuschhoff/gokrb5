@@ -23,9 +23,7 @@ func TestFixturesDecode(t *testing.T) {
 		"keytab enterprise principal": {KEYTAB_ENTERPRISE_PRINCIPAL, 2},
 		"keytab without kvno32":       {KEYTAB_NO_KVNO32_TRAILER, 2},
 		"ccache password":             {CCACHE_V4_KINIT_PASSWORD, 4},
-		"ccache keytab":               {CCACHE_V4_KINIT_KEYTAB, 4},
 		"ccache service ticket":       {CCACHE_V4_WITH_SERVICE_TICKET, 4},
-		"ccache renewable":            {CCACHE_V4_RENEWABLE_FORWARDABLE, 4},
 		"ccache v3":                   {CCACHE_V3, 3},
 	}
 	for name, test := range tests {

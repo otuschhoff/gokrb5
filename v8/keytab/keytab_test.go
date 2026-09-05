@@ -677,8 +677,11 @@ func TestGetEntryKVNO8Fallback(t *testing.T) {
 	assert.Equal(t, uint32(44), entry.KVNO)
 
 	kt.Entries[0].kvno32Present = true
-	_, err = kt.GetEntry(p, 300, 18)
-	assert.ErrorIs(t, err, ErrKVNONotFound)
+	entry, err = kt.GetEntry(p, 300, 18)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, uint32(44), entry.KVNO, "MIT applies low-byte fallback to the parsed KVNO regardless of trailer presence")
 
 	kt.Entries = append(kt.Entries, Entry{
 		Principal:     p,

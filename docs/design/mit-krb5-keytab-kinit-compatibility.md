@@ -1,6 +1,6 @@
 # Design Spec: MIT krb5 Compatibility — Keytab Handling and `kinit`
 
-Status: Draft
+Status: Implemented; compatibility questions resolved against MIT krb5 1.21.3
 Scope: `v8` module (`github.com/jcmturner/gokrb5/v8`)
 Reference implementation: MIT Kerberos 5 (krb5 ≥ 1.18; verify against latest stable)
 
@@ -52,7 +52,7 @@ Numbered for traceability (`KT-n`).
 | KT-2 | `GetEncryptionKey` with `kvno == 0` selects the entry with the **newest timestamp**, not the **highest kvno**. MIT (`krb5_ktfile_get_entry`, `kt_file.c`) selects the highest kvno when kvno is unspecified. Merged keytabs with out-of-order timestamps produce different keys. | High |
 | KT-3 | `GetEncryptionKey` requires an exact `etype` match; no wildcard (`etype == 0` → any) as in MIT. MIT also treats "similar" enctypes (e.g. DES variants) as matching — document as unsupported (DES not implemented). | Medium |
 | KT-4 | `GetEncryptionKey` requires exact realm match. MIT matches any realm when the lookup principal's realm is empty. | Medium |
-| KT-5 | `GetEncryptionKey` has no 8-bit kvno wrap-around handling. MIT matches an entry whose stored kvno is `kvno & 0xff` when only the 8-bit field was written (legacy writers). | Low |
+| KT-5 | `GetEncryptionKey` has no 8-bit kvno wrap-around handling. After failing to find an exact match, MIT accepts an entry whose parsed kvno is `kvno & 0xff`, regardless of whether the optional 32-bit field was present. | Low |
 | KT-6 | 32-bit kvno trailer handling is not recorded explicitly. MIT reads the optional trailer for both v1 and v2, using native byte order for v1, and ignores a zero trailer value. | Low |
 | KT-7 | v1 round-trip is broken: `parsePrincipal` decrements `NumComponents` on read, `principal.marshal` writes it back unchanged, so v1 → marshal → v1 writes the wrong count. `NumComponents` should be derived from `len(Components)` at marshal time, not stored. | Medium |
 | KT-8 | `AddEntry` accepts `KVNO uint8`. kvnos > 255 are common (AD, long-lived service principals). MIT writes `vno & 0xff` to the 8-bit field and the full value to the 32-bit trailer. | High |
@@ -62,7 +62,7 @@ Numbered for traceability (`KT-n`).
 | KT-12 | No file-level write helper. MIT creates keytabs `0600`, uses `krb5_lock_file` while appending, and appends (never rewrites) on `ktadd`. gokrb5 needs `WriteFile(path)` with atomic write (temp + `rename`), `0600`, and an `Append`-safe path, otherwise concurrent `ktadd` from MIT tools can corrupt the file. | Medium |
 | KT-13 | `Unmarshal` on a keytab that already has entries appends to `Entries` (no reset). Calling `Unmarshal` twice duplicates entries. | Low |
 | KT-14 | Error messages format raw bytes with `%s` (`fmt.Errorf("%s's length is less than %d", b, …)`), dumping binary key material into logs. | Medium (security) |
-| KT-15 | Zero-length record (`l == 0`) terminates parsing. MIT behaviour for a zero-length record must be verified (`kt_file.c: krb5_ktfileint_internal_read_entry`); trailing zero padding is common when a hole is created at EOF. | Low |
+| KT-15 | Zero-length record (`l == 0`) terminates parsing. MIT and its file-format documentation define a zero-length record as EOF. | Low |
 | KT-16 | No default keytab resolution: `KRB5_KTNAME`, `KRB5_CLIENT_KTNAME`, `[libdefaults] default_keytab_name`, `default_client_keytab_name`, `FILE:`/`WRFILE:` prefix stripping, `%{euid}`/`%{uid}`/`%{username}` parameter expansion. `config.LibDefaults.DefaultKeytabName` is parsed but never used. | Medium |
 | KT-17 | No `klist -kte`-compatible text rendering. Useful for diff-based interoperability tests and for a `gokrb5 klist -k` tool. | Low |
 | KT-18 | No exported accessor for the keytab version, and no way to request writing v1 (MIT can still read v1; writing v1 is not required — read-only support is sufficient). | Low |
@@ -100,7 +100,7 @@ Numbered `KI-n`.
 | KI-12 | Enterprise principals (`kinit -E`, `KRB_NT_ENTERPRISE`): `credentials.New` splits the username on `/`; `types.ParseSPNString` splits on the last `@`. An enterprise name `user@corp.example@REALM` must become a single component with name type 10. | Low |
 | KI-13 | `Settings.DisablePAFXFAST` actually controls `PA_REQ_ENC_PA_REP` (RFC 6806 §11), not FAST. Rename/document; keep the old name as a deprecated alias. | Low |
 | KI-14 | Ticket-flag handling for `-f/-F`, `-p/-P`, `-a/-A`, `-C` (canonicalize), `-l`, `-r`, `-s` (start time / postdated), `-S service`, `-v` (validate) is only reachable via `config.LibDefaults`. The CLI needs per-invocation overrides that take precedence over krb5.conf. `-s` and `-v` may be deferred. | Medium |
-| KI-15 | ccache `GetEntries` filters `X-CACHECONF:` entries when loading; the writer must be able to emit them (`fast_avail`, `pa_type`, `refresh_time` for keytab-based caches) so MIT `kinit -R`/GSSAPI auto-refresh behaves identically. | Medium |
+| KI-15 | ccache `GetEntries` filters `X-CACHECONF:` entries when loading; the writer must preserve MIT metadata semantics for `pa_type`, `fast_avail`, and `start_realm`. `refresh_time` belongs to GSS client-keytab refresh, not ordinary `kinit -k` output. | Medium |
 | KI-16 | Password-keytab preference: `Credentials.WithPassword` clears the keytab and vice versa. MIT `kinit -k` with a password-less principal must still work; `kinit` without `-k` must never read the keytab. Behaviour is compatible; add tests to lock it. | Low |
 
 ---
@@ -140,7 +140,7 @@ type Keytab struct {
 
 - `Load(path string) (*Keytab, error)` — accepts `FILE:`/`WRFILE:` prefix.
 - `LoadDefault(cfg *config.Config) (*Keytab, error)` — resolution order `KRB5_KTNAME` → `default_keytab_name` → `FILE:/etc/krb5.keytab`.
-- `LoadDefaultClient(cfg *config.Config) (*Keytab, error)` — `KRB5_CLIENT_KTNAME` → `default_client_keytab_name` → `FILE:/var/kerberos/krb5/user/%{euid}/client.keytab` (Linux/RHEL default; also accept the Debian default `/var/lib/krb5/user/%{euid}/client.keytab` when the first does not exist — verify defaults against the MIT build configuration table).
+- `LoadDefaultClient(cfg *config.Config) (*Keytab, error)` — `KRB5_CLIENT_KTNAME` → `default_client_keytab_name` → compiled-policy fallbacks. MIT's `DEFCKTNAME` is build-time configurable; gokrb5 probes `/var/kerberos`, `/etc`, then `/var/lib` variants and returns the primary path if none exists.
 - `Unmarshal(b []byte) error` — resets `Entries` first; honours all rules in §3.1.5.
 - `Read(io.Reader)` convenience.
 
@@ -182,7 +182,7 @@ Rules (mirror `krb5_ktfile_get_entry`):
 2. Realm must match exactly unless the lookup realm is `""`, in which case any realm matches.
 3. `etype == 0` matches any enctype; otherwise exact match (no "similar enctype" support — document).
 4. `kvno == 0`: among matches choose the highest `KVNO`; tie-break by newest `Timestamp`.
-5. `kvno != 0`: exact match on `KVNO`; if none, and `kvno > 255`, accept an entry whose `KVNO == kvno & 0xff` **only if** that entry was written without a 32-bit trailer (tracked by an unexported flag set during unmarshal). If still none → `ErrKVNONotFound`.
+5. `kvno != 0`: exact match on `KVNO`; if none, and `kvno > 255`, accept an entry whose parsed `KVNO == kvno & 0xff`, regardless of whether the record contained a 32-bit trailer. If still none → `ErrKVNONotFound`.
 6. No principal match → `ErrNotFound`. Sentinel errors are exported so callers can distinguish.
 
 #### 3.1.6 Rendering
@@ -199,7 +199,7 @@ Rules (mirror `krb5_ktfile_get_entry`):
 - `func (c *CCache) KDCTimeOffset() (time.Duration, bool)` and `SetKDCTimeOffset(d time.Duration)`.
 - `DefaultCCacheName(cfg *config.Config) (string, error)` with `KRB5CCNAME` → `default_ccache_name` → `FILE:/tmp/krb5cc_%{uid}`, parameter expansion, `FILE:` prefix handling, error for unsupported types.
 - Harden `Unmarshal`: every `read*` returns an error on short input; header loop iterates `*p < start+length`; unknown header tags are skipped (MIT ignores unknown tags).
-- `func (cl *Client) CCache() (*credentials.CCache, error)` in `v8/client` — exports the client's current TGT session(s) and cached service tickets into a `CCache` (client principal, TGT with flags/times/session key, `pa_type` config entry, `fast_avail` omitted). Round-trip `NewFromCCache(cl.CCache())` must be lossless.
+- `func (cl *Client) CCache() (*credentials.CCache, error)` in `v8/client` — exports the client's current TGT session(s) and cached service tickets into a `CCache` (client principal, TGT with flags/times/session key, and TGT-associated `pa_type` when pre-authentication was selected). `fast_avail` is omitted because gokrb5 does not negotiate FAST. `AddCredential` records global `start_realm` for cross-realm TGTs. Round-trip `NewFromCCache(cl.CCache())` must be lossless.
 
 ### 3.3 AS exchange corrections (`v8/client`, `v8/crypto`, `v8/messages`)
 
@@ -228,7 +228,7 @@ Behaviour:
 - `-v`: validate (postdated) — may be deferred; if unimplemented, exit with the MIT error text `kinit: -v not supported`.
 - Output: silent on success (`-V` prints `Using default cache: …`, `Using principal: …`, `Authenticated to Kerberos v5` exactly like MIT).
 - Exit status 1 on failure; error text `kinit: <message> while getting initial credentials` (mapping table from `krberror`/KRB-ERROR codes to MIT `com_err` strings for the common cases: password incorrect, client not found, preauth failed, clock skew, key expired, cannot contact any KDC).
-- Writes ccache v4 with `pa_type` config entry; for keytab logins also `refresh_time`.
+- Writes ccache v4 with a TGT-associated `pa_type` entry when pre-authentication was selected. It does not write `refresh_time`; MIT writes that key from GSS client-keytab refresh code, not `kinit`.
 
 Also provide `v8/cmd/goklist` (`-k -t -K -e -c`) and `v8/cmd/gokdestroy` as thin wrappers — they are cheap and make interop testing self-contained. `goktutil` is optional; `keytab` package API + tests cover it.
 
@@ -259,9 +259,9 @@ All generated once with a pinned MIT version (record `krb5-config --version`), f
 8. `KEYTAB_ENTERPRISE_PRINCIPAL` — `ktutil addent -e ... -p user\@corp.example@TEST.GOKRB5`-style name (name type 10 if `ktutil` supports it; otherwise `kadmin` with `-E`).
 9. `KEYTAB_NO_KVNO32_TRAILER` — hand-built record without 32-bit trailer (legacy writer), kvno8 = 5 → verifies fallback rule.
 10. `CCACHE_V4_KINIT_PASSWORD` — `kinit testuser1` then `cat /tmp/krb5cc_*`; includes `X-CACHECONF:` entries and KDC offset header.
-11. `CCACHE_V4_KINIT_KEYTAB` — `kinit -kt` variant (has `refresh_time`).
+11. `ccache_v4_kinit_keytab.hex` — generated by `kinit -kt` when a test KDC is available; validated by live interop rather than represented by aliased password-login bytes. Ordinary MIT `kinit -kt` does not add `refresh_time`.
 12. `CCACHE_V4_WITH_SERVICE_TICKET` — after `kvno HTTP/host.test.gokrb5`.
-13. `CCACHE_V4_RENEWABLE_FORWARDABLE` — `kinit -f -r 7d`.
+13. `ccache_v4_renewable_forwardable.hex` — generated by `kinit -f -r 7d` when a test KDC is available and validated by live interop.
 14. `CCACHE_V3` — produced with `KRB5CCNAME` on an old MIT if available; else synthesized.
 15. `KLIST_KTE_OUTPUT_*` — captured text of `klist -kte` for fixtures 1–4 (for `Klist()` diff tests).
 
@@ -479,10 +479,12 @@ Check: all §5 checkboxes ticked; CI green on every Go version in the matrix.
 
 ---
 
-## 7. Open Questions (resolve during Phase 0/1 by reading MIT source)
+## 7. Resolved Compatibility Questions
 
-1. MIT behaviour for a zero-length keytab record (`kt_file.c`, `krb5_ktfileint_internal_read_entry`) — treat as EOF or skip?
-2. Exact 8-bit kvno fallback rule in `krb5_ktfile_get_entry` (condition and whether it applies only when the 32-bit trailer is absent).
-3. Client keytab default path per platform (`/var/kerberos/krb5/user/%{euid}/client.keytab` vs `/var/lib/krb5/user/%{euid}/client.keytab`) — mirror MIT's `DEFCKTNAME` build default and document.
-4. Which `X-CACHECONF:` entries MIT `kinit` writes in the pinned version (`pa_type`, `fast_avail`, `refresh_time`, `start_realm`) so `gokinit` output is diff-clean under `klist -c` with config entries shown.
-5. Whether to emit `ETYPE-INFO`-only (pre-RFC 4120) handling for `kdc-older`; confirm the `kdc-older` container's ETYPE-INFO variant.
+These conclusions were verified against the `krb5-1.21.3-final` source tag.
+
+1. A zero-length keytab record is EOF. `src/lib/krb5/keytab/kt_file.c`, `krb5_ktfileint_internal_read_entry`, returns `KRB5_KT_END` when `size == 0`; `doc/formats/keytab_file_format.rst` specifies the same behavior.
+2. Explicit KVNO lookup first seeks an exact match, then accepts the first entry whose parsed KVNO equals `kvno & 0xff`. `krb5_ktfile_get_entry` does not condition this fallback on absence of the optional 32-bit trailer. Trailer parsing remains independent: a present, nonzero 32-bit value overrides KVNO8.
+3. The client-keytab path is build policy, not a platform constant. `src/configure.ac` accepts `DEFCKTNAME`, inherits it from `krb5-config --defcktname` when available, and otherwise uses `FILE:$localstatedir/krb5/user/%{euid}/client.keytab`. `src/lib/krb5/os/ktdefname.c`, `k5_kt_client_default_name`, applies environment and profile overrides first. The locally installed 1.21.3 build reports `FILE:/etc/krb5/user/%{euid}/client.keytab`; gokrb5 also recognizes common `/var/kerberos` and `/var/lib` builds.
+4. Initial-credential acquisition writes TGT-associated `pa_type` when a pre-authentication mechanism was selected and TGT-associated `fast_avail=yes` when FAST was negotiated (`src/lib/krb5/krb/get_in_tkt.c`, `save_selected_preauth_type` and `write_out_ccache`). Generic ccache storage writes global `start_realm` for a cross-realm TGT (`src/lib/krb5/ccache/ccfns.c`, `krb5_cc_store_cred`). `refresh_time` is written by GSS credential acquisition for client-keytab refresh (`src/lib/gssapi/krb5/acquire_cred.c`, `set_refresh_time`), not by ordinary `kinit` or `kinit -k`.
+5. ETYPE-INFO behavior depends on requested enctypes, not KDC version. `src/kdc/kdc_preauth.c`, `requires_info2` and `add_etype_info`, always emits ETYPE-INFO2 and additionally emits ETYPE-INFO for requests containing no enctype that requires INFO2. gokrb5 accepts ETYPE-INFO-only method data for legacy interoperability and gives ETYPE-INFO2 precedence when both are present.

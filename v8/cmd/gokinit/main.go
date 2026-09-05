@@ -124,12 +124,12 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				return fail(stderr, changeErr, "while changing password")
 			}
 			if err = cl.LoginWithOptions(requestOptions); err == nil {
-				return writeCache(cl, cacheName, false, opts.verbose, stdout, stderr)
+				return writeCache(cl, cacheName, opts.verbose, stdout, stderr)
 			}
 		}
 		return fail(stderr, err, "while getting initial credentials")
 	}
-	return writeCache(cl, cacheName, opts.useKeytab, opts.verbose, stdout, stderr)
+	return writeCache(cl, cacheName, opts.verbose, stdout, stderr)
 }
 
 func parseArgs(args []string, stderr io.Writer) (initOptions, error) {
@@ -281,23 +281,10 @@ func changeExpiredPassword(cl *client.Client, principal string, stdin io.Reader,
 	return nil
 }
 
-func writeCache(cl *client.Client, cacheName string, keytabLogin, verbose bool, stdout, stderr io.Writer) int {
+func writeCache(cl *client.Client, cacheName string, verbose bool, stdout, stderr io.Writer) int {
 	cache, err := cl.CCache()
 	if err != nil {
 		return fail(stderr, err, "while creating credentials cache")
-	}
-	if keytabLogin {
-		entries := cache.GetEntries()
-		if len(entries) > 0 {
-			start := entries[0].StartTime
-			if start.IsZero() {
-				start = entries[0].AuthTime
-			}
-			refresh := start.Add(entries[0].EndTime.Sub(start) / 2).Unix()
-			if err := cache.SetConfig("refresh_time", "", strconv.FormatInt(refresh, 10)); err != nil {
-				return fail(stderr, err, "while setting refresh time")
-			}
-		}
 	}
 	if err := cache.WriteFile(cacheName); err != nil {
 		return fail(stderr, err, "while storing credentials")
@@ -322,7 +309,7 @@ func renewCredentials(cacheName string, cfg *config.Config, verbose bool, stdout
 	if err := cl.Renew(); err != nil {
 		return fail(stderr, err, "while renewing credentials")
 	}
-	return writeCache(cl, cacheName, false, verbose, stdout, stderr)
+	return writeCache(cl, cacheName, verbose, stdout, stderr)
 }
 
 func displayCacheName(name string) string {

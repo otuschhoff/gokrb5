@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -237,4 +238,16 @@ func TestLoadDefaultClientResolutionOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Equal(t, uint32(2), loaded.Entries[0].KVNO)
+}
+
+func TestFirstExistingClientKeytabName(t *testing.T) {
+	dir := t.TempDir()
+	missing := "FILE:" + filepath.Join(dir, "missing")
+	existing := "FILE:" + filepath.Join(dir, "client.keytab")
+	if err := os.WriteFile(strings.TrimPrefix(existing, "FILE:"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Equal(t, existing, firstExistingKeytabName([]string{missing, existing}))
+	assert.Equal(t, missing, firstExistingKeytabName([]string{missing, "FILE:" + filepath.Join(dir, "also-missing")}))
 }

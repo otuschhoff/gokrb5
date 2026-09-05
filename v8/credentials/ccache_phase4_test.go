@@ -20,11 +20,9 @@ import (
 
 func ccacheFixtures() map[string]string {
 	return map[string]string{
-		"v4 password":              testdata.CCACHE_V4_KINIT_PASSWORD,
-		"v4 keytab":                testdata.CCACHE_V4_KINIT_KEYTAB,
-		"v4 service ticket":        testdata.CCACHE_V4_WITH_SERVICE_TICKET,
-		"v4 renewable forwardable": testdata.CCACHE_V4_RENEWABLE_FORWARDABLE,
-		"v3":                       testdata.CCACHE_V3,
+		"v4 password":       testdata.CCACHE_V4_KINIT_PASSWORD,
+		"v4 service ticket": testdata.CCACHE_V4_WITH_SERVICE_TICKET,
+		"v3":                testdata.CCACHE_V3,
 	}
 }
 
@@ -116,7 +114,28 @@ func TestCCacheCapturedConfigEntry(t *testing.T) {
 	value, found := cache.GetConfig("fast_avail", "krbtgt/TEST.GOKRB5@TEST.GOKRB5")
 	assert.True(t, found)
 	assert.Equal(t, "yes", value)
+	_, found = cache.GetConfig("fast_avail", "")
+	assert.False(t, found)
+	for _, key := range []string{"pa_type", "refresh_time", "start_realm"} {
+		_, found = cache.GetConfig(key, "")
+		assert.False(t, found, "unexpected global %s entry", key)
+		_, found = cache.GetConfig(key, "krbtgt/TEST.GOKRB5@TEST.GOKRB5")
+		assert.False(t, found, "unexpected TGT-associated %s entry", key)
+	}
 	assert.Len(t, cache.GetEntries(), 2)
+}
+
+func TestCCacheCapturedKinitPasswordHasNoConfigEntries(t *testing.T) {
+	data, err := hex.DecodeString(testdata.CCACHE_V4_KINIT_PASSWORD)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := new(CCache)
+	if err := cache.Unmarshal(data); err != nil {
+		t.Fatal(err)
+	}
+	assert.Len(t, cache.GetEntries(), 1)
+	assert.Len(t, cache.Credentials, 1)
 }
 
 func TestCCacheConfigEntriesAndOffset(t *testing.T) {
@@ -157,6 +176,37 @@ func TestCCacheConfigEntriesAndOffset(t *testing.T) {
 	offset, ok = reparsed.KDCTimeOffset()
 	assert.True(t, ok)
 	assert.Equal(t, -1500*time.Millisecond-25*time.Microsecond, offset)
+}
+
+func TestCCacheCrossRealmTGTRecordsStartRealm(t *testing.T) {
+	client := Principal{Realm: "CLIENT.EXAMPLE", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user")}
+	cache := NewCCache(client.PrincipalName, client.Realm)
+	cache.AddCredential(&Credential{
+		Client: client,
+		Server: Principal{Realm: "CLIENT.EXAMPLE", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/SOURCE.EXAMPLE")},
+	})
+
+	value, found := cache.GetConfig("start_realm", "")
+	assert.True(t, found)
+	assert.Equal(t, "SOURCE.EXAMPLE", value)
+	_, associated := cache.GetConfig("start_realm", "krbtgt/SOURCE.EXAMPLE@CLIENT.EXAMPLE")
+	assert.False(t, associated)
+	if assert.Len(t, cache.Credentials, 2) {
+		assert.Equal(t, configRealm, cache.Credentials[0].Server.Realm, "MIT stores start_realm before the cross-realm TGT")
+		assert.Equal(t, "CLIENT.EXAMPLE", cache.Credentials[1].Server.Realm)
+	}
+}
+
+func TestCCacheSameRealmTGTOmitsStartRealm(t *testing.T) {
+	client := Principal{Realm: "EXAMPLE.ORG", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user")}
+	cache := NewCCache(client.PrincipalName, client.Realm)
+	cache.AddCredential(&Credential{
+		Client: client,
+		Server: Principal{Realm: client.Realm, PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/EXAMPLE.ORG")},
+	})
+
+	_, found := cache.GetConfig("start_realm", "")
+	assert.False(t, found)
 }
 
 func TestCCacheV3WritesRepeatedEnctype(t *testing.T) {

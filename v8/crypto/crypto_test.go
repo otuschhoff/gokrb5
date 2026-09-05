@@ -73,6 +73,49 @@ func TestGetKeyFromPasswordETypeInfo2PrecedesPasswordSalt(t *testing.T) {
 	assert.Equal(t, expected, key.KeyValue)
 }
 
+func TestGetKeyFromPasswordUsesETypeInfoOnly(t *testing.T) {
+	entries := types.ETypeInfo{{EType: etypeID.DES3_CBC_SHA1_KD, Salt: []byte("legacy-salt")}}
+	value, err := asn1.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pas := types.PADataSequence{{PADataType: patype.PA_ETYPE_INFO, PADataValue: value}}
+	key, selected, err := GetKeyFromPasswordForETypes("password", types.PrincipalName{}, "EXAMPLE.ORG", []int32{etypeID.DES3_CBC_SHA1_KD}, pas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := selected.StringToKey("password", "legacy-salt", selected.GetDefaultStringToKeyParams())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, etypeID.DES3_CBC_SHA1_KD, key.KeyType)
+	assert.Equal(t, expected, key.KeyValue)
+}
+
+func TestGetKeyFromPasswordETypeInfo2PrecedesETypeInfo(t *testing.T) {
+	infoValue, err := asn1.Marshal(types.ETypeInfo{{EType: etypeID.AES128_CTS_HMAC_SHA1_96, Salt: []byte("info-salt")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info2Value, err := asn1.Marshal(types.ETypeInfo2{{EType: etypeID.AES128_CTS_HMAC_SHA1_96, Salt: "info2-salt"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pas := types.PADataSequence{
+		{PADataType: patype.PA_ETYPE_INFO, PADataValue: infoValue},
+		{PADataType: patype.PA_ETYPE_INFO2, PADataValue: info2Value},
+	}
+	key, selected, err := GetKeyFromPasswordForETypes("password", types.PrincipalName{}, "EXAMPLE.ORG", []int32{etypeID.AES128_CTS_HMAC_SHA1_96}, pas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := selected.StringToKey("password", "info2-salt", selected.GetDefaultStringToKeyParams())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, expected, key.KeyValue)
+}
+
 func TestGetKeyFromPasswordSkipsUnsupportedRequestedEType(t *testing.T) {
 	key, _, err := GetKeyFromPasswordForETypes("password", types.PrincipalName{NameString: []string{"user"}}, "EXAMPLE.ORG", []int32{999, etypeID.AES128_CTS_HMAC_SHA1_96}, nil)
 	if err != nil {

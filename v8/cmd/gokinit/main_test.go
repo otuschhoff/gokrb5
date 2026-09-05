@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/hex"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 
@@ -94,7 +93,7 @@ func TestHelpSucceeds(t *testing.T) {
 	assert.Contains(t, stderr.String(), usageLine)
 }
 
-func TestWriteCacheAddsKeytabRefreshTime(t *testing.T) {
+func TestWriteCacheOmitsGSSRefreshTime(t *testing.T) {
 	data, err := hex.DecodeString(testdata.CCACHE_TEST)
 	if err != nil {
 		t.Fatal(err)
@@ -109,18 +108,11 @@ func TestWriteCacheAddsKeytabRefreshTime(t *testing.T) {
 	}
 	path := filepath.Join(t.TempDir(), "ccache")
 	var stdout, stderr bytes.Buffer
-	assert.Equal(t, 0, writeCache(cl, "FILE:"+path, true, false, &stdout, &stderr))
+	assert.Equal(t, 0, writeCache(cl, "FILE:"+path, false, &stdout, &stderr))
 	written, err := credentials.LoadCCache(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := written.GetEntries()[0]
-	start := entry.StartTime
-	if start.IsZero() {
-		start = entry.AuthTime
-	}
-	expected := strconv.FormatInt(start.Add(entry.EndTime.Sub(start)/2).Unix(), 10)
-	actual, found := written.GetConfig("refresh_time", "")
-	assert.True(t, found)
-	assert.Equal(t, expected, actual)
+	_, found := written.GetConfig("refresh_time", "")
+	assert.False(t, found)
 }

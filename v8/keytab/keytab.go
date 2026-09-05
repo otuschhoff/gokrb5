@@ -287,7 +287,7 @@ func (kt *Keytab) GetEntry(p Principal, kvno uint32, etype int32) (Entry, error)
 			}
 			continue
 		}
-		if kvno > 255 && !candidate.kvno32Present && candidate.KVNO == kvno&0xff {
+		if kvno > 255 && candidate.KVNO == kvno&0xff {
 			if !fallbackFound || candidate.Timestamp.After(fallback.Timestamp) {
 				fallback = candidate
 				fallbackFound = true

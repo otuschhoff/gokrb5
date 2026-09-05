@@ -114,6 +114,23 @@ func TestPreAuthETypeUsesFirstRequestedKDCOffer(t *testing.T) {
 	assert.Equal(t, etypeID.AES128_CTS_HMAC_SHA1_96, et.GetETypeID())
 }
 
+func TestPreAuthETypeAcceptsETypeInfoOnly(t *testing.T) {
+	entries := types.ETypeInfo{{EType: etypeID.DES3_CBC_SHA1_KD, Salt: []byte("legacy-salt")}}
+	info, err := asn1.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	methodData, err := asn1.Marshal(types.PADataSequence{{PADataType: patype.PA_ETYPE_INFO, PADataValue: info}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	et, err := preAuthEType(&messages.KRBError{EData: methodData}, []int32{etypeID.DES3_CBC_SHA1_KD})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, etypeID.DES3_CBC_SHA1_KD, et.GetETypeID())
+}
+
 func TestClientCCacheExportRoundTrip(t *testing.T) {
 	data, err := hex.DecodeString(testdata.CCACHE_TEST)
 	if err != nil {

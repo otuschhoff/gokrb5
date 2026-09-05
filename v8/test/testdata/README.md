@@ -30,9 +30,9 @@ name-type field is changed to `KRB_NT_ENTERPRISE` (10) after capture. MIT no
 longer emits v1 keytabs. The v1 little- and big-endian fixtures are
 specification-derived. The deleted-record holes and missing KVNO32 trailer are
 derived from MIT v2 captures by changing only record framing. The committed v3
-cache is a minimal specification-derived cache. `CCACHE_V4_KINIT_KEYTAB` is a
-format-equivalent fallback and must be replaced with generator output when a
-test KDC is available.
+cache is a minimal specification-derived cache. Keytab-login and renewable
+forwardable caches are tested by the live interop suite instead of claiming
+password-login bytes as captures.
 
 Never use production credentials when generating committed fixtures. The
 script writes key material and tickets to its output directory.

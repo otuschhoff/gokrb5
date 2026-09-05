@@ -13,8 +13,13 @@ import (
 const (
 	defaultKeytabName       = "FILE:/etc/krb5.keytab"
 	defaultClientKeytabName = "FILE:/var/kerberos/krb5/user/%{euid}/client.keytab"
-	debianClientKeytabName  = "FILE:/var/lib/krb5/user/%{euid}/client.keytab"
 )
+
+var defaultClientKeytabNames = []string{
+	defaultClientKeytabName,
+	"FILE:/etc/krb5/user/%{euid}/client.keytab",
+	"FILE:/var/lib/krb5/user/%{euid}/client.keytab",
+}
 
 // ResolveName resolves a FILE or WRFILE keytab name to a filesystem path.
 // The writable result reports whether the WRFILE type was requested.
@@ -74,12 +79,21 @@ func LoadDefaultClient(cfg *config.Config) (*Keytab, error) {
 	if name == "" {
 		name = defaultClientKeytabName
 	}
-	path, _, err := ResolveName(name, cfg)
-	if err != nil {
-		return new(Keytab), err
-	}
-	if _, err := os.Stat(path); os.IsNotExist(err) && name == defaultClientKeytabName {
-		name = debianClientKeytabName
+	if name == defaultClientKeytabName {
+		name = firstExistingKeytabName(defaultClientKeytabNames)
 	}
 	return Load(name)
+}
+
+func firstExistingKeytabName(names []string) string {
+	for _, name := range names {
+		path, _, err := ResolveName(name, nil)
+		if err != nil {
+			return name
+		}
+		if _, statErr := os.Stat(path); statErr == nil || !os.IsNotExist(statErr) {
+			return name
+		}
+	}
+	return names[0]
 }
