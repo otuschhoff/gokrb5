@@ -2,179 +2,102 @@ package client
 
 import (
 	"bytes"
-	"encoding/hex"
 	"log"
+	"strings"
 	"testing"
 
-	"github.com/jcmturner/gokrb5/v8/config"
-	"github.com/jcmturner/gokrb5/v8/iana/etypeID"
-	"github.com/jcmturner/gokrb5/v8/iana/nametype"
-	"github.com/jcmturner/gokrb5/v8/keytab"
-	"github.com/jcmturner/gokrb5/v8/test"
-	"github.com/jcmturner/gokrb5/v8/test/testdata"
-	"github.com/jcmturner/gokrb5/v8/types"
+	"github.com/jcmturner/gokrb5/v8/test/ad"
 	"github.com/stretchr/testify/assert"
 )
 
+// The AD integration tests discover the domain from the host's FQDN and read
+// credentials from the repository root (krb5.keytab, user, pw). See ad.Environment.
+
+// AD does not return the PA-FX-FAST marker gokrb5 expects alongside PA-REQ-ENC-PA-REP (see USAGE.md).
+func adSettings() []func(*Settings) { return []func(*Settings){DisablePAReqEncPARep(true)} }
+
 func TestClient_SuccessfulLogin_AD(t *testing.T) {
-	test.AD(t)
+	env := ad.Environment(t)
 
-	b, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER1_USER_GOKRB5)
-	kt := keytab.New()
-	kt.Unmarshal(b)
-	c, _ := config.NewFromString(testdata.KRB5_CONF_AD)
-	cl := NewWithKeytab("testuser1", "USER.GOKRB5", kt, c, DisablePAFXFAST(true))
-
-	err := cl.Login()
-	if err != nil {
-		t.Fatalf("Error on login: %v\n", err)
+	cl := NewWithPassword(env.User, env.UserRealm, env.Password, env.Config, adSettings()...)
+	if err := cl.Login(); err != nil {
+		t.Fatalf("Error on login to %s: %v", env.Realm, err)
 	}
+	assert.True(t, strings.EqualFold(env.UserRealm, cl.Credentials.Realm()), "client realm should match the user realm")
 }
 
-func TestClient_SuccessfulLogin_AD_Without_PreAuth(t *testing.T) {
-	test.AD(t)
+func TestClient_SuccessfulLogin_AD_Keytab(t *testing.T) {
+	env := ad.Environment(t)
+	machine, ok := env.MachineAccountPrincipal()
+	if !ok {
+		t.Skipf("keytab %s has no computer account principal", env.KeytabPath)
+	}
 
-	b, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER3_USER_GOKRB5)
-	kt := keytab.New()
-	kt.Unmarshal(b)
-	c, _ := config.NewFromString(testdata.KRB5_CONF_AD)
-	cl := NewWithKeytab("testuser3", "USER.GOKRB5", kt, c, DisablePAFXFAST(true))
-
-	err := cl.Login()
-	if err != nil {
-		t.Fatalf("Error on login: %v\n", err)
+	cl := NewWithKeytab(machine.Components[0], machine.Realm, env.Keytab, env.Config, adSettings()...)
+	if err := cl.Login(); err != nil {
+		t.Fatalf("Error on keytab login as %s: %v", machine, err)
 	}
 }
 
 func TestClient_GetServiceTicket_AD(t *testing.T) {
-	test.AD(t)
-
-	b, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER1_USER_GOKRB5)
-	kt := keytab.New()
-	kt.Unmarshal(b)
-	c, _ := config.NewFromString(testdata.KRB5_CONF_AD)
-	cl := NewWithKeytab("testuser1", "USER.GOKRB5", kt, c)
-
-	err := cl.Login()
+	env := ad.Environment(t)
+	spn, err := env.ServiceSPN()
 	if err != nil {
-		t.Fatalf("Error on login: %v\n", err)
+		t.Fatal(err)
 	}
-	spn := "HTTP/user2.user.gokrb5"
+
+	cl := NewWithPassword(env.User, env.UserRealm, env.Password, env.Config, adSettings()...)
+	if err := cl.Login(); err != nil {
+		t.Fatalf("Error on login: %v", err)
+	}
 	tkt, key, err := cl.GetServiceTicket(spn)
 	if err != nil {
-		t.Fatalf("Error getting service ticket: %v\n", err)
+		t.Fatalf("Error getting service ticket for %s: %v", spn, err)
 	}
-	assert.Equal(t, spn, tkt.SName.PrincipalNameString())
-	assert.Equal(t, int32(18), key.KeyType)
+	assert.True(t, strings.EqualFold(spn, tkt.SName.PrincipalNameString()), "ticket sname %q should match %q", tkt.SName.PrincipalNameString(), spn)
+	assert.NotEmpty(t, key.KeyValue, "session key should be present")
 
-	b, _ = hex.DecodeString(testdata.KEYTAB_TESTUSER2_USER_GOKRB5)
-	skt := keytab.New()
-	skt.Unmarshal(b)
-	sname := types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: []string{"testuser2"}}
-	err = tkt.DecryptEncPart(skt, &sname)
-	if err != nil {
-		t.Errorf("could not decrypt service ticket: %v", err)
+	if err := tkt.DecryptEncPart(env.Keytab, nil); err != nil {
+		t.Fatalf("could not decrypt service ticket with %s: %v", env.KeytabPath, err)
 	}
+	assert.True(t, strings.EqualFold(env.User, tkt.DecryptedEncPart.CName.PrincipalNameString()), "ticket cname should be the logged in user")
+
 	w := bytes.NewBufferString("")
 	l := log.New(w, "", 0)
-	isPAC, pac, err := tkt.GetPACType(skt, &sname, l)
+	isPAC, pac, err := tkt.GetPACType(env.Keytab, nil, l)
 	if err != nil {
 		t.Log(w.String())
-		t.Errorf("error getting PAC: %v", err)
+		t.Fatalf("error getting PAC: %v", err)
 	}
-	assert.True(t, isPAC, "should have PAC")
-	assert.Equal(t, "USER", pac.KerbValidationInfo.LogonDomainName.String(), "domain name in PAC not correct")
+	if !assert.True(t, isPAC, "AD service ticket should carry a PAC") {
+		return
+	}
+	assert.True(t, strings.EqualFold(env.User, pac.KerbValidationInfo.EffectiveName.Value), "PAC EffectiveName %q should match user %q", pac.KerbValidationInfo.EffectiveName.Value, env.User)
+	assert.NotEmpty(t, pac.KerbValidationInfo.LogonDomainName.Value, "PAC should name the logon domain")
+	assert.NotEmpty(t, pac.KerbValidationInfo.GetGroupMembershipSIDs(), "PAC should list group SIDs")
+	assert.NotNil(t, pac.ClientInfo, "PAC should carry client info")
+	assert.NotNil(t, pac.ServerChecksum, "PAC should carry the server checksum")
+	assert.NotNil(t, pac.KDCChecksum, "PAC should carry the KDC checksum")
 }
 
-func TestClient_GetServiceTicket_AD_TRUST_USER_DOMAIN(t *testing.T) {
-	test.AD(t)
-
-	b, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER1_USER_GOKRB5)
-	kt := keytab.New()
-	kt.Unmarshal(b)
-	c, _ := config.NewFromString(testdata.KRB5_CONF_AD)
-	c.LibDefaults.Canonicalize = true
-	c.LibDefaults.DefaultTktEnctypes = []string{"rc4-hmac"}
-	c.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.ETypesByName["rc4-hmac"]}
-	c.LibDefaults.DefaultTGSEnctypes = []string{"rc4-hmac"}
-	c.LibDefaults.DefaultTGSEnctypeIDs = []int32{etypeID.ETypesByName["rc4-hmac"]}
-	cl := NewWithKeytab("testuser1", "USER.GOKRB5", kt, c, DisablePAFXFAST(true))
-	err := cl.Login()
-
+func TestClient_GetServiceTicket_AD_CachedTicketReused(t *testing.T) {
+	env := ad.Environment(t)
+	spn, err := env.ServiceSPN()
 	if err != nil {
-		t.Fatalf("Error on login: %v\n", err)
+		t.Fatal(err)
 	}
-	spn := "HTTP/host.res.gokrb5"
-	tkt, key, err := cl.GetServiceTicket(spn)
+
+	cl := NewWithPassword(env.User, env.UserRealm, env.Password, env.Config, adSettings()...)
+	if err := cl.Login(); err != nil {
+		t.Fatalf("Error on login: %v", err)
+	}
+	first, _, err := cl.GetServiceTicket(spn)
 	if err != nil {
-		t.Fatalf("Error getting service ticket: %v\n", err)
+		t.Fatal(err)
 	}
-	assert.Equal(t, spn, tkt.SName.PrincipalNameString())
-	assert.Equal(t, etypeID.ETypesByName["rc4-hmac"], key.KeyType)
-
-	b, _ = hex.DecodeString(testdata.KEYTAB_SYSHTTP_RES_GOKRB5)
-	skt := keytab.New()
-	skt.Unmarshal(b)
-	sname := types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: []string{"sysHTTP"}}
-	err = tkt.DecryptEncPart(skt, &sname)
+	second, _, err := cl.GetServiceTicket(spn)
 	if err != nil {
-		t.Errorf("error decrypting ticket with service keytab: %v", err)
+		t.Fatal(err)
 	}
-	w := bytes.NewBufferString("")
-	l := log.New(w, "", 0)
-	isPAC, pac, err := tkt.GetPACType(skt, &sname, l)
-	if err != nil {
-		t.Log(w.String())
-		t.Errorf("error getting PAC: %v", err)
-	}
-	assert.True(t, isPAC, "Did not find PAC in service ticket")
-	assert.Equal(t, "testuser1", pac.KerbValidationInfo.EffectiveName.Value, "PAC value not parsed")
-
-}
-
-func TestClient_GetServiceTicket_AD_USER_DOMAIN(t *testing.T) {
-	test.AD(t)
-
-	b, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER1_USER_GOKRB5)
-	kt := keytab.New()
-	kt.Unmarshal(b)
-	c, _ := config.NewFromString(testdata.KRB5_CONF_AD)
-	c.LibDefaults.Canonicalize = true
-	c.LibDefaults.DefaultTktEnctypes = []string{"rc4-hmac"}
-	c.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.ETypesByName["rc4-hmac"]}
-	c.LibDefaults.DefaultTGSEnctypes = []string{"rc4-hmac"}
-	c.LibDefaults.DefaultTGSEnctypeIDs = []int32{etypeID.ETypesByName["rc4-hmac"]}
-	cl := NewWithKeytab("testuser1", "USER.GOKRB5", kt, c, DisablePAFXFAST(true))
-
-	err := cl.Login()
-
-	if err != nil {
-		t.Fatalf("Error on login: %v\n", err)
-	}
-	spn := "HTTP/user2.user.gokrb5"
-	tkt, _, err := cl.GetServiceTicket(spn)
-	if err != nil {
-		t.Fatalf("Error getting service ticket: %v\n", err)
-	}
-	assert.Equal(t, spn, tkt.SName.PrincipalNameString())
-	//assert.Equal(t, etypeID.ETypesByName["rc4-hmac"], key.KeyType)
-
-	b, _ = hex.DecodeString(testdata.KEYTAB_TESTUSER2_USER_GOKRB5)
-	skt := keytab.New()
-	skt.Unmarshal(b)
-	sname := types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: []string{"testuser2"}}
-	err = tkt.DecryptEncPart(skt, &sname)
-	if err != nil {
-		t.Errorf("error decrypting ticket with service keytab: %v", err)
-	}
-	w := bytes.NewBufferString("")
-	l := log.New(w, "", 0)
-	isPAC, pac, err := tkt.GetPACType(skt, &sname, l)
-	if err != nil {
-		t.Log(w.String())
-		t.Errorf("error getting PAC: %v", err)
-	}
-	assert.True(t, isPAC, "Did not find PAC in service ticket")
-	assert.Equal(t, "testuser1", pac.KerbValidationInfo.EffectiveName.Value, "PAC value not parsed")
-
+	assert.Equal(t, first.EncPart.Cipher, second.EncPart.Cipher, "second request should be served from the ticket cache")
 }

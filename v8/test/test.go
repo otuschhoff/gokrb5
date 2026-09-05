@@ -21,6 +21,8 @@ func Integration(t *testing.T) {
 }
 
 // AD skips the test unless the AD test environment variable is set.
+// Use test/ad.Environment to obtain the domain discovered from the host's FQDN and
+// the credentials read from the repository root (krb5.keytab, user, pw).
 func AD(t *testing.T) {
 	if os.Getenv(ADIntegrationEnvVar) != "1" {
 		t.Skip("Skipping AD integration test")
