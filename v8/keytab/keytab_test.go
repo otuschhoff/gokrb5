@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -75,7 +76,7 @@ func TestUnmarshalAllFixtures(t *testing.T) {
 			{"host/host.test.gokrb5@TEST.GOKRB5", 1, 18, 1700000000, "07b6b34bb7a9a1ed7cd964f21c09f7afcf77757dddd29e8e5ab4de2f2a8ea92e"},
 		}},
 		"enterprise principal": {testdata.KEYTAB_ENTERPRISE_PRINCIPAL, 2, []expectedEntry{
-			{"user@corp.example@TEST.GOKRB5", 1, 18, 1700000000, "3e1ba322d0872633a3c1c5ea9ea65dd8517d8e8b5ed199cd55e82056cfc81412"},
+			{`user\@corp.example@TEST.GOKRB5`, 1, 18, 1700000000, "3e1ba322d0872633a3c1c5ea9ea65dd8517d8e8b5ed199cd55e82056cfc81412"},
 		}},
 		"without kvno32": {testdata.KEYTAB_NO_KVNO32_TRAILER, 2, []expectedEntry{
 			{"testuser1@TEST.GOKRB5", 44, 18, 1700000000, "bbdc430aab7e2d4622a0b6951481453b0962e9db8e2f168942ad175cda6d9de9"},
@@ -116,11 +117,9 @@ func TestUnmarshal(t *testing.T) {
 	}
 	assert.Equal(t, uint8(2), kt.version, "Keytab version not as expected")
 	assert.Equal(t, uint32(1), kt.Entries[0].KVNO, "KVNO not as expected")
-	assert.Equal(t, uint8(1), kt.Entries[0].KVNO8, "KVNO8 not as expected")
 	assert.Equal(t, time.Unix(1505669592, 0), kt.Entries[0].Timestamp, "Timestamp not as expected")
 	assert.Equal(t, int32(17), kt.Entries[0].Key.KeyType, "Key's EType not as expected")
 	assert.Equal(t, "698c4df8e9f60e7eea5a21bf4526ad25", hex.EncodeToString(kt.Entries[0].Key.KeyValue), "Key material not as expected")
-	assert.Equal(t, int16(1), kt.Entries[0].Principal.NumComponents, "Number of components in principal not as expected")
 	assert.Equal(t, int32(1), kt.Entries[0].Principal.NameType, "Name type of principal not as expected")
 	assert.Equal(t, "TEST.GOKRB5", kt.Entries[0].Principal.Realm, "Realm of principal not as expected")
 	assert.Equal(t, "testuser1", kt.Entries[0].Principal.Components[0], "Component in principal not as expected")
@@ -145,6 +144,29 @@ func TestMarshal(t *testing.T) {
 	}
 }
 
+func TestMarshalByteExactVsKtutil(t *testing.T) {
+	for name, fixture := range map[string]string{
+		"all etypes": testdata.KEYTAB_KTUTIL_ALL_ETYPES,
+		"kvno 300":   testdata.KEYTAB_KTUTIL_KVNO_300,
+	} {
+		t.Run(name, func(t *testing.T) {
+			b, err := hex.DecodeString(fixture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			kt := New()
+			if err := kt.Unmarshal(b); err != nil {
+				t.Fatal(err)
+			}
+			marshaled, err := kt.Marshal()
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, b, marshaled)
+		})
+	}
+}
+
 func TestUnmarshalV1RoundTrip(t *testing.T) {
 	for name, fixture := range map[string]string{
 		"little endian": testdata.KEYTAB_V1_LITTLE_ENDIAN,
@@ -159,9 +181,7 @@ func TestUnmarshalV1RoundTrip(t *testing.T) {
 			if err := kt.Unmarshal(b); err != nil {
 				t.Fatal(err)
 			}
-			assert.Equal(t, int16(1), kt.Entries[0].Principal.NumComponents)
 			assert.False(t, kt.Entries[0].kvno32Present)
-			kt.Entries[0].Principal.NumComponents = 99
 
 			marshaled, err := kt.Marshal()
 			if err != nil {
@@ -185,10 +205,12 @@ func TestUnmarshalV1KVNO32(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			kvno := uint32(300)
+			b[36] = byte(kvno)
 			recordLength := test.endian.Uint32(b[2:6])
 			test.endian.PutUint32(b[2:6], recordLength+4)
 			trailer := make([]byte, 4)
-			test.endian.PutUint32(trailer, 300)
+			test.endian.PutUint32(trailer, kvno)
 			b = append(b, trailer...)
 
 			kt := New()
@@ -429,9 +451,6 @@ func TestLoad(t *testing.T) {
 		if e.Principal.NameType != int32(1) {
 			t.Error("name type not as expected")
 		}
-		if e.Principal.NumComponents != int16(1) {
-			t.Error("number of component not as expected")
-		}
 		if len(e.Principal.Components) != 1 {
 			t.Error("number of component not as expected")
 		}
@@ -443,9 +462,6 @@ func TestLoad(t *testing.T) {
 		}
 		if e.KVNO == uint32(0) {
 			t.Error("entry kvno not as expected")
-		}
-		if e.KVNO8 == uint8(0) {
-			t.Error("entry kvno8 not as expected")
 		}
 	}
 }
@@ -523,7 +539,7 @@ func TestKeytabEntriesUser(t *testing.T) {
 
 	kt := New()
 	for _, et := range encTypes {
-		err = kt.AddEntry("user", "EXAMPLE.ORG", "hello123", ts, uint8(31), et)
+		err = kt.AddEntry("user", "EXAMPLE.ORG", "hello123", ts, 31, et)
 		if err != nil {
 			t.Errorf("Error adding entry to keytab: %s", err)
 		}
@@ -561,7 +577,7 @@ func TestKeytabEntriesService(t *testing.T) {
 
 	kt := New()
 	for _, et := range encTypes {
-		err = kt.AddEntry("HTTP/www.example.org", "EXAMPLE.ORG", "hello456", ts, uint8(10), et)
+		err = kt.AddEntry("HTTP/www.example.org", "EXAMPLE.ORG", "hello456", ts, 10, et)
 		if err != nil {
 			t.Errorf("Error adding entry to keytab: %s", err)
 		}
@@ -593,10 +609,180 @@ func TestKeytab_GetEncryptionKey(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	assert.Equal(t, 4, kvno)
+	assert.Equal(t, 5, kvno)
 	_, kvno, err = kt.GetEncryptionKey(pn, realm, 3, 18)
 	if err != nil {
 		t.Error(err)
 	}
 	assert.Equal(t, 3, kvno)
+}
+
+func TestGetEntryMITSemantics(t *testing.T) {
+	p := Principal{Realm: "EXAMPLE.ORG", Components: []string{"HTTP", "host.example.org"}, NameType: nametype.KRB_NT_SRV_HST}
+	otherType := p
+	otherType.NameType = nametype.KRB_NT_PRINCIPAL
+	kt := New()
+	kt.Entries = []Entry{
+		{Principal: otherType, Timestamp: time.Unix(400, 0), KVNO: 4, Key: types.EncryptionKey{KeyType: 17, KeyValue: []byte{4}}},
+		{Principal: otherType, Timestamp: time.Unix(300, 0), KVNO: 5, Key: types.EncryptionKey{KeyType: 18, KeyValue: []byte{5}}},
+		{Principal: p, Timestamp: time.Unix(500, 0), KVNO: 5, Key: types.EncryptionKey{KeyType: 18, KeyValue: []byte{6}}},
+		{Principal: Principal{Realm: "OTHER.ORG", Components: p.Components}, Timestamp: time.Unix(600, 0), KVNO: 6, Key: types.EncryptionKey{KeyType: 18, KeyValue: []byte{7}}},
+	}
+
+	entry, err := kt.GetEntry(p, 0, 18)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, uint32(5), entry.KVNO, "highest KVNO should win over timestamp")
+	assert.Equal(t, []byte{6}, entry.Key.KeyValue, "newest timestamp should break a KVNO tie")
+
+	entry, err = kt.GetEntry(p, 4, 17)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, otherType.NameType, entry.Principal.NameType, "principal name type should be ignored")
+
+	entry, err = kt.GetEntry(p, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, uint32(5), entry.KVNO, "etype zero should match any enctype")
+
+	anyRealm := p
+	anyRealm.Realm = ""
+	entry, err = kt.GetEntry(anyRealm, 0, 18)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "OTHER.ORG", entry.Principal.Realm)
+	assert.Equal(t, uint32(6), entry.KVNO)
+}
+
+func TestGetEntryKVNO8Fallback(t *testing.T) {
+	b, err := hex.DecodeString(testdata.KEYTAB_NO_KVNO32_TRAILER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kt := New()
+	if err := kt.Unmarshal(b); err != nil {
+		t.Fatal(err)
+	}
+	p := kt.Entries[0].Principal
+
+	entry, err := kt.GetEntry(p, 300, 18)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, uint32(44), entry.KVNO)
+
+	kt.Entries[0].kvno32Present = true
+	_, err = kt.GetEntry(p, 300, 18)
+	assert.ErrorIs(t, err, ErrKVNONotFound)
+
+	kt.Entries = append(kt.Entries, Entry{
+		Principal:     p,
+		Timestamp:     time.Unix(1, 0),
+		KVNO:          300,
+		Key:           types.EncryptionKey{KeyType: 18, KeyValue: []byte{1}},
+		kvno32Present: true,
+	})
+	entry, err = kt.GetEntry(p, 300, 18)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, uint32(300), entry.KVNO, "exact KVNO should take precedence over fallback")
+}
+
+func TestGetEntryErrors(t *testing.T) {
+	p := Principal{Realm: "EXAMPLE.ORG", Components: []string{"user"}}
+	kt := New()
+	kt.Entries = []Entry{{Principal: p, KVNO: 1, Key: types.EncryptionKey{KeyType: 18, KeyValue: []byte{1}}}}
+
+	_, err := kt.GetEntry(Principal{Realm: p.Realm, Components: []string{"missing"}}, 0, 18)
+	assert.ErrorIs(t, err, ErrNotFound)
+	assert.False(t, errors.Is(err, ErrKVNONotFound))
+
+	_, err = kt.GetEntry(p, 2, 18)
+	assert.ErrorIs(t, err, ErrKVNONotFound)
+
+	_, err = kt.GetEntry(p, 0, 17)
+	assert.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestAddEntryHighKVNO(t *testing.T) {
+	kt := New()
+	if err := kt.AddEntry("user", "EXAMPLE.ORG", "password", time.Unix(1700000000, 0), 300, etypeID.AES128_CTS_HMAC_SHA1_96); err != nil {
+		t.Fatal(err)
+	}
+	b, err := kt.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reparsed := New()
+	if err := reparsed.Unmarshal(b); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, uint32(300), reparsed.Entries[0].KVNO)
+	kvno8Offset := 6 + 2 + 2 + len(kt.Entries[0].Principal.Realm) + 4 + 4
+	for _, component := range kt.Entries[0].Principal.Components {
+		kvno8Offset += 2 + len(component)
+	}
+	assert.Equal(t, byte(44), b[kvno8Offset], "the 8-bit field should contain the low KVNO byte")
+	assert.Contains(t, reparsed.Entries[0].String(), " 300 ")
+}
+
+func TestPrincipalParseAndString(t *testing.T) {
+	tests := map[string]struct {
+		expected Principal
+		output   string
+	}{
+		`HTTP/host.example.org@EXAMPLE.ORG`: {
+			expected: Principal{Realm: "EXAMPLE.ORG", Components: []string{"HTTP", "host.example.org"}, NameType: nametype.KRB_NT_PRINCIPAL},
+			output:   `HTTP/host.example.org@EXAMPLE.ORG`,
+		},
+		`svc\/name/host\@name@REALM\/NAME`: {
+			expected: Principal{Realm: "REALM/NAME", Components: []string{"svc/name", "host@name"}, NameType: nametype.KRB_NT_PRINCIPAL},
+			output:   `svc\/name/host\@name@REALM\/NAME`,
+		},
+		`user@corp.example@EXAMPLE.ORG`: {
+			expected: Principal{Realm: "EXAMPLE.ORG", Components: []string{"user@corp.example"}, NameType: nametype.KRB_NT_ENTERPRISE},
+			output:   `user\@corp.example@EXAMPLE.ORG`,
+		},
+		"line\\n/tab\\t/back\\b/nul\\0@REALM": {
+			expected: Principal{Realm: "REALM", Components: []string{"line\n", "tab\t", "back\b", "nul\x00"}, NameType: nametype.KRB_NT_PRINCIPAL},
+			output:   "line\\n/tab\\t/back\\b/nul\\0@REALM",
+		},
+	}
+	for input, test := range tests {
+		t.Run(input, func(t *testing.T) {
+			parsed, err := ParsePrincipal(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, test.expected, parsed)
+			assert.Equal(t, test.output, parsed.String())
+		})
+	}
+
+	for _, input := range []string{"", "/host@REALM", "user@", `user\`, "user@ONE@TWO@THREE", "user@REALM/EXTRA"} {
+		t.Run("invalid "+input, func(t *testing.T) {
+			_, err := ParsePrincipal(input)
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestVersionAndPrincipals(t *testing.T) {
+	p1 := Principal{Realm: "EXAMPLE.ORG", Components: []string{"one"}, NameType: 1}
+	p1OtherType := p1
+	p1OtherType.NameType = 10
+	p2 := Principal{Realm: "EXAMPLE.ORG", Components: []string{"two"}, NameType: 1}
+	kt := New()
+	kt.Entries = []Entry{{Principal: p1}, {Principal: p1OtherType}, {Principal: p2}}
+
+	assert.Equal(t, uint8(2), kt.Version())
+	principals := kt.Principals()
+	assert.Equal(t, []Principal{p1, p2}, principals)
+	principals[0].Components[0] = "changed"
+	assert.Equal(t, "one", kt.Entries[0].Principal.Components[0], "Principals should return defensive component copies")
 }

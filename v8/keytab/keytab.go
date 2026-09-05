@@ -14,6 +14,7 @@ import (
 	"unsafe"
 
 	"github.com/jcmturner/gokrb5/v8/crypto"
+	"github.com/jcmturner/gokrb5/v8/iana/nametype"
 	"github.com/jcmturner/gokrb5/v8/types"
 )
 
@@ -21,26 +22,35 @@ const (
 	keytabFirstByte byte = 05
 )
 
+var (
+	// ErrNotFound indicates that no entry matched the requested principal and enctype.
+	ErrNotFound = errors.New("matching keytab entry not found")
+	// ErrKVNONotFound indicates that matching entries exist, but none has the requested KVNO.
+	ErrKVNONotFound = errors.New("matching keytab KVNO not found")
+)
+
 // Keytab struct.
 type Keytab struct {
 	version   uint8
 	byteOrder binary.ByteOrder
-	Entries   []entry
+	Entries   []Entry
 }
 
-// Keytab entry struct.
-type entry struct {
-	Principal     principal
+// Entry is one keytab record.
+type Entry struct {
+	Principal     Principal
 	Timestamp     time.Time
-	KVNO8         uint8
 	Key           types.EncryptionKey
 	KVNO          uint32
 	kvno32Present bool
 }
 
-func (e entry) String() string {
+// Deprecated: use Entry.
+type entry = Entry
+
+func (e Entry) String() string {
 	return fmt.Sprintf("% 4d %s %-56s %2d %-64x",
-		e.KVNO8,
+		e.KVNO,
 		e.Timestamp.Format("02/01/06 15:04:05"),
 		e.Principal.String(),
 		e.Key.KeyType,
@@ -48,21 +58,153 @@ func (e entry) String() string {
 	)
 }
 
-// Keytab entry principal struct.
-type principal struct {
-	NumComponents int16 `json:"-"`
-	Realm         string
-	Components    []string
-	NameType      int32
+// Principal identifies a keytab principal.
+type Principal struct {
+	Realm      string
+	Components []string
+	NameType   int32
 }
 
-func (p principal) String() string {
-	return fmt.Sprintf("%s@%s", strings.Join(p.Components, "/"), p.Realm)
+// Deprecated: use Principal.
+type principal = Principal
+
+func (p Principal) String() string {
+	components := make([]string, len(p.Components))
+	for i, component := range p.Components {
+		components[i] = escapePrincipalPart(component)
+	}
+	name := strings.Join(components, "/")
+	return name + "@" + escapePrincipalPart(p.Realm)
+}
+
+func escapePrincipalPart(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '/', '@', '\\':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\t':
+			b.WriteString(`\t`)
+		case '\b':
+			b.WriteString(`\b`)
+		case 0:
+			b.WriteString(`\0`)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// ParsePrincipal parses a principal name with MIT-style backslash escapes.
+func ParsePrincipal(s string) (Principal, error) {
+	var p Principal
+	var part strings.Builder
+	inRealm := false
+	escaped := false
+	firstEnterpriseAt := true
+	unescapedAts := 0
+	for _, r := range s {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+		} else if r == '@' {
+			unescapedAts++
+		}
+	}
+	if unescapedAts > 2 {
+		return Principal{}, errors.New("principal contains too many realm separators")
+	}
+	enterprise := unescapedAts == 2
+	escaped = false
+
+	appendPart := func() error {
+		if part.Len() == 0 {
+			return errors.New("principal contains an empty component")
+		}
+		p.Components = append(p.Components, part.String())
+		part.Reset()
+		return nil
+	}
+
+	for _, r := range s {
+		if escaped {
+			switch r {
+			case 'n':
+				part.WriteByte('\n')
+			case 't':
+				part.WriteByte('\t')
+			case 'b':
+				part.WriteByte('\b')
+			case '0':
+				part.WriteByte(0)
+			default:
+				part.WriteRune(r)
+			}
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+			continue
+		}
+		if r == '@' {
+			if enterprise && firstEnterpriseAt {
+				part.WriteByte('@')
+				firstEnterpriseAt = false
+				continue
+			}
+			if inRealm {
+				return Principal{}, errors.New("principal contains multiple realm separators")
+			}
+			if err := appendPart(); err != nil {
+				return Principal{}, err
+			}
+			inRealm = true
+			continue
+		}
+		if r == '/' && !enterprise {
+			if inRealm {
+				return Principal{}, errors.New("realm contains an unescaped component separator")
+			}
+			if err := appendPart(); err != nil {
+				return Principal{}, err
+			}
+			continue
+		}
+		part.WriteRune(r)
+	}
+	if escaped {
+		return Principal{}, errors.New("principal ends with an incomplete escape")
+	}
+	if part.Len() == 0 {
+		if inRealm {
+			return Principal{}, errors.New("principal contains an empty realm")
+		}
+		return Principal{}, errors.New("principal contains an empty component")
+	}
+	if inRealm {
+		p.Realm = part.String()
+	} else {
+		p.Components = append(p.Components, part.String())
+	}
+	if enterprise {
+		p.NameType = nametype.KRB_NT_ENTERPRISE
+	} else {
+		p.NameType = nametype.KRB_NT_PRINCIPAL
+	}
+	return p, nil
 }
 
 // New creates new, empty Keytab type.
 func New() *Keytab {
-	var e []entry
+	var e []Entry
 	return &Keytab{
 		version:   2,
 		byteOrder: binary.BigEndian,
@@ -70,44 +212,117 @@ func New() *Keytab {
 	}
 }
 
-// GetEncryptionKey returns the EncryptionKey from the Keytab for the newest entry with the required kvno, etype and matching principal.
-// If the kvno is zero then the latest kvno will be returned. The kvno is also returned for
-func (kt *Keytab) GetEncryptionKey(princName types.PrincipalName, realm string, kvno int, etype int32) (types.EncryptionKey, int, error) {
-	var key types.EncryptionKey
-	var t time.Time
-	var kv int
-	for _, k := range kt.Entries {
-		if k.Principal.Realm == realm && len(k.Principal.Components) == len(princName.NameString) &&
-			k.Key.KeyType == etype &&
-			(k.KVNO == uint32(kvno) || kvno == 0) &&
-			k.Timestamp.After(t) {
-			p := true
-			for i, n := range k.Principal.Components {
-				if princName.NameString[i] != n {
-					p = false
-					break
-				}
+// Version returns the keytab file format version.
+func (kt *Keytab) Version() uint8 {
+	return kt.version
+}
+
+// Principals returns the distinct principals in entry order.
+func (kt *Keytab) Principals() []Principal {
+	principals := make([]Principal, 0)
+	for _, entry := range kt.Entries {
+		seen := false
+		for _, p := range principals {
+			if principalMatches(entry.Principal, p) && entry.Principal.Realm == p.Realm {
+				seen = true
+				break
 			}
-			if p {
-				key = k.Key
-				kv = int(k.KVNO)
-				t = k.Timestamp
+		}
+		if !seen {
+			p := entry.Principal
+			p.Components = append([]string(nil), p.Components...)
+			principals = append(principals, p)
+		}
+	}
+	return principals
+}
+
+// GetEntry returns the best matching keytab entry using MIT Kerberos lookup semantics.
+// Enctype zero is a wildcard; similar enctype matching is not supported.
+func (kt *Keytab) GetEntry(p Principal, kvno uint32, etype int32) (Entry, error) {
+	var exact Entry
+	var fallback Entry
+	var exactFound bool
+	var fallbackFound bool
+	var principalAndETypeFound bool
+
+	for _, candidate := range kt.Entries {
+		if !principalMatches(candidate.Principal, p) || etype != 0 && candidate.Key.KeyType != etype {
+			continue
+		}
+		principalAndETypeFound = true
+
+		if kvno == 0 {
+			if !exactFound || candidate.KVNO > exact.KVNO || candidate.KVNO == exact.KVNO && candidate.Timestamp.After(exact.Timestamp) {
+				exact = candidate
+				exactFound = true
+			}
+			continue
+		}
+		if candidate.KVNO == kvno {
+			if !exactFound || candidate.Timestamp.After(exact.Timestamp) {
+				exact = candidate
+				exactFound = true
+			}
+			continue
+		}
+		if kvno > 255 && !candidate.kvno32Present && candidate.KVNO == kvno&0xff {
+			if !fallbackFound || candidate.Timestamp.After(fallback.Timestamp) {
+				fallback = candidate
+				fallbackFound = true
 			}
 		}
 	}
-	if len(key.KeyValue) < 1 {
-		return key, 0, fmt.Errorf("matching key not found in keytab. Looking for %q realm: %v kvno: %v etype: %v", princName.PrincipalNameString(), realm, kvno, etype)
+
+	if exactFound {
+		return exact, nil
 	}
-	return key, kv, nil
+	if fallbackFound {
+		return fallback, nil
+	}
+	if principalAndETypeFound && kvno != 0 {
+		return Entry{}, fmt.Errorf("%w: principal %q, kvno %d, enctype %d", ErrKVNONotFound, p.String(), kvno, etype)
+	}
+	return Entry{}, fmt.Errorf("%w: principal %q, enctype %d", ErrNotFound, p.String(), etype)
+}
+
+func principalMatches(candidate, requested Principal) bool {
+	if requested.Realm != "" && candidate.Realm != requested.Realm {
+		return false
+	}
+	if len(candidate.Components) != len(requested.Components) {
+		return false
+	}
+	for i := range requested.Components {
+		if candidate.Components[i] != requested.Components[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// GetEncryptionKey returns the EncryptionKey and KVNO from the best matching keytab entry.
+func (kt *Keytab) GetEncryptionKey(princName types.PrincipalName, realm string, kvno int, etype int32) (types.EncryptionKey, int, error) {
+	if kvno < 0 {
+		return types.EncryptionKey{}, 0, fmt.Errorf("%w: kvno %d", ErrKVNONotFound, kvno)
+	}
+	entry, err := kt.GetEntry(Principal{
+		Realm:      realm,
+		Components: princName.NameString,
+		NameType:   princName.NameType,
+	}, uint32(kvno), etype)
+	if err != nil {
+		return types.EncryptionKey{}, 0, fmt.Errorf("matching key not found in keytab. Looking for %q realm: %v kvno: %v etype: %v: %w", princName.PrincipalNameString(), realm, kvno, etype, err)
+	}
+	return entry.Key, int(entry.KVNO), nil
 }
 
 // Create a new Keytab entry.
-func newEntry() entry {
+func newEntry() Entry {
 	var b []byte
-	return entry{
+	return Entry{
 		Principal: newPrincipal(),
 		Timestamp: time.Time{},
-		KVNO8:     0,
 		Key: types.EncryptionKey{
 			KeyType:  0,
 			KeyValue: b,
@@ -128,7 +343,7 @@ func (kt Keytab) String() string {
 }
 
 // AddEntry adds an entry to the keytab. The password should be provided in plain text and it will be converted using the defined enctype to be stored.
-func (kt *Keytab) AddEntry(principalName, realm, password string, ts time.Time, KVNO uint8, encType int32) error {
+func (kt *Keytab) AddEntry(principalName, realm, password string, ts time.Time, kvno uint32, encType int32) error {
 	// Generate a key from the password
 	princ, _ := types.ParseSPNString(principalName)
 	key, _, err := crypto.GetKeyFromPassword(password, princ, realm, encType, types.PADataSequence{})
@@ -138,11 +353,6 @@ func (kt *Keytab) AddEntry(principalName, realm, password string, ts time.Time, 
 
 	// Populate the keytab entry principal
 	ktep := newPrincipal()
-	ktep.NumComponents = int16(len(princ.NameString))
-	if kt.version == 1 {
-		ktep.NumComponents += 1
-	}
-
 	ktep.Realm = realm
 	ktep.Components = princ.NameString
 	ktep.NameType = princ.NameType
@@ -151,8 +361,7 @@ func (kt *Keytab) AddEntry(principalName, realm, password string, ts time.Time, 
 	e := newEntry()
 	e.Principal = ktep
 	e.Timestamp = ts
-	e.KVNO8 = KVNO
-	e.KVNO = uint32(KVNO)
+	e.KVNO = kvno
 	e.Key = key
 
 	kt.Entries = append(kt.Entries, e)
@@ -160,13 +369,12 @@ func (kt *Keytab) AddEntry(principalName, realm, password string, ts time.Time, 
 }
 
 // Create a new principal.
-func newPrincipal() principal {
+func newPrincipal() Principal {
 	var c []string
-	return principal{
-		NumComponents: 0,
-		Realm:         "",
-		Components:    c,
-		NameType:      0,
+	return Principal{
+		Realm:      "",
+		Components: c,
+		NameType:   0,
 	}
 }
 
@@ -280,7 +488,7 @@ func (kt *Keytab) Unmarshal(b []byte) error {
 			if err != nil {
 				return err
 			}
-			ke.KVNO8 = uint8(rei8)
+			kvno8 := uint8(rei8)
 			rei16, err := readInt16(eb, &p, &endian)
 			if err != nil {
 				return err
@@ -310,8 +518,7 @@ func (kt *Keytab) Unmarshal(b []byte) error {
 				}
 			}
 			if ke.KVNO == 0 {
-				// Handles if the value from the last 4 bytes was zero and also if there are not the 4 bytes present. Makes sense to put the same value here as KVNO8
-				ke.KVNO = uint32(ke.KVNO8)
+				ke.KVNO = uint32(kvno8)
 			}
 			// Add the entry to the keytab
 			kt.Entries = append(kt.Entries, ke)
@@ -330,7 +537,7 @@ func (kt *Keytab) Unmarshal(b []byte) error {
 	return nil
 }
 
-func (e entry) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
+func (e Entry) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
 	var b []byte
 	pb, err := e.Principal.marshal(v, endian)
 	if err != nil {
@@ -340,7 +547,7 @@ func (e entry) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
 
 	t := make([]byte, 9)
 	endian.PutUint32(t[0:4], uint32(e.Timestamp.Unix()))
-	t[4] = e.KVNO8
+	t[4] = byte(e.KVNO)
 	endian.PutUint16(t[5:7], uint16(e.Key.KeyType))
 	endian.PutUint16(t[7:9], uint16(len(e.Key.KeyValue)))
 	b = append(b, t...)
@@ -367,17 +574,16 @@ func (e entry) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
 
 // Parse the Keytab bytes of a principal into a Keytab entry's principal.
 func parsePrincipal(b []byte, p *int, kt *Keytab, ke *entry, e *binary.ByteOrder) error {
-	var err error
-	ke.Principal.NumComponents, err = readInt16(b, p, e)
+	componentCount, err := readInt16(b, p, e)
 	if err != nil {
 		return err
 	}
 	if kt.version == 1 {
 		//In version 1 the number of components includes the realm. Minus 1 to make consistent with version 2
-		ke.Principal.NumComponents--
+		componentCount--
 	}
-	if ke.Principal.NumComponents <= 0 {
-		return fmt.Errorf("principal component count must be positive: %d", ke.Principal.NumComponents)
+	if componentCount <= 0 {
+		return fmt.Errorf("principal component count must be positive: %d", componentCount)
 	}
 	lenRealm, err := readInt16(b, p, e)
 	if err != nil {
@@ -388,7 +594,7 @@ func parsePrincipal(b []byte, p *int, kt *Keytab, ke *entry, e *binary.ByteOrder
 		return err
 	}
 	ke.Principal.Realm = string(realmB)
-	for i := 0; i < int(ke.Principal.NumComponents); i++ {
+	for i := 0; i < int(componentCount); i++ {
 		l, err := readInt16(b, p, e)
 		if err != nil {
 			return err
@@ -409,7 +615,7 @@ func parsePrincipal(b []byte, p *int, kt *Keytab, ke *entry, e *binary.ByteOrder
 	return nil
 }
 
-func (p principal) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
+func (p Principal) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
 	//var b []byte
 	b := make([]byte, 2)
 	componentCount := len(p.Components)
