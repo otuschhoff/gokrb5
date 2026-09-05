@@ -1,6 +1,7 @@
 package krberror
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -20,4 +21,11 @@ func TestErrorf(t *testing.T) {
 	assert.Equal(t, "[Root cause: another error] cause: some text < another error: some text", a.Error())
 	a = Errorf(err, "cause", "arg1=%d arg2=%s", 123, "arg")
 	assert.Equal(t, "[Root cause: another error] cause: arg1=123 arg2=arg < another error: some text", a.Error())
+}
+
+func TestErrorfUnwrapsKRBError(t *testing.T) {
+	want := errors.New("KDC error")
+	err := Errorf(want, KDCError, "KDC rejected request")
+	err = Errorf(err, KRBMsgError, "AS exchange failed")
+	assert.ErrorIs(t, err, want)
 }

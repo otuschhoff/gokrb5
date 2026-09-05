@@ -36,10 +36,6 @@ func (cl *Client) CCache() (*credentials.CCache, error) {
 		cache.AddCredential(credential)
 	}
 	cl.sessions.mux.RUnlock()
-	if len(sessionRealms) == 0 {
-		return nil, errors.New("client has no TGT session to export")
-	}
-
 	serviceNames := make([]string, 0)
 	cl.cache.mux.RLock()
 	for name := range cl.cache.Entries {
@@ -56,9 +52,13 @@ func (cl *Client) CCache() (*credentials.CCache, error) {
 		cache.AddCredential(credential)
 	}
 	cl.cache.mux.RUnlock()
+	if len(sessionRealms) == 0 && len(serviceNames) == 0 {
+		return nil, errors.New("client has no credentials to export")
+	}
 
 	if cl.settings.preAuthType != 0 {
-		principal := "krbtgt/" + cl.Credentials.Domain() + "@" + cl.Credentials.Domain()
+		entries := cache.GetEntries()
+		principal := entries[0].Server.PrincipalName.PrincipalNameString() + "@" + entries[0].Server.Realm
 		if err := cache.SetConfig("pa_type", principal, strconv.FormatInt(int64(cl.settings.preAuthType), 10)); err != nil {
 			return nil, err
 		}

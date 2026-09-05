@@ -245,6 +245,15 @@ func (cl *Client) renewTGT(s *session) error {
 	return nil
 }
 
+// Renew renews the TGT session for the client's realm.
+func (cl *Client) Renew() error {
+	s, ok := cl.sessions.get(cl.Credentials.Domain())
+	if !ok {
+		return fmt.Errorf("TGT session not found for realm %s", cl.Credentials.Domain())
+	}
+	return cl.renewTGT(s)
+}
+
 // refreshSession updates either through renewal or creating a new login.
 // The boolean indicates if the update was a renewal.
 func (cl *Client) refreshSession(s *session) (bool, error) {

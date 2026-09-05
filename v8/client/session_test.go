@@ -158,3 +158,8 @@ func TestSessions_JSON(t *testing.T) {
 ]`
 	assert.Equal(t, expected, j, "json output not as expected")
 }
+
+func TestRenewRequiresHomeRealmTGT(t *testing.T) {
+	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", config.New())
+	assert.EqualError(t, cl.Renew(), "TGT session not found for realm EXAMPLE.ORG")
+}

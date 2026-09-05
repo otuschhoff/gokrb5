@@ -1,5 +1,39 @@
 ## Version 8 Usage
 
+### Command-line tools
+
+Version 8 includes MIT-compatible command-line tools for acquiring, inspecting,
+and destroying credentials:
+
+```sh
+go install github.com/jcmturner/gokrb5/v8/cmd/gokinit
+go install github.com/jcmturner/gokrb5/v8/cmd/goklist
+go install github.com/jcmturner/gokrb5/v8/cmd/gokdestroy
+```
+
+`gokinit` honors `KRB5_CONFIG`, `KRB5CCNAME`, `KRB5_KTNAME`, and
+`KRB5_CLIENT_KTNAME`. It supports password and keytab acquisition, ticket and
+renewal lifetimes, forwardable/proxiable/address options, canonical and
+enterprise principals, initial service tickets, and TGT renewal:
+
+```sh
+gokinit user@EXAMPLE.COM
+gokinit -k -t /path/to/user.keytab user@EXAMPLE.COM
+gokinit -l 2h -r 7d -f user@EXAMPLE.COM
+gokinit -R -c FILE:/tmp/krb5cc_1000
+```
+
+Passwords are read without echo from the controlling terminal. Reading a
+password from standard input requires the explicit `--password-stdin` option.
+Credential cache commands currently support FILE caches. Validation with `-v`
+is not implemented and returns `kinit: -v not supported`.
+
+```sh
+goklist -c FILE:/tmp/krb5cc_1000 -e
+goklist -k -t -K -e /path/to/user.keytab
+gokdestroy -c FILE:/tmp/krb5cc_1000
+```
+
 ### Configuration
 The gokrb5 libraries use the same krb5.conf configuration file format as MIT Kerberos, 
 described [here](https://web.mit.edu/kerberos/krb5-latest/doc/admin/conf_files/krb5_conf.html).

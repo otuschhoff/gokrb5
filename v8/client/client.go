@@ -83,17 +83,25 @@ func NewFromPrincipalString(princ string, krb5conf *config.Config, settings ...f
 	if parsed.Realm == "" {
 		return nil, errors.New("client principal does not specify a realm and no default realm is configured")
 	}
-	creds := credentials.NewFromPrincipalName(types.PrincipalName{
+	return NewFromPrincipalName(types.PrincipalName{
 		NameType:   parsed.NameType,
 		NameString: append([]string(nil), parsed.Components...),
-	}, parsed.Realm)
+	}, parsed.Realm, krb5conf, settings...), nil
+}
+
+// NewFromPrincipalName creates a client from a typed principal name and realm.
+func NewFromPrincipalName(princ types.PrincipalName, realm string, krb5conf *config.Config, settings ...func(*Settings)) *Client {
+	if realm == "" && krb5conf != nil {
+		realm = krb5conf.LibDefaults.DefaultRealm
+	}
+	creds := credentials.NewFromPrincipalName(princ, realm)
 	return &Client{
 		Credentials: creds,
 		Config:      krb5conf,
 		settings:    NewSettings(settings...),
 		sessions:    &sessions{Entries: make(map[string]*session)},
 		cache:       NewCache(),
-	}, nil
+	}
 }
 
 // NewFromCCache create a client from a populated client cache.
@@ -113,33 +121,37 @@ func NewFromCCache(c *credentials.CCache, krb5conf *config.Config, settings ...f
 		NameType:   nametype.KRB_NT_SRV_INST,
 		NameString: []string{"krbtgt", c.DefaultPrincipal.Realm},
 	}
+	entries := c.GetEntries()
+	if len(entries) == 0 {
+		return cl, errors.New("credential cache contains no credentials")
+	}
 	tgtCredential, ok := c.GetEntry(spn)
-	if !ok {
-		return cl, errors.New("TGT not found in CCache")
-	}
-	var tgt messages.Ticket
-	err := tgt.Unmarshal(tgtCredential.Ticket)
-	if err != nil {
-		return cl, fmt.Errorf("TGT bytes in cache are not valid: %v", err)
-	}
-	cl.sessions.Entries[c.DefaultPrincipal.Realm] = &session{
-		realm:        c.DefaultPrincipal.Realm,
-		authTime:     tgtCredential.AuthTime,
-		startTime:    tgtCredential.StartTime,
-		endTime:      tgtCredential.EndTime,
-		renewTill:    tgtCredential.RenewTill,
-		tgt:          tgt,
-		sessionKey:   tgtCredential.Key,
-		ticketFlags:  tgtCredential.TicketFlags,
-		addresses:    append([]types.HostAddress(nil), tgtCredential.Addresses...),
-		authData:     append([]types.AuthorizationDataEntry(nil), tgtCredential.AuthData...),
-		isSKey:       tgtCredential.IsSKey,
-		secondTicket: append([]byte(nil), tgtCredential.SecondTicket...),
+	configCredential := entries[0]
+	if ok {
+		var tgt messages.Ticket
+		if err := tgt.Unmarshal(tgtCredential.Ticket); err != nil {
+			return cl, fmt.Errorf("TGT bytes in cache are not valid: %v", err)
+		}
+		cl.sessions.Entries[c.DefaultPrincipal.Realm] = &session{
+			realm:        c.DefaultPrincipal.Realm,
+			authTime:     tgtCredential.AuthTime,
+			startTime:    tgtCredential.StartTime,
+			endTime:      tgtCredential.EndTime,
+			renewTill:    tgtCredential.RenewTill,
+			tgt:          tgt,
+			sessionKey:   tgtCredential.Key,
+			ticketFlags:  tgtCredential.TicketFlags,
+			addresses:    append([]types.HostAddress(nil), tgtCredential.Addresses...),
+			authData:     append([]types.AuthorizationDataEntry(nil), tgtCredential.AuthData...),
+			isSKey:       tgtCredential.IsSKey,
+			secondTicket: append([]byte(nil), tgtCredential.SecondTicket...),
+		}
+		configCredential = tgtCredential
 	}
 	if offset, ok := c.KDCTimeOffset(); ok {
 		cl.setKDCTimeOffset(offset)
 	}
-	configPrincipal := tgt.SName.PrincipalNameString() + "@" + tgt.Realm
+	configPrincipal := configCredential.Server.PrincipalName.PrincipalNameString() + "@" + configCredential.Server.Realm
 	if value, ok := c.GetConfig("pa_type", configPrincipal); ok {
 		paType, err := strconv.ParseInt(value, 10, 32)
 		if err != nil {
@@ -147,13 +159,12 @@ func NewFromCCache(c *credentials.CCache, krb5conf *config.Config, settings ...f
 		}
 		cl.settings.preAuthType = int32(paType)
 	}
-	for _, cred := range c.GetEntries() {
+	for _, cred := range entries {
 		if cred == tgtCredential {
 			continue
 		}
 		var tkt messages.Ticket
-		err = tkt.Unmarshal(cred.Ticket)
-		if err != nil {
+		if err := tkt.Unmarshal(cred.Ticket); err != nil {
 			return cl, fmt.Errorf("cache entry ticket bytes are not valid: %v", err)
 		}
 		cl.cache.addEntryWithDetails(
@@ -253,6 +264,11 @@ func (cl *Client) IsConfigured() (bool, error) {
 
 // Login the client with the KDC via an AS exchange.
 func (cl *Client) Login() error {
+	return cl.LoginWithOptions(messages.ASReqOptions{})
+}
+
+// LoginWithOptions logs the client in with per-request AS options.
+func (cl *Client) LoginWithOptions(options messages.ASReqOptions) error {
 	if ok, err := cl.IsConfigured(); !ok {
 		return err
 	}
@@ -267,7 +283,7 @@ func (cl *Client) Login() error {
 		// no credentials but there is a session with tgt already
 		return nil
 	}
-	ASReq, err := cl.newASReq()
+	ASReq, err := cl.newASReqWithOptions(options)
 	if err != nil {
 		return krberror.Errorf(err, krberror.KRBMsgError, "error generating new AS_REQ")
 	}
@@ -275,12 +291,32 @@ func (cl *Client) Login() error {
 	if err != nil {
 		return err
 	}
-	cl.addSession(ASRep.Ticket, ASRep.DecryptedEncPart)
+	if len(ASRep.Ticket.SName.NameString) > 0 && strings.EqualFold(ASRep.Ticket.SName.NameString[0], "krbtgt") {
+		cl.addSession(ASRep.Ticket, ASRep.DecryptedEncPart)
+	} else {
+		cl.cache.addEntryWithDetails(
+			ASRep.Ticket,
+			ASRep.DecryptedEncPart.AuthTime,
+			ASRep.DecryptedEncPart.StartTime,
+			ASRep.DecryptedEncPart.EndTime,
+			ASRep.DecryptedEncPart.RenewTill,
+			ASRep.DecryptedEncPart.Key,
+			ASRep.DecryptedEncPart.Flags,
+			ASRep.DecryptedEncPart.CAddr,
+			nil,
+			false,
+			nil,
+		)
+	}
 	return nil
 }
 
 func (cl *Client) newASReq() (messages.ASReq, error) {
-	req, err := messages.NewASReqForTGT(cl.Credentials.Domain(), cl.Config, cl.Credentials.CName())
+	return cl.newASReqWithOptions(messages.ASReqOptions{})
+}
+
+func (cl *Client) newASReqWithOptions(options messages.ASReqOptions) (messages.ASReq, error) {
+	req, err := messages.NewASReqForTGTWithOptions(cl.Credentials.Domain(), cl.Config, cl.Credentials.CName(), options)
 	if err != nil || !cl.Credentials.HasKeytab() {
 		return req, err
 	}

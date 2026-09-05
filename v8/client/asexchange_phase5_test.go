@@ -167,6 +167,52 @@ func TestClientCCacheExportRoundTrip(t *testing.T) {
 	assert.Equal(t, encoded, encodedAgain)
 }
 
+func TestClientCCacheExportAssociatesPATypeWithInitialService(t *testing.T) {
+	data, err := hex.DecodeString(testdata.CCACHE_TEST)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := new(credentials.CCache)
+	if err := original.Unmarshal(data); err != nil {
+		t.Fatal(err)
+	}
+	credential := original.GetEntries()[0]
+	var ticket messages.Ticket
+	if err := ticket.Unmarshal(credential.Ticket); err != nil {
+		t.Fatal(err)
+	}
+	ticket.SName = types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "HTTP/host.example.org")
+	ticket.Realm = "EXAMPLE.ORG"
+	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", config.New())
+	cl.cache.addEntryWithDetails(ticket, credential.AuthTime, credential.StartTime, credential.EndTime,
+		credential.RenewTill, credential.Key, credential.TicketFlags, credential.Addresses,
+		credential.AuthData, credential.IsSKey, credential.SecondTicket)
+	cl.settings.preAuthType = patype.PA_ENC_TIMESTAMP
+
+	exported, err := cl.CCache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	paType, found := exported.GetConfig("pa_type", "HTTP/host.example.org@EXAMPLE.ORG")
+	assert.True(t, found)
+	assert.Equal(t, "2", paType)
+	_, found = exported.GetConfig("pa_type", "krbtgt/EXAMPLE.ORG@EXAMPLE.ORG")
+	assert.False(t, found)
+
+	reloaded, err := NewFromCCache(exported, config.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	roundTrip, err := reloaded.CCache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Len(t, roundTrip.GetEntries(), 1)
+	paType, found = roundTrip.GetConfig("pa_type", "HTTP/host.example.org@EXAMPLE.ORG")
+	assert.True(t, found)
+	assert.Equal(t, "2", paType)
+}
+
 func TestClockSkewRetry(t *testing.T) {
 	cfg := config.New()
 	cfg.LibDefaults.DNSLookupKDC = true

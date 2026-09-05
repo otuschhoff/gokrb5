@@ -27,11 +27,13 @@ It has been reported that gokrb5 also works with the [gollvm](https://go.googles
 * Client Side
   * Client that can authenticate to an SPNEGO Kerberos authenticated web service
   * Ability to change client's password
+  * MIT-compatible `gokinit`, `goklist`, and `gokdestroy` command-line tools
 * General
   * Kerberos libraries for custom integration
   * Parsing Keytab files
   * Parsing krb5.conf files
   * Parsing client credentials cache files such as `/tmp/krb5cc_$(id -u $(whoami))`
+  * Writing MIT FILE credential caches and keytabs
 
 #### Implemented Encryption & Checksum Types
 

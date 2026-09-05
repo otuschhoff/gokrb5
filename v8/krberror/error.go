@@ -23,11 +23,17 @@ const (
 type Krberror struct {
 	RootCause string
 	EText     []string
+	cause     error
 }
 
 // Error function to implement the error interface.
 func (e Krberror) Error() string {
 	return fmt.Sprintf("[Root cause: %s] ", e.RootCause) + strings.Join(e.EText, separator)
+}
+
+// Unwrap returns the error which caused this Kerberos error.
+func (e Krberror) Unwrap() error {
+	return e.cause
 }
 
 // Add another error statement to the error.
@@ -49,7 +55,9 @@ func Errorf(err error, et, format string, a ...interface{}) Krberror {
 		e.Add(et, fmt.Sprintf(format, a...))
 		return e
 	}
-	return NewErrorf(et, format+": %s", append(a, err)...)
+	e := NewErrorf(et, format+": %s", append(a, err)...)
+	e.cause = err
+	return e
 }
 
 // NewErrorf creates a new Krberror from a formatted string.

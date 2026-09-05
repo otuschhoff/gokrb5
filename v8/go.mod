@@ -3,6 +3,7 @@ module github.com/jcmturner/gokrb5/v8
 go 1.16
 
 require (
+	github.com/creack/pty v1.1.18
 	github.com/gorilla/sessions v1.2.1
 	github.com/hashicorp/go-uuid v1.0.3
 	github.com/jcmturner/aescts/v2 v2.0.0
@@ -13,4 +14,5 @@ require (
 	github.com/stretchr/testify v1.8.1
 	golang.org/x/crypto v0.6.0
 	golang.org/x/net v0.7.0 // indirect
+	golang.org/x/term v0.5.0
 )

@@ -24,6 +24,11 @@ func DefaultCCacheName(cfg *config.Config) (string, error) {
 	return resolveCCacheName(name)
 }
 
+// ResolveCCacheName resolves a FILE credential cache name to a filesystem path.
+func ResolveCCacheName(name string) (string, error) {
+	return resolveCCacheName(name)
+}
+
 func resolveCCacheName(name string) (string, error) {
 	if name == "" {
 		return "", errors.New("credential cache path is empty")
