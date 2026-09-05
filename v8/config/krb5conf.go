@@ -50,7 +50,7 @@ type LibDefaults struct {
 	CCacheType   int           //default is 4. unlikely to implement older
 	Clockskew    time.Duration //max allowed skew in seconds, default 300
 	//Default_ccache_name string // default /tmp/krb5cc_%{uid} //Not implementing as will hold in memory
-	DefaultClientKeytabName string //default /usr/local/var/krb5/user/%{euid}/client.keytab
+	DefaultClientKeytabName string //default /var/kerberos/krb5/user/%{euid}/client.keytab
 	DefaultKeytabName       string //default /etc/krb5.keytab
 	DefaultRealm            string
 	DefaultTGSEnctypes      []string //default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4
@@ -85,11 +85,9 @@ type LibDefaults struct {
 
 // Create a new LibDefaults struct.
 func newLibDefaults() LibDefaults {
-	uid := "0"
 	var hdir string
 	usr, _ := user.Current()
 	if usr != nil {
-		uid = usr.Uid
 		hdir = usr.HomeDir
 	}
 	opts := asn1.BitString{}
@@ -98,7 +96,7 @@ func newLibDefaults() LibDefaults {
 	l := LibDefaults{
 		CCacheType:              4,
 		Clockskew:               time.Duration(300) * time.Second,
-		DefaultClientKeytabName: fmt.Sprintf("/usr/local/var/krb5/user/%s/client.keytab", uid),
+		DefaultClientKeytabName: "FILE:/var/kerberos/krb5/user/%{euid}/client.keytab",
 		DefaultKeytabName:       "/etc/krb5.keytab",
 		DefaultTGSEnctypes:      []string{"aes256-cts-hmac-sha1-96", "aes128-cts-hmac-sha1-96", "des3-cbc-sha1", "arcfour-hmac-md5", "camellia256-cts-cmac", "camellia128-cts-cmac", "des-cbc-crc", "des-cbc-md5", "des-cbc-md4"},
 		DefaultTktEnctypes:      []string{"aes256-cts-hmac-sha1-96", "aes128-cts-hmac-sha1-96", "des3-cbc-sha1", "arcfour-hmac-md5", "camellia256-cts-cmac", "camellia128-cts-cmac", "des-cbc-crc", "des-cbc-md5", "des-cbc-md4"},

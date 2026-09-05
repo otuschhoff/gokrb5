@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 	"unsafe"
@@ -33,6 +34,7 @@ var (
 type Keytab struct {
 	version   uint8
 	byteOrder binary.ByteOrder
+	name      string
 	Entries   []Entry
 }
 
@@ -344,28 +346,142 @@ func (kt Keytab) String() string {
 
 // AddEntry adds an entry to the keytab. The password should be provided in plain text and it will be converted using the defined enctype to be stored.
 func (kt *Keytab) AddEntry(principalName, realm, password string, ts time.Time, kvno uint32, encType int32) error {
-	// Generate a key from the password
 	princ, _ := types.ParseSPNString(principalName)
 	key, _, err := crypto.GetKeyFromPassword(password, princ, realm, encType, types.PADataSequence{})
 	if err != nil {
 		return err
 	}
+	return kt.AddKey(Principal{Realm: realm, Components: princ.NameString, NameType: princ.NameType}, kvno, key, ts)
+}
 
-	// Populate the keytab entry principal
-	ktep := newPrincipal()
-	ktep.Realm = realm
-	ktep.Components = princ.NameString
-	ktep.NameType = princ.NameType
+// AddEntryWithSalt derives and adds an entry using the supplied salt and string-to-key parameters.
+func (kt *Keytab) AddEntryWithSalt(principalName, realm, password, salt, s2kparams string, ts time.Time, kvno uint32, encType int32) error {
+	princ, _ := types.ParseSPNString(principalName)
+	et, err := crypto.GetEtype(encType)
+	if err != nil {
+		return err
+	}
+	if s2kparams == "" {
+		s2kparams = et.GetDefaultStringToKeyParams()
+	}
+	keyValue, err := et.StringToKey(password, salt, s2kparams)
+	if err != nil {
+		return fmt.Errorf("error deriving key from string: %v", err)
+	}
+	return kt.AddKey(
+		Principal{Realm: realm, Components: princ.NameString, NameType: princ.NameType},
+		kvno,
+		types.EncryptionKey{KeyType: encType, KeyValue: keyValue},
+		ts,
+	)
+}
 
-	// Populate the keytab entry
-	e := newEntry()
-	e.Principal = ktep
-	e.Timestamp = ts
-	e.KVNO = kvno
-	e.Key = key
-
-	kt.Entries = append(kt.Entries, e)
+// AddKey validates and adds an entry containing an already-derived key.
+func (kt *Keytab) AddKey(p Principal, kvno uint32, key types.EncryptionKey, ts time.Time) error {
+	if len(p.Components) == 0 {
+		return errors.New("keytab principal must contain at least one component")
+	}
+	for _, component := range p.Components {
+		if component == "" {
+			return errors.New("keytab principal components must not be empty")
+		}
+	}
+	et, err := crypto.GetEtype(key.KeyType)
+	if err != nil {
+		return err
+	}
+	if len(key.KeyValue) != et.GetKeyByteSize() {
+		return fmt.Errorf("invalid key length %d for enctype %d: expected %d", len(key.KeyValue), key.KeyType, et.GetKeyByteSize())
+	}
+	p.Components = append([]string(nil), p.Components...)
+	key.KeyValue = append([]byte(nil), key.KeyValue...)
+	kt.Entries = append(kt.Entries, Entry{Principal: p, Timestamp: ts, Key: key, KVNO: kvno})
 	return nil
+}
+
+// RemoveEntry removes entries matching p, kvno, and etype. Zero kvno and etype values are wildcards.
+func (kt *Keytab) RemoveEntry(p Principal, kvno uint32, etype int32) int {
+	return kt.removeEntries(func(entry Entry) bool {
+		return principalMatches(entry.Principal, p) && (kvno == 0 || entry.KVNO == kvno) && (etype == 0 || entry.Key.KeyType == etype)
+	})
+}
+
+// RemovePrincipal removes every entry matching p.
+func (kt *Keytab) RemovePrincipal(p Principal) int {
+	return kt.removeEntries(func(entry Entry) bool {
+		return principalMatches(entry.Principal, p)
+	})
+}
+
+// RemoveOldKVNO retains entries for the newest keep distinct KVNOs matching p and removes older generations.
+func (kt *Keytab) RemoveOldKVNO(p Principal, keep int) int {
+	if keep <= 0 {
+		return kt.RemovePrincipal(p)
+	}
+	kvnos := make(map[uint32]struct{})
+	for _, entry := range kt.Entries {
+		if principalMatches(entry.Principal, p) {
+			kvnos[entry.KVNO] = struct{}{}
+		}
+	}
+	ordered := make([]uint32, 0, len(kvnos))
+	for kvno := range kvnos {
+		ordered = append(ordered, kvno)
+	}
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i] > ordered[j] })
+	if len(ordered) <= keep {
+		return 0
+	}
+	old := make(map[uint32]struct{}, len(ordered)-keep)
+	for _, kvno := range ordered[keep:] {
+		old[kvno] = struct{}{}
+	}
+	return kt.removeEntries(func(entry Entry) bool {
+		_, remove := old[entry.KVNO]
+		return remove && principalMatches(entry.Principal, p)
+	})
+}
+
+// Merge appends entries from other that are not already present and returns the number added.
+func (kt *Keytab) Merge(other *Keytab) int {
+	if other == nil {
+		return 0
+	}
+	added := 0
+	for _, candidate := range other.Entries {
+		duplicate := false
+		for _, entry := range kt.Entries {
+			if entry.KVNO == candidate.KVNO && entry.Key.KeyType == candidate.Key.KeyType &&
+				entry.Principal.NameType == candidate.Principal.NameType && entry.Principal.Realm == candidate.Principal.Realm &&
+				principalMatches(entry.Principal, candidate.Principal) &&
+				bytes.Equal(entry.Key.KeyValue, candidate.Key.KeyValue) {
+				duplicate = true
+				break
+			}
+		}
+		if duplicate {
+			continue
+		}
+		candidate.Principal.Components = append([]string(nil), candidate.Principal.Components...)
+		candidate.Key.KeyValue = append([]byte(nil), candidate.Key.KeyValue...)
+		kt.Entries = append(kt.Entries, candidate)
+		added++
+	}
+	return added
+}
+
+func (kt *Keytab) removeEntries(remove func(Entry) bool) int {
+	kept := kt.Entries[:0]
+	removed := 0
+	for _, entry := range kt.Entries {
+		if remove(entry) {
+			removed++
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	kt.Entries = kept
+	return removed
 }
 
 // Create a new principal.
@@ -380,13 +496,29 @@ func newPrincipal() Principal {
 
 // Load a Keytab file into a Keytab type.
 func Load(ktPath string) (*Keytab, error) {
+	path, _, err := ResolveName(ktPath, nil)
+	if err != nil {
+		return new(Keytab), err
+	}
 	kt := new(Keytab)
-	b, err := os.ReadFile(ktPath)
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return kt, err
 	}
 	err = kt.Unmarshal(b)
+	if err == nil {
+		kt.name = path
+	}
 	return kt, err
+}
+
+// Read reads and unmarshals a keytab from r.
+func (kt *Keytab) Read(r io.Reader) error {
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	return kt.Unmarshal(b)
 }
 
 // Marshal keytab into byte slice
@@ -559,7 +691,7 @@ func (e Entry) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
 	}
 	b = append(b, buf.Bytes()...)
 
-	if v == 2 || e.kvno32Present {
+	if v == 2 || e.kvno32Present || e.KVNO > 255 {
 		t = make([]byte, 4)
 		endian.PutUint32(t, e.KVNO)
 		b = append(b, t...)

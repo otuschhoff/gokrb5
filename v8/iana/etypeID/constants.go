@@ -1,6 +1,8 @@
 // Package etypeID provides Kerberos 5 encryption type assigned numbers.
 package etypeID
 
+import "fmt"
+
 // Kerberos encryption type assigned numbers.
 const (
 	//RESERVED : 0
@@ -74,6 +76,43 @@ var ETypesByName = map[string]int32{
 	"camellia256-cts-cmac":         CAMELLIA256_CTS_CMAC,
 	"camellia256-cts":              CAMELLIA256_CTS_CMAC,
 	"subkey-keymaterial":           SUBKEY_KEYMATERIAL,
+}
+
+// ETypesByID maps encryption type IDs to the canonical names used by MIT Kerberos tools.
+var ETypesByID = map[int32]string{
+	DES_CBC_CRC:                  "des-cbc-crc",
+	DES_CBC_MD4:                  "des-cbc-md4",
+	DES_CBC_MD5:                  "des-cbc-md5",
+	DES_CBC_RAW:                  "des-cbc-raw",
+	DES3_CBC_MD5:                 "des3-cbc-md5",
+	DES3_CBC_RAW:                 "des3-cbc-raw",
+	DES3_CBC_SHA1:                "des3-cbc-sha1",
+	DES_HMAC_SHA1:                "des-hmac-sha1",
+	DSAWITHSHA1_CMSOID:           "dsaWithSHA1-CmsOID",
+	MD5WITHRSAENCRYPTION_CMSOID:  "md5WithRSAEncryption-CmsOID",
+	SHA1WITHRSAENCRYPTION_CMSOID: "sha1WithRSAEncryption-CmsOID",
+	RC2CBC_ENVOID:                "rc2CBC-EnvOID",
+	RSAENCRYPTION_ENVOID:         "rsaEncryption-EnvOID",
+	RSAES_OAEP_ENV_OID:           "rsaES-OAEP-ENV-OID",
+	DES_EDE3_CBC_ENV_OID:         "des-ede3-cbc-Env-OID",
+	DES3_CBC_SHA1_KD:             "DEPRECATED:des3-cbc-sha1",
+	AES128_CTS_HMAC_SHA1_96:      "aes128-cts-hmac-sha1-96",
+	AES256_CTS_HMAC_SHA1_96:      "aes256-cts-hmac-sha1-96",
+	AES128_CTS_HMAC_SHA256_128:   "aes128-cts-hmac-sha256-128",
+	AES256_CTS_HMAC_SHA384_192:   "aes256-cts-hmac-sha384-192",
+	RC4_HMAC:                     "DEPRECATED:arcfour-hmac",
+	RC4_HMAC_EXP:                 "DEPRECATED:arcfour-hmac-exp",
+	CAMELLIA128_CTS_CMAC:         "camellia128-cts-cmac",
+	CAMELLIA256_CTS_CMAC:         "camellia256-cts-cmac",
+	SUBKEY_KEYMATERIAL:           "subkey-keymaterial",
+}
+
+// ETypeToString returns the canonical MIT Kerberos name for an encryption type.
+func ETypeToString(id int32) string {
+	if name, ok := ETypesByID[id]; ok {
+		return name
+	}
+	return fmt.Sprintf("etype %d", id)
 }
 
 // EtypeSupported resolves the etype name string to the etype ID.

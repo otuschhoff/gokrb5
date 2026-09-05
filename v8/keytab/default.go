@@ -1,0 +1,85 @@
+package keytab
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"os/user"
+	"strings"
+
+	"github.com/jcmturner/gokrb5/v8/config"
+)
+
+const (
+	defaultKeytabName       = "FILE:/etc/krb5.keytab"
+	defaultClientKeytabName = "FILE:/var/kerberos/krb5/user/%{euid}/client.keytab"
+	debianClientKeytabName  = "FILE:/var/lib/krb5/user/%{euid}/client.keytab"
+)
+
+// ResolveName resolves a FILE or WRFILE keytab name to a filesystem path.
+// The writable result reports whether the WRFILE type was requested.
+func ResolveName(name string, cfg *config.Config) (path string, writable bool, err error) {
+	if name == "" {
+		name = defaultKeytabName
+		if cfg != nil && cfg.LibDefaults.DefaultKeytabName != "" {
+			name = cfg.LibDefaults.DefaultKeytabName
+		}
+	}
+	switch {
+	case strings.HasPrefix(name, "FILE:"):
+		name = strings.TrimPrefix(name, "FILE:")
+	case strings.HasPrefix(name, "WRFILE:"):
+		name = strings.TrimPrefix(name, "WRFILE:")
+		writable = true
+	case strings.Contains(strings.SplitN(name, "/", 2)[0], ":"):
+		return "", false, fmt.Errorf("unsupported keytab type in %q", name)
+	}
+	if name == "" {
+		return "", false, errors.New("keytab path is empty")
+	}
+	uid, euid := currentUIDs()
+	username := ""
+	if current, userErr := user.Current(); userErr == nil {
+		username = current.Username
+	}
+	name = strings.NewReplacer(
+		"%{uid}", uid,
+		"%{euid}", euid,
+		"%{username}", username,
+	).Replace(name)
+	if strings.Contains(name, "%{") {
+		return "", false, fmt.Errorf("unsupported parameter in keytab name %q", name)
+	}
+	return name, writable, nil
+}
+
+// LoadDefault loads the default acceptor keytab.
+func LoadDefault(cfg *config.Config) (*Keytab, error) {
+	name := os.Getenv("KRB5_KTNAME")
+	if name == "" && cfg != nil {
+		name = cfg.LibDefaults.DefaultKeytabName
+	}
+	if name == "" {
+		name = defaultKeytabName
+	}
+	return Load(name)
+}
+
+// LoadDefaultClient loads the default client keytab.
+func LoadDefaultClient(cfg *config.Config) (*Keytab, error) {
+	name := os.Getenv("KRB5_CLIENT_KTNAME")
+	if name == "" && cfg != nil {
+		name = cfg.LibDefaults.DefaultClientKeytabName
+	}
+	if name == "" {
+		name = defaultClientKeytabName
+	}
+	path, _, err := ResolveName(name, cfg)
+	if err != nil {
+		return new(Keytab), err
+	}
+	if _, err := os.Stat(path); os.IsNotExist(err) && name == defaultClientKeytabName {
+		name = debianClientKeytabName
+	}
+	return Load(name)
+}

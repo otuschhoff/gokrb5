@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jcmturner/gokrb5/v8/crypto"
 	"github.com/jcmturner/gokrb5/v8/iana/etypeID"
 	"github.com/jcmturner/gokrb5/v8/iana/nametype"
 	"github.com/jcmturner/gokrb5/v8/test/testdata"
@@ -785,4 +786,77 @@ func TestVersionAndPrincipals(t *testing.T) {
 	assert.Equal(t, []Principal{p1, p2}, principals)
 	principals[0].Components[0] = "changed"
 	assert.Equal(t, "one", kt.Entries[0].Principal.Components[0], "Principals should return defensive component copies")
+}
+
+func TestAddKeyAndEntryWithSalt(t *testing.T) {
+	p := Principal{Realm: "TEST.GOKRB5", Components: []string{"host", "host.test.gokrb5"}, NameType: nametype.KRB_NT_SRV_HST}
+	key, err := hex.DecodeString("07b6b34bb7a9a1ed7cd964f21c09f7afcf77757dddd29e8e5ab4de2f2a8ea92e")
+	if err != nil {
+		t.Fatal(err)
+	}
+	kt := New()
+	if err := kt.AddKey(p, 1, types.EncryptionKey{KeyType: 18, KeyValue: key}, time.Unix(1700000000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	p.Components[0] = "changed"
+	key[0] = 0
+	assert.Equal(t, "host", kt.Entries[0].Principal.Components[0])
+	assert.Equal(t, byte(0x07), kt.Entries[0].Key.KeyValue[0])
+
+	derived := New()
+	err = derived.AddEntryWithSalt("host/host.test.gokrb5", "TEST.GOKRB5", "passwordvalue", "TEST.GOKRB5hosthost.test.gokrb5", "", time.Unix(1700000000, 0), 1, 18)
+	if err != nil {
+		t.Fatal(err)
+	}
+	etype, err := crypto.GetEtype(18)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := etype.StringToKey("passwordvalue", "TEST.GOKRB5hosthost.test.gokrb5", "00001000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, expected, derived.Entries[0].Key.KeyValue)
+	assert.Equal(t, kt.Entries[0].Key.KeyValue, derived.Entries[0].Key.KeyValue, "explicit salt derivation should match the MIT fixture")
+	marshaled, err := derived.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture, err := hex.DecodeString(testdata.KEYTAB_AD_HOST_SALT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, fixture, marshaled)
+
+	assert.Error(t, kt.AddKey(Principal{}, 1, types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)}, time.Time{}))
+	assert.Error(t, kt.AddKey(Principal{Realm: "EXAMPLE.ORG", Components: []string{""}}, 1, types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)}, time.Time{}))
+	assert.Error(t, kt.AddKey(p, 1, types.EncryptionKey{KeyType: 999, KeyValue: make([]byte, 32)}, time.Time{}))
+	assert.Error(t, kt.AddKey(p, 1, types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 16)}, time.Time{}))
+	assert.Error(t, derived.AddEntryWithSalt("user", "EXAMPLE.ORG", "password", "salt", "invalid", time.Time{}, 1, 18))
+}
+
+func TestRemoveAndMerge(t *testing.T) {
+	p := Principal{Realm: "EXAMPLE.ORG", Components: []string{"user"}, NameType: nametype.KRB_NT_PRINCIPAL}
+	other := Principal{Realm: "EXAMPLE.ORG", Components: []string{"other"}, NameType: nametype.KRB_NT_PRINCIPAL}
+	entry := func(principal Principal, kvno uint32, etype int32, value byte) Entry {
+		return Entry{Principal: principal, KVNO: kvno, Key: types.EncryptionKey{KeyType: etype, KeyValue: []byte{value}}}
+	}
+
+	kt := New()
+	kt.Entries = []Entry{entry(p, 1, 17, 1), entry(p, 1, 18, 2), entry(p, 2, 17, 3), entry(p, 3, 17, 4), entry(other, 1, 17, 5)}
+	assert.Equal(t, 1, kt.RemoveEntry(p, 1, 17))
+	assert.Equal(t, 2, kt.RemoveOldKVNO(p, 1))
+	assert.Equal(t, []Entry{entry(p, 3, 17, 4), entry(other, 1, 17, 5)}, kt.Entries)
+	assert.Equal(t, 1, kt.RemovePrincipal(other))
+
+	otherKT := New()
+	pOtherType := p
+	pOtherType.NameType = nametype.KRB_NT_ENTERPRISE
+	otherKT.Entries = []Entry{entry(p, 3, 17, 4), entry(pOtherType, 3, 17, 4), entry(p, 4, 18, 6)}
+	assert.Equal(t, 2, kt.Merge(otherKT))
+	assert.Len(t, kt.Entries, 3)
+	otherKT.Entries[2].Key.KeyValue[0] = 9
+	assert.Equal(t, byte(6), kt.Entries[2].Key.KeyValue[0])
+	assert.Equal(t, 3, kt.RemoveEntry(p, 0, 0), "zero kvno and enctype should remove every matching entry")
+	assert.Empty(t, kt.Entries)
 }
