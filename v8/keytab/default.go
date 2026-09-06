@@ -36,7 +36,7 @@ func ResolveName(name string, cfg *config.Config) (path string, writable bool, e
 	case strings.HasPrefix(name, "WRFILE:"):
 		name = strings.TrimPrefix(name, "WRFILE:")
 		writable = true
-	case strings.Contains(strings.SplitN(name, "/", 2)[0], ":"):
+	case !isWindowsDrivePath(name) && strings.Contains(strings.SplitN(name, "/", 2)[0], ":"):
 		return "", false, fmt.Errorf("unsupported keytab type in %q", name)
 	}
 	if name == "" {
@@ -56,6 +56,11 @@ func ResolveName(name string, cfg *config.Config) (path string, writable bool, e
 		return "", false, fmt.Errorf("unsupported parameter in keytab name %q", name)
 	}
 	return name, writable, nil
+}
+
+func isWindowsDrivePath(name string) bool {
+	return len(name) >= 2 && name[1] == ':' &&
+		(('A' <= name[0] && name[0] <= 'Z') || ('a' <= name[0] && name[0] <= 'z'))
 }
 
 // LoadDefault loads the default acceptor keytab.

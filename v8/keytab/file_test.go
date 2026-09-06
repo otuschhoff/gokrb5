@@ -211,6 +211,12 @@ func TestResolveNameAndLoadDefault(t *testing.T) {
 	assert.Equal(t, "/etc/krb5.keytab", defaultPath)
 	_, _, err = ResolveName("DIR:/tmp/keytab", nil)
 	assert.Error(t, err)
+	for _, windowsPath := range []string{`C:\keytabs\service.keytab`, "C:/keytabs/service.keytab", `C:service.keytab`, `z:\keytabs\service.keytab`} {
+		resolved, writable, resolveErr := ResolveName(windowsPath, nil)
+		assert.NoError(t, resolveErr)
+		assert.False(t, writable)
+		assert.Equal(t, windowsPath, resolved)
+	}
 }
 
 func TestLoadDefaultClientResolutionOrder(t *testing.T) {

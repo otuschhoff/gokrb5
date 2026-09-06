@@ -46,7 +46,7 @@ func TestClient_SuccessfulLogin_Keytab(t *testing.T) {
 	}
 	for _, tst := range tests {
 		c.Realms[0].KDC = []string{addr + ":" + tst}
-		cl := client.NewWithKeytab("testuser1", "TEST.GOKRB5", kt, c)
+		cl := client.NewWithKeytab("testuser1", "TEST.GOKRB5", kt, c, mitKDCSettings(tst)...)
 
 		err := cl.Login()
 		if err != nil {
@@ -91,7 +91,7 @@ func TestClient_Login_Keytab_KDCPrefersEtypeNotInKeytab(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg.Realms[0].KDC = []string{addr + ":" + port}
-			cl := client.NewWithKeytab("testuser1", "TEST.GOKRB5", aes128Only, cfg)
+			cl := client.NewWithKeytab("testuser1", "TEST.GOKRB5", aes128Only, cfg, mitKDCSettings(port)...)
 			if err := cl.Login(); err != nil {
 				t.Fatalf("error logging in with aes128-only keytab: %v", err)
 			}
@@ -139,7 +139,7 @@ func TestClient_SuccessfulLogin_Password(t *testing.T) {
 	}
 	for _, tst := range tests {
 		c.Realms[0].KDC = []string{addr + ":" + tst}
-		cl := client.NewWithPassword("testuser1", "TEST.GOKRB5", "passwordvalue", c)
+		cl := client.NewWithPassword("testuser1", "TEST.GOKRB5", "passwordvalue", c, mitKDCSettings(tst)...)
 
 		err := cl.Login()
 		if err != nil {
@@ -459,7 +459,7 @@ func TestClient_GetServiceTicket_OlderKDC(t *testing.T) {
 		addr = testdata.KDC_IP_TEST_GOKRB5
 	}
 	c.Realms[0].KDC = []string{addr + ":" + testdata.KDC_PORT_TEST_GOKRB5_OLD}
-	cl := client.NewWithKeytab("testuser1", "TEST.GOKRB5", kt, c)
+	cl := client.NewWithKeytab("testuser1", "TEST.GOKRB5", kt, c, client.DisablePAReqEncPARep(true))
 
 	err := cl.Login()
 	if err != nil {
@@ -513,6 +513,13 @@ func TestMultiThreadedClientUse(t *testing.T) {
 		}()
 	}
 	wg2.Wait()
+}
+
+func mitKDCSettings(port string) []func(*client.Settings) {
+	if port == testdata.KDC_PORT_TEST_GOKRB5_OLD {
+		return []func(*client.Settings){client.DisablePAReqEncPARep(true)}
+	}
+	return nil
 }
 
 func spnegoGet(cl *client.Client) error {

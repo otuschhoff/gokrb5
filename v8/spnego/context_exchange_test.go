@@ -2,6 +2,8 @@ package spnego
 
 import (
 	"encoding/hex"
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +18,8 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 	"github.com/stretchr/testify/require"
 )
+
+var contextExchangeID atomic.Uint64
 
 func TestMutualContextExchange(t *testing.T) {
 	initiator, acceptor, initial := newContextExchange(t, []int{gssapi.ContextFlagMutual, gssapi.ContextFlagInteg})
@@ -242,7 +246,8 @@ func newContextExchangeWithPreferences(t *testing.T, options KRB5TokenAPREQOptio
 	kt := keytab.New()
 	require.NoError(t, kt.Unmarshal(b))
 	const realm = "TEST.GOKRB5"
-	cl := client.NewWithKeytab("testuser1", realm, kt, config.New())
+	username := fmt.Sprintf("testuser%d", contextExchangeID.Add(1))
+	cl := client.NewWithKeytab(username, realm, kt, config.New())
 	sname := types.NewPrincipalName(1, "HTTP/host.test.gokrb5")
 	now := time.Now().UTC()
 	ticket, sessionKey, err := messages.NewTicket(

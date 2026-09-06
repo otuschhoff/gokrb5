@@ -34,6 +34,7 @@ type Client struct {
 	sessions      *sessions
 	cache         *Cache
 	s4uCache      *Cache
+	loginMux      sync.Mutex
 	kdcTimeOffset time.Duration
 	kdcTimeMux    sync.RWMutex
 	fastArmorMux  sync.Mutex
@@ -324,6 +325,9 @@ func (cl *Client) Login() error {
 
 // LoginWithOptions logs the client in with per-request AS options.
 func (cl *Client) LoginWithOptions(options messages.ASReqOptions) error {
+	cl.loginMux.Lock()
+	defer cl.loginMux.Unlock()
+
 	if ok, err := cl.IsConfigured(); !ok {
 		return err
 	}
