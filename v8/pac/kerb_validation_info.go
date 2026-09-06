@@ -5,8 +5,8 @@ import (
 	"bytes"
 	"fmt"
 
+	"github.com/jcmturner/gokrb5/v8/pac/internal/ndr"
 	"github.com/jcmturner/rpc/v2/mstypes"
-	"github.com/jcmturner/rpc/v2/ndr"
 )
 
 // KERB_VALIDATION_INFO flags.

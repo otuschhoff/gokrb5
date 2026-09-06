@@ -1,17 +1,94 @@
 package messages
 
 import (
+	"bytes"
 	"encoding/hex"
+	"errors"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/jcmturner/gokrb5/v8/iana"
 	"github.com/jcmturner/gokrb5/v8/iana/errorcode"
 	"github.com/jcmturner/gokrb5/v8/iana/msgtype"
 	"github.com/jcmturner/gokrb5/v8/iana/nametype"
+	"github.com/jcmturner/gokrb5/v8/iana/ntstatus"
+	"github.com/jcmturner/gokrb5/v8/iana/patype"
+	"github.com/jcmturner/gokrb5/v8/krberror"
 	"github.com/jcmturner/gokrb5/v8/test/testdata"
+	"github.com/jcmturner/gokrb5/v8/types"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestKRBErrorMethodData(t *testing.T) {
+	want := types.PADataSequence{{PADataType: patype.PA_FX_COOKIE, PADataValue: []byte("cookie")}}
+	b, err := asn1.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := KRBError{ErrorCode: errorcode.KDC_ERR_PREAUTH_REQUIRED, EData: b}
+	got, err := k.MethodData()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("MethodData = %#v, want %#v", got, want)
+	}
+	k.ErrorCode = errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED
+	if _, err := k.MethodData(); err != nil {
+		t.Fatalf("KDC_ERR_MORE_PREAUTH_DATA_REQUIRED METHOD-DATA: %v", err)
+	}
+	k.ErrorCode = errorcode.KRB_ERR_GENERIC
+	if _, err := k.MethodData(); err == nil {
+		t.Fatal("non-preauth KRB-ERROR accepted as METHOD-DATA")
+	}
+	k.ErrorCode = errorcode.KDC_ERR_PREAUTH_REQUIRED
+	k.EData = append(b, 0)
+	if _, err := k.MethodData(); err == nil {
+		t.Fatal("METHOD-DATA with trailing bytes was accepted")
+	}
+}
+
+func TestKRBErrorNTStatus(t *testing.T) {
+	k := KRBError{ErrorCode: errorcode.KDC_ERR_CLIENT_REVOKED, EData: mustDecodeHex(t, testdata.MSKILEKerbErrorDataAccountDisabled)}
+	status, ok := k.NTStatus()
+	if !ok || status != ntstatus.STATUS_ACCOUNT_DISABLED {
+		t.Fatalf("NTStatus = %v, %v", status, ok)
+	}
+	if !bytes.Contains([]byte(k.Error()), []byte("STATUS_ACCOUNT_DISABLED")) {
+		t.Fatalf("Error text does not include NTSTATUS: %s", k.Error())
+	}
+	k.EData = []byte{0x30, 0x00}
+	if _, ok := k.NTStatus(); ok {
+		t.Fatal("invalid KERB-ERROR-DATA returned an NTSTATUS")
+	}
+}
+
+func TestWrappedKRBErrorExposesNTStatus(t *testing.T) {
+	want := KRBError{ErrorCode: errorcode.KDC_ERR_CLIENT_REVOKED, EData: mustDecodeHex(t, testdata.MSKILEKerbErrorDataAccountDisabled)}
+	wrapped := krberror.Errorf(want, krberror.KDCError, "KDC rejected request")
+	var got KRBError
+	if !errors.As(wrapped, &got) {
+		t.Fatal("wrapped KRBError was not discoverable with errors.As")
+	}
+	status, ok := wrapped.NTStatus()
+	if !ok || status != ntstatus.STATUS_ACCOUNT_DISABLED {
+		t.Fatalf("wrapped NTStatus = %v, %v", status, ok)
+	}
+	if !bytes.Contains([]byte(wrapped.Error()), []byte("STATUS_ACCOUNT_DISABLED")) {
+		t.Fatalf("wrapped error text does not include NTSTATUS: %s", wrapped.Error())
+	}
+}
+
+func mustDecodeHex(t *testing.T, value string) []byte {
+	t.Helper()
+	b, err := hex.DecodeString(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
 
 func TestUnmarshalMarshalKRBError(t *testing.T) {
 	t.Parallel()

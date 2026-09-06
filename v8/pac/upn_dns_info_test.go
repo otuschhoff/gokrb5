@@ -1,7 +1,9 @@
 package pac
 
 import (
+	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"testing"
 
 	"github.com/jcmturner/gokrb5/v8/test/testdata"
@@ -26,4 +28,33 @@ func TestUPN_DNSInfo_Unmarshal(t *testing.T) {
 	assert.Equal(t, "testuser1@test.gokrb5", k.UPN, "UPN not as expected")
 	assert.Equal(t, "TEST.GOKRB5", k.DNSDomain, "DNS Domain not as expected")
 	assert.Equal(t, uint32(0), k.Flags, "DNS Domain not as expected")
+}
+
+func TestUPNDNSInfoBoundsChecks(t *testing.T) {
+	validHeader := func() []byte {
+		b := make([]byte, 16)
+		binary.LittleEndian.PutUint16(b[0:2], 2)
+		binary.LittleEndian.PutUint16(b[2:4], 12)
+		binary.LittleEndian.PutUint16(b[4:6], 2)
+		binary.LittleEndian.PutUint16(b[6:8], 14)
+		return b
+	}
+	tests := []struct {
+		name   string
+		mutate func([]byte)
+	}{
+		{"UPN past end", func(b []byte) { binary.LittleEndian.PutUint16(b[2:4], 16) }},
+		{"DNS past end", func(b []byte) { binary.LittleEndian.PutUint16(b[6:8], 16) }},
+		{"odd UPN length", func(b []byte) { binary.LittleEndian.PutUint16(b[0:2], 1) }},
+		{"odd DNS length", func(b []byte) { binary.LittleEndian.PutUint16(b[4:6], 1) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := validHeader()
+			tt.mutate(b)
+			if err := (&UPNDNSInfo{}).Unmarshal(b); !errors.Is(err, ErrPACMalformed) {
+				t.Fatalf("Unmarshal error = %v, want ErrPACMalformed", err)
+			}
+		})
+	}
 }

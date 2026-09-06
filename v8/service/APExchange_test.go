@@ -11,6 +11,7 @@ import (
 	"github.com/jcmturner/gokrb5/v8/credentials"
 	"github.com/jcmturner/gokrb5/v8/iana/errorcode"
 	"github.com/jcmturner/gokrb5/v8/iana/flags"
+	"github.com/jcmturner/gokrb5/v8/iana/msflags"
 	"github.com/jcmturner/gokrb5/v8/iana/nametype"
 	"github.com/jcmturner/gokrb5/v8/keytab"
 	"github.com/jcmturner/gokrb5/v8/messages"
@@ -58,6 +59,58 @@ func TestVerifyAPREQ(t *testing.T) {
 	ok, _, err := VerifyAPREQ(&APReq, s)
 	if !ok || err != nil {
 		t.Fatalf("Validation of AP_REQ failed when it should not have: %v", err)
+	}
+}
+
+func TestVerifyAPREQIgnoresKerbLocalAndRestrictionEntry(t *testing.T) {
+	cl := getClient()
+	sname := types.PrincipalName{
+		NameType:   nametype.KRB_NT_PRINCIPAL,
+		NameString: []string{"HTTP", "host.test.gokrb5"},
+	}
+	b, err := hex.DecodeString(testdata.HTTP_KEYTAB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kt := keytab.New()
+	if err := kt.Unmarshal(b); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	tkt, sessionKey, err := messages.NewTicket(
+		cl.Credentials.CName(), cl.Credentials.Domain(), sname, "TEST.GOKRB5",
+		types.NewKrbFlags(), kt, 18, 1, now, now, now.Add(24*time.Hour), now.Add(48*time.Hour),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restriction, err := types.NewKerbADRestrictionEntryForToken(types.LSAPTokenInfoIntegrity{
+		Flags:   msflags.TokenInfoUACRestricted,
+		TokenIL: msflags.TokenILMedium,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restrictionEntry, err := types.NewKerbADRestrictionEntry(restriction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticator := newTestAuthenticator(*cl.Credentials)
+	authenticator.AuthorizationData = types.AuthorizationData{
+		types.NewKerbLocalEntry(),
+		restrictionEntry,
+	}
+	apReq, err := messages.NewAPReq(tkt, sessionKey, authenticator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostAddress, err := types.GetHostAddress("127.0.0.1:1234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, _, err := VerifyAPREQ(&apReq, NewSettings(kt, ClientAddress(hostAddress)))
+	if err != nil || !ok {
+		t.Fatalf("VerifyAPREQ rejected Microsoft authorization data: %v", err)
 	}
 }
 

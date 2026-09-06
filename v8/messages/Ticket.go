@@ -214,35 +214,26 @@ func (t *Ticket) Decrypt(key types.EncryptionKey) error {
 
 // GetPACType returns a Microsoft PAC that has been extracted from the ticket and processed.
 func (t *Ticket) GetPACType(keytab *keytab.Keytab, sname *types.PrincipalName, l *log.Logger) (bool, pac.PACType, error) {
-	var isPAC bool
-	for _, ad := range t.DecryptedEncPart.AuthorizationData {
-		if ad.ADType == adtype.ADIfRelevant {
-			var ad2 types.AuthorizationData
-			err := ad2.Unmarshal(ad.ADData)
-			if err != nil {
-				l.Printf("PAC authorization data could not be unmarshaled: %v", err)
-				continue
-			}
-			if ad2[0].ADType == adtype.ADWin2KPAC {
-				isPAC = true
-				var p pac.PACType
-				err = p.Unmarshal(ad2[0].ADData)
-				if err != nil {
-					return isPAC, p, fmt.Errorf("error unmarshaling PAC: %v", err)
-				}
-				if sname == nil {
-					sname = &t.SName
-				}
-				key, _, err := keytab.GetEncryptionKey(*sname, t.Realm, t.EncPart.KVNO, t.EncPart.EType)
-				if err != nil {
-					return isPAC, p, NewKRBError(t.SName, t.Realm, errorcode.KRB_AP_ERR_NOKEY, fmt.Sprintf("Could not get key from keytab: %v", err))
-				}
-				err = p.ProcessPACInfoBuffers(key, l)
-				return isPAC, p, err
-			}
-		}
+	entries, err := t.DecryptedEncPart.AuthorizationData.EntriesOfType(adtype.ADWin2KPAC)
+	if err != nil {
+		return false, pac.PACType{}, fmt.Errorf("PAC authorization data could not be traversed: %w", err)
 	}
-	return isPAC, pac.PACType{}, nil
+	if len(entries) == 0 {
+		return false, pac.PACType{}, nil
+	}
+	var p pac.PACType
+	if err := p.Unmarshal(entries[0].ADData); err != nil {
+		return true, p, fmt.Errorf("error unmarshaling PAC: %w", err)
+	}
+	if sname == nil {
+		sname = &t.SName
+	}
+	key, _, err := keytab.GetEncryptionKey(*sname, t.Realm, t.EncPart.KVNO, t.EncPart.EType)
+	if err != nil {
+		return true, p, NewKRBError(t.SName, t.Realm, errorcode.KRB_AP_ERR_NOKEY, fmt.Sprintf("Could not get key from keytab: %v", err))
+	}
+	err = p.ProcessPACInfoBuffers(key, l)
+	return true, p, err
 }
 
 // Valid checks it the ticket is currently valid. Max duration passed endtime passed in as argument.

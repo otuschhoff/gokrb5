@@ -11,6 +11,7 @@ import (
 	"github.com/jcmturner/gokrb5/v8/iana/asnAppTag"
 	"github.com/jcmturner/gokrb5/v8/iana/errorcode"
 	"github.com/jcmturner/gokrb5/v8/iana/msgtype"
+	"github.com/jcmturner/gokrb5/v8/iana/ntstatus"
 	"github.com/jcmturner/gokrb5/v8/krberror"
 	"github.com/jcmturner/gokrb5/v8/types"
 )
@@ -76,7 +77,53 @@ func (k KRBError) Error() string {
 	if k.EText != "" {
 		etxt = fmt.Sprintf("%s - %s", etxt, k.EText)
 	}
+	if status, ok := k.NTStatus(); ok {
+		etxt = fmt.Sprintf("%s - %s", etxt, status)
+	}
 	return etxt
+}
+
+// MethodData decodes e-data as METHOD-DATA for pre-authentication errors.
+func (k KRBError) MethodData() (types.PADataSequence, error) {
+	if k.ErrorCode != errorcode.KDC_ERR_PREAUTH_REQUIRED &&
+		k.ErrorCode != errorcode.KDC_ERR_PREAUTH_FAILED &&
+		k.ErrorCode != errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED {
+		return nil, fmt.Errorf("KRB-ERROR code %d does not carry METHOD-DATA", k.ErrorCode)
+	}
+	var methodData types.PADataSequence
+	rest, err := asn1.Unmarshal(k.EData, &methodData)
+	if err != nil {
+		return nil, fmt.Errorf("decode KRB-ERROR METHOD-DATA: %w", err)
+	}
+	if len(rest) != 0 {
+		return nil, fmt.Errorf("decode KRB-ERROR METHOD-DATA: %d trailing bytes", len(rest))
+	}
+	return methodData, nil
+}
+
+// KerbErrorData decodes the singular MS-KILE KERB-ERROR-DATA value. The
+// result is a slice for API compatibility with other typed-data consumers.
+func (k KRBError) KerbErrorData() ([]types.KerbErrorData, error) {
+	var data types.KerbErrorData
+	if err := data.Unmarshal(k.EData); err != nil {
+		return nil, fmt.Errorf("decode KRB-ERROR-DATA: %w", err)
+	}
+	return []types.KerbErrorData{data}, nil
+}
+
+// NTStatus returns the first extended NTSTATUS carried in KERB-ERROR-DATA.
+func (k KRBError) NTStatus() (ntstatus.Code, bool) {
+	data, err := k.KerbErrorData()
+	if err != nil {
+		return 0, false
+	}
+	for i := range data {
+		ext, err := data[i].GetKerbExtError()
+		if err == nil {
+			return ext.Status, true
+		}
+	}
+	return 0, false
 }
 
 func processUnmarshalReplyError(b []byte, err error) error {

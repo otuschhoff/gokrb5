@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/jcmturner/gokrb5/v8/iana/ntstatus"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -28,4 +29,19 @@ func TestErrorfUnwrapsKRBError(t *testing.T) {
 	err := Errorf(want, KDCError, "KDC rejected request")
 	err = Errorf(err, KRBMsgError, "AS exchange failed")
 	assert.ErrorIs(t, err, want)
+}
+
+type statusError struct{}
+
+func (statusError) Error() string { return "KDC error" }
+func (statusError) NTStatus() (ntstatus.Code, bool) {
+	return ntstatus.STATUS_ACCOUNT_DISABLED, true
+}
+
+func TestKrberrorNTStatus(t *testing.T) {
+	err := Errorf(statusError{}, KDCError, "KDC rejected request")
+	status, ok := err.NTStatus()
+	if !ok || status != ntstatus.STATUS_ACCOUNT_DISABLED {
+		t.Fatalf("NTStatus = %v, %v", status, ok)
+	}
 }

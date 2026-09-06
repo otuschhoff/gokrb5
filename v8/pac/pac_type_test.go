@@ -2,7 +2,9 @@ package pac
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"testing"
@@ -12,6 +14,41 @@ import (
 	"github.com/jcmturner/gokrb5/v8/types"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestPACBoundsChecks(t *testing.T) {
+	t.Run("impossible buffer count", func(t *testing.T) {
+		b := make([]byte, 8)
+		binary.LittleEndian.PutUint32(b, 1)
+		var pac PACType
+		if err := pac.Unmarshal(b); !errors.Is(err, ErrPACMalformed) {
+			t.Fatalf("Unmarshal error = %v, want ErrPACMalformed", err)
+		}
+	})
+
+	tests := []struct {
+		name   string
+		data   []byte
+		buffer []InfoBuffer
+	}{
+		{"count mismatch", make([]byte, 40), []InfoBuffer{{Offset: 24, CBBufferSize: 1}}},
+		{"misaligned", make([]byte, 40), []InfoBuffer{{Offset: 25, CBBufferSize: 1}}},
+		{"inside header", make([]byte, 40), []InfoBuffer{{Offset: 16, CBBufferSize: 1}}},
+		{"past end", make([]byte, 40), []InfoBuffer{{Offset: 32, CBBufferSize: 9}}},
+		{"range overflow", make([]byte, 40), []InfoBuffer{{Offset: ^uint64(0) - 7, CBBufferSize: 16}}},
+		{"overlap", make([]byte, 64), []InfoBuffer{{Offset: 40, CBBufferSize: 16}, {Offset: 48, CBBufferSize: 8}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pac := PACType{CBuffers: uint32(len(tt.buffer)), Buffers: tt.buffer, Data: tt.data}
+			if tt.name == "count mismatch" {
+				pac.CBuffers++
+			}
+			if err := pac.ProcessPACInfoBuffers(types.EncryptionKey{}, log.New(&bytes.Buffer{}, "", 0)); !errors.Is(err, ErrPACMalformed) {
+				t.Fatalf("ProcessPACInfoBuffers error = %v, want ErrPACMalformed", err)
+			}
+		})
+	}
+}
 
 func TestPACTypeVerify(t *testing.T) {
 	t.Parallel()

@@ -73,6 +73,8 @@ const (
 	KDC_ERR_REVOCATION_STATUS_UNAVAILABLE int32 = 74 //Reserved for PKINIT
 	KDC_ERR_CLIENT_NAME_MISMATCH          int32 = 75 //Reserved for PKINIT
 	KDC_ERR_KDC_NAME_MISMATCH             int32 = 76 //Reserved for PKINIT
+	KDC_ERR_PREAUTH_EXPIRED               int32 = 90 //Pre-authentication data has expired
+	KDC_ERR_MORE_PREAUTH_DATA_REQUIRED    int32 = 91 //Additional pre-authentication data is required
 )
 
 // Lookup an error code description.
@@ -152,4 +154,6 @@ var errorcodeLookup = map[int32]string{
 	KDC_ERR_REVOCATION_STATUS_UNAVAILABLE: "KDC_ERR_REVOCATION_STATUS_UNAVAILABLE Reserved for PKINIT",
 	KDC_ERR_CLIENT_NAME_MISMATCH:          "KDC_ERR_CLIENT_NAME_MISMATCH Reserved for PKINIT",
 	KDC_ERR_KDC_NAME_MISMATCH:             "KDC_ERR_KDC_NAME_MISMATCH Reserved for PKINIT",
+	KDC_ERR_PREAUTH_EXPIRED:               "KDC_ERR_PREAUTH_EXPIRED Pre-authentication data has expired",
+	KDC_ERR_MORE_PREAUTH_DATA_REQUIRED:    "KDC_ERR_MORE_PREAUTH_DATA_REQUIRED Additional pre-authentication data is required",
 }

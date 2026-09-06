@@ -2,6 +2,7 @@ package pac
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/jcmturner/rpc/v2/mstypes"
 )
@@ -18,7 +19,7 @@ type UPNDNSInfo struct {
 }
 
 const (
-	upnNoUPNAttr = 31 // The user account object does not have the userPrincipalName attribute ([MS-ADA3] section 2.349) set. A UPN constructed by concatenating the user name with the DNS domain name of the account domain is provided.
+	upnNoUPNAttr uint32 = 1 << 0 // The account has no userPrincipalName attribute; the UPN is constructed from the account and DNS domain names.
 )
 
 // Unmarshal bytes into the UPN_DNSInfo struct
@@ -45,10 +46,24 @@ func (k *UPNDNSInfo) Unmarshal(b []byte) (err error) {
 	if err != nil {
 		return
 	}
-	ub := mstypes.NewReader(bytes.NewReader(b[k.UPNOffset : k.UPNOffset+k.UPNLength]))
-	db := mstypes.NewReader(bytes.NewReader(b[k.DNSDomainNameOffset : k.DNSDomainNameOffset+k.DNSDomainNameLength]))
+	if k.UPNLength%2 != 0 {
+		return fmt.Errorf("%w: UPN length %d is not valid UTF-16", ErrPACMalformed, k.UPNLength)
+	}
+	if k.DNSDomainNameLength%2 != 0 {
+		return fmt.Errorf("%w: DNS domain length %d is not valid UTF-16", ErrPACMalformed, k.DNSDomainNameLength)
+	}
+	upn, err := copyPACRange(b, uint64(k.UPNOffset), uint64(k.UPNLength))
+	if err != nil {
+		return fmt.Errorf("UPN_DNS_INFO UPN: %w", err)
+	}
+	domain, err := copyPACRange(b, uint64(k.DNSDomainNameOffset), uint64(k.DNSDomainNameLength))
+	if err != nil {
+		return fmt.Errorf("UPN_DNS_INFO DNS domain: %w", err)
+	}
+	ub := mstypes.NewReader(bytes.NewReader(upn))
+	db := mstypes.NewReader(bytes.NewReader(domain))
 
-	u := make([]rune, k.UPNLength/2, k.UPNLength/2)
+	u := make([]rune, k.UPNLength/2)
 	for i := 0; i < len(u); i++ {
 		var r uint16
 		r, err = ub.Uint16()
@@ -58,7 +73,7 @@ func (k *UPNDNSInfo) Unmarshal(b []byte) (err error) {
 		u[i] = rune(r)
 	}
 	k.UPN = string(u)
-	d := make([]rune, k.DNSDomainNameLength/2, k.DNSDomainNameLength/2)
+	d := make([]rune, k.DNSDomainNameLength/2)
 	for i := 0; i < len(d); i++ {
 		var r uint16
 		r, err = db.Uint16()

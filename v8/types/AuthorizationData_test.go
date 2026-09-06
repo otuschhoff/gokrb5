@@ -2,14 +2,48 @@ package types
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/jcmturner/gokrb5/v8/iana/adtype"
 	"github.com/jcmturner/gokrb5/v8/iana/nametype"
 	"github.com/jcmturner/gokrb5/v8/test/testdata"
 	"github.com/stretchr/testify/assert"
 )
+
+func mustMarshalAuthorizationData(t *testing.T, a AuthorizationData) []byte {
+	t.Helper()
+	b, err := asn1.Marshal(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func TestAuthorizationDataEntriesOfType(t *testing.T) {
+	want := AuthorizationDataEntry{ADType: adtype.ADWin2KPAC, ADData: []byte("pac")}
+	nested := AuthorizationData{{ADType: adtype.ADIfRelevant, ADData: mustMarshalAuthorizationData(t, AuthorizationData{want})}}
+	entries, err := nested.EntriesOfType(adtype.ADWin2KPAC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || !reflect.DeepEqual(entries[0], want) {
+		t.Fatalf("entries = %#v, want %#v", entries, []AuthorizationDataEntry{want})
+	}
+}
+
+func TestAuthorizationDataWalkDepthLimit(t *testing.T) {
+	a := AuthorizationData{{ADType: adtype.ADWin2KPAC}}
+	for i := 0; i <= maxAuthorizationDataDepth; i++ {
+		a = AuthorizationData{{ADType: adtype.ADIfRelevant, ADData: mustMarshalAuthorizationData(t, a)}}
+	}
+	if err := a.Walk(func(int, AuthorizationDataEntry) error { return nil }); !errors.Is(err, ErrAuthorizationDataDepth) {
+		t.Fatalf("Walk error = %v, want ErrAuthorizationDataDepth", err)
+	}
+}
 
 func TestUnmarshalAuthorizationData(t *testing.T) {
 	t.Parallel()

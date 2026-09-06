@@ -12,6 +12,20 @@ import (
 	"github.com/jcmturner/rpc/v2/mstypes"
 )
 
+// ErrPACMalformed indicates that a PAC has an invalid buffer table or range.
+var ErrPACMalformed = errors.New("PAC is malformed")
+
+func copyPACRange(data []byte, offset, size uint64) ([]byte, error) {
+	end := offset + size
+	if end < offset {
+		return nil, fmt.Errorf("%w: range at %d with size %d overflows", ErrPACMalformed, offset, size)
+	}
+	if end > uint64(len(data)) {
+		return nil, fmt.Errorf("%w: range [%d:%d] exceeds data size %d", ErrPACMalformed, offset, end, len(data))
+	}
+	return append([]byte(nil), data[int(offset):int(end)]...), nil
+}
+
 const (
 	infoTypeKerbValidationInfo     uint32 = 1
 	infoTypeCredentials            uint32 = 2
@@ -53,8 +67,11 @@ type InfoBuffer struct {
 
 // Unmarshal bytes into the PACType struct
 func (pac *PACType) Unmarshal(b []byte) (err error) {
+	if len(b) < 8 {
+		return fmt.Errorf("%w: header is %d bytes, want at least 8", ErrPACMalformed, len(b))
+	}
 	pac.Data = b
-	zb := make([]byte, len(b), len(b))
+	zb := make([]byte, len(b))
 	copy(zb, b)
 	pac.ZeroSigData = zb
 	r := mstypes.NewReader(bytes.NewReader(b))
@@ -66,7 +83,11 @@ func (pac *PACType) Unmarshal(b []byte) (err error) {
 	if err != nil {
 		return
 	}
-	buf := make([]InfoBuffer, pac.CBuffers, pac.CBuffers)
+	maxBuffers := uint32((len(b) - 8) / 16)
+	if pac.CBuffers > maxBuffers {
+		return fmt.Errorf("%w: buffer count %d exceeds table capacity %d", ErrPACMalformed, pac.CBuffers, maxBuffers)
+	}
+	buf := make([]InfoBuffer, int(pac.CBuffers))
 	for i := range buf {
 		buf[i].ULType, err = r.Uint32()
 		if err != nil {
@@ -85,12 +106,56 @@ func (pac *PACType) Unmarshal(b []byte) (err error) {
 	return nil
 }
 
+func (pac *PACType) validateInfoBuffers() error {
+	if uint64(pac.CBuffers) != uint64(len(pac.Buffers)) {
+		return fmt.Errorf("%w: declared buffer count %d does not match table length %d", ErrPACMalformed, pac.CBuffers, len(pac.Buffers))
+	}
+	headerEnd := uint64(8) + uint64(len(pac.Buffers))*16
+	if headerEnd > uint64(len(pac.Data)) {
+		return fmt.Errorf("%w: buffer table ends at %d beyond PAC size %d", ErrPACMalformed, headerEnd, len(pac.Data))
+	}
+	for i, buf := range pac.Buffers {
+		if buf.Offset%8 != 0 {
+			return fmt.Errorf("%w: buffer %d offset %d is not 8-byte aligned", ErrPACMalformed, i, buf.Offset)
+		}
+		end := buf.Offset + uint64(buf.CBBufferSize)
+		if end < buf.Offset {
+			return fmt.Errorf("%w: buffer %d range overflows", ErrPACMalformed, i)
+		}
+		if buf.Offset < headerEnd {
+			return fmt.Errorf("%w: buffer %d starts at %d inside header ending at %d", ErrPACMalformed, i, buf.Offset, headerEnd)
+		}
+		if end > uint64(len(pac.Data)) {
+			return fmt.Errorf("%w: buffer %d ends at %d beyond PAC size %d", ErrPACMalformed, i, end, len(pac.Data))
+		}
+		if buf.CBBufferSize == 0 {
+			continue
+		}
+		for j := 0; j < i; j++ {
+			other := pac.Buffers[j]
+			if other.CBBufferSize == 0 {
+				continue
+			}
+			otherEnd := other.Offset + uint64(other.CBBufferSize)
+			if buf.Offset < otherEnd && other.Offset < end {
+				return fmt.Errorf("%w: buffers %d and %d overlap", ErrPACMalformed, j, i)
+			}
+		}
+	}
+	return nil
+}
+
 // ProcessPACInfoBuffers processes the PAC Info Buffers.
 // https://msdn.microsoft.com/en-us/library/cc237954.aspx
 func (pac *PACType) ProcessPACInfoBuffers(key types.EncryptionKey, l *log.Logger) error {
+	if err := pac.validateInfoBuffers(); err != nil {
+		return err
+	}
 	for _, buf := range pac.Buffers {
-		p := make([]byte, buf.CBBufferSize, buf.CBBufferSize)
-		copy(p, pac.Data[int(buf.Offset):int(buf.Offset)+int(buf.CBBufferSize)])
+		p, err := copyPACRange(pac.Data, buf.Offset, uint64(buf.CBBufferSize))
+		if err != nil {
+			return err
+		}
 		switch buf.ULType {
 		case infoTypeKerbValidationInfo:
 			if pac.KerbValidationInfo != nil {

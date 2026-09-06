@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"fmt"
 
+	"github.com/jcmturner/gokrb5/v8/pac/internal/ndr"
 	"github.com/jcmturner/rpc/v2/mstypes"
-	"github.com/jcmturner/rpc/v2/ndr"
 )
 
 // DeviceInfo implements https://msdn.microsoft.com/en-us/library/hh536402.aspx

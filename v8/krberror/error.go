@@ -2,8 +2,11 @@
 package krberror
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/jcmturner/gokrb5/v8/iana/ntstatus"
 )
 
 // Error type descriptions.
@@ -34,6 +37,17 @@ func (e Krberror) Error() string {
 // Unwrap returns the error which caused this Kerberos error.
 func (e Krberror) Unwrap() error {
 	return e.cause
+}
+
+// NTStatus returns an MS-KILE extended status exposed by the wrapped error.
+func (e Krberror) NTStatus() (ntstatus.Code, bool) {
+	var provider interface {
+		NTStatus() (ntstatus.Code, bool)
+	}
+	if e.cause != nil && errors.As(e.cause, &provider) {
+		return provider.NTStatus()
+	}
+	return 0, false
 }
 
 // Add another error statement to the error.
