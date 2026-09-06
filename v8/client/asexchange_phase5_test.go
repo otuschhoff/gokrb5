@@ -9,9 +9,11 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/credentials"
 	"github.com/otuschhoff/gokrb5/v8/crypto"
+	"github.com/otuschhoff/gokrb5/v8/iana"
 	"github.com/otuschhoff/gokrb5/v8/iana/errorcode"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/iana/keyusage"
+	"github.com/otuschhoff/gokrb5/v8/iana/msgtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
@@ -129,6 +131,81 @@ func TestPreAuthETypeAcceptsETypeInfoOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Equal(t, etypeID.DES3_CBC_SHA1_KD, et.GetETypeID())
+}
+
+func TestASExchangePasswordReplyUsesPreAuthSalt(t *testing.T) {
+	const salt = "non-default-kdc-salt"
+	entries := types.ETypeInfo2{{EType: etypeID.AES128_CTS_HMAC_SHA1_96, Salt: salt}}
+	info, err := asn1.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	methodData, err := asn1.Marshal(types.PADataSequence{{PADataType: patype.PA_ETYPE_INFO2, PADataValue: info}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	et, err := crypto.GetEtype(etypeID.AES128_CTS_HMAC_SHA1_96)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replyKey, err := et.StringToKey("password", salt, et.GetDefaultStringToKeyParams())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.New()
+	cfg.LibDefaults.DNSLookupKDC = true
+	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES128_CTS_HMAC_SHA1_96}
+	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", cfg, DisablePAReqEncPARep(true))
+	request, err := cl.newASReq()
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	cl.sendToKDCFunc = func(requestBytes []byte, _ string) ([]byte, error) {
+		calls++
+		if calls == 1 {
+			preAuthError := messages.NewKRBError(request.ReqBody.CName, request.ReqBody.Realm, errorcode.KDC_ERR_PREAUTH_REQUIRED, "pre-authentication required")
+			preAuthError.EData = methodData
+			return nil, preAuthError
+		}
+		var retried messages.ASReq
+		if err := retried.Unmarshal(requestBytes); err != nil {
+			t.Fatal(err)
+		}
+		now := time.Now().UTC()
+		part := messages.EncKDCRepPart{
+			Key:       types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("session-key-1234")},
+			Nonce:     retried.ReqBody.Nonce,
+			Flags:     types.NewKrbFlags(),
+			AuthTime:  now,
+			StartTime: now,
+			EndTime:   now.Add(time.Hour),
+			SRealm:    retried.ReqBody.Realm,
+			SName:     retried.ReqBody.SName,
+		}
+		partBytes, err := part.Marshal()
+		if err != nil {
+			t.Fatal(err)
+		}
+		reply := messages.ASRep{KDCRepFields: messages.KDCRepFields{
+			PVNO:    iana.PVNO,
+			MsgType: msgtype.KRB_AS_REP,
+			CRealm:  retried.ReqBody.Realm,
+			CName:   retried.ReqBody.CName,
+			Ticket:  s4uTestTicket(retried.ReqBody.Realm, retried.ReqBody.SName.PrincipalNameString()),
+		}}
+		reply.EncPart, err = crypto.GetEncryptedData(partBytes, types.EncryptionKey{KeyType: et.GetETypeID(), KeyValue: replyKey}, keyusage.AS_REP_ENCPART, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return reply.Marshal()
+	}
+
+	if _, err := cl.ASExchange("EXAMPLE.ORG", request, 0); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, 2, calls)
 }
 
 func TestClientCCacheExportRoundTrip(t *testing.T) {

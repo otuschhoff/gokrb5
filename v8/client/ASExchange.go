@@ -59,6 +59,7 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 
 	var ASRep messages.ASRep
 	preAuthRetried := false
+	var preAuthError *messages.KRBError
 	skewRetried := false
 	preAuthRounds := 0
 	pkinitRetried := false
@@ -178,6 +179,9 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 			} else if err := setPAData(cl, hint, &ASReq); err != nil {
 				return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: failed setting AS_REQ PAData after clock skew")
 			}
+			if hint != nil {
+				preAuthError = hint
+			}
 			skewRetried = true
 			continue
 		}
@@ -194,6 +198,7 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 			} else if err := setPAData(cl, &e, &ASReq); err != nil {
 				return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: failed setting AS_REQ PAData for pre-authentication required")
 			}
+			preAuthError = &e
 			preAuthRetried = true
 			continue
 		}
@@ -237,6 +242,20 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 			return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: PKINIT AS_REP is not valid")
 		}
 		cl.setPKINITReplyKey(realm, replyKey)
+		return ASRep, nil
+	}
+	if preAuthError != nil && cl.Credentials.HasPassword() {
+		et, err := crypto.GetEtype(ASRep.EncPart.EType)
+		if err != nil {
+			return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: unsupported AS_REP encryption type")
+		}
+		replyKey, _, err := cl.Key(et, ASRep.EncPart.KVNO, preAuthError)
+		if err != nil {
+			return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: could not derive AS_REP reply key")
+		}
+		if ok, err := ASRep.VerifyWithReplyKeyAndRequestBytes(cl.Config, cl.Credentials, ASReq, replyKey, requestBytes); !ok {
+			return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: AS_REP is not valid or client password incorrect")
+		}
 		return ASRep, nil
 	}
 	if ok, err := ASRep.Verify(cl.Config, cl.Credentials, ASReq); !ok {
