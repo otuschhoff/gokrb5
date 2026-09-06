@@ -251,7 +251,7 @@ func (cl *Client) IsConfigured() (bool, error) {
 	}
 	if !cl.Config.LibDefaults.DNSLookupKDC {
 		for _, r := range cl.Config.Realms {
-			if r.Realm == cl.Credentials.Domain() {
+			if types.RealmEqual(r.Realm, cl.Credentials.Domain()) {
 				if len(r.KDC) > 0 {
 					return true, nil
 				}
@@ -360,7 +360,7 @@ func (cl *Client) AffirmLogin() error {
 
 // realmLogin obtains or renews a TGT and establishes a session for the realm specified.
 func (cl *Client) realmLogin(realm string) error {
-	if realm == cl.Credentials.Domain() {
+	if types.RealmEqual(realm, cl.Credentials.Domain()) {
 		return cl.Login()
 	}
 	_, endTime, _, _, err := cl.sessionTimes(cl.Credentials.Domain())
@@ -405,7 +405,7 @@ func (cl *Client) Diagnostics(w io.Writer) error {
 	if cl.Credentials.HasKeytab() {
 		var loginRealmEncTypes []int32
 		for _, e := range cl.Credentials.Keytab().Entries {
-			if e.Principal.Realm == cl.Credentials.Realm() {
+			if types.RealmEqual(e.Principal.Realm, cl.Credentials.Realm()) {
 				loginRealmEncTypes = append(loginRealmEncTypes, e.Key.KeyType)
 			}
 		}

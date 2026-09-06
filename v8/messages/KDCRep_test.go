@@ -9,11 +9,13 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/credentials"
 	"github.com/otuschhoff/gokrb5/v8/iana"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
+	"github.com/otuschhoff/gokrb5/v8/iana/flags"
 	"github.com/otuschhoff/gokrb5/v8/iana/msgtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
+	"github.com/otuschhoff/gokrb5/v8/types"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -24,6 +26,30 @@ const (
 	testUser               = "testuser1"
 	testUserPassword       = "passwordvalue"
 )
+
+func TestRequestAllowsCanonicalName(t *testing.T) {
+	standard := KDCReqBody{KDCOptions: types.NewKrbFlags(), CName: types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL}}
+	assert.False(t, requestAllowsCanonicalName(standard))
+
+	canonicalized := standard
+	types.SetFlag(&canonicalized.KDCOptions, flags.Canonicalize)
+	assert.True(t, requestAllowsCanonicalName(canonicalized))
+
+	enterprise := standard
+	enterprise.CName.NameType = nametype.KRB_NT_ENTERPRISE
+	assert.True(t, requestAllowsCanonicalName(enterprise))
+}
+
+func TestVerifyEncPARepRequiresAcknowledgementAndChecksum(t *testing.T) {
+	rep := ASRep{KDCRepFields: KDCRepFields{DecryptedEncPart: EncKDCRepPart{Flags: types.NewKrbFlags()}}}
+	req := ASReq{KDCReqFields: KDCReqFields{PAData: types.PADataSequence{{PADataType: patype.PA_REQ_ENC_PA_REP}}}}
+	err := rep.verifyEncPARep(req, types.EncryptionKey{})
+	assert.ErrorContains(t, err, "did not acknowledge")
+
+	types.SetFlag(&rep.DecryptedEncPart.Flags, flags.EncPARep)
+	err = rep.verifyEncPARep(req, types.EncryptionKey{})
+	assert.ErrorContains(t, err, "omitted PA-REQ-ENC-PA-REP")
+}
 
 func TestUnmarshalASRep(t *testing.T) {
 	t.Parallel()

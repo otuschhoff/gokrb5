@@ -2,9 +2,11 @@ package krbcli
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/otuschhoff/gokrb5/v8/iana/errorcode"
+	"github.com/otuschhoff/gokrb5/v8/iana/ntstatus"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 )
 
@@ -20,24 +22,28 @@ func ErrorText(err error) string {
 		return ""
 	}
 	if kdcErr, ok := KDCError(err); ok {
+		text := ""
 		switch kdcErr.ErrorCode {
 		case errorcode.KDC_ERR_C_PRINCIPAL_UNKNOWN:
-			return "Client not found in Kerberos database"
+			text = "Client not found in Kerberos database"
 		case errorcode.KDC_ERR_S_PRINCIPAL_UNKNOWN:
-			return "Server not found in Kerberos database"
+			text = "Server not found in Kerberos database"
 		case errorcode.KDC_ERR_KEY_EXPIRED:
-			return "Password has expired"
+			text = "Password has expired"
 		case errorcode.KDC_ERR_PREAUTH_FAILED, errorcode.KRB_AP_ERR_BAD_INTEGRITY:
-			return "Password incorrect"
+			text = "Password incorrect"
 		case errorcode.KRB_AP_ERR_SKEW:
-			return "Clock skew too great"
+			text = "Clock skew too great"
 		case errorcode.KDC_ERR_ETYPE_NOSUPP:
-			return "KDC has no support for encryption type"
+			text = "KDC has no support for encryption type"
 		case errorcode.KDC_ERR_CLIENT_REVOKED:
-			return "Clients credentials have been revoked"
+			text = "Clients credentials have been revoked"
 		}
-		if kdcErr.EText != "" {
-			return kdcErr.EText
+		if text == "" && kdcErr.EText != "" {
+			text = kdcErr.EText
+		}
+		if text != "" {
+			return appendNTStatus(text, err)
 		}
 	}
 	text := err.Error()
@@ -47,6 +53,18 @@ func ErrorText(err error) string {
 		return "Cannot contact any KDC for requested realm"
 	case strings.Contains(lower, "incorrect password") || strings.Contains(lower, "integrity"):
 		return "Password incorrect"
+	}
+	return appendNTStatus(text, err)
+}
+
+func appendNTStatus(text string, err error) string {
+	var provider interface {
+		NTStatus() (ntstatus.Code, bool)
+	}
+	if errors.As(err, &provider) {
+		if status, ok := provider.NTStatus(); ok {
+			return fmt.Sprintf("%s: %s (0x%08X)", text, status, uint32(status))
+		}
 	}
 	return text
 }

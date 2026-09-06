@@ -3,6 +3,7 @@ package client
 import (
 	"github.com/otuschhoff/gokrb5/v8/iana/flags"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
+	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 	"github.com/otuschhoff/gokrb5/v8/krberror"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/types"
@@ -10,11 +11,12 @@ import (
 
 // TGSREQGenerateAndExchange generates the TGS_REQ and performs a TGS exchange to retrieve a ticket to the specified SPN.
 func (cl *Client) TGSREQGenerateAndExchange(spn types.PrincipalName, kdcRealm string, tgt messages.Ticket, sessionKey types.EncryptionKey, renewal bool) (tgsReq messages.TGSReq, tgsRep messages.TGSRep, err error) {
-	tgsReq, err = messages.NewTGSReq(cl.Credentials.CName(), kdcRealm, cl.Config, tgt, sessionKey, spn, renewal)
+	options := cl.tgsReqOptions(kdcRealm)
+	tgsReq, err = messages.NewTGSReqWithOptions(cl.Credentials.CName(), kdcRealm, cl.Config, tgt, sessionKey, spn, renewal, options)
 	if err != nil {
 		return tgsReq, tgsRep, krberror.Errorf(err, krberror.KRBMsgError, "TGS Exchange Error: failed to generate a new TGS_REQ")
 	}
-	return cl.TGSExchange(tgsReq, kdcRealm, tgsRep.Ticket, sessionKey, 0)
+	return cl.TGSExchange(tgsReq, kdcRealm, tgt, sessionKey, 0)
 }
 
 // TGSExchange exchanges the provided TGS_REQ with the KDC to retrieve a TGS_REP.
@@ -52,17 +54,22 @@ func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messa
 		// Server referral https://tools.ietf.org/html/rfc6806.html#section-8
 		// The TGS Rep contains a TGT for another domain as the service resides in that domain.
 		cl.addSession(tgsRep.Ticket, tgsRep.DecryptedEncPart)
-		realm := tgsRep.Ticket.SName.NameString[len(tgsRep.Ticket.SName.NameString)-1]
+		realm, err := referralRealm(tgsRep.DecryptedEncPart.EncPAData, tgsRep.Ticket.SName.NameString[len(tgsRep.Ticket.SName.NameString)-1])
+		if err != nil {
+			return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: invalid PA-SVR-REFERRAL-INFO")
+		}
+		options := cl.tgsReqOptions(realm)
 		referral++
 		if types.IsFlagSet(&tgsReq.ReqBody.KDCOptions, flags.EncTktInSkey) && len(tgsReq.ReqBody.AdditionalTickets) > 0 {
-			tgsReq, err = messages.NewUser2UserTGSReq(cl.Credentials.CName(), kdcRealm, cl.Config, tgt, sessionKey, tgsReq.ReqBody.SName, tgsReq.Renewal, tgsReq.ReqBody.AdditionalTickets[0])
+			tgsReq, err = messages.NewUser2UserTGSReqWithOptions(cl.Credentials.CName(), realm, cl.Config, tgsRep.Ticket, tgsRep.DecryptedEncPart.Key, tgsReq.ReqBody.SName, tgsReq.Renewal, tgsReq.ReqBody.AdditionalTickets[0], options)
 			if err != nil {
 				return tgsReq, tgsRep, err
 			}
-		}
-		tgsReq, err = messages.NewTGSReq(cl.Credentials.CName(), realm, cl.Config, tgsRep.Ticket, tgsRep.DecryptedEncPart.Key, tgsReq.ReqBody.SName, tgsReq.Renewal)
-		if err != nil {
-			return tgsReq, tgsRep, err
+		} else {
+			tgsReq, err = messages.NewTGSReqWithOptions(cl.Credentials.CName(), realm, cl.Config, tgsRep.Ticket, tgsRep.DecryptedEncPart.Key, tgsReq.ReqBody.SName, tgsReq.Renewal, options)
+			if err != nil {
+				return tgsReq, tgsRep, err
+			}
 		}
 		return cl.TGSExchange(tgsReq, realm, tgsRep.Ticket, tgsRep.DecryptedEncPart.Key, referral)
 	}
@@ -81,6 +88,30 @@ func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messa
 	)
 	cl.Log("ticket added to cache for %s (EndTime: %v)", tgsRep.Ticket.SName.PrincipalNameString(), tgsRep.DecryptedEncPart.EndTime)
 	return tgsReq, tgsRep, err
+}
+
+func (cl *Client) tgsReqOptions(realm string) messages.TGSReqOptions {
+	options := messages.TGSReqOptions{}
+	if session, ok := cl.sessions.get(realm); ok {
+		options.SupportedEncTypes = session.supportedEncryptionTypes()
+	}
+	return options
+}
+
+func referralRealm(paData types.PADataSequence, fallback string) (string, error) {
+	for i := range paData {
+		if paData[i].PADataType != patype.PA_SVR_REFERRAL_INFO {
+			continue
+		}
+		referral, err := paData[i].GetPASvrReferralInfo()
+		if err != nil {
+			return "", err
+		}
+		if referral.ReferredRealm != "" {
+			return referral.ReferredRealm, nil
+		}
+	}
+	return fallback, nil
 }
 
 // GetServiceTicket makes a request to get a service ticket for the SPN specified

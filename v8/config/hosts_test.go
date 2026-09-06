@@ -1,6 +1,10 @@
 package config
 
 import (
+	"errors"
+	"net"
+	"reflect"
+
 	"github.com/otuschhoff/gokrb5/v8/test"
 	"testing"
 
@@ -38,6 +42,51 @@ func TestConfig_GetKDCsUsesConfiguredKDC(t *testing.T) {
 	if kdcs[1] != "kdc2b.test.gokrb5:88" {
 		t.Fatalf("expected kdc2b.test.gokrb5:88 but received %s", kdcs[1])
 	}
+}
+
+func TestGetKDCsUsesADSiteDiscoveryOrder(t *testing.T) {
+	original := orderedSRV
+	defer func() { orderedSRV = original }()
+	var names []string
+	orderedSRV = func(service, proto, name string) (int, map[int]*net.SRV, error) {
+		names = append(names, service+"/"+proto+"/"+name)
+		if name == "dc._msdcs.EXAMPLE.ORG" {
+			return 1, map[int]*net.SRV{1: {Target: "dc.example.org.", Port: 88}}, nil
+		}
+		return 0, nil, errors.New("not found")
+	}
+	c := New()
+	c.LibDefaults.DNSLookupKDC = true
+	c.LibDefaults.ADSite = "HQ"
+	c.Realms = nil
+	count, kdcs, err := c.GetKDCs("EXAMPLE.ORG", true)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
+	assert.Equal(t, "dc.example.org:88", kdcs[1])
+	assert.True(t, reflect.DeepEqual([]string{
+		"kerberos/tcp/HQ._sites.dc._msdcs.EXAMPLE.ORG",
+		"kerberos/tcp/dc._msdcs.EXAMPLE.ORG",
+	}, names), "lookup order = %v", names)
+}
+
+func TestGetKpasswdServersFallsBackAfterLookupError(t *testing.T) {
+	original := orderedSRV
+	defer func() { orderedSRV = original }()
+	var services []string
+	orderedSRV = func(service, proto, name string) (int, map[int]*net.SRV, error) {
+		services = append(services, service)
+		if service == "kpasswd" {
+			return 0, nil, errors.New("not found")
+		}
+		return 1, map[int]*net.SRV{1: {Target: "admin.example.org.", Port: 749}}, nil
+	}
+	c := New()
+	c.LibDefaults.DNSLookupKDC = true
+	count, servers, err := c.GetKpasswdServers("EXAMPLE.ORG", true)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
+	assert.Equal(t, "admin.example.org:749", servers[1])
+	assert.Equal(t, []string{"kpasswd", "kerberos-adm"}, services)
 }
 
 func TestResolveKDC(t *testing.T) {

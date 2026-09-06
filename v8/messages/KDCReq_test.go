@@ -9,7 +9,9 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/iana"
 	"github.com/otuschhoff/gokrb5/v8/iana/addrtype"
+	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/iana/flags"
+	"github.com/otuschhoff/gokrb5/v8/iana/msflags"
 	"github.com/otuschhoff/gokrb5/v8/iana/msgtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
@@ -69,6 +71,75 @@ func TestNewASReqOptionsOverrideConfig(t *testing.T) {
 	assert.Equal(t, service, req.ReqBody.SName)
 	assert.Equal(t, start, req.ReqBody.From)
 	assert.Equal(t, addresses, req.ReqBody.Addresses)
+}
+
+func TestNewASReqIncludesPACRequest(t *testing.T) {
+	cfg := config.New()
+	req, err := NewASReq("EXAMPLE.ORG", cfg, types.PrincipalName{}, types.PrincipalName{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.PAData) != 1 {
+		t.Fatalf("PA-DATA count = %d, want 1", len(req.PAData))
+	}
+	pacRequest, err := req.PAData[0].GetKerbPAPACRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.True(t, pacRequest.IncludePAC)
+
+	cfg.LibDefaults.RequestPAC = false
+	yes := true
+	req, err = NewASReqWithOptions("EXAMPLE.ORG", cfg, types.PrincipalName{}, types.PrincipalName{}, ASReqOptions{IncludePAC: &yes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pacRequest, err = req.PAData[0].GetKerbPAPACRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.True(t, pacRequest.IncludePAC)
+
+	no := false
+	req, err = NewASReqWithOptions("EXAMPLE.ORG", config.New(), types.PrincipalName{}, types.PrincipalName{}, ASReqOptions{IncludePAC: &no})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pacRequest, err = req.PAData[0].GetKerbPAPACRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.False(t, pacRequest.IncludePAC)
+}
+
+func TestTGSReqMSKILEOptions(t *testing.T) {
+	cfg := config.New()
+	cfg.LibDefaults.NoAddresses = true
+	cfg.LibDefaults.DefaultTGSEnctypeIDs = []int32{etypeID.RC4_HMAC, etypeID.AES256_CTS_HMAC_SHA1_96, etypeID.AES128_CTS_HMAC_SHA1_96}
+	original := append([]int32(nil), cfg.LibDefaults.DefaultTGSEnctypeIDs...)
+	req, err := tgsReq(types.PrincipalName{}, types.PrincipalName{}, "EXAMPLE.ORG", false, cfg, TGSReqOptions{
+		SupportedEncTypes: msflags.SupportedEncTypeAES256CTSHMACSHA196SK | msflags.SupportedEncTypeClaims,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := req.addMSKILEPAData(cfg, TGSReqOptions{SupportedEncTypes: msflags.SupportedEncTypeClaims}); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, []int32{etypeID.AES256_CTS_HMAC_SHA1_96, etypeID.RC4_HMAC, etypeID.AES128_CTS_HMAC_SHA1_96}, req.ReqBody.EType)
+	assert.Equal(t, original, cfg.LibDefaults.DefaultTGSEnctypeIDs)
+
+	var options types.PAPACOptions
+	for i := range req.PAData {
+		if req.PAData[i].PADataType == patype.PA_PAC_OPTIONS {
+			options, err = req.PAData[i].GetPAPACOptions()
+		}
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.True(t, types.IsFlagSet(&options.Options, flags.PACOptionBranchAware))
+	assert.True(t, types.IsFlagSet(&options.Options, flags.PACOptionClaims))
 }
 
 func boolPointer(value bool) *bool { return &value }

@@ -12,9 +12,12 @@ import (
 
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
+	"github.com/otuschhoff/gokrb5/v8/iana/msflags"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
+	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/test"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
+	"github.com/otuschhoff/gokrb5/v8/types"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -162,4 +165,42 @@ func TestSessions_JSON(t *testing.T) {
 func TestRenewRequiresHomeRealmTGT(t *testing.T) {
 	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", config.New())
 	assert.EqualError(t, cl.Renew(), "TGT session not found for realm EXAMPLE.ORG")
+}
+
+func TestSessionsUseCaseInsensitiveRealmKeys(t *testing.T) {
+	s := &sessions{Entries: make(map[string]*session)}
+	want := &session{realm: "Example.Org"}
+	s.update(want)
+	got, ok := s.get("example.org")
+	assert.True(t, ok)
+	assert.Same(t, want, got)
+}
+
+func TestGetSupportedEncTypes(t *testing.T) {
+	want := msflags.SupportedEncTypeAES256CTSHMACSHA196SK | msflags.SupportedEncTypeClaims
+	pa, err := types.NewPASupportedEncTypesPAData(types.PASupportedEncTypes(want))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := getSupportedEncTypes(types.PADataSequence{pa})
+	assert.NoError(t, err)
+	assert.Equal(t, want, got)
+
+	s := &session{supportedEncTypes: want}
+	s.update(messages.Ticket{}, messages.EncKDCRepPart{})
+	assert.Equal(t, msflags.SupportedEncTypes(0), s.supportedEncryptionTypes())
+}
+
+func TestReferralRealmUsesReplyMetadata(t *testing.T) {
+	pa, err := types.NewPASvrReferralInfoPAData(types.PASvrReferralData{ReferredRealm: "CHILD.EXAMPLE.ORG"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := referralRealm(types.PADataSequence{pa}, "FALLBACK.EXAMPLE.ORG")
+	assert.NoError(t, err)
+	assert.Equal(t, "CHILD.EXAMPLE.ORG", got)
+
+	got, err = referralRealm(nil, "FALLBACK.EXAMPLE.ORG")
+	assert.NoError(t, err)
+	assert.Equal(t, "FALLBACK.EXAMPLE.ORG", got)
 }

@@ -8,7 +8,10 @@ import (
 	"strings"
 
 	"github.com/jcmturner/dnsutils/v2"
+	"github.com/otuschhoff/gokrb5/v8/types"
 )
+
+var orderedSRV = dnsutils.OrderedSRV
 
 // GetKDCs returns the count of KDCs available and a map of KDC host names keyed on preference order.
 func (c *Config) GetKDCs(realm string, tcp bool) (int, map[int]string, error) {
@@ -21,7 +24,7 @@ func (c *Config) GetKDCs(realm string, tcp bool) (int, map[int]string, error) {
 	// Get the KDCs from the krb5.conf.
 	var ks []string
 	for _, r := range c.Realms {
-		if r.Realm != realm {
+		if !types.RealmEqual(r.Realm, realm) {
 			continue
 		}
 		ks = r.KDC
@@ -43,7 +46,12 @@ func (c *Config) GetKDCs(realm string, tcp bool) (int, map[int]string, error) {
 	if tcp {
 		proto = "tcp"
 	}
-	index, addrs, err := dnsutils.OrderedSRV("kerberos", proto, realm)
+	names := make([]string, 0, 3)
+	if c.LibDefaults.ADSite != "" {
+		names = append(names, c.LibDefaults.ADSite+"._sites.dc._msdcs."+realm)
+	}
+	names = append(names, "dc._msdcs."+realm, realm)
+	index, addrs, err := firstSRV("kerberos", proto, names)
 	if err != nil {
 		return count, kdcs, err
 	}
@@ -69,15 +77,9 @@ func (c *Config) GetKpasswdServers(realm string, tcp bool) (int, map[int]string,
 		if tcp {
 			proto = "tcp"
 		}
-		c, addrs, err := dnsutils.OrderedSRV("kpasswd", proto, realm)
+		c, addrs, err := firstServiceSRV([]string{"kpasswd", "kerberos-adm"}, proto, realm)
 		if err != nil {
 			return count, kdcs, err
-		}
-		if c < 1 {
-			c, addrs, err = dnsutils.OrderedSRV("kerberos-adm", proto, realm)
-			if err != nil {
-				return count, kdcs, err
-			}
 		}
 		if len(addrs) < 1 {
 			return count, kdcs, fmt.Errorf("no kpasswd or kadmin SRV records found for realm %s", realm)
@@ -91,7 +93,7 @@ func (c *Config) GetKpasswdServers(realm string, tcp bool) (int, map[int]string,
 		var ks []string
 		var ka []string
 		for _, r := range c.Realms {
-			if r.Realm == realm {
+			if types.RealmEqual(r.Realm, realm) {
 				ks = r.KPasswdServer
 				ka = r.AdminServer
 				break
@@ -113,6 +115,42 @@ func (c *Config) GetKpasswdServers(realm string, tcp bool) (int, map[int]string,
 		kdcs = randServOrder(ks)
 	}
 	return count, kdcs, nil
+}
+
+func firstSRV(service, proto string, names []string) (int, map[int]*net.SRV, error) {
+	var lastErr error
+	for _, name := range names {
+		count, addrs, err := orderedSRV(service, proto, name)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if len(addrs) > 0 {
+			return count, addrs, nil
+		}
+	}
+	if lastErr != nil {
+		return 0, nil, lastErr
+	}
+	return 0, nil, nil
+}
+
+func firstServiceSRV(services []string, proto, name string) (int, map[int]*net.SRV, error) {
+	var lastErr error
+	for _, service := range services {
+		count, addrs, err := orderedSRV(service, proto, name)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if len(addrs) > 0 {
+			return count, addrs, nil
+		}
+	}
+	if lastErr != nil {
+		return 0, nil, lastErr
+	}
+	return 0, nil, nil
 }
 
 func randServOrder(ks []string) map[int]string {

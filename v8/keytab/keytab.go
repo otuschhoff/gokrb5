@@ -226,7 +226,7 @@ func (kt *Keytab) Principals() []Principal {
 	for _, entry := range kt.Entries {
 		seen := false
 		for _, p := range principals {
-			if principalMatches(entry.Principal, p) && entry.Principal.Realm == p.Realm {
+			if principalMatches(entry.Principal, p) {
 				seen = true
 				break
 			}
@@ -308,7 +308,7 @@ func (kt *Keytab) GetEntry(p Principal, kvno uint32, etype int32) (Entry, error)
 }
 
 func principalMatches(candidate, requested Principal) bool {
-	if requested.Realm != "" && candidate.Realm != requested.Realm {
+	if requested.Realm != "" && !types.RealmEqual(candidate.Realm, requested.Realm) {
 		return false
 	}
 	if len(candidate.Components) != len(requested.Components) {

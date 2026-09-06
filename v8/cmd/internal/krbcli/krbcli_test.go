@@ -3,6 +3,7 @@ package krbcli
 import (
 	"bufio"
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/errorcode"
 	"github.com/otuschhoff/gokrb5/v8/krberror"
 	"github.com/otuschhoff/gokrb5/v8/messages"
+	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -132,4 +134,14 @@ func TestErrorTextUsesWrappedKDCCode(t *testing.T) {
 	wrapped := krberror.Errorf(messages.KRBError{ErrorCode: errorcode.KDC_ERR_KEY_EXPIRED}, krberror.KDCError, "login failed")
 	assert.Equal(t, "Password has expired", ErrorText(wrapped))
 	assert.Equal(t, "plain failure", ErrorText(errors.New("plain failure")))
+}
+
+func TestErrorTextIncludesWrappedNTStatus(t *testing.T) {
+	eData, err := hex.DecodeString(testdata.MSKILEKerbErrorDataAccountDisabled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kdcErr := messages.KRBError{ErrorCode: errorcode.KDC_ERR_CLIENT_REVOKED, EData: eData}
+	wrapped := krberror.Errorf(kdcErr, krberror.KDCError, "login failed")
+	assert.Equal(t, "Clients credentials have been revoked: STATUS_ACCOUNT_DISABLED (0xC0000072)", ErrorText(wrapped))
 }

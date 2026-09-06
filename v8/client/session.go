@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+	"github.com/otuschhoff/gokrb5/v8/iana/msflags"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
+	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 	"github.com/otuschhoff/gokrb5/v8/krberror"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/types"
@@ -35,8 +37,9 @@ func (s *sessions) destroy() {
 func (s *sessions) update(sess *session) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
+	realmKey := strings.ToUpper(sess.realm)
 	// if a session already exists for this, cancel its auto renew.
-	if i, ok := s.Entries[sess.realm]; ok {
+	if i, ok := s.Entries[realmKey]; ok {
 		if i != sess {
 			// Session in the sessions cache is not the same as one provided.
 			// Cancel the one in the cache and add this one.
@@ -45,19 +48,19 @@ func (s *sessions) update(sess *session) {
 			if i.cancel != nil {
 				i.cancel <- true
 			}
-			s.Entries[sess.realm] = sess
+			s.Entries[realmKey] = sess
 			return
 		}
 	}
 	// No session for this realm was found so just add it
-	s.Entries[sess.realm] = sess
+	s.Entries[realmKey] = sess
 }
 
 // get returns the session for the realm specified
 func (s *sessions) get(realm string) (*session, bool) {
 	s.mux.RLock()
 	defer s.mux.RUnlock()
-	sess, ok := s.Entries[realm]
+	sess, ok := s.Entries[strings.ToUpper(realm)]
 	return sess, ok
 }
 
@@ -76,6 +79,7 @@ type session struct {
 	isSKey               bool
 	secondTicket         []byte
 	sessionKeyExpiration time.Time
+	supportedEncTypes    msflags.SupportedEncTypes
 	cancel               chan bool
 	mux                  sync.RWMutex
 }
@@ -97,6 +101,10 @@ func (cl *Client) addSession(tgt messages.Ticket, dep messages.EncKDCRepPart) {
 		return
 	}
 	realm := tgt.SName.NameString[len(tgt.SName.NameString)-1]
+	supportedEncTypes, err := getSupportedEncTypes(dep.EncPAData)
+	if err != nil {
+		cl.Log("could not parse PA-SUPPORTED-ENCTYPES for %s: %v", realm, err)
+	}
 	s := &session{
 		realm:                realm,
 		authTime:             dep.AuthTime,
@@ -108,6 +116,7 @@ func (cl *Client) addSession(tgt messages.Ticket, dep messages.EncKDCRepPart) {
 		ticketFlags:          dep.Flags,
 		addresses:            append([]types.HostAddress(nil), dep.CAddr...),
 		sessionKeyExpiration: dep.KeyExpiration,
+		supportedEncTypes:    supportedEncTypes,
 	}
 	cl.sessions.update(s)
 	cl.enableAutoSessionRenewal(s)
@@ -127,6 +136,24 @@ func (s *session) update(tgt messages.Ticket, dep messages.EncKDCRepPart) {
 	s.ticketFlags = dep.Flags
 	s.addresses = append([]types.HostAddress(nil), dep.CAddr...)
 	s.sessionKeyExpiration = dep.KeyExpiration
+	s.supportedEncTypes, _ = getSupportedEncTypes(dep.EncPAData)
+}
+
+func getSupportedEncTypes(paData types.PADataSequence) (msflags.SupportedEncTypes, error) {
+	for i := range paData {
+		if paData[i].PADataType != patype.PA_SUPPORTED_ETYPES {
+			continue
+		}
+		value, err := paData[i].GetPASupportedEncTypes()
+		return msflags.SupportedEncTypes(value), err
+	}
+	return 0, nil
+}
+
+func (s *session) supportedEncryptionTypes() msflags.SupportedEncTypes {
+	s.mux.RLock()
+	defer s.mux.RUnlock()
+	return s.supportedEncTypes
 }
 
 // destroy will cancel any auto renewal of the session and set the expiration times to the current time

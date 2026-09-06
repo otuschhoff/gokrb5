@@ -44,6 +44,7 @@ func New() *Config {
 
 // LibDefaults represents the [libdefaults] section of the configuration.
 type LibDefaults struct {
+	ADSite          string
 	AllowWeakCrypto bool //default false
 	// ap_req_checksum_type int //unlikely to support this
 	Canonicalize            bool          //default false
@@ -76,6 +77,7 @@ type LibDefaults struct {
 	Proxiable             bool          //default false
 	RDNS                  bool          //default true
 	RealmTryDomains       int           //default -1
+	RequestPAC            bool          //default true
 	RenewLifetime         time.Duration //default 0
 	SafeChecksumType      int           //default 8
 	TicketLifetime        time.Duration //default 1 day
@@ -109,6 +111,7 @@ func newLibDefaults() LibDefaults {
 		PermittedEnctypes:       []string{"aes256-cts-hmac-sha1-96", "aes128-cts-hmac-sha1-96", "des3-cbc-sha1", "arcfour-hmac-md5", "camellia256-cts-cmac", "camellia128-cts-cmac", "des-cbc-crc", "des-cbc-md5", "des-cbc-md4"},
 		RDNS:                    true,
 		RealmTryDomains:         -1,
+		RequestPAC:              true,
 		SafeChecksumType:        8,
 		TicketLifetime:          time.Duration(24) * time.Hour,
 		UDPPreferenceLimit:      1465,
@@ -144,12 +147,20 @@ func (l *LibDefaults) parseLines(lines []string) error {
 				return InvalidErrorf("libdefaults section line (%s): %v", line, err)
 			}
 			l.AllowWeakCrypto = v
+		case "ad_site":
+			l.ADSite = strings.TrimSpace(p[1])
 		case "canonicalize":
 			v, err := parseBoolean(p[1])
 			if err != nil {
 				return InvalidErrorf("libdefaults section line (%s): %v", line, err)
 			}
 			l.Canonicalize = v
+		case "request_pac":
+			v, err := parseBoolean(p[1])
+			if err != nil {
+				return InvalidErrorf("libdefaults section line (%s): %v", line, err)
+			}
+			l.RequestPAC = v
 		case "ccache_type":
 			p[1] = strings.TrimSpace(p[1])
 			v, err := strconv.ParseUint(p[1], 10, 32)

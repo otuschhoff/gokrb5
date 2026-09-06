@@ -81,6 +81,7 @@ const (
 `
 	krb5ConfJson = `{
   "LibDefaults": {
+	"ADSite": "",
     "AllowWeakCrypto": false,
     "Canonicalize": false,
     "CCacheType": 4,
@@ -152,6 +153,7 @@ const (
     "Proxiable": false,
     "RDNS": true,
     "RealmTryDomains": -1,
+	"RequestPAC": true,
     "RenewLifetime": 0,
     "SafeChecksumType": 8,
     "TicketLifetime": 36000000000000,

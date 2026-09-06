@@ -33,7 +33,7 @@ func NewCCache(defaultPrincipal types.PrincipalName, realm string) *CCache {
 func (c *CCache) AddCredential(cred *Credential) {
 	if cred != nil {
 		components := cred.Server.PrincipalName.NameString
-		if len(components) == 2 && components[0] == "krbtgt" && cred.Client.Realm != components[1] {
+		if len(components) == 2 && components[0] == "krbtgt" && !types.RealmEqual(cred.Client.Realm, components[1]) {
 			_ = c.SetConfig("start_realm", "", components[1])
 		}
 		c.Credentials = append(c.Credentials, cred)

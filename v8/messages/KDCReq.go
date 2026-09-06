@@ -16,8 +16,10 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/crypto"
 	"github.com/otuschhoff/gokrb5/v8/iana"
 	"github.com/otuschhoff/gokrb5/v8/iana/asnAppTag"
+	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/iana/flags"
 	"github.com/otuschhoff/gokrb5/v8/iana/keyusage"
+	"github.com/otuschhoff/gokrb5/v8/iana/msflags"
 	"github.com/otuschhoff/gokrb5/v8/iana/msgtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
@@ -54,6 +56,7 @@ type ASReqOptions struct {
 	Forwardable      *bool
 	Proxiable        *bool
 	Canonicalize     *bool
+	IncludePAC       *bool
 	Addresses        []types.HostAddress
 	Enterprise       *bool
 	ServicePrincipal *types.PrincipalName
@@ -63,6 +66,13 @@ type ASReqOptions struct {
 // TGSReq implements RFC 4120 KRB_TGS_REQ: https://tools.ietf.org/html/rfc4120#section-5.4.1.
 type TGSReq struct {
 	KDCReqFields
+}
+
+// TGSReqOptions controls Microsoft-specific TGS request behavior.
+type TGSReqOptions struct {
+	PACOptions        []int
+	IncludePAC        *bool
+	SupportedEncTypes msflags.SupportedEncTypes
 }
 
 type marshalKDCReqBody struct {
@@ -162,6 +172,10 @@ func NewASReqWithOptions(realm string, c *config.Config, cname, sname types.Prin
 	if options.Proxiable != nil {
 		proxiable = *options.Proxiable
 	}
+	includePAC := c.LibDefaults.RequestPAC
+	if options.IncludePAC != nil {
+		includePAC = *options.IncludePAC
+	}
 	if options.Enterprise != nil && *options.Enterprise {
 		cname.NameType = nametype.KRB_NT_ENTERPRISE
 	}
@@ -214,33 +228,52 @@ func NewASReqWithOptions(realm string, c *config.Config, cname, sname types.Prin
 		ha = append(ha, types.HostAddressesFromNetIPs(c.LibDefaults.ExtraAddresses)...)
 		a.ReqBody.Addresses = ha
 	}
+	pacRequest, err := types.NewKerbPAPACRequestPAData(includePAC)
+	if err != nil {
+		return a, fmt.Errorf("could not marshal KERB-PA-PAC-REQUEST: %v", err)
+	}
+	a.PAData = append(a.PAData, pacRequest)
 	return a, nil
 }
 
 // NewTGSReq generates a new KRB_TGS_REQ struct.
 func NewTGSReq(cname types.PrincipalName, kdcRealm string, c *config.Config, tgt Ticket, sessionKey types.EncryptionKey, sname types.PrincipalName, renewal bool) (TGSReq, error) {
-	a, err := tgsReq(cname, sname, kdcRealm, renewal, c)
+	return NewTGSReqWithOptions(cname, kdcRealm, c, tgt, sessionKey, sname, renewal, TGSReqOptions{})
+}
+
+// NewTGSReqWithOptions generates a new KRB_TGS_REQ with Microsoft-specific options.
+func NewTGSReqWithOptions(cname types.PrincipalName, kdcRealm string, c *config.Config, tgt Ticket, sessionKey types.EncryptionKey, sname types.PrincipalName, renewal bool, options TGSReqOptions) (TGSReq, error) {
+	a, err := tgsReq(cname, sname, kdcRealm, renewal, c, options)
 	if err != nil {
 		return a, err
 	}
-	err = a.setPAData(tgt, sessionKey)
-	return a, err
+	if err := a.setPAData(tgt, sessionKey); err != nil {
+		return a, err
+	}
+	return a, a.addMSKILEPAData(c, options)
 }
 
 // NewUser2UserTGSReq returns a TGS-REQ suitable for user-to-user authentication (https://tools.ietf.org/html/rfc4120#section-3.7)
 func NewUser2UserTGSReq(cname types.PrincipalName, kdcRealm string, c *config.Config, clientTGT Ticket, sessionKey types.EncryptionKey, sname types.PrincipalName, renewal bool, verifyingTGT Ticket) (TGSReq, error) {
-	a, err := tgsReq(cname, sname, kdcRealm, renewal, c)
+	return NewUser2UserTGSReqWithOptions(cname, kdcRealm, c, clientTGT, sessionKey, sname, renewal, verifyingTGT, TGSReqOptions{})
+}
+
+// NewUser2UserTGSReqWithOptions returns a user-to-user TGS-REQ with Microsoft-specific options.
+func NewUser2UserTGSReqWithOptions(cname types.PrincipalName, kdcRealm string, c *config.Config, clientTGT Ticket, sessionKey types.EncryptionKey, sname types.PrincipalName, renewal bool, verifyingTGT Ticket, options TGSReqOptions) (TGSReq, error) {
+	a, err := tgsReq(cname, sname, kdcRealm, renewal, c, options)
 	if err != nil {
 		return a, err
 	}
 	a.ReqBody.AdditionalTickets = []Ticket{verifyingTGT}
 	types.SetFlag(&a.ReqBody.KDCOptions, flags.EncTktInSkey)
-	err = a.setPAData(clientTGT, sessionKey)
-	return a, err
+	if err := a.setPAData(clientTGT, sessionKey); err != nil {
+		return a, err
+	}
+	return a, a.addMSKILEPAData(c, options)
 }
 
 // tgsReq populates the fields for a TGS_REQ
-func tgsReq(cname, sname types.PrincipalName, kdcRealm string, renewal bool, c *config.Config) (TGSReq, error) {
+func tgsReq(cname, sname types.PrincipalName, kdcRealm string, renewal bool, c *config.Config, options TGSReqOptions) (TGSReq, error) {
 	nonce, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt32))
 	if err != nil {
 		return TGSReq{}, err
@@ -256,7 +289,7 @@ func tgsReq(cname, sname types.PrincipalName, kdcRealm string, renewal bool, c *
 			SName:      sname,
 			Till:       t.Add(c.LibDefaults.TicketLifetime),
 			Nonce:      int(nonce.Int64()),
-			EType:      c.LibDefaults.DefaultTGSEnctypeIDs,
+			EType:      preferredTGSEnctypes(c.LibDefaults.DefaultTGSEnctypeIDs, options.SupportedEncTypes),
 		},
 		Renewal: renewal,
 	}
@@ -288,6 +321,55 @@ func tgsReq(cname, sname types.PrincipalName, kdcRealm string, renewal bool, c *
 	return TGSReq{
 		k,
 	}, nil
+}
+
+func preferredTGSEnctypes(configured []int32, supported msflags.SupportedEncTypes) []int32 {
+	etypes := append([]int32(nil), configured...)
+	if supported&msflags.SupportedEncTypeAES256CTSHMACSHA196SK == 0 {
+		return etypes
+	}
+	for i, etype := range etypes {
+		if etype != etypeID.AES256_CTS_HMAC_SHA1_96 || i == 0 {
+			continue
+		}
+		copy(etypes[1:i+1], etypes[:i])
+		etypes[0] = etypeID.AES256_CTS_HMAC_SHA1_96
+		break
+	}
+	return etypes
+}
+
+func (k *TGSReq) addMSKILEPAData(c *config.Config, options TGSReqOptions) error {
+	includePAC := c.LibDefaults.RequestPAC
+	if options.IncludePAC != nil {
+		includePAC = *options.IncludePAC
+	}
+	pacRequest, err := types.NewKerbPAPACRequestPAData(includePAC)
+	if err != nil {
+		return fmt.Errorf("could not marshal KERB-PA-PAC-REQUEST: %v", err)
+	}
+	k.PAData = append(k.PAData, pacRequest)
+
+	pacOptions := append([]int(nil), options.PACOptions...)
+	pacOptions = appendPACOption(pacOptions, flags.PACOptionBranchAware)
+	if options.SupportedEncTypes&msflags.SupportedEncTypeClaims != 0 {
+		pacOptions = appendPACOption(pacOptions, flags.PACOptionClaims)
+	}
+	pa, err := types.NewPAPACOptionsPAData(pacOptions...)
+	if err != nil {
+		return fmt.Errorf("could not marshal PA-PAC-OPTIONS: %v", err)
+	}
+	k.PAData = append(k.PAData, pa)
+	return nil
+}
+
+func appendPACOption(options []int, option int) []int {
+	for _, existing := range options {
+		if existing == option {
+			return options
+		}
+	}
+	return append(options, option)
 }
 
 func (k *TGSReq) setPAData(tgt Ticket, sessionKey types.EncryptionKey) error {

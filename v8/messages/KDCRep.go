@@ -16,6 +16,7 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/flags"
 	"github.com/otuschhoff/gokrb5/v8/iana/keyusage"
 	"github.com/otuschhoff/gokrb5/v8/iana/msgtype"
+	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 	"github.com/otuschhoff/gokrb5/v8/krberror"
 	"github.com/otuschhoff/gokrb5/v8/types"
@@ -247,10 +248,10 @@ func (k *ASRep) DecryptEncPart(c *credentials.Credentials) (types.EncryptionKey,
 // Verify checks the validity of AS_REP message.
 func (k *ASRep) Verify(cfg *config.Config, creds *credentials.Credentials, asReq ASReq) (bool, error) {
 	//Ref RFC 4120 Section 3.1.5
-	if !k.CName.Equal(asReq.ReqBody.CName) {
+	if !k.CName.Equal(asReq.ReqBody.CName) && !requestAllowsCanonicalName(asReq.ReqBody) {
 		return false, krberror.NewErrorf(krberror.KRBMsgError, "CName in response does not match what was requested. Requested: %+v; Reply: %+v", asReq.ReqBody.CName, k.CName)
 	}
-	if k.CRealm != asReq.ReqBody.Realm {
+	if !types.RealmEqual(k.CRealm, asReq.ReqBody.Realm) {
 		return false, krberror.NewErrorf(krberror.KRBMsgError, "CRealm in response does not match what was requested. Requested: %s; Reply: %s", asReq.ReqBody.Realm, k.CRealm)
 	}
 	key, err := k.DecryptEncPart(creds)
@@ -263,7 +264,7 @@ func (k *ASRep) Verify(cfg *config.Config, creds *credentials.Credentials, asReq
 	if !k.DecryptedEncPart.SName.Equal(asReq.ReqBody.SName) {
 		return false, krberror.NewErrorf(krberror.KRBMsgError, "SName in response does not match what was requested. Requested: %v; Reply: %v", asReq.ReqBody.SName, k.DecryptedEncPart.SName)
 	}
-	if k.DecryptedEncPart.SRealm != asReq.ReqBody.Realm {
+	if !types.RealmEqual(k.DecryptedEncPart.SRealm, asReq.ReqBody.Realm) {
 		return false, krberror.NewErrorf(krberror.KRBMsgError, "SRealm in response does not match what was requested. Requested: %s; Reply: %s", asReq.ReqBody.Realm, k.DecryptedEncPart.SRealm)
 	}
 	if len(asReq.ReqBody.Addresses) > 0 {
@@ -275,30 +276,46 @@ func (k *ASRep) Verify(cfg *config.Config, creds *credentials.Credentials, asReq
 	if t.Sub(k.DecryptedEncPart.AuthTime) > cfg.LibDefaults.Clockskew || k.DecryptedEncPart.AuthTime.Sub(t) > cfg.LibDefaults.Clockskew {
 		return false, krberror.NewErrorf(krberror.KRBMsgError, "clock skew with KDC too large. Greater than %v seconds", cfg.LibDefaults.Clockskew.Seconds())
 	}
-	// RFC 6806 https://tools.ietf.org/html/rfc6806.html#section-11
-	if asReq.PAData.Contains(patype.PA_REQ_ENC_PA_REP) && types.IsFlagSet(&k.DecryptedEncPart.Flags, flags.EncPARep) {
-		if len(k.DecryptedEncPart.EncPAData) < 2 || !k.DecryptedEncPart.EncPAData.Contains(patype.PA_FX_FAST) {
-			return false, krberror.NewErrorf(krberror.KRBMsgError, "KDC did not respond appropriately to FAST negotiation")
-		}
-		for _, pa := range k.DecryptedEncPart.EncPAData {
-			if pa.PADataType == patype.PA_REQ_ENC_PA_REP {
-				var pafast types.PAReqEncPARep
-				err := pafast.Unmarshal(pa.PADataValue)
-				if err != nil {
-					return false, krberror.Errorf(err, krberror.EncodingError, "KDC FAST negotiation response error, could not unmarshal PA_REQ_ENC_PA_REP")
-				}
-				etype, err := crypto.GetChksumEtype(pafast.ChksumType)
-				if err != nil {
-					return false, krberror.Errorf(err, krberror.ChksumError, "KDC FAST negotiation response error")
-				}
-				ab, _ := asReq.Marshal()
-				if !etype.VerifyChecksum(key.KeyValue, ab, pafast.Chksum, keyusage.KEY_USAGE_AS_REQ) {
-					return false, krberror.Errorf(err, krberror.ChksumError, "KDC FAST negotiation response checksum invalid")
-				}
-			}
+	if asReq.PAData.Contains(patype.PA_REQ_ENC_PA_REP) {
+		if err := k.verifyEncPARep(asReq, key); err != nil {
+			return false, err
 		}
 	}
+	creds.SetCName(k.CName)
+	creds.SetRealm(k.CRealm)
 	return true, nil
+}
+
+func requestAllowsCanonicalName(req KDCReqBody) bool {
+	return types.IsFlagSet(&req.KDCOptions, flags.Canonicalize) || req.CName.NameType == nametype.KRB_NT_ENTERPRISE
+}
+
+func (k *ASRep) verifyEncPARep(asReq ASReq, key types.EncryptionKey) error {
+	if !types.IsFlagSet(&k.DecryptedEncPart.Flags, flags.EncPARep) {
+		return krberror.NewErrorf(krberror.KRBMsgError, "KDC did not acknowledge PA-REQ-ENC-PA-REP")
+	}
+	for _, pa := range k.DecryptedEncPart.EncPAData {
+		if pa.PADataType != patype.PA_REQ_ENC_PA_REP {
+			continue
+		}
+		var encPARep types.PAReqEncPARep
+		if err := encPARep.Unmarshal(pa.PADataValue); err != nil {
+			return krberror.Errorf(err, krberror.EncodingError, "could not unmarshal PA-REQ-ENC-PA-REP response")
+		}
+		checksumType, err := crypto.GetChksumEtype(encPARep.ChksumType)
+		if err != nil {
+			return krberror.Errorf(err, krberror.ChksumError, "unsupported PA-REQ-ENC-PA-REP checksum type")
+		}
+		requestBytes, err := asReq.Marshal()
+		if err != nil {
+			return krberror.Errorf(err, krberror.EncodingError, "could not marshal AS-REQ for PA-REQ-ENC-PA-REP verification")
+		}
+		if !checksumType.VerifyChecksum(key.KeyValue, requestBytes, encPARep.Chksum, keyusage.KEY_USAGE_AS_REQ) {
+			return krberror.NewErrorf(krberror.ChksumError, "PA-REQ-ENC-PA-REP checksum invalid")
+		}
+		return nil
+	}
+	return krberror.NewErrorf(krberror.KRBMsgError, "KDC omitted PA-REQ-ENC-PA-REP response")
 }
 
 // DecryptEncPart decrypts the encrypted part of an TGS_REP.
@@ -318,10 +335,10 @@ func (k *TGSRep) DecryptEncPart(key types.EncryptionKey) error {
 
 // Verify checks the validity of the TGS_REP message.
 func (k *TGSRep) Verify(cfg *config.Config, tgsReq TGSReq) (bool, error) {
-	if !k.CName.Equal(tgsReq.ReqBody.CName) {
+	if !k.CName.Equal(tgsReq.ReqBody.CName) && !requestAllowsCanonicalName(tgsReq.ReqBody) {
 		return false, krberror.NewErrorf(krberror.KRBMsgError, "CName in response does not match what was requested. Requested: %+v; Reply: %+v", tgsReq.ReqBody.CName, k.CName)
 	}
-	if k.Ticket.Realm != tgsReq.ReqBody.Realm {
+	if !types.RealmEqual(k.Ticket.Realm, tgsReq.ReqBody.Realm) {
 		return false, krberror.NewErrorf(krberror.KRBMsgError, "realm in response ticket does not match what was requested. Requested: %s; Reply: %s", tgsReq.ReqBody.Realm, k.Ticket.Realm)
 	}
 	if k.DecryptedEncPart.Nonce != tgsReq.ReqBody.Nonce {
@@ -343,7 +360,7 @@ func (k *TGSRep) Verify(cfg *config.Config, tgsReq TGSReq) (bool, error) {
 	//		return false, krberror.NewErrorf(krberror.KRBMsgError, "SName in response does not match what was requested. Requested: %+v; Reply: %+v", tgsReq.ReqBody.SName, k.DecryptedEncPart.SName)
 	//	}
 	//}
-	if k.DecryptedEncPart.SRealm != tgsReq.ReqBody.Realm {
+	if !types.RealmEqual(k.DecryptedEncPart.SRealm, tgsReq.ReqBody.Realm) {
 		return false, krberror.NewErrorf(krberror.KRBMsgError, "SRealm in response does not match what was requested. Requested: %s; Reply: %s", tgsReq.ReqBody.Realm, k.DecryptedEncPart.SRealm)
 	}
 	if len(k.DecryptedEncPart.CAddr) > 0 {
