@@ -53,7 +53,7 @@ func ValidateCertificateChain(signed *VerifiedSignedData, policy CertificateChai
 	}
 	intermediates := x509.NewCertPool()
 	if policy.Intermediates != nil {
-		intermediates = policy.Intermediates.Clone()
+		intermediates = cloneCertPool(policy.Intermediates)
 	}
 	for _, certificate := range signed.Certificates {
 		if !bytes.Equal(certificate.Raw, signed.Signer.Raw) {
@@ -216,11 +216,11 @@ func checkCRLs(client *http.Client, certificate, issuer *x509.Certificate, now t
 		if readErr != nil || response.StatusCode != http.StatusOK {
 			continue
 		}
-		list, err := x509.ParseRevocationList(body)
-		if err != nil || list.CheckSignatureFrom(issuer) != nil || !revocationTimeValid(now, list.ThisUpdate, list.NextUpdate) {
+		list, err := x509.ParseCRL(body)
+		if err != nil || issuer.CheckCRLSignature(list) != nil || !revocationTimeValid(now, list.TBSCertList.ThisUpdate, list.TBSCertList.NextUpdate) {
 			continue
 		}
-		for _, entry := range list.RevokedCertificateEntries {
+		for _, entry := range list.TBSCertList.RevokedCertificates {
 			if entry.SerialNumber.Cmp(certificate.SerialNumber) == 0 {
 				return false, fmt.Errorf("PKINIT KDC certificate %q is revoked", certificate.Subject)
 			}

@@ -95,6 +95,40 @@ jobs:
       - name: Run tests with race detector
         run: go test -race ./...
 
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: v8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache-dependency-path: v8/go.sum
+
+      - name: Collect cross-package coverage
+        run: go test -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
+
+      - name: Enforce coverage floor
+        shell: bash
+        run: |
+          coverage=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub(/%/, "", $3); print $3}')
+          echo "Total statement coverage: ${coverage}%"
+          awk -v coverage="${coverage}" 'BEGIN { if (coverage + 0 < 64.0) exit 1 }'
+
+      - name: Upload coverage profile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v8-coverage
+          path: v8/coverage.out
+
   cross-build:
     name: Cross-build ${{ matrix.name }}
     runs-on: ubuntu-latest
