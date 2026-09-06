@@ -164,6 +164,62 @@ Therefore the GetServiceTicket method can be continually used for the most effic
 tkt, key, err := cl.GetServiceTicket("HTTP/host.test.gokrb5")
 ```
 
+##### Service for User and Constrained Delegation
+
+A service account can request a ticket to itself for an authenticated user with
+S4U2self. The user ticket is cached separately from the service account's own
+ticket under the user, realm, and SPN.
+
+```go
+user := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
+evidence, _, err := cl.GetServiceTicketForUser(
+    user,
+    "EXAMPLE.COM",
+    "HTTP/service.example.com",
+    client.S4UWithForwardable(true),
+)
+```
+
+The KDC decides whether the returned evidence ticket is forwardable. Its
+issued state is available from the S4U cache:
+
+```go
+info, ok := cl.GetCachedServiceTicketForUserInfo(
+    user,
+    "EXAMPLE.COM",
+    "HTTP/service.example.com",
+)
+if ok && info.Forwardable {
+    // The ticket can be offered for classic constrained delegation.
+}
+```
+
+Use the evidence ticket for S4U2proxy. Add the resource-based option when the
+target account authorizes the calling service through RBCD.
+
+```go
+ticket, key, err := cl.GetServiceTicketOnBehalfOf(
+    evidence,
+    "HTTP/target.example.com",
+    client.S4UWithResourceBasedDelegation(),
+)
+```
+
+Policy denials preserve the KDC error and extended NTSTATUS while exposing
+stable classifications:
+
+```go
+if errors.Is(err, krberror.ErrProtocolTransitionNotPermitted) {
+    // S4U2self was denied.
+}
+if errors.Is(err, krberror.ErrDelegationNotPermitted) {
+    // S4U2proxy was denied.
+}
+```
+
+`S4UWithCertificate` accepts a DER-encoded X.509 certificate for
+PA-S4U-X509-USER. Cross-realm S4U referrals are followed automatically.
+
 The steps after this will be specific to the application protocol but it will likely involve a client/server 
 Authentication Protocol exchange (AP exchange).
 This will involve these steps:

@@ -1,11 +1,13 @@
 # Design Spec: MS-KILE Compliance — Kerberos Protocol Extensions for Active Directory
 
-Status: Draft
-Scope: `v8` module (`github.com/otuschhoff/gokrb5/v8`)
-Normative references (verify against the latest published revision before each phase):
+**Status:** Draft
+
+**Scope:** `v8` module (`github.com/otuschhoff/gokrb5/v8`)
+
+**Normative references:** Verify against the latest published revision before each phase.
 
 | Reference | Title | Used for |
-|---|---|---|
+| --- | --- | --- |
 | [MS-KILE] | Kerberos Protocol Extensions | Client (§3.2) and application-server (§3.4) behaviour, MS PA-DATA, authorization data, error data |
 | [MS-PAC] | Privilege Attribute Certificate Data Structure | PAC buffers, signatures, validation rules |
 | [MS-SFU] | Kerberos Protocol Extensions: Service for User and Constrained Delegation | S4U2self, S4U2proxy, resource-based constrained delegation |
@@ -35,7 +37,7 @@ gokrb5 must be a fully MS-KILE-compliant **Kerberos client** and **application s
 ### 1.1 Out of scope (deliberate non-goals)
 
 | Item | Reason |
-|---|---|
+| --- | --- |
 | KDC role (MS-KILE §3.3) | gokrb5 is not a KDC. Structures the KDC emits are decoded; KDC-side logic is not implemented. |
 | DES-CBC-CRC (1), DES-CBC-MD5 (3), RC4-HMAC-EXP (24) | Disabled by default in Windows since Server 2008 R2; cryptographically broken. Clients must gracefully negotiate them away, not implement them. |
 | NTLM | Separate protocol ([MS-NLMP]); NEGOEX and PKU2U are in scope (§3.6, §3.7) but NTLM is never offered or accepted. |
@@ -52,7 +54,7 @@ Sources reviewed: `v8/client/*.go`, `v8/messages/*.go`, `v8/types/*.go`, `v8/pac
 ### 2.1 What exists and is compliant
 
 | Capability | Location |
-|---|---|
+| --- | --- |
 | AES128/256-SHA1, AES-SHA2, RC4-HMAC, DES3 etypes and checksums | `v8/crypto` |
 | RC4 string-to-key (UTF-16LE NT hash), ETYPE-INFO2 salts and s2kparams | `v8/crypto/rfc4757`, `v8/crypto/crypto.go` |
 | PA-ENC-TIMESTAMP, ETYPE-INFO/INFO2 precedence, PA-REQ-ENC-PA-REP (RFC 6806 §11) | `v8/client/ASExchange.go`, `v8/messages/KDCRep.go` |
@@ -72,7 +74,7 @@ Sources reviewed: `v8/client/*.go`, `v8/messages/*.go`, `v8/types/*.go`, `v8/pac
 ### 2.2 Defects and gaps — protocol structures (`KS-n`)
 
 | ID | Finding | Severity |
-|---|---|---|
+| --- | --- | --- |
 | KS-1 | No ASN.1 types for KERB-PA-PAC-REQUEST (128), PA-PAC-OPTIONS (167), KERB-ERROR-DATA / KERB-EXT-ERROR, KERB-AD-RESTRICTION-ENTRY (141) with LSAP_TOKEN_INFO_INTEGRITY, KERB-LOCAL (142), AD-AUTH-DATA-AP-OPTIONS (143), PA-FOR-USER (129), PA-S4U-X509-USER (130), PA-SUPPORTED-ENCTYPES (165), KERB-KEY-LIST-REQ/REP (161/162), PA-SVR-REFERRAL-INFO (20, RFC 6806 Appendix A), KERB-SUPERSEDED-BY-USER (170), KERB-DMSA-KEY-PACKAGE (PA-DATA 171). Only the `patype` constants up to 166 exist; 167, 161, 162, 170, 171 are missing. | High |
 | KS-2 | `iana/adtype` lacks 141, 142, 143; `iana/nametype` lacks `KRB_NT_WELLKNOWN` (11), `KRB_NT_MS_PRINCIPAL` (-128), `KRB_NT_MS_PRINCIPAL_AND_ID` (-129), `KRB_NT_ENT_PRINCIPAL_AND_ID` (-130); no constants for `KERB_AP_OPTIONS_CBT` (0x4000), `KERB_AP_OPTIONS_UNVERIFIED_TARGET_NAME` (0x8000), PA-PAC-OPTIONS flag bits, PA-SUPPORTED-ENCTYPES bit field, `KDC_OPT_CNAME_IN_ADDL_TKT` (bit 14), key usages 26/27 (PA-S4U-X509-USER), NTSTATUS values commonly surfaced in KERB-EXT-ERROR. | Medium |
 | KS-3 | `messages.KRBError.EData` is only parsed as METHOD-DATA in specific retry paths. KERB-ERROR-DATA (data-type 3 `KERB_ERR_TYPE_EXTENDED` carrying an NTSTATUS, data-type 2 `KERB_AP_ERR_TYPE_SKEW_RECOVERY`) and TYPED-DATA are never decoded, so AD-specific failure reasons (e.g. `STATUS_ACCOUNT_DISABLED`, `STATUS_PASSWORD_MUST_CHANGE`) are lost. | Medium |
@@ -85,7 +87,7 @@ Sources reviewed: `v8/client/*.go`, `v8/messages/*.go`, `v8/types/*.go`, `v8/pac
 ### 2.3 Defects and gaps — client behaviour (`KC-n`)
 
 | ID | Finding | Severity |
-|---|---|---|
+| --- | --- | --- |
 | KC-1 | AS-REQ never includes KERB-PA-PAC-REQUEST. AD includes a PAC by default, but MS-KILE §3.2.5 clients send `include-pac` and RODC/branch scenarios depend on it; services that want PAC-less tickets cannot ask. | Medium |
 | KC-2 | `ASRep.Verify`/`TGSRep.Verify` reject any `cname` that differs from the request. When `canonicalize` is set or the request used `KRB_NT_ENTERPRISE`, AD legitimately returns the canonical `cname`; RFC 6806 §11 / MS-KILE require acceptance (protected by PA-REQ-ENC-PA-REP when present). Enterprise logons to AD currently fail. | High |
 | KC-3 | PA-SUPPORTED-ENCTYPES in the reply `encrypted-pa-data` is ignored, so the client cannot learn that the target supports AES-SK, claims, FAST, or compound identity, and cannot restrict TGS etypes accordingly. | Medium |
@@ -107,7 +109,7 @@ Sources reviewed: `v8/client/*.go`, `v8/messages/*.go`, `v8/types/*.go`, `v8/pac
 ### 2.4 Defects and gaps — application-server behaviour (`KA-n`)
 
 | ID | Finding | Severity |
-|---|---|---|
+| --- | --- | --- |
 | KA-1 | PAC validation stops at server-checksum verification. MS-PAC/MS-KILE application-server rules not applied: PAC_CLIENT_INFO `Name` must equal the ticket `cname` (case-insensitive) and `ClientId` must equal ticket `authtime`; PAC_REQUESTOR SID (when present) must equal KERB_VALIDATION_INFO `UserId` under `LogonDomainId`; UPN_DNS_INFO `S` extension SAM name/SID (when present) must match; duplicate buffer types must be rejected rather than ignored where MS-PAC says "MUST NOT". | High |
 | KA-2 | Only `GroupMembershipSIDs`, logon times and a few names are exposed in `credentials.ADCredentials`. UPN, DNS domain, SAM account name, user SID, extra SIDs with attributes, resource group SIDs, client/device claims, device info, S4U delegation chain, PAC attributes flags and `UserAccountControl` are parsed but not surfaced. | Medium |
 | KA-3 | Acceptor ignores the 0x8003 checksum entirely: no channel-binding comparison, no reading of `Flags`, no delegation (`Deleg` KRB-CRED) extraction, no DCE-style AP-REP handling, no `KERB_AP_OPTIONS_CBT` detection for Extended Protection policy. | High |
@@ -121,7 +123,7 @@ Sources reviewed: `v8/client/*.go`, `v8/messages/*.go`, `v8/types/*.go`, `v8/pac
 ### 2.5 Defects and gaps — NEGOEX and PKU2U (`KN-n`)
 
 | ID | Finding | Severity |
-|---|---|---|
+| --- | --- | --- |
 | KN-1 | No NEGOEX mechanism (`1.3.6.1.4.1.311.2.2.30`): no message framing (`MESSAGE_HEADER`, `NEGO_MESSAGE`, `EXCHANGE_MESSAGE`, `VERIFY_MESSAGE`, `ALERT_MESSAGE`), no auth-scheme GUID negotiation, no conversation state machine. | High |
 | KN-2 | SPNEGO acceptor behaviour when the initiator's optimistic `mechToken` is NEGOEX (the Windows default) is unverified: it must answer `accept-incomplete` selecting KRB5 (or NEGOEX once implemented) instead of failing. SPNEGO initiator cannot offer NEGOEX. | Medium |
 | KN-3 | No PKU2U mechanism (`1.3.6.1.5.2.7`): no `WELLKNOWN:PKU2U` realm handling, no acceptor-as-KDC AS exchange, no PKU2U metadata (trusted-certifier) exchange, no certificate-to-principal mapping. | High |
@@ -131,7 +133,7 @@ Sources reviewed: `v8/client/*.go`, `v8/messages/*.go`, `v8/types/*.go`, `v8/pac
 ### 2.6 Defects and gaps — PKINIT / MS-PKCA (`KP-n`)
 
 | ID | Finding | Severity |
-|---|---|---|
+| --- | --- | --- |
 | KP-1 | No PA-PK-AS-REQ (16) / PA-PK-AS-REP (17) ASN.1 (`AuthPack`, `PKAuthenticator`, `DHRepInfo`, `KDCDHKeyInfo`, `ReplyKeyPack`, `TD-*` typed data) and no CMS `SignedData`/`EnvelopedData` codec; the `patype` constants 14–18 exist but nothing consumes them. The legacy Windows 2000 PA-PK-AS-REQ-OLD (14/15) must be recognised and rejected with a clear error, not treated as unknown PA-DATA. | High |
 | KP-2 | No Diffie-Hellman (MODP 2/14/16) or RSA (`encKeyPack`) reply-key path; `octetstring2key` (RFC 4556 §3.2.3.1) and the RFC 8636 KDF (`id-pkinit-kdf-ah-sha256/384/512`) that Windows Server 2012+ negotiates via `supportedKDFs`/`kdfId` are absent. | High |
 | KP-3 | No client certificate selection/validation per MS-PKCA §3.1.5: EKU `id-kp-clientAuth` or `Smart Card Logon` (`1.3.6.1.4.1.311.20.2.2`), UPN in `otherName` SAN (`1.3.6.1.4.1.311.20.2.3`) or `id-pkinit-san`, the strong-mapping SID extension (`1.3.6.1.4.1.311.25.2`) for diagnostics, `pkinit_identities` sources (PEM, PKCS#12, `crypto.Signer` for PKCS#11/TPM). | High |
@@ -220,10 +222,12 @@ func (a AuthorizationData) EntriesOfType(adType int32) ([]AuthorizationDataEntry
 4. **Realm normalisation**: `types.RealmEqual(a, b string) bool` (ASCII case-fold) used in `Verify` paths, cache keys upper-cased, `Config` lookups case-insensitive. `KDCRep.Verify` compares `CRealm` with `RealmEqual`.
 5. **Errors**: `krberror` carries `NTStatus`; `gokinit` maps common statuses to MIT-equivalent text plus the Windows detail (e.g. `Client's credentials have been revoked (account disabled)`).
 6. **S4U (MS-SFU)** in new `v8/client/s4u.go`:
+
    ```go
    func (cl *Client) GetServiceTicketForUser(user types.PrincipalName, userRealm, spn string, opts ...S4UOption) (messages.Ticket, types.EncryptionKey, error) // S4U2self
    func (cl *Client) GetServiceTicketOnBehalfOf(evidence messages.Ticket, spn string, opts ...S4UOption) (messages.Ticket, types.EncryptionKey, error)          // S4U2proxy
    ```
+
    - S4U2self: TGS-REQ to own TGT's realm with `sname` = own principal, PA-FOR-USER (checksum `KERB_CHECKSUM_HMAC_MD5` over `name-type(4 LE) || name-strings || realm || "Kerberos"` keyed by the TGT session key, usage `KERB_NON_KERB_CKSUM_SALT`), plus PA-S4U-X509-USER when the KDC supports it (checksum over DER `S4UUserID`, usage 26; verify reply PA-S4U-X509-USER usage 27). Handle cross-realm user: follow referrals per MS-SFU §3.1.5.1.1 using the user's realm TGT chain; the resulting ticket is `forwardable` only if protocol transition is allowed — surface the flag.
    - S4U2proxy: TGS-REQ with `cname-in-addl-tkt`, `additional-tickets = [evidence]`, PA-PAC-OPTIONS RBCD bit when `opts.ResourceBased`; map `KDC_ERR_BADOPTION` with NTSTATUS `STATUS_NOT_SUPPORTED`/`STATUS_NO_MATCH` into typed errors (`ErrDelegationNotPermitted`). Cross-realm: obtain referral TGT for the target realm first, then repeat with the evidence ticket per MS-SFU §3.1.5.2.
    - Verify the returned PAC contains `S4U_DELEGATION_INFO` naming the client and the transited services; expose via `ADCredentials.S4UDelegationInfo` on the acceptor.
@@ -321,6 +325,7 @@ MS-PKCA profiles RFC 4556 for AD; gokrb5 implements the client role (MS-PKCA §3
 **Client identity (`v8/pkinit/identity.go`)** — `Identity{Certificate *x509.Certificate; Chain []*x509.Certificate; Signer crypto.Signer}` with loaders `FromPEM`, `FromPKCS12`, and a `Signer`-only constructor for PKCS#11/TPM callers. Selection rules (MS-PKCA §3.1.5.1): certificate must be time-valid, carry EKU `id-kp-clientAuth` or `Smart Card Logon` unless `pkinit_eku_checking = none`, and name the principal via UPN `otherName` SAN, `id-pkinit-san`, or subject mapping; `KeyTrust` mode (KP-8) allows a self-signed certificate. The SID extension (`1.3.6.1.4.1.311.25.2`) is decoded and exposed for diagnostics only.
 
 **AS exchange (`v8/pkinit/client.go`, `v8/client/ASExchange.go`)**:
+
 1. Build `PKAuthenticator` with `paChecksum = SHA-1(DER(KDC-REQ-BODY))`; when the KDC advertised RFC 8636 support (`supportedKDFs` echo or `KDC_ERR_NO_ACCEPTABLE_KDF`), also send `supportedKDFs = [sha512, sha384, sha256]`.
 2. DH mode (default): generate an ephemeral key in MODP group 14 (fall back to the KDC's `TD-DH-PARAMETERS` on `KDC_ERR_DH_KEY_PARAMETERS_NOT_ACCEPTED`, never below `pkinit_dh_min_bits`, default 2048), `clientDHNonce` 32 random bytes. RSA mode when configured or when the KDC returns `KDC_ERR_PUBLIC_KEY_ENCRYPTION_NOT_SUPPORTED` for DH.
 3. Wrap `AuthPack` in CMS `SignedData` signed by `Identity.Signer` with the chain; send PA-PK-AS-REQ plus KERB-PA-PAC-REQUEST; include `PA-PK-OCSP-RESPONSE` when the caller supplies a stapled OCSP response.
@@ -341,7 +346,7 @@ MS-PKCA profiles RFC 4556 for AD; gokrb5 implements the client role (MS-PKCA §3
 ### 4.1 Test layers
 
 | Layer | Runs where | Mechanism |
-|---|---|---|
+| --- | --- | --- |
 | Unit | always | Byte-exact fixtures captured from Windows Server 2019/2022 DCs and Samba AD DC (4.20+), stored as hex constants in `v8/test/testdata/mskile_vectors.go` with the capturing command/tool and OS build recorded. MS-KILE/MS-PAC/MS-SFU "Protocol Examples" sections provide additional normative vectors. |
 | Fuzz | always | `FuzzPACUnmarshal`, `FuzzKerbErrorData`, `FuzzRC4Tokens`, `FuzzFASTResponse`, `FuzzPKASRep`, seeded with all fixtures; 60 s in CI. |
 | Samba AD integration | CI (`INTEGRATION=1 TESTAD=1 TESTAD_REALM=SAMBA.GOKRB5 TESTAD_DIR=<provisioned files>`) | New container `jcmturner/gokrb5:samba-ad-dc` provisioned with users, an RC4-only user, an AES-only user, a service account with `msDS-AllowedToDelegateTo`, an RBCD target (`msDS-AllowedToActOnBehalfOfOtherIdentity`), a protocol-transition-enabled service, a computer account for FAST armor, claims enabled, a PKINIT CA. The container exports `krb5.keytab`, `user` and `pw` so the same `test/ad` discovery drives both Samba and Windows runs. Samba implements MS-KILE/MS-SFU/MS-PAC closely enough for functional tests. |
@@ -415,11 +420,13 @@ Capture procedure is documented in `v8/test/testdata/gen/mskile_capture.md` (Wir
 ## 5. Exit Criteria
 
 ### 5.1 Structures and parsing
+
 - [ ] EC-S1: Every structure in §3.1 round-trips byte-exactly against its captured fixture.
 - [ ] EC-S2: All fuzz targets run 60 s in CI with zero crashes; PAC/UPN/RC4/FAST/PKINIT parsers return errors, never panic, on every truncation of every fixture.
 - [ ] EC-S3: `KRBError.NTStatus()` returns the expected code for fixture set 2.
 
 ### 5.2 Client role (MS-KILE §3.2, MS-SFU §3.1/§3.2)
+
 - [ ] EC-C1: AS-REQ carries KERB-PA-PAC-REQUEST; canonicalised cname accepted; enterprise logon succeeds against Samba and Windows.
 - [ ] EC-C2: PA-SUPPORTED-ENCTYPES consumed; TGS etype selection follows AES-SK semantics; RC4-only accounts work.
 - [ ] EC-C3: S4U2self (PA-FOR-USER and PA-S4U-X509-USER), S4U2proxy (classic and RBCD) succeed; cross-realm S4U follows MS-SFU referral rules; PAC `S4U_DELEGATION_INFO` matches.
@@ -432,6 +439,7 @@ Capture procedure is documented in `v8/test/testdata/gen/mskile_capture.md` (Wir
 - [ ] EC-C10: `gokinit` surfaces NTSTATUS detail; `goklist` shows PAC-derived flags unchanged from MIT output (no regression).
 
 ### 5.3 Application-server role (MS-KILE §3.4, MS-PAC)
+
 - [ ] EC-A1: PAC validation enforces server checksum, client-info name/authtime, requestor SID (when present), UPN_DNS_INFO `S` consistency, duplicate-buffer and alignment rules; every rule has a negative test built with the marshaller.
 - [ ] EC-A2: `ADCredentials` exposes all fields in §3.3 and the HTTP context carries them.
 - [ ] EC-A3: Channel-binding policy Never/WhenSupported/Always behaves per MS-KILE with `KERB_AP_OPTIONS_CBT` detection; `KERB-LOCAL`/`KERB-AD-RESTRICTION-ENTRY` are ignored.
@@ -441,6 +449,7 @@ Capture procedure is documented in `v8/test/testdata/gen/mskile_capture.md` (Wir
 - [ ] EC-A7: Ticket `sname` must match a configured service principal; user-to-user tickets accepted when enabled.
 
 ### 5.4 NEGOEX and PKU2U (MS-NEGOEX, MS-PKU2U)
+
 - [ ] EC-N1: NEGOEX messages round-trip byte-exactly against fixtures 13; decoder never panics (fuzz 60 s).
 - [ ] EC-N2: Kerberos over NEGOEX inside SPNEGO completes in both directions against MIT and Windows; `VERIFY` computed and validated; tampering any prior message fails verification.
 - [ ] EC-N3: SPNEGO acceptor handles an optimistic NEGOEX token from Windows by negotiating down to KRB5 when NEGOEX is disabled, and up to NEGOEX when enabled.
@@ -448,6 +457,7 @@ Capture procedure is documented in `v8/test/testdata/gen/mskile_capture.md` (Wir
 - [ ] EC-N5: Per-message tokens after NEGOEX/PKU2U use RFC 4121 with the negotiated key and interoperate with the peer.
 
 ### 5.5 PKINIT (MS-PKCA)
+
 - [ ] EC-P1: PA-PK-AS-REQ/REP, CMS and typed-data structures round-trip byte-exactly against fixtures 11; `FuzzPKASRep`/`FuzzCMS` 60 s clean; PA-PK-AS-REQ-OLD is rejected with a typed error.
 - [ ] EC-P2: DH (group 14, KDC-directed fallback) and RSA modes obtain a TGT from Samba and Windows; RFC 4556 `octetstring2key` and RFC 8636 KDF vectors pass; Windows Server 2012+ negotiates a SHA-2 KDF.
 - [ ] EC-P3: Client certificate selection enforces MS-PKCA EKU/UPN rules with `pkinit_eku_checking` modes; key-trust (self-signed) identities work when enabled.
@@ -458,6 +468,7 @@ Capture procedure is documented in `v8/test/testdata/gen/mskile_capture.md` (Wir
 - [ ] EC-P8: `gokinit -X X509_user_identity=… -X X509_anchors=…` and `pkinit_*` `krb5.conf` keys behave like MIT `kinit` for the supported subset.
 
 ### 5.6 Quality gates
+
 - [ ] EC-Q1: No exported API removed; new options are additive; `CHANGELOG.md` lists every new setting.
 - [ ] EC-Q2: `go vet`, `gofmt -l`, `go test ./...` (all Go versions in CI), `INTEGRATION=1` MIT suites, `TESTAD=1` Samba suites green; the same suites green against a live Windows domain on the manual runner before release.
 - [ ] EC-Q3: `USAGE.md` documents S4U, channel bindings, delegation, FAST, KKDCP, PKINIT, NEGOEX, PKU2U, Extended Protection; `README.md` feature list updated.
@@ -480,6 +491,7 @@ Conventions for every phase:
 Files: `v8/iana/patype/constants.go`, `v8/iana/adtype/constants.go`, `v8/iana/nametype/constants.go`, `v8/iana/flags/constants.go`, `v8/iana/keyusage/constants.go`, new `v8/iana/msflags/constants.go`, new `v8/iana/ntstatus/constants.go`, new `v8/types/mskile.go`, new `v8/types/fast.go`, new `v8/types/mskile_test.go`, new `v8/test/testdata/mskile_vectors.go`, new `v8/test/testdata/gen/mskile_capture.md`.
 
 Steps:
+
 1. Add every constant listed in §3.1. Keep existing names; add new aliases rather than renaming.
 2. Implement the structures in §3.1 with `Marshal`/`Unmarshal`, mirroring the style of `types/PAData.go` (`gofork/encoding/asn1`, `generalstring` tags). Little-endian binary structures (`KerbExtError`, `LSAPTokenInfoIntegrity`, `ADAuthDataAPOptions`, `PASupportedEncTypes`) use `encoding/binary` with strict length checks.
 3. Add constructors: `NewKerbPAPACRequestPAData(include bool)`, `NewPAPACOptionsPAData(bits ...int)`, `NewADAuthDataAPOptionsEntry(opts uint32)`, `(PAData).GetPAPACOptions()`, etc.
@@ -493,6 +505,7 @@ Check: `go test ./iana/... ./types/... ./test/testdata` green; `go vet ./...` cl
 Files: `v8/pac/pac_type.go`, `v8/pac/upn_dns_info.go`, `v8/pac/*_test.go`, new `v8/pac/fuzz_test.go`, `v8/types/AuthorizationData.go`, `v8/messages/Ticket.go`, `v8/messages/KRBError.go`, `v8/krberror/error.go`, `v8/service/APExchange.go`, tests alongside.
 
 Steps:
+
 1. In `ProcessPACInfoBuffers` validate each `InfoBuffer` (`Offset+Size <= len(Data)`, `Offset % 8 == 0`, no overlap with the header table or other buffers, `CBuffers` sane); return `ErrPACMalformed` wrapping the detail. Copy slices via a checked helper.
 2. Bounds-check `UPNDNSInfo.Unmarshal` (and audit `client_info.go`, `s4u_delegation_info.go`, `credentials_info.go`, `signature_data.go` for unchecked slicing).
 3. Add `FuzzPACUnmarshal` seeded with all `MarshaledPAC_*` fixtures; property: never panics.
@@ -507,6 +520,7 @@ Check: `go test ./pac/... ./types/... ./messages/... ./service/...` green; `go t
 Files: `v8/messages/KDCReq.go`, `v8/messages/KDCRep.go`, `v8/client/ASExchange.go`, `v8/client/TGSExchange.go`, `v8/client/client.go`, `v8/client/session.go`, `v8/client/cache.go`, `v8/credentials/credentials.go`, `v8/config/krb5conf.go`, `v8/config/hosts.go`, `v8/kadmin/message.go`, `v8/cmd/gokinit/main.go`, `v8/cmd/internal/krbcli/*.go`, tests alongside.
 
 Steps:
+
 1. Add `types.RealmEqual`; replace realm `==`/`!=` comparisons in `messages` verification, `client` session/cache lookups (normalise keys to upper case), and `config` realm lookups.
 2. `ASReqOptions.IncludePAC *bool` and `Config.LibDefaults.RequestPAC` (parse `request_pac`); emit KERB-PA-PAC-REQUEST by default.
 3. `ASRep.Verify`/`TGSRep.Verify`: accept `cname` change when `canonicalize` was set or the request name type was `KRB_NT_ENTERPRISE`; if PA-REQ-ENC-PA-REP was requested, require successful verification before accepting. Update `Credentials` with the canonical name and realm; keep the original for display.
@@ -523,6 +537,7 @@ Check: `go test ./...` green; `INTEGRATION=1` MIT suites green (MIT ignores the 
 Files: new `v8/gssapi/channelBindings.go`, new `v8/gssapi/authenticatorChecksum.go`, `v8/gssapi/contextFlags.go`, `v8/spnego/krb5Token.go`, `v8/spnego/negotiationToken.go`, `v8/spnego/http.go`, `v8/service/settings.go`, `v8/service/APExchange.go`, `v8/messages/APReq.go`, `v8/messages/APRep.go`, `v8/messages/KRBCred.go`, `v8/client/client.go` (forwarded-TGT request helper), `v8/credentials/credentials.go`, tests alongside.
 
 Steps:
+
 1. Implement `ChannelBindings`, `MD5Hash`, `TLSServerEndPoint`, `TLSUnique`.
 2. Replace `newAuthenticatorChksum` with a typed `AuthenticatorChecksum{Bnd, Flags, Deleg}` marshaller/unmarshaller (RFC 4121 §4.1.1) including `Exts`.
 3. `NewKRB5TokenAPREQ` options: bindings, flags, delegate. Delegation: request a forwarded TGT via TGS-REQ (`forwarded`, `forwardable`, acceptor addresses optional), build KRB-CRED (usage 14, session key), honour `ok-as-delegate` unless forced. Add `AD-IF-RELEVANT[AD-AUTH-DATA-AP-OPTIONS{CBT}]` to the authenticator when bindings are given.
@@ -537,6 +552,7 @@ Check: `go test ./gssapi/... ./spnego/... ./service/... ./client/...` green; Sam
 Files: `v8/pac/pac_type.go`, `v8/pac/upn_dns_info.go`, new `v8/pac/attributes_info.go`, new `v8/pac/requestor.go`, new `v8/pac/marshal.go`, new `v8/pac/verify_options.go`, `v8/pac/*_test.go`, `v8/credentials/credentials.go`, `v8/service/APExchange.go`, `v8/spnego/http.go`, `USAGE.md`.
 
 Steps:
+
 1. Add buffers 16–19 and the `ZeroSigData` handling for 16/19 per MS-PAC §2.8.
 2. Fix `UPNDNSInfo` flags; add `S` extension fields.
 3. Implement `PACType.Marshal`, per-buffer `Marshal`, `Sign(serverKey, kdcKey, ticketKey?)`; if `rpc/v2/ndr` lacks an encoder, add a minimal one under `v8/pac/internal/ndrw` for the types used (document in §7).
@@ -557,6 +573,7 @@ non-conformant NDR while retaining lossless PAC re-signing.
 Files: `v8/spnego/negotiationToken.go`, `v8/spnego/spnego.go`, `v8/spnego/krb5Token.go`, tests alongside, `v8/USAGE.md`.
 
 Steps:
+
 1. Compute and verify `mechListMIC` over the DER-encoded `MechTypeList` using the established Kerberos context and RFC 4121 direction, subkey, key-usage, and sequence semantics.
 2. Implement the RFC 4178 `request-mic` continuation in both directions, including fail-closed handling for missing, altered, or unexpected mechanism-list MICs.
 3. Parse and marshal NegTokenInit2 `negHints`; make standard versus Microsoft legacy Kerberos OID ordering configurable without enabling legacy RC4 encryption.
@@ -569,6 +586,7 @@ Check: `go test ./spnego/...` green; race detector and negotiation-token fuzzing
 Files: new `v8/client/s4u.go`, `v8/messages/KDCReq.go` (`NewS4U2SelfTGSReq`, `NewS4U2ProxyTGSReq`), `v8/messages/KDCRep.go` (verify PA-S4U-X509-USER reply checksum), `v8/client/TGSExchange.go` (referral handling for S4U per MS-SFU §3.1.5), `v8/krberror/error.go` (`ErrDelegationNotPermitted`, `ErrProtocolTransitionNotPermitted`), `v8/credentials/credentials.go` (`S4UDelegationInfo` exposure already from Phase 4), tests alongside, `USAGE.md`.
 
 Steps:
+
 1. PA-FOR-USER builder with HMAC-MD5 checksum exactly per MS-SFU §2.2.1 (byte order and concatenation), keyed with the TGT session key, usage 17.
 2. PA-S4U-X509-USER builder (usage 26) and reply verification (usage 27); send both when the KDC advertises support (Windows 2008+); fall back to PA-FOR-USER only on `KDC_ERR_PADATA_TYPE_NOSUPP`.
 3. S4U2self flow including cross-realm user (obtain referral TGT for the user's realm, retry there, then present to own realm per MS-SFU §3.1.5.1.1); expose whether the ticket is `forwardable`.
@@ -583,6 +601,7 @@ Check: `go test ./client/... ./messages/...` green; `TESTAD=1` S4U suite green a
 Files: new `v8/messages/fast.go`, new `v8/client/fast.go`, `v8/client/ASExchange.go`, `v8/client/TGSExchange.go`, `v8/client/settings.go`, `v8/crypto/crypto.go` (`KRBFXCF2` — check `v8/crypto/common` first), `v8/messages/KDCRep.go`, `v8/messages/KRBError.go`, tests alongside, `USAGE.md`.
 
 Steps:
+
 1. Implement `KRB-FX-CF2` (RFC 6113 §5.1) with test vectors from RFC 6113 appendix / MIT `t_cf2`.
 2. Armor acquisition: explicit `(ticket, key)` option or keytab-based armor AS exchange; armor key derivation; `FX_FAST_ARMOR_AP_REQUEST`.
 3. Wrap AS-REQ/TGS-REQ into PA-FX-FAST; implement PA-ENCRYPTED-CHALLENGE pre-auth; carry PA-FX-COOKIE; unwrap PA-FX-FAST replies (strengthen key, `KrbFastFinished` ticket checksum) and PA-FX-ERROR.
@@ -597,6 +616,7 @@ Check: `go test ./...` green; MIT FAST test green; Samba FAST/claims tests green
 Files: new `v8/client/kkdcp.go`, `v8/client/network.go`, `v8/config/krb5conf.go` (`kdc = https://…`, `kpasswd_server = https://…`), `v8/config/hosts.go`, `v8/kadmin/passwd.go` / `v8/client/passwd.go`, `v8/client/settings.go` (`HTTPClient`), tests with `httptest`, `USAGE.md`.
 
 Steps:
+
 1. `KDC-PROXY-MESSAGE` ASN.1 type in `v8/types` (Phase 0 may pre-add it) with marshal/unmarshal.
 2. When a resolved KDC entry has scheme `https`, send via POST with 4-byte-length-prefixed message, `Content-Type: application/kerberos`, `target-domain` = realm; parse reply; map HTTP errors to `NetworkingError`.
 3. Apply the same path to kpasswd when `kpasswd_server` is `https://`.
@@ -609,6 +629,7 @@ Check: `go test ./client/... ./config/...` green; integration item 10 green.
 Files: new package `v8/pkinit/` (`asn1.go`, `cms.go`, `identity.go`, `dh.go`, `kdf.go`, `kdccert.go`, `client.go`, `errors.go`, `pkinit_test.go`, `fuzz_test.go`), `v8/client/ASExchange.go` (PA-PK-AS-REQ path and PKINIT error retries), `v8/client/settings.go` (`PKINITIdentity`, `PKINITAnchors`, `RequireFreshness`, `PKINITOCSPResponse`), `v8/client/client.go` (`PKINITCredentials()`), `v8/config/krb5conf.go` (`pkinit_*` keys), `v8/pac/pac_type.go` + `v8/pac/credentials_info.go` (decrypt buffer 2 with a supplied reply key), `v8/iana/errorcode` (verify all PKINIT codes present), `v8/cmd/gokinit` (`-X` options, PIN prompt), `go.mod` (only if Open Question 10 selects a dependency), `v8/test/testdata/mskile_vectors.go` (fixture 11), tests alongside, `USAGE.md`.
 
 Steps:
+
 1. ASN.1 structures from §3.9 including RFC 8636 `supportedKDFs`/`kdf`, RFC 8070 `freshnessToken`, `TD-*` typed data, `KRB5PrincipalName`, and the PA-PK-AS-REQ-OLD recogniser; round-trip tests against fixture 11 and the RFC 4556 examples.
 2. CMS subset per §3.9 with sign/verify and RSA `EnvelopedData`; `FuzzCMS`.
 3. `Identity` loaders (PEM, PKCS#12, `crypto.Signer`) and MS-PKCA client-certificate selection rules with `pkinit_eku_checking` modes and key-trust mode.
@@ -626,6 +647,7 @@ Check: `go test ./pkinit/... ./client/... ./pac/... ./cmd/...` green; `go test -
 Files: new `v8/gssapi/mechanism.go` (`Mechanism`, `Context` interfaces; `NegoExKey()`/`NegoExVerifyKey()` on the KRB5 context), `v8/gssapi/gssapi.go` (OIDs `OIDNegoEx`, `OIDPKU2U`), new package `v8/negoex/` (`message.go`, `vectors.go`, `conversation.go`, `verify.go`, `scheme_kerberos.go`, `negoex_test.go`, `fuzz_test.go`), `v8/spnego/negotiationToken.go`, `v8/spnego/spnego.go`, `v8/spnego/http.go`, `v8/iana/keyusage/constants.go`, `v8/test/testdata/mskile_vectors.go` (fixture 13), tests alongside, `USAGE.md`.
 
 Steps:
+
 1. Define `gssapi.Mechanism`/`gssapi.Context`; adapt the existing KRB5 initiator/acceptor (`spnego/krb5Token.go`, Phase 3/5 context) to implement them without changing exported behaviour. Implement the KRB5 NEGOEX key derivation with the GSS PRF (RFC 4401) mirroring MIT's `krb5_gss_inquire_sec_context_by_oid`; add the verified key-usage constants.
 2. Implement NEGOEX structures and vector encoding with strict bounds checks; `FuzzNegoExUnmarshal` seeded with fixture 13.
 3. Implement the conversation state machine for initiator and acceptor (scheme intersection, optimistic `AP_REQUEST`, `CHALLENGE` loop, `VERIFY` computation/validation over the message log, `ALERT` handling, NTSTATUS mapping).
@@ -639,6 +661,7 @@ Check: `go test ./gssapi/... ./negoex/... ./spnego/...` green; `go test -fuzz Fu
 Files: new package `v8/pku2u/` (`names.go`, `metadata.go`, `initiator.go`, `acceptor.go`, `ticket.go`, `pku2u_test.go`, `fuzz_test.go`), `v8/pkinit` (export the AS-REQ/AS-REP PKINIT builders and reply-key derivation for reuse), `v8/negoex/scheme_pku2u.go`, `v8/credentials/credentials.go` (`CertificateIdentity` on the acceptor side), `v8/spnego/http.go` (acceptor option to enable PKU2U), `v8/test/testdata/mskile_vectors.go` (fixture 14), tests alongside, `USAGE.md`.
 
 Steps:
+
 1. Implement `WELLKNOWN:PKU2U` realm handling and certificate-to-principal mapping (UPN SAN, subject fallback) with unit tests.
 2. Implement metadata encoding/decoding (trusted certifiers) and selection of a certificate acceptable to the peer.
 3. Initiator: build the PKINIT AS-REQ for the acceptor name, process AS-REP, send AP-REQ with mutual flag; complete on AP-REP; derive the context key from the AP-REP subkey.
@@ -653,6 +676,7 @@ Check: `go test ./pku2u/... ./negoex/... ./spnego/...` green; fuzz clean; end-to
 Files: new `v8/test/testdata/docker/samba-ad-dc/` (Dockerfile, provisioning script creating the accounts in §4.1 and exporting `krb5.keytab`, `user`, `pw` for `test/ad`), `.github/workflows/testingv8.yml` (new jobs `ad-samba` with `TESTAD=1 TESTAD_REALM=… TESTAD_DIR=… INTEGRATION=1`, `negoex-mit`, and 60 s fuzz jobs for all fuzz targets), `v8/test/ad/ad.go` (add `Kind()` reporting `samba|windows` from the discovered KDC so tests can skip Windows-only or Samba-only cases), new `v8/test/adintegration/*_test.go` (build tag `adintegration`) implementing §4.4 items 1–14, `v8/USAGE.md`, `v8/README.md`, `v8/CHANGELOG.md`, this document (§7 resolutions, status → Implemented).
 
 Steps:
+
 1. Build and pin the Samba container; provision users, service accounts, delegation attributes, claims, CA and computer account; export keytabs into `testdata` (test-only secrets). Add the MIT ≥ 1.18 image used for NEGOEX interop.
 2. Implement §4.4 tests; each skips without the gate.
 3. Add CI jobs; ensure runtime < 15 min.
@@ -684,3 +708,13 @@ Check: all §5 checkboxes ticked; CI green; Windows checklist executed once and 
 17. **RFC 8636 KDF selection by Windows (Phase 9)** — Verify which `kdfId` values Windows Server 2012–2022 select when offered SHA-256/384/512, and whether omitting `supportedKDFs` still yields `octetstring2key`; fixtures must cover both.
 18. **Freshness enforcement (Phase 9)** — Confirm the KRB-ERROR code and e-data Windows returns when the freshness extension is required but absent, so `RequireFreshness`/retry logic matches.
 19. **Key-trust identities (Phase 9)** — Confirm the AuthPack/CMS shape Windows Hello key-trust clients send (self-signed certificate vs. bare public key) before implementing KP-8.
+
+[MS-KILE]: https://learn.microsoft.com/openspecs/windows_protocols/ms-kile/
+[MS-PAC]: https://learn.microsoft.com/openspecs/windows_protocols/ms-pac/
+[MS-SFU]: https://learn.microsoft.com/openspecs/windows_protocols/ms-sfu/
+[MS-KKDCP]: https://learn.microsoft.com/openspecs/windows_protocols/ms-kkdcp/
+[MS-PKCA]: https://learn.microsoft.com/openspecs/windows_protocols/ms-pkca/
+[MS-SPNG]: https://learn.microsoft.com/openspecs/windows_protocols/ms-spng/
+[MS-NEGOEX]: https://learn.microsoft.com/openspecs/windows_protocols/ms-negoex/
+[MS-PKU2U]: https://learn.microsoft.com/openspecs/windows_protocols/ms-pku2u/
+[MS-NLMP]: https://learn.microsoft.com/openspecs/windows_protocols/ms-nlmp/

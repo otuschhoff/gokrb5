@@ -41,4 +41,11 @@ const (
 	PACOptionBranchAware                        = 1
 	PACOptionForwardToFullDC                    = 2
 	PACOptionResourceBasedConstrainedDelegation = 3
+
+	// KERB_S4U_OPTIONS bit positions.
+	S4UOptionReserved                = 0
+	S4UOptionCheckLogonHours         = 1
+	S4UOptionUseReplyKeyUsage        = 2
+	S4UOptionNTAuthPolicyNotRequired = 3
+	S4UOptionUnconditionalDelegation = 4
 )

@@ -22,6 +22,47 @@ const (
 	KDCError        = "KDC_Error"
 )
 
+var (
+	// ErrDelegationNotPermitted indicates that S4U2proxy policy rejected delegation.
+	ErrDelegationNotPermitted = errors.New("delegation not permitted")
+	// ErrProtocolTransitionNotPermitted indicates that S4U2self policy rejected protocol transition.
+	ErrProtocolTransitionNotPermitted = errors.New("protocol transition not permitted")
+)
+
+// PolicyError classifies an S4U policy failure while retaining the KDC error.
+type PolicyError struct {
+	Kind  error
+	Cause error
+}
+
+func (e PolicyError) Error() string {
+	return fmt.Sprintf("%s: %v", e.Kind, e.Cause)
+}
+
+// Unwrap returns the underlying KDC error.
+func (e PolicyError) Unwrap() error { return e.Cause }
+
+// Is matches the policy classification or any wrapped error.
+func (e PolicyError) Is(target error) bool {
+	return target == e.Kind || errors.Is(e.Cause, target)
+}
+
+// NTStatus returns an extended status carried by the KDC error.
+func (e PolicyError) NTStatus() (ntstatus.Code, bool) {
+	var provider interface {
+		NTStatus() (ntstatus.Code, bool)
+	}
+	if errors.As(e.Cause, &provider) {
+		return provider.NTStatus()
+	}
+	return 0, false
+}
+
+// NewPolicyError classifies an S4U policy failure.
+func NewPolicyError(kind, cause error) error {
+	return PolicyError{Kind: kind, Cause: cause}
+}
+
 // Krberror is an error type for gokrb5
 type Krberror struct {
 	RootCause string

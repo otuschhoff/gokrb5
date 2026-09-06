@@ -5,6 +5,7 @@ package messages
 
 import (
 	"crypto/rand"
+	"crypto/x509"
 	"fmt"
 	"math"
 	"math/big"
@@ -76,6 +77,13 @@ type TGSReqOptions struct {
 	Forwardable       *bool
 	Forwarded         *bool
 	Addresses         *types.HostAddresses
+}
+
+// S4U2SelfReqOptions controls S4U2self pre-authentication data.
+type S4U2SelfReqOptions struct {
+	TGSReqOptions
+	SubjectCertificate []byte
+	PAForUserOnly      bool
 }
 
 type marshalKDCReqBody struct {
@@ -254,6 +262,66 @@ func NewTGSReqWithOptions(cname types.PrincipalName, kdcRealm string, c *config.
 		return a, err
 	}
 	return a, a.addMSKILEPAData(c, options)
+}
+
+// NewS4U2SelfTGSReq generates an S4U2self request for a service ticket to sname.
+func NewS4U2SelfTGSReq(cname types.PrincipalName, kdcRealm string, c *config.Config, tgt Ticket, sessionKey types.EncryptionKey, sname, user types.PrincipalName, userRealm string, options S4U2SelfReqOptions) (TGSReq, error) {
+	if len(options.SubjectCertificate) > 0 {
+		if _, err := x509.ParseCertificate(options.SubjectCertificate); err != nil {
+			return TGSReq{}, fmt.Errorf("invalid S4U subject certificate: %v", err)
+		}
+	}
+	a, err := tgsReq(cname, sname, kdcRealm, false, c, options.TGSReqOptions)
+	if err != nil {
+		return a, err
+	}
+	if err := a.setPAData(tgt, sessionKey); err != nil {
+		return a, err
+	}
+	paForUser, err := NewPAForUserPAData(user, userRealm, sessionKey)
+	if err != nil {
+		return a, err
+	}
+	a.PAData = append(a.PAData, paForUser)
+	if !options.PAForUserOnly && supportsS4UX509(sessionKey.KeyType) {
+		s4uOptions := types.NewKrbFlags()
+		types.SetFlag(&s4uOptions, flags.S4UOptionUseReplyKeyUsage)
+		x509, err := NewPAS4UX509UserPAData(types.S4UUserID{
+			Nonce:              uint32(a.ReqBody.Nonce),
+			CName:              user,
+			CRealm:             userRealm,
+			SubjectCertificate: append([]byte(nil), options.SubjectCertificate...),
+			Options:            s4uOptions,
+		}, sessionKey)
+		if err != nil {
+			return a, err
+		}
+		a.PAData = append(a.PAData, x509)
+	}
+	return a, a.addMSKILEPAData(c, options.TGSReqOptions)
+}
+
+// NewS4U2ProxyTGSReq generates an S4U2proxy request using an evidence ticket.
+func NewS4U2ProxyTGSReq(cname types.PrincipalName, kdcRealm string, c *config.Config, tgt Ticket, sessionKey types.EncryptionKey, sname types.PrincipalName, evidence Ticket, options TGSReqOptions) (TGSReq, error) {
+	a, err := tgsReq(cname, sname, kdcRealm, false, c, options)
+	if err != nil {
+		return a, err
+	}
+	a.ReqBody.AdditionalTickets = []Ticket{evidence}
+	types.SetFlag(&a.ReqBody.KDCOptions, flags.CNameInAddlTkt)
+	if err := a.setPAData(tgt, sessionKey); err != nil {
+		return a, err
+	}
+	return a, a.addMSKILEPAData(c, options)
+}
+
+func supportsS4UX509(keyType int32) bool {
+	switch keyType {
+	case etypeID.DES_CBC_CRC, etypeID.DES_CBC_MD4, etypeID.DES_CBC_MD5, etypeID.RC4_HMAC:
+		return false
+	default:
+		return true
+	}
 }
 
 // NewUser2UserTGSReq returns a TGS-REQ suitable for user-to-user authentication (https://tools.ietf.org/html/rfc4120#section-3.7)

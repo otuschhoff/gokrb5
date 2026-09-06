@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+	"github.com/otuschhoff/gokrb5/v8/iana/flags"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
@@ -21,7 +23,9 @@ type Cache struct {
 // CacheEntry holds details for a cache entry.
 type CacheEntry struct {
 	SPN          string
-	Ticket       messages.Ticket `json:"-"`
+	UserName     types.PrincipalName `json:"-"`
+	UserRealm    string              `json:"-"`
+	Ticket       messages.Ticket     `json:"-"`
 	AuthTime     time.Time
 	StartTime    time.Time
 	EndTime      time.Time
@@ -32,6 +36,14 @@ type CacheEntry struct {
 	AuthData     []types.AuthorizationDataEntry `json:"-"`
 	IsSKey       bool                           `json:"-"`
 	SecondTicket []byte                         `json:"-"`
+}
+
+// S4UTicketInfo exposes an impersonated ticket and its KDC-issued metadata.
+type S4UTicketInfo struct {
+	Ticket      messages.Ticket
+	SessionKey  types.EncryptionKey
+	Forwardable bool
+	EndTime     time.Time
 }
 
 // NewCache creates a new client ticket cache instance.
@@ -76,9 +88,13 @@ func (c *Cache) addEntry(tkt messages.Ticket, authTime, startTime, endTime, rene
 
 func (c *Cache) addEntryWithDetails(tkt messages.Ticket, authTime, startTime, endTime, renewTill time.Time, sessionKey types.EncryptionKey, ticketFlags asn1.BitString, addresses []types.HostAddress, authData []types.AuthorizationDataEntry, isSKey bool, secondTicket []byte) CacheEntry {
 	spn := tkt.SName.PrincipalNameString()
+	return c.addEntryWithKey(spn, spn, tkt, authTime, startTime, endTime, renewTill, sessionKey, ticketFlags, addresses, authData, isSKey, secondTicket)
+}
+
+func (c *Cache) addEntryWithKey(cacheKey, spn string, tkt messages.Ticket, authTime, startTime, endTime, renewTill time.Time, sessionKey types.EncryptionKey, ticketFlags asn1.BitString, addresses []types.HostAddress, authData []types.AuthorizationDataEntry, isSKey bool, secondTicket []byte) CacheEntry {
 	c.mux.Lock()
 	defer c.mux.Unlock()
-	(*c).Entries[spn] = CacheEntry{
+	(*c).Entries[cacheKey] = CacheEntry{
 		SPN:          spn,
 		Ticket:       tkt,
 		AuthTime:     authTime,
@@ -92,7 +108,7 @@ func (c *Cache) addEntryWithDetails(tkt messages.Ticket, authTime, startTime, en
 		IsSKey:       isSKey,
 		SecondTicket: append([]byte(nil), secondTicket...),
 	}
-	return c.Entries[spn]
+	return c.Entries[cacheKey]
 }
 
 // clear deletes all the cache entries
@@ -130,6 +146,74 @@ func (cl *Client) GetCachedTicket(spn string) (messages.Ticket, types.Encryption
 	var tkt messages.Ticket
 	var key types.EncryptionKey
 	return tkt, key, false
+}
+
+// GetCachedServiceTicketForUser returns a valid S4U ticket for a user and SPN.
+func (cl *Client) GetCachedServiceTicketForUser(user types.PrincipalName, userRealm, spn string) (messages.Ticket, types.EncryptionKey, bool) {
+	info, ok := cl.GetCachedServiceTicketForUserInfo(user, userRealm, spn)
+	if ok {
+		return info.Ticket, info.SessionKey, true
+	}
+	return messages.Ticket{}, types.EncryptionKey{}, false
+}
+
+// GetCachedServiceTicketForUserInfo returns a valid S4U ticket with its
+// forwardable state and expiry.
+func (cl *Client) GetCachedServiceTicketForUserInfo(user types.PrincipalName, userRealm, spn string) (S4UTicketInfo, bool) {
+	entry, ok := cl.s4uCache.getEntry(s4uCacheKey(user, userRealm, spn))
+	if ok && time.Now().UTC().After(entry.StartTime) && time.Now().UTC().Before(entry.EndTime) {
+		cl.Log("S4U ticket received from cache for %s as %s@%s", spn, user.PrincipalNameString(), userRealm)
+		forwardable := len(entry.TicketFlags.Bytes) > flags.Forwardable/8 && types.IsFlagSet(&entry.TicketFlags, flags.Forwardable)
+		return S4UTicketInfo{
+			Ticket:      entry.Ticket,
+			SessionKey:  entry.SessionKey,
+			Forwardable: forwardable,
+			EndTime:     entry.EndTime,
+		}, true
+	}
+	return S4UTicketInfo{}, false
+}
+
+func s4uCacheKey(user types.PrincipalName, userRealm, spn string) string {
+	return strings.ToUpper(userRealm) + "\x00" + user.PrincipalNameString() + "\x00" + spn
+}
+
+func (cl *Client) addS4UCacheEntry(user types.PrincipalName, userRealm, spn string, tgsRep messages.TGSRep) {
+	part := tgsRep.DecryptedEncPart
+	key := s4uCacheKey(user, userRealm, spn)
+	cl.s4uCache.mux.Lock()
+	defer cl.s4uCache.mux.Unlock()
+	cl.s4uCache.Entries[key] = CacheEntry{
+		SPN:         spn,
+		UserName:    user,
+		UserRealm:   userRealm,
+		Ticket:      tgsRep.Ticket,
+		AuthTime:    part.AuthTime,
+		StartTime:   part.StartTime,
+		EndTime:     part.EndTime,
+		RenewTill:   part.RenewTill,
+		SessionKey:  part.Key,
+		TicketFlags: part.Flags,
+		Addresses:   append([]types.HostAddress(nil), part.CAddr...),
+	}
+}
+
+func (cl *Client) s4uIdentityForTicket(ticket messages.Ticket) (types.PrincipalName, string, bool) {
+	cl.s4uCache.mux.RLock()
+	defer cl.s4uCache.mux.RUnlock()
+	for _, entry := range cl.s4uCache.Entries {
+		if ticketsEqual(entry.Ticket, ticket) {
+			return entry.UserName, entry.UserRealm, true
+		}
+	}
+	return types.PrincipalName{}, "", false
+}
+
+func ticketsEqual(left, right messages.Ticket) bool {
+	if left.TktVNO != right.TktVNO || !types.RealmEqual(left.Realm, right.Realm) || !left.SName.Equal(right.SName) {
+		return false
+	}
+	return left.EncPart.EType == right.EncPart.EType && left.EncPart.KVNO == right.EncPart.KVNO && string(left.EncPart.Cipher) == string(right.EncPart.Cipher)
 }
 
 // renewTicket renews a cache entry ticket.

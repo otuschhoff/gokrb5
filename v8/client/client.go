@@ -30,6 +30,7 @@ type Client struct {
 	settings      *Settings
 	sessions      *sessions
 	cache         *Cache
+	s4uCache      *Cache
 	kdcTimeOffset time.Duration
 	kdcTimeMux    sync.RWMutex
 	sendToKDCFunc func([]byte, string) ([]byte, error)
@@ -49,7 +50,8 @@ func NewWithPassword(username, realm, password string, krb5conf *config.Config, 
 		sessions: &sessions{
 			Entries: make(map[string]*session),
 		},
-		cache: NewCache(),
+		cache:    NewCache(),
+		s4uCache: NewCache(),
 	}
 }
 
@@ -66,7 +68,8 @@ func NewWithKeytab(username, realm string, kt *keytab.Keytab, krb5conf *config.C
 		sessions: &sessions{
 			Entries: make(map[string]*session),
 		},
-		cache: NewCache(),
+		cache:    NewCache(),
+		s4uCache: NewCache(),
 	}
 }
 
@@ -101,6 +104,7 @@ func NewFromPrincipalName(princ types.PrincipalName, realm string, krb5conf *con
 		settings:    NewSettings(settings...),
 		sessions:    &sessions{Entries: make(map[string]*session)},
 		cache:       NewCache(),
+		s4uCache:    NewCache(),
 	}
 }
 
@@ -115,7 +119,8 @@ func NewFromCCache(c *credentials.CCache, krb5conf *config.Config, settings ...f
 		sessions: &sessions{
 			Entries: make(map[string]*session),
 		},
-		cache: NewCache(),
+		cache:    NewCache(),
+		s4uCache: NewCache(),
 	}
 	spn := types.PrincipalName{
 		NameType:   nametype.KRB_NT_SRV_INST,
@@ -394,6 +399,7 @@ func (cl *Client) Destroy() {
 	creds := credentials.New("", "")
 	cl.sessions.destroy()
 	cl.cache.clear()
+	cl.s4uCache.clear()
 	cl.Credentials = creds
 	cl.Log("client destroyed")
 }
