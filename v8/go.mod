@@ -4,6 +4,7 @@ go 1.18
 
 require (
 	github.com/creack/pty v1.1.18
+	github.com/github/smimesign v0.2.0
 	github.com/gorilla/sessions v1.2.1
 	github.com/hashicorp/go-uuid v1.0.3
 	github.com/jcmturner/aescts/v2 v2.0.0
@@ -17,12 +18,8 @@ require (
 )
 
 require (
-	github.com/certifi/gocertifi v0.0.0-20180118203423-deb3ae2ef261 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/github/smimesign v0.2.0 // indirect
 	github.com/gorilla/securecookie v1.1.1 // indirect
-	github.com/pborman/getopt v0.0.0-20180811024354-2b5b3bfb099b // indirect
-	github.com/pkg/errors v0.8.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	golang.org/x/net v0.7.0 // indirect
 	golang.org/x/sys v0.5.0 // indirect

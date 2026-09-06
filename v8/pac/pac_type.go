@@ -257,8 +257,8 @@ func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey ty
 			}
 			pac.UPNDNSInfo = &k
 		case infoTypePACClientClaimsInfo:
-			if len(p) < 1 {
-				return fmt.Errorf("%w: ClientClaimsInfo is empty", ErrPACMalformed)
+			if len(p) == 0 {
+				continue
 			}
 			var k ClientClaimsInfo
 			err := k.Unmarshal(p)

@@ -8,6 +8,8 @@ hostname="${SAMBA_HOSTNAME:-dc}"
 admin_password="${SAMBA_ADMIN_PASSWORD:-AdminPassw0rd!}"
 test_user="${SAMBA_TEST_USER:-testuser}"
 test_password="${SAMBA_TEST_PASSWORD:-TestPassw0rd!}"
+delegator_user="${SAMBA_DELEGATOR_USER:-frontendsvc}"
+delegator_password="${SAMBA_DELEGATOR_PASSWORD:-FrontendPassw0rd!}"
 target_user="${SAMBA_TARGET_USER:-targetsvc}"
 target_password="${SAMBA_TARGET_PASSWORD:-TargetPassw0rd!}"
 denied_user="${SAMBA_DENIED_USER:-deniedsvc}"
@@ -18,7 +20,8 @@ artifact_dir="${SAMBA_ARTIFACT_DIR:-/artifacts}"
 
 realm_lower="${realm,,}"
 dc_fqdn="${hostname}.${realm_lower}"
-service_spn="host/${dc_fqdn}"
+host_spn="host/${dc_fqdn}"
+service_spn="HTTP/frontend.${realm_lower}"
 target_spn="HTTP/target.${realm_lower}"
 denied_spn="HTTP/denied.${realm_lower}"
 machine_account="${hostname^^}$"
@@ -41,6 +44,7 @@ if [[ ! -s /var/lib/samba/private/sam.ldb ]]; then
         --adminpass="${admin_password}" \
         --use-rfc2307
 fi
+export KRB5_CONFIG=/var/lib/samba/private/krb5.conf
 
 create_user() {
     local account="$1"
@@ -59,24 +63,29 @@ add_spn() {
 }
 
 create_user "${test_user}" "${test_password}"
+create_user "${delegator_user}" "${delegator_password}"
 create_user "${target_user}" "${target_password}"
 create_user "${denied_user}" "${denied_password}"
 create_user "${disabled_user}" "${disabled_password}"
 samba-tool user disable "${disabled_user}"
+add_spn "${service_spn}" "${delegator_user}"
 add_spn "${target_spn}" "${target_user}"
 add_spn "${denied_spn}" "${denied_user}"
 
-samba-tool delegation for-any-protocol "${machine_account}" on
-if ! samba-tool delegation show "${machine_account}" | grep -Fq "${target_spn}"; then
-    samba-tool delegation add-service "${machine_account}" "${target_spn}"
+samba-tool delegation for-any-protocol "${delegator_user}" on
+if ! samba-tool delegation show "${delegator_user}" | grep -Fq "${target_spn}"; then
+    samba-tool delegation add-service "${delegator_user}" "${target_spn}"
 fi
-if ! samba-tool delegation show "${target_user}" | grep -Fq "${machine_account}"; then
-    samba-tool delegation add-principal "${target_user}" "${machine_account}"
+if ! samba-tool delegation show "${target_user}" | grep -Fq "${delegator_user}"; then
+    samba-tool delegation add-principal "${target_user}" "${delegator_user}"
 fi
 
 mkdir -p "${artifact_dir}"
 rm -f "${artifact_dir}/krb5.keytab"
 samba-tool domain exportkeytab "${artifact_dir}/krb5.keytab"
+for principal in "${host_spn}" "${service_spn}" "${target_spn}" "${denied_spn}"; do
+    samba-tool domain exportkeytab "${artifact_dir}/krb5.keytab" --principal="${principal}"
+done
 if [[ ! -s "${artifact_dir}/krb5.keytab" ]]; then
     echo "samba-tool produced an empty keytab" >&2
     exit 1
@@ -89,6 +98,7 @@ TESTAD_KIND=samba
 TESTAD_REALM=${realm}
 TESTAD_KDC=127.0.0.1:88
 TESTAD_SERVICE_SPN=${service_spn}
+TESTAD_DELEGATOR=${delegator_user}
 TESTAD_TARGET_SPN=${target_spn}
 TESTAD_DENIED_SPN=${denied_spn}
 TESTAD_DISABLED_USER=${disabled_user}

@@ -54,6 +54,7 @@ func TestDiscoverADEnvironmentFromFiles(t *testing.T) {
 		{Realm: realm, Components: []string{"HOST", "WS01"}},
 		{Realm: realm, Components: []string{"host", "ws01.ad.example.com"}},
 		{Realm: realm, Components: []string{"WS01$"}},
+		{Realm: realm, Components: []string{"frontendsvc"}},
 		{Realm: "OTHER.EXAMPLE", Components: []string{"host", "ws01.other.example"}},
 	} {
 		if err := kt.AddKey(p, 3, key, time0()); err != nil {
@@ -74,6 +75,7 @@ func TestDiscoverADEnvironmentFromFiles(t *testing.T) {
 	t.Setenv(KindEnvVar, string(KindWindows))
 	t.Setenv(KDCEnvVar, " 127.0.0.1:88, 127.0.0.2:88 ")
 	t.Setenv(ServiceSPNEnvVar, "HTTP/service.ad.example.com")
+	t.Setenv(DelegatorEnvVar, "FRONTENDSVC")
 	t.Setenv(TargetSPNEnvVar, "HTTP/target.ad.example.com")
 	t.Setenv(DeniedSPNEnvVar, "HTTP/denied.ad.example.com")
 	t.Setenv(DisabledUserEnvVar, "disabled")
@@ -112,6 +114,9 @@ func TestDiscoverADEnvironmentFromFiles(t *testing.T) {
 	machine, ok := env.MachineAccountPrincipal()
 	assert.True(t, ok)
 	assert.Equal(t, "WS01$", machine.Components[0])
+	delegator, ok := env.DelegationPrincipal()
+	assert.True(t, ok)
+	assert.Equal(t, "frontendsvc", delegator.Components[0])
 }
 
 func TestDiscoverADEnvironmentMissingFiles(t *testing.T) {

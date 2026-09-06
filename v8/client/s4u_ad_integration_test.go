@@ -11,7 +11,8 @@ import (
 
 func TestClientS4U2SelfAD(t *testing.T) {
 	env := ad.Environment(t)
-	machine, ok := env.MachineAccountPrincipal()
+	env.Config.LibDefaults.Forwardable = true
+	machine, ok := env.DelegationPrincipal()
 	if !ok {
 		t.Skipf("keytab %s has no computer account principal", env.KeytabPath)
 	}

@@ -2,21 +2,107 @@
 name: v8
 on:
   push:
-    paths:
-      - 'v8/**'
-      - '.github/workflows/testingv8.yml'
   pull_request:
     paths:
       - 'v8/**'
       - '.github/workflows/testingv8.yml'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: v8-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
-    name: Tests
+  quality:
+    name: Format, vet, and module checks
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: v8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache-dependency-path: v8/go.sum
+
+      - name: Check formatting
+        run: test -z "$(gofmt -s -l . | tee /dev/stderr)"
+
+      - name: Check module files
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Vet
+        run: go vet ./...
+
+  unit:
+    name: Unit (${{ matrix.os }}, Go ${{ matrix.go }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
-        go: [ '1.18.x', '1.19.x', '1.20.x' ]
+        include:
+          - os: ubuntu-latest
+            go: '1.18.x'
+          - os: ubuntu-latest
+            go: stable
+          - os: macos-latest
+            go: stable
+          - os: windows-latest
+            go: stable
+    defaults:
+      run:
+        working-directory: v8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go ${{ matrix.go }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache-dependency-path: v8/go.sum
+
+      - name: Run unit tests
+        run: go test ./...
+
+  race:
+    name: Race detector
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: v8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache-dependency-path: v8/go.sum
+
+      - name: Run tests with race detector
+        run: go test -race ./...
+
+  build:
+    name: MIT integration (Go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        go: [ '1.18.x', 'stable' ]
     env:
       TEST_KDC_ADDR: 127.0.0.1
       TEST_HTTP_URL: http://cname.test.gokrb5
@@ -24,27 +110,14 @@ jobs:
       DNS_IP: 127.0.88.53
       DNSUTILS_OVERRIDE_NS: 127.0.88.53:53
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Set up Go ${{ matrix.go }}
-        uses: actions/setup-go@v1
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go }}
-
-      - name: Checkout
-        uses: actions/checkout@v2
-        with:
-          ref: ${{ github.ref }}
-
-      - name: Test well formatted with gofmt
-        run: |
-          GO_FILES=$(find ${GITHUB_WORKFLOW} -iname '*.go' -type f | grep -v /vendor/)
-          test -z $(gofmt -s -l -e $GO_FILES | tee /dev/fd/2 | xargs | sed 's/\s//g')
-        id: gofmt
-
-      - name: Unit tests
-        run: |
-          cd ${GITHUB_WORKFLOW}
-          go test -race ./...
-        id: unitTests
+          cache-dependency-path: v8/go.sum
 
       - name: Start integration test dependencies
         run: |
@@ -62,15 +135,18 @@ jobs:
           dig _kerberos._udp.TEST.GOKRB5
         id: intgTestDeps
 
-      - name: Run Examples
+      - name: Build and run examples
         run: |
-          cd ${GITHUB_WORKFLOW}
+          cd v8
           go run -tags="examples" examples/example.go
+          for example in example-AD.go httpClient.go httpServer.go longRunningClient.go; do
+            go build -tags="examples" -o "${RUNNER_TEMP}/${example%.go}" "examples/${example}"
+          done
         id: examples
 
       - name: Tests including integration tests
         run: |
-          cd ${GITHUB_WORKFLOW}
+          cd v8
           go test -race ./...
         env:
           INTEGRATION: 1
@@ -79,7 +155,7 @@ jobs:
 
       - name: MIT interoperability tests
         run: |
-          cd ${GITHUB_WORKFLOW}
+          cd v8
           go test -race -tags interop ./test/interop/...
         env:
           INTEGRATION: 1
@@ -87,7 +163,7 @@ jobs:
 
       - name: Tests (32bit)
         run: |
-          cd ${GITHUB_WORKFLOW}
+          cd v8
           go test ./...
         env:
           GOARCH: 386
@@ -130,13 +206,14 @@ jobs:
           - package: ./types
             target: FuzzFASTUnmarshal
     steps:
-      - name: Set up Go
-        uses: actions/setup-go@v1
-        with:
-          go-version: '1.20.x'
-
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache-dependency-path: v8/go.sum
 
       - name: Run fuzz target
         run: |
@@ -148,13 +225,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Set up Go
-        uses: actions/setup-go@v1
-        with:
-          go-version: '1.20.x'
-
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache-dependency-path: v8/go.sum
 
       - name: Build Samba AD image
         run: |
@@ -204,4 +282,8 @@ jobs:
 
       - name: Show Samba logs on failure
         if: failure()
-        run: docker logs gokrb5-samba-ad
+        run: docker logs gokrb5-samba-ad || true
+
+      - name: Stop Samba AD domain controller
+        if: always()
+        run: docker rm -f gokrb5-samba-ad || true

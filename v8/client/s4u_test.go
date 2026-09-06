@@ -91,6 +91,41 @@ func TestS4U2SelfDoesNotSilentlyDowngrade(t *testing.T) {
 	}
 }
 
+func TestS4U2SelfRetriesPAForUserForForwardableEvidence(t *testing.T) {
+	cfg := s4uClientTestConfig()
+	cl := NewWithPassword("HTTP/service.example.com", "EXAMPLE.COM", "unused", cfg)
+	service := cl.Credentials.CName()
+	user := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
+	key := s4uTestKey(1)
+	calls := 0
+	cl.sendToKDCFunc = func(requestBytes []byte, _ string) ([]byte, error) {
+		calls++
+		var request messages.TGSReq
+		if err := request.Unmarshal(requestBytes); err != nil {
+			t.Fatal(err)
+		}
+		if calls == 1 {
+			if !request.PAData.Contains(patype.PA_S4U_X509_USER) {
+				t.Fatal("first S4U request omitted PA-S4U-X509-USER")
+			}
+			return marshalS4UTGSReply(t, request, key, s4uTestKey(2), user, "EXAMPLE.COM", service), nil
+		}
+		if request.PAData.Contains(patype.PA_S4U_X509_USER) {
+			t.Fatal("retry retained PA-S4U-X509-USER")
+		}
+		return marshalS4UTGSReply(t, request, key, s4uTestKey(3), user, "EXAMPLE.COM", service, flags.Forwardable), nil
+	}
+
+	forwardable := true
+	reply, err := cl.s4u2SelfExchange(service, user, "EXAMPLE.COM", "EXAMPLE.COM", s4uTestTicket("EXAMPLE.COM", "krbtgt/EXAMPLE.COM"), key, s4uOptions{forwardable: &forwardable})
+	if err != nil {
+		t.Fatalf("s4u2SelfExchange() error = %v", err)
+	}
+	if calls != 2 || !types.IsFlagSet(&reply.DecryptedEncPart.Flags, flags.Forwardable) {
+		t.Fatalf("exchange calls = %d, forwardable = %t; want 2 and true", calls, types.IsFlagSet(&reply.DecryptedEncPart.Flags, flags.Forwardable))
+	}
+}
+
 func TestS4U2ProxyReferralPreservesOptionsAndUsesReferralEvidence(t *testing.T) {
 	cfg := s4uClientTestConfig()
 	cl := NewWithPassword("HTTP/service.example.com", "SERVICE.EXAMPLE", "unused", cfg)
@@ -231,13 +266,17 @@ func s4uTestTicket(realm, spn string) messages.Ticket {
 	}
 }
 
-func marshalS4UTGSReply(t *testing.T, request messages.TGSReq, encryptionKey, replyKey types.EncryptionKey, cname types.PrincipalName, crealm string, ticketSName types.PrincipalName) []byte {
+func marshalS4UTGSReply(t *testing.T, request messages.TGSReq, encryptionKey, replyKey types.EncryptionKey, cname types.PrincipalName, crealm string, ticketSName types.PrincipalName, replyFlags ...int) []byte {
 	t.Helper()
 	now := time.Now().UTC()
+	flagsValue := types.NewKrbFlags()
+	for _, flag := range replyFlags {
+		types.SetFlag(&flagsValue, flag)
+	}
 	part := messages.EncKDCRepPart{
 		Key:       replyKey,
 		Nonce:     request.ReqBody.Nonce,
-		Flags:     types.NewKrbFlags(),
+		Flags:     flagsValue,
 		AuthTime:  now,
 		StartTime: now,
 		EndTime:   now.Add(time.Hour),

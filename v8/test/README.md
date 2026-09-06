@@ -11,7 +11,8 @@ Use `TESTAD_KIND=samba` or `TESTAD_KIND=windows` to identify the domain
 implementation. Containerized environments should also set `TESTAD_REALM`,
 `TESTAD_KDC`, and `TESTAD_SERVICE_SPN`; these avoid assumptions about the test
 runner's hostname and DNS domain. Delegation tests use `TESTAD_TARGET_SPN` and
-`TESTAD_DENIED_SPN`. The disabled-account NTSTATUS test uses
+`TESTAD_DENIED_SPN`; `TESTAD_DELEGATOR` selects a dedicated keytab principal,
+falling back to the machine account when unset. The disabled-account test uses
 `TESTAD_DISABLED_USER` and `TESTAD_DISABLED_PASSWORD`. Tests skip only the
 scenario whose optional setting is absent.
 

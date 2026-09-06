@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"testing"
 
 	"github.com/otuschhoff/gokrb5/v8/keytab"
@@ -80,6 +81,21 @@ func TestPACRejectsDuplicateValidationInfo(t *testing.T) {
 	err = duplicate.ProcessPACInfoBuffers(types.EncryptionKey{}, log.New(&bytes.Buffer{}, "", 0))
 	if !errors.Is(err, ErrPACMalformed) {
 		t.Fatalf("ProcessPACInfoBuffers error = %v, want ErrPACMalformed", err)
+	}
+}
+
+func TestPACAllowsEmptyClientClaimsInfo(t *testing.T) {
+	pac := PACType{
+		CBuffers: 1,
+		Buffers:  []InfoBuffer{{ULType: infoTypePACClientClaimsInfo, Offset: 24}},
+		Data:     make([]byte, 24),
+	}
+	err := pac.ProcessPACInfoBuffers(types.EncryptionKey{}, log.New(&bytes.Buffer{}, "", 0))
+	if err == nil || strings.Contains(err.Error(), "ClientClaimsInfo is empty") {
+		t.Fatalf("ProcessPACInfoBuffers error = %v; want normal PAC verification error", err)
+	}
+	if pac.ClientClaimsInfo != nil {
+		t.Fatal("empty client claims buffer produced claims")
 	}
 }
 

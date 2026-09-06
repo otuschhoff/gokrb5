@@ -687,20 +687,22 @@ HttpOnly, two-minute exchange cookies rather than client network addresses.
 
 Status: implemented for locally testable and automated surfaces. CI provisions
 a digest-pinned Samba AD DC and exercises password and machine logon, PAC
-validation, disabled-account NTSTATUS, S4U2self, classic/RBCD S4U2proxy,
-negative delegation, S4U delegation PAC data, SPNEGO, and required FAST. All
-13 parser/security-context fuzz targets run for 60 seconds in a matrix. The
-container could not be built in the implementation environment because no
-container engine was installed; its first CI run remains the runtime
-validation gate. Windows IIS/RPC/CA, bidirectional PKU2U, fixture 14, claims,
-PKINIT, KKDCP, and policy-controlled FAST scenarios remain external release
-gates and must not be represented as completed by synthetic tests.
+validation, disabled-account rejection, S4U2self, classic/RBCD S4U2proxy,
+negative delegation, S4U delegation PAC data, and SPNEGO. All 13
+parser/security-context fuzz targets run for 60 seconds in a matrix. On
+2026-09-06 the pinned image was built locally and the full race-enabled,
+`adintegration`-tagged suite passed against a freshly provisioned domain. The
+pinned Samba image rejects disabled logon without Windows KERB-EXT-ERROR data
+and does not provide interoperable required FAST. Those checks, Windows
+IIS/RPC/CA, bidirectional PKU2U, fixture 14, claims, PKINIT, and KKDCP remain
+external release gates and must not be represented as completed by synthetic
+tests.
 
-Files: new `v8/test/testdata/docker/samba-ad-dc/` (Dockerfile, provisioning script creating the accounts in §4.1 and exporting `krb5.keytab`, `user`, `pw` for `test/ad`), `.github/workflows/testingv8.yml` (new jobs `ad-samba` with `TESTAD=1 TESTAD_REALM=… TESTAD_DIR=… INTEGRATION=1`, `negoex-mit`, and 60 s fuzz jobs for all fuzz targets), `v8/test/ad/ad.go` (add `Kind()` reporting `samba|windows` from the discovered KDC so tests can skip Windows-only or Samba-only cases), new `v8/test/adintegration/*_test.go` (build tag `adintegration`) implementing §4.4 items 1–14, `v8/USAGE.md`, `v8/README.md`, `v8/CHANGELOG.md`, this document (§7 resolutions, status → Implemented).
+Files: new `v8/test/testdata/docker/samba-ad-dc/` (Containerfile and provisioning script creating the automated accounts and exporting `krb5.keytab`, `user`, `pw`, and `environment` for `test/ad`), `.github/workflows/testingv8.yml` (quality, cross-platform unit, race, MIT integration, Samba AD, and 60-second fuzz jobs for every fuzz target), `v8/test/ad/ad.go` (environment kind and deterministic KDC/SPN/delegator overrides), new `v8/test/adintegration/ad_test.go` (build tag `adintegration`) implementing the automated subset of §4.4, `v8/USAGE.md`, `v8/README.md`, `v8/CHANGELOG.md`, this document (§7 resolutions, status → Implemented).
 
 Steps:
 
-1. Build and pin the Samba container; provision users, service accounts, delegation attributes, claims, CA and computer account; export keytabs into `testdata` (test-only secrets). Add the MIT ≥ 1.18 image used for NEGOEX interop.
+1. Build and pin the Samba container; provision users, service accounts, delegation attributes, and the computer account; export test-only keytabs and credentials as runtime artifacts.
 2. Implement §4.4 tests; each skips without the gate.
 3. Add CI jobs; ensure runtime < 15 min.
 4. Document every new API/setting; update feature tables; write the Windows manual-run checklist (`docs/design/ms-kile-windows-checklist.md`) including NEGOEX and PKU2U scenarios.

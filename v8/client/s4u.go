@@ -148,6 +148,11 @@ func (cl *Client) s4u2SelfExchange(service, user types.PrincipalName, userRealm,
 			return messages.TGSRep{}, classifyS4UError(err, false)
 		}
 		replyPAData := types.PADataSequence(reply.PAData)
+		if !isReferralReply(reply, request) && !paForUserOnly && request.PAData.Contains(patype.PA_S4U_X509_USER) &&
+			options.forwardable != nil && *options.forwardable && !types.IsFlagSet(&reply.DecryptedEncPart.Flags, flags.Forwardable) {
+			paForUserOnly = true
+			continue
+		}
 		if request.PAData.Contains(patype.PA_S4U_X509_USER) && replyPAData.Contains(patype.PA_S4U_X509_USER) {
 			normalized, err := reply.VerifyS4UX509UserReply(request, sessionKey)
 			if err != nil {

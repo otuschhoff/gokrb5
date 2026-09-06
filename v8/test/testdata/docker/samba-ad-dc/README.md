@@ -33,7 +33,9 @@ The container must be privileged because Samba AD uses filesystem extended
 attributes. Override the `SAMBA_*` environment variables only when testing a
 non-default realm or credentials.
 
-The automated image provisions logon, account-policy, PAC, classic/RBCD S4U,
-SPNEGO, and FAST coverage. It does not provision an AD CS-compatible CA,
-claims policy, KKDCP proxy, or an independent RPC `gss-server`; those scenarios
-remain in the Windows/manual release checklist.
+The automated image provisions password and machine logon, disabled-account
+rejection, PAC, classic/RBCD S4U, and SPNEGO coverage. Samba does not return the
+Windows KERB-EXT-ERROR status for the disabled account, and the pinned image
+does not provide interoperable required FAST. Those checks, along with AD CS,
+claims policy, KKDCP, and an independent RPC `gss-server`, remain in the
+Windows/manual release checklist.

@@ -27,6 +27,7 @@ const (
 	KindEnvVar         = "TESTAD_KIND"
 	KDCEnvVar          = "TESTAD_KDC"
 	ServiceSPNEnvVar   = "TESTAD_SERVICE_SPN"
+	DelegatorEnvVar    = "TESTAD_DELEGATOR"
 	TargetSPNEnvVar    = "TESTAD_TARGET_SPN"
 	DeniedSPNEnvVar    = "TESTAD_DENIED_SPN"
 	DisabledUserEnvVar = "TESTAD_DISABLED_USER"
@@ -68,6 +69,7 @@ type Env struct {
 	Config           *config.Config
 	kind             Kind
 	serviceSPN       string
+	delegator        string
 	targetSPN        string
 	deniedSPN        string
 	disabledUser     string
@@ -158,6 +160,7 @@ func Discover() (*Env, error) {
 		Config:           cfg,
 		kind:             kind,
 		serviceSPN:       strings.TrimSpace(os.Getenv(ServiceSPNEnvVar)),
+		delegator:        strings.TrimSpace(os.Getenv(DelegatorEnvVar)),
 		targetSPN:        strings.TrimSpace(os.Getenv(TargetSPNEnvVar)),
 		deniedSPN:        strings.TrimSpace(os.Getenv(DeniedSPNEnvVar)),
 		disabledUser:     strings.TrimSpace(os.Getenv(DisabledUserEnvVar)),
@@ -242,6 +245,20 @@ func (e *Env) DelegationTargetSPN() (string, bool) {
 // DeniedTargetSPN returns a target for which S4U2proxy must be denied.
 func (e *Env) DeniedTargetSPN() (string, bool) {
 	return e.deniedSPN, e.deniedSPN != ""
+}
+
+// DelegationPrincipal returns the keytab identity configured for S4U, falling
+// back to the machine account used by existing Windows AD test environments.
+func (e *Env) DelegationPrincipal() (keytab.Principal, bool) {
+	if e.delegator != "" {
+		for _, principal := range e.Keytab.Principals() {
+			if len(principal.Components) == 1 && strings.EqualFold(principal.Components[0], e.delegator) && strings.EqualFold(principal.Realm, e.Realm) {
+				return principal, true
+			}
+		}
+		return keytab.Principal{}, false
+	}
+	return e.MachineAccountPrincipal()
 }
 
 // DisabledAccount returns credentials for the account-policy error test.
