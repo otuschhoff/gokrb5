@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"time"
 
 	"github.com/otuschhoff/gokrb5/v8/keytab"
 	"github.com/otuschhoff/gokrb5/v8/messages"
@@ -26,6 +28,7 @@ type Settings struct {
 	fastArmor               *fastArmorCredentials
 	fastArmorKeytab         *keytab.Keytab
 	requireFAST             bool
+	kkdcpClient             *http.Client
 	logger                  *log.Logger
 }
 
@@ -120,6 +123,21 @@ func RequireFAST(required bool) func(*Settings) {
 // RequireFAST indicates whether unarmored KDC responses must be rejected.
 func (s *Settings) RequireFAST() bool {
 	return s.requireFAST
+}
+
+// KKDCPClient configures the HTTP client used for KDC proxy requests. The
+// client's transport controls TLS trust, client certificates, and proxies.
+func KKDCPClient(httpClient *http.Client) func(*Settings) {
+	return func(s *Settings) {
+		s.kkdcpClient = httpClient
+	}
+}
+
+func (s *Settings) httpClient() *http.Client {
+	if s.kkdcpClient != nil {
+		return s.kkdcpClient
+	}
+	return &http.Client{Timeout: 5 * time.Second}
 }
 
 // Logger used to configure client with a logger.

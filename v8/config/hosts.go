@@ -70,6 +70,18 @@ func (c *Config) GetKDCs(realm string, tcp bool) (int, map[int]string, error) {
 func (c *Config) GetKpasswdServers(realm string, tcp bool) (int, map[int]string, error) {
 	kdcs := make(map[int]string)
 	var count int
+	var ks []string
+	var ka []string
+	for _, r := range c.Realms {
+		if types.RealmEqual(r.Realm, realm) {
+			ks = r.KPasswdServer
+			ka = r.AdminServer
+			break
+		}
+	}
+	if len(ks) > 0 {
+		return len(ks), randServOrder(ks), nil
+	}
 
 	// Use DNS to resolve kerberos SRV records if configured to do so in krb5.conf.
 	if c.LibDefaults.DNSLookupKDC {
@@ -90,23 +102,12 @@ func (c *Config) GetKpasswdServers(realm string, tcp bool) (int, map[int]string,
 		}
 	} else {
 		// Get the KDCs from the krb5.conf an order them randomly for preference.
-		var ks []string
-		var ka []string
-		for _, r := range c.Realms {
-			if types.RealmEqual(r.Realm, realm) {
-				ks = r.KPasswdServer
-				ka = r.AdminServer
-				break
+		for _, k := range ka {
+			h, _, err := net.SplitHostPort(k)
+			if err != nil {
+				continue
 			}
-		}
-		if len(ks) < 1 {
-			for _, k := range ka {
-				h, _, err := net.SplitHostPort(k)
-				if err != nil {
-					continue
-				}
-				ks = append(ks, h+":464")
-			}
+			ks = append(ks, h+":464")
 		}
 		count = len(ks)
 		if count < 1 {
@@ -155,25 +156,8 @@ func firstServiceSRV(services []string, proto, name string) (int, map[int]*net.S
 
 func randServOrder(ks []string) map[int]string {
 	kdcs := make(map[int]string)
-	count := len(ks)
-	i := 1
-	if count > 1 {
-		l := len(ks)
-		for l > 0 {
-			ri := rand.Intn(l)
-			kdcs[i] = ks[ri]
-			if l > 1 {
-				// Remove the entry from the source slice by swapping with the last entry and truncating
-				ks[len(ks)-1], ks[ri] = ks[ri], ks[len(ks)-1]
-				ks = ks[:len(ks)-1]
-				l = len(ks)
-			} else {
-				l = 0
-			}
-			i++
-		}
-	} else {
-		kdcs[i] = ks[0]
+	for i, index := range rand.Perm(len(ks)) {
+		kdcs[i+1] = ks[index]
 	}
 	return kdcs
 }

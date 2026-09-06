@@ -140,6 +140,35 @@ armor. Claims are requested through PA-PAC-OPTIONS when the KDC advertises
 claims support, and validated user and device claims are available through
 `credentials.ADCredentials`.
 
+#### KDC proxy transport
+
+HTTPS KDC proxy endpoints can be configured directly in `krb5.conf`. The same
+endpoint may be used for ticket requests and password changes:
+
+```ini
+[realms]
+ EXAMPLE.ORG = {
+  kdc = https://proxy.example.org/KdcProxy
+  kpasswd_server = https://proxy.example.org/KdcProxy
+ }
+```
+
+The client sends MS-KKDCP `KDC-PROXY-MESSAGE` requests with the target realm
+and validates the framed Kerberos response. By default it uses an HTTP client
+with a five-second timeout and the system TLS trust store. Supply a custom
+client when private roots, client certificates, or custom proxy behavior are
+required:
+
+```go
+httpClient := &http.Client{Transport: transport, Timeout: 10 * time.Second}
+cl := client.NewWithPassword("username", "EXAMPLE.ORG", "password", cfg,
+	client.KKDCPClient(httpClient),
+)
+```
+
+Only HTTPS proxy URLs are accepted. The optional DC locator hint is omitted,
+allowing the proxy to use its default writable-DC discovery flags.
+
 #### Authenticate to a Service
 
 ##### HTTP SPNEGO
