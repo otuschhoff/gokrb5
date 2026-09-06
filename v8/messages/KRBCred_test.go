@@ -8,10 +8,13 @@ import (
 
 	"github.com/otuschhoff/gokrb5/v8/iana"
 	"github.com/otuschhoff/gokrb5/v8/iana/addrtype"
+	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/iana/msgtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
+	"github.com/otuschhoff/gokrb5/v8/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestUnmarshalKRBCred(t *testing.T) {
@@ -129,4 +132,54 @@ func TestUnmarshalEncCredPart_optionalsNULL(t *testing.T) {
 		assert.Equal(t, addrtype.IPv4, addr.AddrType, fmt.Sprintf("Host address type not as expected for address item %d within ticket info %d", j+1, i+1))
 		assert.Equal(t, "12d00023", hex.EncodeToString(addr.Address), fmt.Sprintf("Host address not as expected for address item %d within ticket info %d", j+1, i+1))
 	}
+}
+
+func TestKRBCredRoundTrip(t *testing.T) {
+	t.Parallel()
+	var ticket Ticket
+	ticketBytes, err := hex.DecodeString(testdata.MarshaledKRB5ticket)
+	require.NoError(t, err)
+	require.NoError(t, ticket.Unmarshal(ticketBytes))
+	key := types.EncryptionKey{
+		KeyType:  etypeID.AES256_CTS_HMAC_SHA1_96,
+		KeyValue: []byte("0123456789abcdef0123456789abcdef"),
+	}
+	info := KrbCredInfo{
+		Key:       key,
+		PRealm:    testdata.TEST_REALM,
+		PName:     types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "testuser"),
+		Flags:     types.NewKrbFlags(),
+		AuthTime:  time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC),
+		StartTime: time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC),
+		EndTime:   time.Date(2024, time.January, 2, 13, 4, 5, 0, time.UTC),
+		SRealm:    ticket.Realm,
+		SName:     ticket.SName,
+	}
+
+	credential, err := NewKRBCred([]Ticket{ticket}, []KrbCredInfo{info}, key)
+	require.NoError(t, err)
+	wire, err := credential.Marshal()
+	require.NoError(t, err)
+	var decoded KRBCred
+	require.NoError(t, decoded.Unmarshal(wire))
+	require.NoError(t, decoded.DecryptEncPart(key))
+	require.Len(t, decoded.Tickets, 1)
+	require.Len(t, decoded.DecryptedEncPart.TicketInfo, 1)
+	assert.Equal(t, info.Key, decoded.DecryptedEncPart.TicketInfo[0].Key)
+	assert.Equal(t, info.SName, decoded.DecryptedEncPart.TicketInfo[0].SName)
+}
+
+func TestKRBCredNullEncryptedEncPart(t *testing.T) {
+	part := EncKrbCredPart{TicketInfo: []KrbCredInfo{{
+		Key:    types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: make([]byte, 16)},
+		PRealm: testdata.TEST_REALM,
+		PName:  types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "testuser"),
+	}}}
+	wire, err := part.Marshal()
+	require.NoError(t, err)
+
+	credential := KRBCred{EncPart: types.EncryptedData{EType: 0, Cipher: wire}}
+	require.NoError(t, credential.DecryptEncPart(types.EncryptionKey{}))
+	require.Len(t, credential.DecryptedEncPart.TicketInfo, 1)
+	assert.Equal(t, part.TicketInfo[0].PName, credential.DecryptedEncPart.TicketInfo[0].PName)
 }

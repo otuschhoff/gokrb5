@@ -1,6 +1,8 @@
 package client
 
 import (
+	"fmt"
+
 	"github.com/otuschhoff/gokrb5/v8/iana/flags"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
@@ -141,4 +143,48 @@ func (cl *Client) GetServiceTicket(spn string) (messages.Ticket, types.Encryptio
 		return tkt, skey, err
 	}
 	return tgsRep.Ticket, tgsRep.DecryptedEncPart.Key, nil
+}
+
+// GetDelegatedCredential requests a forwarded TGT and wraps it in a KRB-CRED
+// encrypted with the service-ticket session key. Unless force is true, the
+// service ticket must carry the ok-as-delegate flag.
+func (cl *Client) GetDelegatedCredential(serviceTicket messages.Ticket, serviceSessionKey types.EncryptionKey, addresses types.HostAddresses, force bool) ([]byte, error) {
+	if !force {
+		entry, ok := cl.cache.getEntry(serviceTicket.SName.PrincipalNameString())
+		if !ok || !types.IsFlagSet(&entry.TicketFlags, flags.OKAsDelegate) {
+			return nil, fmt.Errorf("service ticket is not trusted for delegation")
+		}
+	}
+	realm := cl.Credentials.Realm()
+	tgt, tgtKey, err := cl.sessionTGT(realm)
+	if err != nil {
+		return nil, err
+	}
+	forwarded := true
+	forwardable := true
+	addressCopy := append(types.HostAddresses(nil), addresses...)
+	options := cl.tgsReqOptions(realm)
+	options.Forwarded = &forwarded
+	options.Forwardable = &forwardable
+	options.Addresses = &addressCopy
+	sname := types.PrincipalName{NameType: nametype.KRB_NT_SRV_INST, NameString: []string{"krbtgt", realm}}
+	request, err := messages.NewTGSReqWithOptions(cl.Credentials.CName(), realm, cl.Config, tgt, tgtKey, sname, false, options)
+	if err != nil {
+		return nil, fmt.Errorf("could not create forwarded-TGT request: %v", err)
+	}
+	_, reply, err := cl.TGSExchange(request, realm, tgt, tgtKey, 0)
+	if err != nil {
+		return nil, fmt.Errorf("could not obtain forwarded TGT: %v", err)
+	}
+	part := reply.DecryptedEncPart
+	credential, err := messages.NewKRBCred([]messages.Ticket{reply.Ticket}, []messages.KrbCredInfo{{
+		Key: part.Key, PRealm: reply.CRealm, PName: reply.CName, Flags: part.Flags,
+		AuthTime: part.AuthTime, StartTime: part.StartTime, EndTime: part.EndTime,
+		RenewTill: part.RenewTill, SRealm: part.SRealm, SName: part.SName,
+		CAddr: append(types.HostAddresses(nil), part.CAddr...),
+	}}, serviceSessionKey)
+	if err != nil {
+		return nil, fmt.Errorf("could not build delegated KRB_CRED: %v", err)
+	}
+	return credential.Marshal()
 }

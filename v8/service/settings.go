@@ -5,8 +5,18 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/otuschhoff/gokrb5/v8/gssapi"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
 	"github.com/otuschhoff/gokrb5/v8/types"
+)
+
+// ExtendedProtectionPolicy controls channel-binding enforcement.
+type ExtendedProtectionPolicy int
+
+const (
+	ExtendedProtectionDisabled ExtendedProtectionPolicy = iota
+	ExtendedProtectionAllowed
+	ExtendedProtectionRequired
 )
 
 // Settings defines service side configuration settings.
@@ -20,6 +30,46 @@ type Settings struct {
 	maxClockSkew       time.Duration
 	logger             *log.Logger
 	sessionMgr         SessionMgr
+	extendedProtection ExtendedProtectionPolicy
+	channelBindings    *gssapi.ChannelBindings
+	servicePrincipals  []string
+}
+
+// ExtendedProtection configures channel-binding enforcement.
+func ExtendedProtection(policy ExtendedProtectionPolicy) func(*Settings) {
+	return func(s *Settings) {
+		s.extendedProtection = policy
+	}
+}
+
+// ExtendedProtection returns the configured channel-binding policy.
+func (s *Settings) ExtendedProtection() ExtendedProtectionPolicy {
+	return s.extendedProtection
+}
+
+// ChannelBindings configures the channel bindings expected from initiators.
+func ChannelBindings(bindings *gssapi.ChannelBindings) func(*Settings) {
+	return func(s *Settings) {
+		s.channelBindings = bindings
+	}
+}
+
+// ChannelBindings returns the configured acceptor channel bindings.
+func (s *Settings) ChannelBindings() *gssapi.ChannelBindings {
+	return s.channelBindings
+}
+
+// ServicePrincipals restricts tickets accepted by this service. By default,
+// all principals in the configured keytab are accepted.
+func ServicePrincipals(principals ...string) func(*Settings) {
+	return func(s *Settings) {
+		s.servicePrincipals = append([]string(nil), principals...)
+	}
+}
+
+// ServicePrincipals returns a copy of the configured principal allowlist.
+func (s *Settings) ServicePrincipals() []string {
+	return append([]string(nil), s.servicePrincipals...)
 }
 
 // NewSettings creates a new service Settings.

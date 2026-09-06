@@ -1,6 +1,7 @@
 package spnego
 
 import (
+	"bytes"
 	"encoding/hex"
 	"math"
 	"testing"
@@ -11,10 +12,14 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
 	"github.com/otuschhoff/gokrb5/v8/iana/msgtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
+	"github.com/otuschhoff/gokrb5/v8/iana/adtype"
+	"github.com/otuschhoff/gokrb5/v8/iana/flags"
+	"github.com/otuschhoff/gokrb5/v8/iana/msflags"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/otuschhoff/gokrb5/v8/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -143,4 +148,71 @@ func TestNewAPREQKRB5Token_and_Marshal(t *testing.T) {
 	assert.Equal(t, testdata.TEST_REALM, mt.APReq.Ticket.Realm, "Realm in ticket within the AP_REQ of the KRB5Token not as expected.")
 	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, mt.APReq.Ticket.SName.NameString, "SName in ticket within the AP_REQ of the KRB5Token not as expected.")
 	assert.Equal(t, int32(18), mt.APReq.EncryptedAuthenticator.EType, "Authenticator within AP_REQ does not have the etype expected.")
+}
+
+func TestNewAPREQKRB5TokenWithOptions(t *testing.T) {
+	t.Parallel()
+	creds := credentials.New("hftsai", testdata.TEST_REALM)
+	creds.SetCName(types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING})
+	cl := client.Client{Credentials: creds}
+	var tkt messages.Ticket
+	ticketBytes, err := hex.DecodeString(testdata.MarshaledKRB5ticket)
+	require.NoError(t, err)
+	require.NoError(t, tkt.Unmarshal(ticketBytes))
+	key := types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)}
+	bindings := &gssapi.ChannelBindings{ApplicationData: []byte("tls-server-end-point:test")}
+	delegated := []byte{0x76, 0x00}
+
+	mt, err := NewKRB5TokenAPREQWithOptions(&cl, tkt, key, KRB5TokenAPREQOptions{
+		GSSAPIFlags:         []int{gssapi.ContextFlagInteg, gssapi.ContextFlagDeleg},
+		ChannelBindings:     bindings,
+		DelegatedCredential: delegated,
+	})
+	require.NoError(t, err)
+	require.NoError(t, mt.APReq.DecryptAuthenticator(key))
+
+	var checksum gssapi.AuthenticatorChecksum
+	require.NoError(t, checksum.Unmarshal(mt.APReq.Authenticator.Cksum.Checksum))
+	assert.Equal(t, bindings.MD5Hash(), checksum.Bnd)
+	assert.Equal(t, uint16(1), checksum.DelegationOption)
+	assert.True(t, bytes.Equal(delegated, checksum.Deleg))
+}
+
+func TestNewAPREQKRB5TokenMutualAndCBTOptions(t *testing.T) {
+	t.Parallel()
+	creds := credentials.New("hftsai", testdata.TEST_REALM)
+	creds.SetCName(types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING})
+	cl := client.Client{Credentials: creds}
+	var tkt messages.Ticket
+	ticketBytes, err := hex.DecodeString(testdata.MarshaledKRB5ticket)
+	require.NoError(t, err)
+	require.NoError(t, tkt.Unmarshal(ticketBytes))
+	key := types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)}
+
+	mt, err := NewKRB5TokenAPREQWithOptions(&cl, tkt, key, KRB5TokenAPREQOptions{
+		GSSAPIFlags:     []int{gssapi.ContextFlagMutual},
+		ChannelBindings: &gssapi.ChannelBindings{ApplicationData: []byte("binding")},
+	})
+	require.NoError(t, err)
+	require.NoError(t, mt.APReq.DecryptAuthenticator(key))
+	assert.True(t, types.IsFlagSet(&mt.APReq.APOptions, flags.APOptionMutualRequired))
+
+	entries, err := mt.APReq.Authenticator.AuthorizationData.EntriesOfType(adtype.ADAuthDataAPOptions)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	options, err := entries[0].GetADAuthDataAPOptions()
+	require.NoError(t, err)
+	assert.Equal(t, msflags.KERB_AP_OPTIONS_CBT, msflags.APOptions(options))
+}
+
+func TestNewAPREQKRB5TokenRejectsDelegationWithoutFlag(t *testing.T) {
+	t.Parallel()
+	creds := credentials.New("hftsai", testdata.TEST_REALM)
+	creds.SetCName(types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING})
+	cl := client.Client{Credentials: creds}
+
+	_, err := NewKRB5TokenAPREQWithOptions(&cl, messages.Ticket{}, types.EncryptionKey{}, KRB5TokenAPREQOptions{
+		DelegatedCredential: []byte{1},
+	})
+	require.Error(t, err)
 }

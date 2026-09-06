@@ -137,6 +137,7 @@ func (n *NegTokenInit) Verify() (bool, gssapi.Status) {
 			return false, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: "MechToken is not a KRB5 token as expected"}
 		}
 	}
+	mt.settings = n.settings
 	// Verify the mechtoken
 	return n.mechToken.Verify()
 }
@@ -219,6 +220,7 @@ func (n *NegTokenResp) Verify() (bool, gssapi.Status) {
 		if mt == nil {
 			return false, gssapi.Status{Code: gssapi.StatusContinueNeeded}
 		}
+		mt.settings = n.settings
 		// Verify the mechtoken
 		return mt.Verify()
 	}
@@ -287,7 +289,14 @@ func UnmarshalNegToken(b []byte) (bool, interface{}, error) {
 
 // NewNegTokenInitKRB5 creates new Init negotiation token for Kerberos 5
 func NewNegTokenInitKRB5(cl *client.Client, tkt messages.Ticket, sessionKey types.EncryptionKey) (NegTokenInit, error) {
-	mt, err := NewKRB5TokenAPREQ(cl, tkt, sessionKey, []int{gssapi.ContextFlagInteg, gssapi.ContextFlagConf}, []int{})
+	return NewNegTokenInitKRB5WithOptions(cl, tkt, sessionKey, KRB5TokenAPREQOptions{
+		GSSAPIFlags: []int{gssapi.ContextFlagInteg, gssapi.ContextFlagConf},
+	})
+}
+
+// NewNegTokenInitKRB5WithOptions creates a Kerberos NegTokenInit with explicit context options.
+func NewNegTokenInitKRB5WithOptions(cl *client.Client, tkt messages.Ticket, sessionKey types.EncryptionKey, options KRB5TokenAPREQOptions) (NegTokenInit, error) {
+	mt, err := NewKRB5TokenAPREQWithOptions(cl, tkt, sessionKey, options)
 	if err != nil {
 		return NegTokenInit{}, fmt.Errorf("error getting KRB5 token; %v", err)
 	}
@@ -298,5 +307,6 @@ func NewNegTokenInitKRB5(cl *client.Client, tkt messages.Ticket, sessionKey type
 	return NegTokenInit{
 		MechTypes:      []asn1.ObjectIdentifier{gssapi.OIDKRB5.OID()},
 		MechTokenBytes: mtb,
+		mechToken:      &mt,
 	}, nil
 }

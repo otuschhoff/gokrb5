@@ -4,13 +4,15 @@ import "github.com/jcmturner/gofork/encoding/asn1"
 
 // GSS-API context flags assigned numbers.
 const (
-	ContextFlagDeleg    = 1
-	ContextFlagMutual   = 2
-	ContextFlagReplay   = 4
-	ContextFlagSequence = 8
-	ContextFlagConf     = 16
-	ContextFlagInteg    = 32
-	ContextFlagAnon     = 64
+	ContextFlagDeleg         = 1
+	ContextFlagMutual        = 2
+	ContextFlagReplay        = 4
+	ContextFlagSequence      = 8
+	ContextFlagConf          = 16
+	ContextFlagInteg         = 32
+	ContextFlagAnon          = 64
+	ContextFlagDCEStyle      = 0x1000
+	ContextFlagExtendedError = 0x4000
 )
 
 // ContextFlags flags for GSSAPI

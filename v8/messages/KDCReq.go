@@ -73,6 +73,9 @@ type TGSReqOptions struct {
 	PACOptions        []int
 	IncludePAC        *bool
 	SupportedEncTypes msflags.SupportedEncTypes
+	Forwardable       *bool
+	Forwarded         *bool
+	Addresses         *types.HostAddresses
 }
 
 type marshalKDCReqBody struct {
@@ -296,6 +299,20 @@ func tgsReq(cname, sname types.PrincipalName, kdcRealm string, renewal bool, c *
 	if c.LibDefaults.Forwardable {
 		types.SetFlag(&k.ReqBody.KDCOptions, flags.Forwardable)
 	}
+	if options.Forwardable != nil {
+		if *options.Forwardable {
+			types.SetFlag(&k.ReqBody.KDCOptions, flags.Forwardable)
+		} else {
+			types.UnsetFlag(&k.ReqBody.KDCOptions, flags.Forwardable)
+		}
+	}
+	if options.Forwarded != nil {
+		if *options.Forwarded {
+			types.SetFlag(&k.ReqBody.KDCOptions, flags.Forwarded)
+		} else {
+			types.UnsetFlag(&k.ReqBody.KDCOptions, flags.Forwarded)
+		}
+	}
 	if c.LibDefaults.Canonicalize {
 		types.SetFlag(&k.ReqBody.KDCOptions, flags.Canonicalize)
 	}
@@ -306,7 +323,9 @@ func tgsReq(cname, sname types.PrincipalName, kdcRealm string, renewal bool, c *
 		types.SetFlag(&k.ReqBody.KDCOptions, flags.Renewable)
 		k.ReqBody.RTime = t.Add(c.LibDefaults.RenewLifetime)
 	}
-	if !c.LibDefaults.NoAddresses {
+	if options.Addresses != nil {
+		k.ReqBody.Addresses = append([]types.HostAddress(nil), (*options.Addresses)...)
+	} else if !c.LibDefaults.NoAddresses {
 		ha, err := types.LocalHostAddresses()
 		if err != nil {
 			return TGSReq{}, fmt.Errorf("could not get local addresses: %v", err)

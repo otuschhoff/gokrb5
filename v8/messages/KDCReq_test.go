@@ -142,6 +142,25 @@ func TestTGSReqMSKILEOptions(t *testing.T) {
 	assert.True(t, types.IsFlagSet(&options.Options, flags.PACOptionClaims))
 }
 
+func TestTGSReqForwardedOptions(t *testing.T) {
+	cfg := config.New()
+	cfg.LibDefaults.Forwardable = false
+	cfg.LibDefaults.NoAddresses = false
+	yes := true
+	addresses := types.HostAddresses{}
+	req, err := tgsReq(types.PrincipalName{}, types.PrincipalName{}, "EXAMPLE.ORG", false, cfg, TGSReqOptions{
+		Forwardable: &yes,
+		Forwarded:   &yes,
+		Addresses:   &addresses,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.True(t, types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Forwardable))
+	assert.True(t, types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Forwarded))
+	assert.Empty(t, req.ReqBody.Addresses)
+}
+
 func boolPointer(value bool) *bool { return &value }
 
 func TestUnmarshalKDCReqBody(t *testing.T) {

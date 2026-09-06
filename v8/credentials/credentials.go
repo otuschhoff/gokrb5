@@ -35,6 +35,7 @@ type Credentials struct {
 	authTime        time.Time
 	groupMembership map[string]bool
 	sessionID       string
+	delegated       []*Credential
 }
 
 // marshalCredentials is used to enable marshaling and unmarshaling of credentials
@@ -153,6 +154,43 @@ func (c *Credentials) SetADCredentials(a ADCredentials) {
 	for i := range a.GroupMembershipSIDs {
 		c.AddAuthzAttribute(a.GroupMembershipSIDs[i])
 	}
+}
+
+// SetDelegatedCredentials stores delegated Kerberos credentials.
+func (c *Credentials) SetDelegatedCredentials(delegated []*Credential) {
+	c.delegated = cloneDelegatedCredentials(delegated)
+}
+
+// DelegatedCredentials returns defensive copies of delegated Kerberos credentials.
+// Delegated credentials are intentionally excluded from Credentials serialization.
+func (c *Credentials) DelegatedCredentials() []*Credential {
+	return cloneDelegatedCredentials(c.delegated)
+}
+
+func cloneDelegatedCredentials(credentials []*Credential) []*Credential {
+	cloned := make([]*Credential, 0, len(credentials))
+	for _, credential := range credentials {
+		if credential == nil {
+			continue
+		}
+		copyCredential := *credential
+		copyCredential.Client.PrincipalName.NameString = append([]string(nil), credential.Client.PrincipalName.NameString...)
+		copyCredential.Server.PrincipalName.NameString = append([]string(nil), credential.Server.PrincipalName.NameString...)
+		copyCredential.Key.KeyValue = append([]byte(nil), credential.Key.KeyValue...)
+		copyCredential.TicketFlags.Bytes = append([]byte(nil), credential.TicketFlags.Bytes...)
+		copyCredential.Addresses = append([]types.HostAddress(nil), credential.Addresses...)
+		for i := range copyCredential.Addresses {
+			copyCredential.Addresses[i].Address = append([]byte(nil), credential.Addresses[i].Address...)
+		}
+		copyCredential.AuthData = append([]types.AuthorizationDataEntry(nil), credential.AuthData...)
+		for i := range copyCredential.AuthData {
+			copyCredential.AuthData[i].ADData = append([]byte(nil), credential.AuthData[i].ADData...)
+		}
+		copyCredential.Ticket = append([]byte(nil), credential.Ticket...)
+		copyCredential.SecondTicket = append([]byte(nil), credential.SecondTicket...)
+		cloned = append(cloned, &copyCredential)
+	}
+	return cloned
 }
 
 // GetADCredentials returns ADCredentials attributes sorted in the credential

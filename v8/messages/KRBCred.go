@@ -5,7 +5,9 @@ import (
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+	"github.com/otuschhoff/gokrb5/v8/asn1tools"
 	"github.com/otuschhoff/gokrb5/v8/crypto"
+	"github.com/otuschhoff/gokrb5/v8/iana"
 	"github.com/otuschhoff/gokrb5/v8/iana/asnAppTag"
 	"github.com/otuschhoff/gokrb5/v8/iana/keyusage"
 	"github.com/otuschhoff/gokrb5/v8/iana/msgtype"
@@ -54,6 +56,25 @@ type KrbCredInfo struct {
 	CAddr     types.HostAddresses `asn1:"optional,explicit,tag:10"`
 }
 
+// NewKRBCred creates and encrypts a KRB_CRED message.
+func NewKRBCred(tickets []Ticket, ticketInfo []KrbCredInfo, key types.EncryptionKey) (KRBCred, error) {
+	if len(tickets) == 0 || len(tickets) != len(ticketInfo) {
+		return KRBCred{}, fmt.Errorf("KRB_CRED requires one ticket-info entry per ticket")
+	}
+	k := KRBCred{
+		PVNO:    iana.PVNO,
+		MsgType: msgtype.KRB_CRED,
+		Tickets: append([]Ticket(nil), tickets...),
+		DecryptedEncPart: EncKrbCredPart{
+			TicketInfo: append([]KrbCredInfo(nil), ticketInfo...),
+		},
+	}
+	if err := k.EncryptEncPart(key); err != nil {
+		return KRBCred{}, err
+	}
+	return k, nil
+}
+
 // Unmarshal bytes b into the KRBCred struct.
 func (k *KRBCred) Unmarshal(b []byte) error {
 	var m marshalKRBCred
@@ -77,14 +98,53 @@ func (k *KRBCred) Unmarshal(b []byte) error {
 	return nil
 }
 
+// Marshal the KRB_CRED message.
+func (k *KRBCred) Marshal() ([]byte, error) {
+	tickets, err := MarshalTicketSequence(k.Tickets)
+	if err != nil {
+		return nil, err
+	}
+	tickets.Tag = 2
+	wire := marshalKRBCred{
+		PVNO:    k.PVNO,
+		MsgType: k.MsgType,
+		Tickets: tickets,
+		EncPart: k.EncPart,
+	}
+	b, err := asn1.Marshal(wire)
+	if err != nil {
+		return nil, krberror.Errorf(err, krberror.EncodingError, "KRB_CRED marshal error")
+	}
+	return asn1tools.AddASNAppTag(b, asnAppTag.KRBCred), nil
+}
+
+// EncryptEncPart encrypts DecryptedEncPart using the KRB-CRED key usage.
+func (k *KRBCred) EncryptEncPart(key types.EncryptionKey) error {
+	b, err := k.DecryptedEncPart.Marshal()
+	if err != nil {
+		return err
+	}
+	k.EncPart, err = crypto.GetEncryptedData(b, key, keyusage.KRB_CRED_ENCPART, 0)
+	if err != nil {
+		return krberror.Errorf(err, krberror.EncryptingError, "error encrypting KRB_CRED EncPart")
+	}
+	return nil
+}
+
 // DecryptEncPart decrypts the encrypted part of a KRB_CRED.
 func (k *KRBCred) DecryptEncPart(key types.EncryptionKey) error {
-	b, err := crypto.DecryptEncPart(k.EncPart, key, keyusage.KRB_CRED_ENCPART)
-	if err != nil {
-		return krberror.Errorf(err, krberror.DecryptingError, "error decrypting KRB_CRED EncPart")
+	var b []byte
+	if k.EncPart.EType == 0 {
+		b = k.EncPart.Cipher
+	} else {
+		var err error
+		b, err = crypto.DecryptEncPart(k.EncPart, key, keyusage.KRB_CRED_ENCPART)
+		if err != nil {
+			return krberror.Errorf(err, krberror.DecryptingError, "error decrypting KRB_CRED EncPart")
+		}
 	}
 	var denc EncKrbCredPart
-	err = denc.Unmarshal(b)
+	err := denc.Unmarshal(b)
 	if err != nil {
 		return krberror.Errorf(err, krberror.EncodingError, "error unmarshaling encrypted part of KRB_CRED")
 	}
@@ -99,4 +159,13 @@ func (k *EncKrbCredPart) Unmarshal(b []byte) error {
 		return krberror.Errorf(err, krberror.EncodingError, "error unmarshaling EncKrbCredPart")
 	}
 	return nil
+}
+
+// Marshal the encrypted part of a KRB_CRED.
+func (k *EncKrbCredPart) Marshal() ([]byte, error) {
+	b, err := asn1.Marshal(*k)
+	if err != nil {
+		return nil, krberror.Errorf(err, krberror.EncodingError, "EncKrbCredPart marshal error")
+	}
+	return asn1tools.AddASNAppTag(b, asnAppTag.EncKrbCredPart), nil
 }

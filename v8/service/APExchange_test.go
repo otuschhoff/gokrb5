@@ -9,6 +9,8 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/credentials"
+	"github.com/otuschhoff/gokrb5/v8/gssapi"
+	"github.com/otuschhoff/gokrb5/v8/iana/chksumtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/errorcode"
 	"github.com/otuschhoff/gokrb5/v8/iana/flags"
 	"github.com/otuschhoff/gokrb5/v8/iana/msflags"
@@ -450,6 +452,120 @@ func TestVerifyAPREQ_ExpiredTicket(t *testing.T) {
 		assert.Equal(t, errorcode.KRB_AP_ERR_TKT_EXPIRED, err.(messages.KRBError).ErrorCode, "Error code not as expected")
 	} else {
 		t.Fatalf("Error is not a KRBError: %v", err)
+	}
+}
+
+func TestExtendedProtectionPolicy(t *testing.T) {
+	t.Parallel()
+	bindings := &gssapi.ChannelBindings{ApplicationData: []byte("tls-server-end-point:test")}
+	matching := gssapi.NewAuthenticatorChecksum(bindings, gssapi.ContextFlagInteg)
+	matchingBytes, err := matching.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := types.Checksum{}
+	present := types.Checksum{CksumType: chksumtype.GSSAPI, Checksum: matchingBytes}
+	mismatchChecksum := gssapi.NewAuthenticatorChecksum(&gssapi.ChannelBindings{ApplicationData: []byte("different")})
+	mismatchBytes, err := mismatchChecksum.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mismatch := types.Checksum{CksumType: chksumtype.GSSAPI, Checksum: mismatchBytes}
+
+	tests := []struct {
+		name    string
+		policy  ExtendedProtectionPolicy
+		binding *gssapi.ChannelBindings
+		check   types.Checksum
+		wantErr bool
+	}{
+		{name: "disabled missing", policy: ExtendedProtectionDisabled, check: missing},
+		{name: "disabled mismatch", policy: ExtendedProtectionDisabled, binding: bindings, check: mismatch},
+		{name: "allowed missing", policy: ExtendedProtectionAllowed, binding: bindings, check: missing},
+		{name: "allowed matching", policy: ExtendedProtectionAllowed, binding: bindings, check: present},
+		{name: "allowed mismatch", policy: ExtendedProtectionAllowed, binding: bindings, check: mismatch, wantErr: true},
+		{name: "required missing", policy: ExtendedProtectionRequired, binding: bindings, check: missing, wantErr: true},
+		{name: "required matching", policy: ExtendedProtectionRequired, binding: bindings, check: present},
+		{name: "required mismatch", policy: ExtendedProtectionRequired, binding: bindings, check: mismatch, wantErr: true},
+		{name: "required configuration", policy: ExtendedProtectionRequired, check: present, wantErr: true},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			_, _, err := verifyAuthenticatorChecksum(test.check, NewSettings(nil, ExtendedProtection(test.policy), ChannelBindings(test.binding)))
+			assert.Equal(t, test.wantErr, err != nil)
+		})
+	}
+}
+
+func TestExtendedProtectionAllowedEnforcesAdvertisedCBT(t *testing.T) {
+	bindings := &gssapi.ChannelBindings{ApplicationData: []byte("tls-server-end-point:expected")}
+	checksum := gssapi.NewAuthenticatorChecksum(nil)
+	checksumBytes, err := checksum.Marshal()
+	assert.NoError(t, err)
+	raw := types.Checksum{CksumType: chksumtype.GSSAPI, Checksum: checksumBytes}
+
+	_, _, err = verifyAuthenticatorChecksumWithCBT(raw, NewSettings(nil,
+		ExtendedProtection(ExtendedProtectionAllowed), ChannelBindings(bindings)), false)
+	assert.NoError(t, err)
+	_, _, err = verifyAuthenticatorChecksumWithCBT(raw, NewSettings(nil,
+		ExtendedProtection(ExtendedProtectionAllowed), ChannelBindings(bindings)), true)
+	assert.Error(t, err)
+}
+
+func TestServicePrincipalAllowed(t *testing.T) {
+	t.Parallel()
+	b, err := hex.DecodeString(testdata.HTTP_KEYTAB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kt := keytab.New()
+	if err := kt.Unmarshal(b); err != nil {
+		t.Fatal(err)
+	}
+	sname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "HTTP/host.test.gokrb5")
+
+	assert.True(t, servicePrincipalAllowed(sname, "test.gokrb5", NewSettings(kt)))
+	assert.True(t, servicePrincipalAllowed(sname, "TEST.GOKRB5", NewSettings(kt, ServicePrincipals("HTTP/host.test.gokrb5"))))
+	assert.False(t, servicePrincipalAllowed(sname, "OTHER.REALM", NewSettings(kt)))
+	assert.False(t, servicePrincipalAllowed(sname, "TEST.GOKRB5", NewSettings(kt, ServicePrincipals("HTTP/other.test.gokrb5@TEST.GOKRB5"))))
+}
+
+func TestExtractDelegatedCredentials(t *testing.T) {
+	t.Parallel()
+	var ticket messages.Ticket
+	ticketBytes, err := hex.DecodeString(testdata.MarshaledKRB5ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ticket.Unmarshal(ticketBytes); err != nil {
+		t.Fatal(err)
+	}
+	key := types.EncryptionKey{KeyType: 18, KeyValue: []byte("0123456789abcdef0123456789abcdef")}
+	info := messages.KrbCredInfo{
+		Key: key, PRealm: testdata.TEST_REALM,
+		PName: types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "testuser"),
+		Flags: types.NewKrbFlags(), SRealm: ticket.Realm, SName: ticket.SName,
+	}
+	delegated, err := messages.NewKRBCred([]messages.Ticket{ticket}, []messages.KrbCredInfo{info}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := delegated.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := extractDelegatedCredentials(gssapi.AuthenticatorChecksum{
+		Flags: gssapi.ContextFlagDeleg, DelegationOption: 1, Deleg: wire,
+	}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assert.Len(t, got, 1) {
+		assert.Equal(t, info.SName, got[0].Server.PrincipalName)
+		assert.Equal(t, key, got[0].Key)
 	}
 }
 

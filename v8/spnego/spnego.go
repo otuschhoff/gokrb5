@@ -3,29 +3,52 @@ package spnego
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/otuschhoff/gokrb5/v8/asn1tools"
 	"github.com/otuschhoff/gokrb5/v8/client"
+	krbcrypto "github.com/otuschhoff/gokrb5/v8/crypto"
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
+	"github.com/otuschhoff/gokrb5/v8/iana/flags"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
+	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/service"
+	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
 // SPNEGO implements the GSS-API mechanism for RFC 4178
 type SPNEGO struct {
-	serviceSettings *service.Settings
-	client          *client.Client
-	spn             string
+	serviceSettings  *service.Settings
+	client           *client.Client
+	spn              string
+	initiatorOptions KRB5TokenAPREQOptions
+	responseToken    gssapi.ContextToken
+	authenticator    types.Authenticator
+	replyKey         types.EncryptionKey
+	contextKey       types.EncryptionKey
+	sequenceNumber   int64
+	dcePending       bool
+	context          context.Context
 }
 
 // SPNEGOClient configures the SPNEGO mechanism suitable for client side use.
 func SPNEGOClient(cl *client.Client, spn string) *SPNEGO {
+	return SPNEGOClientWithOptions(cl, spn, KRB5TokenAPREQOptions{
+		GSSAPIFlags: []int{gssapi.ContextFlagInteg, gssapi.ContextFlagConf},
+	})
+}
+
+// SPNEGOClientWithOptions configures a client with explicit GSS context options.
+func SPNEGOClientWithOptions(cl *client.Client, spn string, options KRB5TokenAPREQOptions) *SPNEGO {
 	s := new(SPNEGO)
 	s.client = cl
 	s.spn = spn
+	s.initiatorOptions = options
 	s.serviceSettings = service.NewSettings(nil, service.SName(spn))
 	return s
 }
@@ -53,9 +76,19 @@ func (s *SPNEGO) InitSecContext() (gssapi.ContextToken, error) {
 	if err != nil {
 		return &SPNEGOToken{}, err
 	}
-	negTokenInit, err := NewNegTokenInitKRB5(s.client, tkt, key)
+	negTokenInit, err := NewNegTokenInitKRB5WithOptions(s.client, tkt, key, s.initiatorOptions)
 	if err != nil {
 		return &SPNEGOToken{}, fmt.Errorf("could not create NegTokenInit: %v", err)
+	}
+	mechanismToken := negTokenInit.mechToken.(*KRB5Token)
+	s.authenticator = mechanismToken.APReq.Authenticator
+	s.replyKey = mechanismToken.APReq.Authenticator.SubKey
+	if len(s.replyKey.KeyValue) == 0 {
+		s.replyKey = key
+	}
+	if contextFlagSet(s.initiatorOptions.GSSAPIFlags, gssapi.ContextFlagDCEStyle) {
+		mechanismToken.raw = true
+		return mechanismToken, nil
 	}
 	return &SPNEGOToken{
 		Init:         true,
@@ -67,26 +100,211 @@ func (s *SPNEGO) InitSecContext() (gssapi.ContextToken, error) {
 // AcceptSecContext is the GSS-API method for the service to verify the context token provided by the client and
 // establish a context.
 func (s *SPNEGO) AcceptSecContext(ct gssapi.ContextToken) (bool, context.Context, gssapi.Status) {
+	if s.dcePending {
+		return s.ContinueSecContext(ct)
+	}
 	var ctx context.Context
-	t, ok := ct.(*SPNEGOToken)
+	var mechanismToken *KRB5Token
+	var ok bool
+	var status gssapi.Status
+	switch token := ct.(type) {
+	case *SPNEGOToken:
+		token.settings = s.serviceSettings
+		var oid asn1.ObjectIdentifier
+		if token.Init && len(token.NegTokenInit.MechTypes) > 0 {
+			oid = token.NegTokenInit.MechTypes[0]
+		}
+		if token.Resp {
+			oid = token.NegTokenResp.SupportedMech
+		}
+		if !(oid.Equal(gssapi.OIDKRB5.OID()) || oid.Equal(gssapi.OIDMSLegacyKRB5.OID())) {
+			return false, ctx, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: "SPNEGO OID of MechToken is not of type KRB5"}
+		}
+		ok, status = token.Verify()
+		ctx = token.Context()
+		if ok {
+			var err error
+			mechanismToken, err = negotiationKRB5Token(token)
+			if err != nil {
+				return false, ctx, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: err.Error()}
+			}
+		}
+	case *KRB5Token:
+		if !token.raw || !token.IsAPReq() {
+			return false, ctx, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: "raw context token is not a DCE AP_REQ"}
+		}
+		token.settings = s.serviceSettings
+		ok, status = token.Verify()
+		ctx = token.Context()
+		mechanismToken = token
+	default:
+		return false, ctx, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: "context token is neither SPNEGO nor Kerberos"}
+	}
 	if !ok {
-		return false, ctx, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: "context token provided was not an SPNEGO token"}
+		return ok, ctx, status
 	}
-	t.settings = s.serviceSettings
-	var oid asn1.ObjectIdentifier
-	if t.Init {
-		oid = t.NegTokenInit.MechTypes[0]
+	s.context = ctx
+	mutual := mechanismToken.checksum.Flags&(gssapi.ContextFlagMutual|gssapi.ContextFlagDCEStyle) != 0 ||
+		types.IsFlagSet(&mechanismToken.APReq.APOptions, flags.APOptionMutualRequired)
+	if !mutual {
+		s.responseToken = nil
+		return true, ctx, status
 	}
-	if t.Resp {
-		oid = t.NegTokenResp.SupportedMech
+	if len(mechanismToken.replyKey.KeyValue) == 0 {
+		return false, ctx, gssapi.Status{Code: gssapi.StatusFailure, Message: "AP_REP reply key is missing"}
 	}
-	if !(oid.Equal(gssapi.OIDKRB5.OID()) || oid.Equal(gssapi.OIDMSLegacyKRB5.OID())) {
-		return false, ctx, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: "SPNEGO OID of MechToken is not of type KRB5"}
+	et, err := krbcrypto.GetEtype(mechanismToken.replyKey.KeyType)
+	if err != nil {
+		return false, ctx, gssapi.Status{Code: gssapi.StatusFailure, Message: err.Error()}
 	}
-	// Flags in the NegInit must be used 	t.NegTokenInit.ReqFlags
-	ok, status := t.Verify()
-	ctx = t.Context()
+	acceptorSubkey, err := types.GenerateEncryptionKey(et)
+	if err != nil {
+		return false, ctx, gssapi.Status{Code: gssapi.StatusFailure, Message: err.Error()}
+	}
+	sequenceNumber, err := randomSequenceNumber()
+	if err != nil {
+		return false, ctx, gssapi.Status{Code: gssapi.StatusFailure, Message: err.Error()}
+	}
+	dceStyle := mechanismToken.checksum.Flags&gssapi.ContextFlagDCEStyle != 0
+	part := messages.EncAPRepPart{Subkey: acceptorSubkey, SequenceNumber: sequenceNumber}
+	if dceStyle {
+		part.CTime = time.Now().UTC()
+		part.Cusec = microseconds(part.CTime)
+	} else {
+		part.CTime = mechanismToken.APReq.Authenticator.CTime
+		part.Cusec = mechanismToken.APReq.Authenticator.Cusec
+	}
+	reply, err := messages.NewAPRep(part, mechanismToken.replyKey)
+	if err != nil {
+		return false, ctx, gssapi.Status{Code: gssapi.StatusFailure, Message: err.Error()}
+	}
+	replyToken := NewKRB5TokenAPREP(reply, dceStyle)
+	s.contextKey = acceptorSubkey
+	s.sequenceNumber = sequenceNumber
+	if dceStyle {
+		s.dcePending = true
+		s.responseToken = &replyToken
+		return false, ctx, gssapi.Status{Code: gssapi.StatusContinueNeeded}
+	}
+	replyBytes, err := replyToken.Marshal()
+	if err != nil {
+		return false, ctx, gssapi.Status{Code: gssapi.StatusFailure, Message: err.Error()}
+	}
+	s.responseToken = &SPNEGOToken{Resp: true, NegTokenResp: NegTokenResp{
+		NegState: asn1.Enumerated(NegStateAcceptCompleted), SupportedMech: gssapi.OIDKRB5.OID(), ResponseToken: replyBytes,
+	}}
 	return ok, ctx, status
+}
+
+// ResponseToken returns the output token generated by the latest context step.
+func (s *SPNEGO) ResponseToken() gssapi.ContextToken {
+	return s.responseToken
+}
+
+// ContinueSecContext processes a mutual-authentication response or DCE final leg.
+func (s *SPNEGO) ContinueSecContext(ct gssapi.ContextToken) (bool, context.Context, gssapi.Status) {
+	mechanismToken, err := contextKRB5Token(ct, s.serviceSettings)
+	if err != nil || !mechanismToken.IsAPRep() {
+		if err == nil {
+			err = errors.New("continuation token is not an AP_REP")
+		}
+		return false, s.context, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: err.Error()}
+	}
+	if s.client != nil {
+		dceStyle := contextFlagSet(s.initiatorOptions.GSSAPIFlags, gssapi.ContextFlagDCEStyle)
+		if dceStyle {
+			err = mechanismToken.APRep.VerifyDCE(s.replyKey, -1, false, s.serviceSettings.MaxClockSkew())
+		} else {
+			err = mechanismToken.APRep.Verify(s.authenticator, s.replyKey)
+		}
+		if err != nil {
+			return false, s.context, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: err.Error()}
+		}
+		s.contextKey = mechanismToken.APRep.DecryptedEncPart.Subkey
+		if len(s.contextKey.KeyValue) == 0 {
+			s.contextKey = s.replyKey
+		}
+		s.sequenceNumber = mechanismToken.APRep.DecryptedEncPart.SequenceNumber
+		if !dceStyle {
+			s.responseToken = nil
+			return true, s.context, gssapi.Status{Code: gssapi.StatusComplete}
+		}
+		now := time.Now().UTC()
+		finalReply, err := messages.NewAPRep(messages.EncAPRepPart{
+			CTime: now, Cusec: microseconds(now), SequenceNumber: s.sequenceNumber,
+		}, s.contextKey)
+		if err != nil {
+			return false, s.context, gssapi.Status{Code: gssapi.StatusFailure, Message: err.Error()}
+		}
+		finalToken := NewKRB5TokenAPREP(finalReply, true)
+		s.responseToken = &finalToken
+		return true, s.context, gssapi.Status{Code: gssapi.StatusComplete}
+	}
+	if !s.dcePending {
+		return false, s.context, gssapi.Status{Code: gssapi.StatusNoContext, Message: "no DCE context continuation is pending"}
+	}
+	if err := mechanismToken.APRep.VerifyDCE(s.contextKey, s.sequenceNumber, true, s.serviceSettings.MaxClockSkew()); err != nil {
+		return false, s.context, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: err.Error()}
+	}
+	s.dcePending = false
+	s.responseToken = nil
+	return true, s.context, gssapi.Status{Code: gssapi.StatusComplete}
+}
+
+func negotiationKRB5Token(token *SPNEGOToken) (*KRB5Token, error) {
+	if token.Init && token.NegTokenInit.mechToken != nil {
+		mechanismToken, ok := token.NegTokenInit.mechToken.(*KRB5Token)
+		if ok {
+			return mechanismToken, nil
+		}
+	}
+	if token.Resp && token.NegTokenResp.mechToken != nil {
+		mechanismToken, ok := token.NegTokenResp.mechToken.(*KRB5Token)
+		if ok {
+			return mechanismToken, nil
+		}
+	}
+	return nil, errors.New("SPNEGO token has no Kerberos mechanism token")
+}
+
+func contextKRB5Token(token gssapi.ContextToken, settings *service.Settings) (*KRB5Token, error) {
+	if mechanismToken, ok := token.(*KRB5Token); ok {
+		return mechanismToken, nil
+	}
+	spnegoToken, ok := token.(*SPNEGOToken)
+	if !ok {
+		return nil, errors.New("context token is neither SPNEGO nor Kerberos")
+	}
+	if spnegoToken.NegTokenResp.mechToken == nil {
+		mechanismToken := new(KRB5Token)
+		mechanismToken.settings = settings
+		if err := mechanismToken.Unmarshal(spnegoToken.NegTokenResp.ResponseToken); err != nil {
+			return nil, err
+		}
+		spnegoToken.NegTokenResp.mechToken = mechanismToken
+	}
+	return negotiationKRB5Token(spnegoToken)
+}
+
+func randomSequenceNumber() (int64, error) {
+	var encoded [4]byte
+	if _, err := rand.Read(encoded[:]); err != nil {
+		return 0, err
+	}
+	return int64(binary.BigEndian.Uint32(encoded[:]) & 0x3fffffff), nil
+}
+
+func microseconds(t time.Time) int {
+	return int((t.UnixNano() / int64(time.Microsecond)) - t.Unix()*1e6)
+}
+
+func contextFlagSet(contextFlags []int, flag int) bool {
+	for _, candidate := range contextFlags {
+		if candidate == flag {
+			return true
+		}
+	}
+	return false
 }
 
 // Log will write to the service's logger if it is configured.
