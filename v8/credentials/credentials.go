@@ -3,6 +3,7 @@ package credentials
 
 import (
 	"bytes"
+	"crypto/x509"
 	"encoding/gob"
 	"encoding/json"
 	"time"
@@ -17,6 +18,8 @@ import (
 const (
 	// AttributeKeyADCredentials assigned number for AD credentials.
 	AttributeKeyADCredentials = "gokrb5AttributeKeyADCredentials"
+	// AttributeKeyCertificateIdentity identifies certificate-authenticated peers.
+	AttributeKeyCertificateIdentity = "gokrb5AttributeKeyCertificateIdentity"
 )
 
 // Credentials struct for a user.
@@ -84,6 +87,15 @@ type ADCredentials struct {
 	PACAttributes       uint32
 	PACRequestorSID     string
 	TicketAuthTime      time.Time
+}
+
+// CertificateIdentity describes an authenticated X.509 peer.
+type CertificateIdentity struct {
+	Certificate *x509.Certificate
+	Chain       []*x509.Certificate
+	SubjectDN   string
+	UPN         string
+	IssuedBy    string
 }
 
 // SIDAndAttributes is a stable credential view of a PAC SID and its flags.
@@ -235,6 +247,19 @@ func (c *Credentials) GetADCredentials() ADCredentials {
 		return a
 	}
 	return ADCredentials{}
+}
+
+// SetCertificateIdentity stores certificate authentication details.
+func (c *Credentials) SetCertificateIdentity(identity CertificateIdentity) {
+	identity.Chain = append([]*x509.Certificate(nil), identity.Chain...)
+	c.SetAttribute(AttributeKeyCertificateIdentity, identity)
+}
+
+// GetCertificateIdentity returns certificate authentication details.
+func (c *Credentials) GetCertificateIdentity() (CertificateIdentity, bool) {
+	identity, ok := c.attributes[AttributeKeyCertificateIdentity].(CertificateIdentity)
+	identity.Chain = append([]*x509.Certificate(nil), identity.Chain...)
+	return identity, ok
 }
 
 // Methods to implement goidentity.Identity interface

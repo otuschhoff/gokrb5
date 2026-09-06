@@ -74,6 +74,26 @@ func GenerateDHKey(group, minimumBits int, random io.Reader) (*DHKey, error) {
 	return &DHKey{group: group, params: params, private: private, public: public}, nil
 }
 
+// GenerateDHKeyForPeer creates a local key using the supported domain
+// parameters carried in a peer's SubjectPublicKeyInfo.
+func GenerateDHKeyForPeer(peer SubjectPublicKeyInfo, minimumBits int, random io.Reader) (*DHKey, error) {
+	if !peer.Algorithm.Algorithm.Equal(OIDDHPublicNumber) {
+		return nil, fmt.Errorf("unsupported PKINIT DH algorithm OID %v", peer.Algorithm.Algorithm)
+	}
+	var offered dhDomainParameters
+	if err := strictUnmarshal(peer.Algorithm.Parameters.FullBytes, &offered); err != nil {
+		return nil, fmt.Errorf("decode PKINIT DH parameters: %w", err)
+	}
+	for _, group := range []int{MODPGroup16, MODPGroup14, MODPGroup2} {
+		known, _ := dhParameters(group)
+		if offered.P != nil && offered.G != nil && offered.Q != nil &&
+			offered.P.Cmp(known.P) == 0 && offered.G.Cmp(known.G) == 0 && offered.Q.Cmp(known.Q) == 0 {
+			return GenerateDHKey(group, minimumBits, random)
+		}
+	}
+	return nil, fmt.Errorf("PKINIT peer used unsupported DH parameters")
+}
+
 // PublicKey returns the RFC 3279 SubjectPublicKeyInfo representation.
 func (key *DHKey) PublicKey() (SubjectPublicKeyInfo, error) {
 	parameters, err := asn1.Marshal(key.params)

@@ -153,6 +153,52 @@ bounded KDF/DH negotiation retries, and FAST reply-key strengthening. External
 hardware-backed keys can be supplied by constructing a `pkinit.Identity` with
 a `crypto.Signer` (and `crypto.Decrypter` when RSA key delivery is selected).
 
+#### PKU2U and NEGOEX
+
+PKU2U provides KDC-less mutual certificate authentication. Windows negotiates
+PKU2U as the auth scheme inside NEGOEX, which is itself carried by SPNEGO.
+Create a fresh mechanism for every HTTP authentication exchange:
+
+```go
+initiatorFactory := func() gssapi.ContextMechanism {
+	return negoex.New(negoex.NewPKU2UScheme(
+		pku2u.NewInitiator(clientIdentity, trustedRoots,
+			pku2u.WithIntermediates(intermediates),
+			pku2u.WithRevocationChecking(revocationClient)),
+	))
+}
+httpClient := spnego.NewNegotiatingClient(nil, "host/server.example.com", initiatorFactory)
+response, err := httpClient.Do(request)
+```
+
+The acceptor uses the corresponding generic HTTP middleware. Authenticated
+certificate details are exposed through the `credentials.Credentials` stored
+in the request context.
+
+```go
+handler := spnego.SPNEGOContextAuthenticate(application, func() gssapi.ContextMechanism {
+	return negoex.New(negoex.NewPKU2UScheme(
+		pku2u.NewAcceptor(serverIdentity, trustedRoots,
+			pku2u.WithIntermediates(intermediates),
+			pku2u.WithRevocationChecking(revocationClient)),
+	))
+})
+```
+
+Both peers require configured trust roots and bind certificate identities to
+the requested principal. Revocation checking is opt-in; when enabled, failure
+to obtain a valid OCSP or CRL result rejects the exchange. PKU2U supports DH
+PKINIT and AES enctypes 17-20 only. It never offers or accepts RC4 and always
+requests PAC suppression. Bare `pku2u.NewInitiator` and `NewAcceptor` values
+can be passed directly to `spnego.NewNegotiator` for explicit non-Windows
+peers; do not advertise bare PKU2U when Windows compatibility is required.
+
+`NegotiatingClient` replays request bodies during the multi-round exchange.
+Requests with bodies therefore need `Request.GetBody`; requests built by
+`http.NewRequest` from `bytes.Reader`, `strings.Reader`, or `bytes.Buffer`
+provide it automatically. The middleware stores incomplete exchanges in a
+random HttpOnly cookie for up to two minutes.
+
 #### FAST armoring and Active Directory claims
 
 The client can armor AS exchanges with an existing TGT and session key:

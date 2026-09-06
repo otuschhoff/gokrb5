@@ -148,6 +148,15 @@ func (identity *Identity) ValidateForPrincipal(principal types.PrincipalName, re
 	return fmt.Errorf("PKINIT client certificate does not identify principal %s", want)
 }
 
+// CertificatePrincipalNames returns UPN and PKINIT principal names carried in
+// the certificate's subject alternative name extension.
+func CertificatePrincipalNames(certificate *x509.Certificate) ([]string, error) {
+	if certificate == nil {
+		return nil, fmt.Errorf("PKINIT certificate is required")
+	}
+	return certificatePrincipalNames(certificate)
+}
+
 func parsePEMCertificates(data []byte) ([]*x509.Certificate, error) {
 	var certificates []*x509.Certificate
 	for len(data) > 0 {

@@ -7,10 +7,12 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
 
+	goforkasn1 "github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/otuschhoff/gokrb5/v8/config"
 	krbcrypto "github.com/otuschhoff/gokrb5/v8/crypto"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
@@ -94,6 +96,94 @@ func TestProcessDHReply(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, want, result.ReplyKey)
 	require.Equal(t, expires, result.DHKeyExpiration)
+}
+
+func TestAcceptExchangeAgreesOnDHReplyKey(t *testing.T) {
+	clientCertificate, clientKey := testClientCertificate(t, "alice@EXAMPLE.COM", oidClientAuth)
+	clientIdentity, err := NewIdentity(clientCertificate, nil, clientKey, true)
+	require.NoError(t, err)
+	root, serverCertificate, serverKey := testKDCChain(t, asn1.ObjectIdentifier(OIDPKINITKDC), "example.com", time.Now().Add(time.Hour))
+	serverIdentity, err := NewIdentity(serverCertificate, nil, serverKey, false)
+	require.NoError(t, err)
+	anchors := x509.NewCertPool()
+	anchors.AddCert(root)
+	req := testASRequest(t)
+	clientExchange, err := BeginExchange(&req, ExchangeOptions{
+		Identity: clientIdentity, Mode: ModeDH,
+		KDCCertificate: KDCCertificatePolicy{Roots: anchors, Realm: "EXAMPLE.COM"},
+	})
+	require.NoError(t, err)
+	acceptor, err := AcceptExchange(&req, AcceptorOptions{
+		Identity: serverIdentity,
+		ValidateSigner: func(signed *VerifiedSignedData) error {
+			if signed.Signer == nil || !signed.Signer.Equal(clientCertificate) {
+				return fmt.Errorf("unexpected client signer")
+			}
+			return nil
+		},
+	})
+	require.NoError(t, err)
+	clientResult, err := clientExchange.ProcessReply(acceptor.ReplyPAData, acceptor.ReplyKey.KeyType)
+	require.NoError(t, err)
+	require.Equal(t, acceptor.ReplyKey, clientResult.ReplyKey)
+}
+
+func TestAcceptExchangeRejectsInvalidRequests(t *testing.T) {
+	clientCertificate, clientKey := testClientCertificate(t, "alice@EXAMPLE.COM", oidClientAuth)
+	clientIdentity, err := NewIdentity(clientCertificate, nil, clientKey, true)
+	require.NoError(t, err)
+	_, serverCertificate, serverKey := testKDCChain(t, asn1.ObjectIdentifier(OIDPKINITKDC), "example.com", time.Now().Add(time.Hour))
+	serverIdentity, err := NewIdentity(serverCertificate, nil, serverKey, false)
+	require.NoError(t, err)
+	now := time.Now().UTC().Truncate(time.Second)
+	accept := func(request *messages.ASReq) error {
+		_, err := AcceptExchange(request, AcceptorOptions{
+			Identity: serverIdentity, CurrentTime: now, ClockSkew: time.Minute,
+			ValidateSigner: func(*VerifiedSignedData) error { return nil },
+		})
+		return err
+	}
+
+	t.Run("missing PA-PK-AS-REQ", func(t *testing.T) {
+		request := testASRequest(t)
+		require.ErrorContains(t, accept(&request), "missing PA-PK-AS-REQ")
+	})
+	t.Run("duplicate PA-PK-AS-REQ", func(t *testing.T) {
+		request := testASRequest(t)
+		_, err := BeginExchange(&request, ExchangeOptions{Identity: clientIdentity, Mode: ModeDH, CurrentTime: now})
+		require.NoError(t, err)
+		request.PAData = append(request.PAData, request.PAData[len(request.PAData)-1])
+		require.ErrorContains(t, accept(&request), "duplicate")
+	})
+	t.Run("stale authenticator", func(t *testing.T) {
+		request := testASRequest(t)
+		_, err := BeginExchange(&request, ExchangeOptions{Identity: clientIdentity, Mode: ModeDH, CurrentTime: now.Add(-2 * time.Minute)})
+		require.NoError(t, err)
+		require.ErrorContains(t, accept(&request), "clock skew")
+	})
+	t.Run("request body changed", func(t *testing.T) {
+		request := testASRequest(t)
+		_, err := BeginExchange(&request, ExchangeOptions{Identity: clientIdentity, Mode: ModeDH, CurrentTime: now})
+		require.NoError(t, err)
+		request.ReqBody.Nonce++
+		require.ErrorContains(t, accept(&request), "does not bind")
+	})
+	t.Run("unsupported KDF", func(t *testing.T) {
+		request := testASRequest(t)
+		_, err := BeginExchange(&request, ExchangeOptions{
+			Identity: clientIdentity, Mode: ModeDH, CurrentTime: now,
+			SupportedKDFs: []KDFAlgorithmID{{ID: goforkasn1.ObjectIdentifier{1, 2, 3}}},
+		})
+		require.NoError(t, err)
+		require.ErrorContains(t, accept(&request), "no supported KDF")
+	})
+	t.Run("RC4 only", func(t *testing.T) {
+		request := testASRequest(t)
+		request.ReqBody.EType = []int32{etypeID.RC4_HMAC}
+		_, err := BeginExchange(&request, ExchangeOptions{Identity: clientIdentity, Mode: ModeDH, CurrentTime: now})
+		require.NoError(t, err)
+		require.ErrorContains(t, accept(&request), "no supported AES")
+	})
 }
 
 func TestProcessRSAReply(t *testing.T) {

@@ -1,5 +1,10 @@
 package testdata
 
+// Fixture 14 (PKU2U_WIN_METADATA_*, PKU2U_WIN_AS_REQ/REP, and
+// PKU2U_WIN_AP_REQ/REP) intentionally has no constants here yet. These values
+// require a sanitized Windows capture with known test keys; synthetic
+// gokrb5-to-gokrb5 bytes would not provide interoperability evidence.
+
 // These structure-only vectors are derived from the normative MS-KILE and
 // MS-PAC layouts. Full packet captures must replace them when a sanitized
 // Windows interoperability fixture set is available.

@@ -658,6 +658,10 @@ Check: `go test ./gssapi/... ./negoex/... ./spnego/...` green; `go test -fuzz Fu
 
 ### Phase 11 — PKU2U (KN-3)
 
+Status: implemented for gokrb5-to-gokrb5 operation. Windows fixture 14 and the
+two directional Windows interoperability runs remain external release gates;
+no synthetic bytes are accepted as substitutes for those captures.
+
 Files: new package `v8/pku2u/` (`names.go`, `metadata.go`, `initiator.go`, `acceptor.go`, `ticket.go`, `pku2u_test.go`, `fuzz_test.go`), `v8/pkinit` (export the AS-REQ/AS-REP PKINIT builders and reply-key derivation for reuse), `v8/negoex/scheme_pku2u.go`, `v8/credentials/credentials.go` (`CertificateIdentity` on the acceptor side), `v8/spnego/http.go` (acceptor option to enable PKU2U), `v8/test/testdata/mskile_vectors.go` (fixture 14), tests alongside, `USAGE.md`.
 
 Steps:
@@ -670,6 +674,14 @@ Steps:
 6. Tests: §4.3 `pku2u` items; gokrb5↔gokrb5 end-to-end over NEGOEX in CI; fixture 14 decode tests; Windows manual checklist entries.
 
 Check: `go test ./pku2u/... ./negoex/... ./spnego/...` green; fuzz clean; end-to-end CI test green.
+
+Implementation audit: PKU2U rejects non-AES AS offers and AP subkeys, requires
+explicit PAC suppression and mutual authentication, validates both certificate
+chains and mapped names, and uses the acceptor-asserted AP-REP subkey for RFC
+4121 and NEGOEX. RFC 4121 coverage includes integrity and confidentiality,
+MICs, replay rejection, arbitrary RRC values, reserved flag tolerance, and
+AES-SHA1/AES-SHA2 enctypes. Generic HTTP continuation state uses random,
+HttpOnly, two-minute exchange cookies rather than client network addresses.
 
 ### Phase 12 — Samba AD DC CI, Windows manual suite, fuzz jobs, documentation (all EC items)
 
@@ -702,12 +714,13 @@ Check: all §5 checkboxes ticked; CI green; Windows checklist executed once and 
 11. **KERB-DMSA-KEY-PACKAGE / KERB-SUPERSEDED-BY-USER (Phase 0, resolved)** — The current MS-KILE definitions were verified on 2026-09-06. `KERB-SUPERSEDED-BY-USER` uses `name [0]`, `realm [1]`. `KERB-DMSA-KEY-PACKAGE` uses `current-keys [0]`, optional `previous-keys [1]`, `expiration-interval [2]`, and `fetch-interval [4]`. Phase 0 provides strict decode/encode support without attaching client behaviour.
 12. **NEGOEX keys (Phase 10, resolved)** — `GSS_C_INQ_NEGOEX_KEY` and `GSS_C_INQ_NEGOEX_VERIFY_KEY` are mechanism extension points returning directional keys; NEGOEX itself does not derive them with a generic Kerberos PRF. The selected scheme supplies both keys. Checksum key usages are 23 (initiator) and 25 (acceptor).
 13. **NEGOEX auth-scheme GUIDs (Phase 10/11, resolved)** — Auth-scheme GUIDs are supplied by mechanisms through the NEGOEX SPI. Kerberos V5 has no standardized GUID and is not registered as a NEGOEX mechanism by MIT. PKU2U defines `235f69ad-73fb-4dbc-8203-0629e739339b`; add that constant and captured fixtures with Phase 11.
-14. **PKU2U acceptor certificate rules (Phase 11)** — Determine which EKU/SAN rules MS-PKU2U applies to the acceptor certificate (it is not a KDC certificate under MS-PKCA) and whether Azure-AD-style certificates require additional name mapping; decide the default anchors policy.
-15. **PKU2U without NEGOEX (Phase 11)** — Windows only negotiates PKU2U via NEGOEX; decide whether the standalone SPNEGO mechanism is exposed by default or behind an option to avoid advertising an OID Windows will never select.
+14. **PKU2U acceptor certificate rules (Phase 11, resolved pending Windows confirmation)** — Peer certificates use generic X.509 chain and optional revocation validation, not MS-PKCA KDC EKU rules. Host targets require a matching DNS SAN; other targets use UPN SAN then X.500 subject mapping. Trust anchors are always explicit. Fixture 14 must confirm Azure-AD-issued certificate profiles.
+15. **PKU2U without NEGOEX (Phase 11, resolved)** — Windows only negotiates PKU2U via NEGOEX. Bare PKU2U remains an explicit `ContextMechanism` for non-Windows peers and is never advertised automatically.
 16. **MS-PKCA KDC certificate name rule (Phase 9)** — Confirm from the current MS-PKCA §3.2.5.2 whether the `dNSName` SAN must equal the realm's DNS domain, the responding DC's FQDN, or either; capture DC certificates issued by the default "Kerberos Authentication" template (which carries both) and the older "Domain Controller" template.
 17. **RFC 8636 KDF selection by Windows (Phase 9)** — Verify which `kdfId` values Windows Server 2012–2022 select when offered SHA-256/384/512, and whether omitting `supportedKDFs` still yields `octetstring2key`; fixtures must cover both.
 18. **Freshness enforcement (Phase 9)** — Confirm the KRB-ERROR code and e-data Windows returns when the freshness extension is required but absent, so `RequireFreshness`/retry logic matches.
 19. **Key-trust identities (Phase 9)** — Confirm the AuthPack/CMS shape Windows Hello key-trust clients send (self-signed certificate vs. bare public key) before implementing KP-8.
+20. **PKU2U AP-REP subkey (Phase 11, resolved pending Windows confirmation)** — RFC 4121 permits an acceptor-asserted AP-REP subkey and requires it to become the base key with the AcceptorSubkey token flag. The implementation generates one, encrypts AP-REP with the authenticator subkey, and installs the asserted key on both sides. Fixture 14 must confirm Windows PKU2U behavior; do not change this based only on symmetric gokrb5 tests.
 
 [MS-KILE]: https://learn.microsoft.com/openspecs/windows_protocols/ms-kile/
 [MS-PAC]: https://learn.microsoft.com/openspecs/windows_protocols/ms-pac/

@@ -55,6 +55,18 @@ type TransitedEncoding struct {
 
 // NewTicket creates a new Ticket instance.
 func NewTicket(cname types.PrincipalName, crealm string, sname types.PrincipalName, srealm string, flags asn1.BitString, sktab *keytab.Keytab, eTypeID int32, kvno int, authTime, startTime, endTime, renewTill time.Time) (Ticket, types.EncryptionKey, error) {
+	skey, _, err := sktab.GetEncryptionKey(sname, srealm, kvno, eTypeID)
+	if err != nil {
+		return Ticket{}, types.EncryptionKey{}, krberror.Errorf(err, krberror.EncryptingError, "error getting encryption key for new ticket")
+	}
+	return NewTicketWithKey(cname, crealm, sname, srealm, flags, skey, kvno, authTime, startTime, endTime, renewTill)
+}
+
+// NewTicketWithKey creates a ticket encrypted by an explicitly supplied
+// service key. It is used by KDC-less protocols that retain an ephemeral
+// service key for the lifetime of a conversation.
+func NewTicketWithKey(cname types.PrincipalName, crealm string, sname types.PrincipalName, srealm string, flags asn1.BitString, serviceKey types.EncryptionKey, kvno int, authTime, startTime, endTime, renewTill time.Time) (Ticket, types.EncryptionKey, error) {
+	eTypeID := serviceKey.KeyType
 	etype, err := crypto.GetEtype(eTypeID)
 	if err != nil {
 		return Ticket{}, types.EncryptionKey{}, krberror.Errorf(err, krberror.EncryptingError, "error getting etype for new ticket")
@@ -80,11 +92,7 @@ func NewTicket(cname types.PrincipalName, crealm string, sname types.PrincipalNa
 		return Ticket{}, types.EncryptionKey{}, krberror.Errorf(err, krberror.EncodingError, "error marshalling ticket encpart")
 	}
 	b = asn1tools.AddASNAppTag(b, asnAppTag.EncTicketPart)
-	skey, _, err := sktab.GetEncryptionKey(sname, srealm, kvno, eTypeID)
-	if err != nil {
-		return Ticket{}, types.EncryptionKey{}, krberror.Errorf(err, krberror.EncryptingError, "error getting encryption key for new ticket")
-	}
-	ed, err := crypto.GetEncryptedData(b, skey, keyusage.KDC_REP_TICKET, kvno)
+	ed, err := crypto.GetEncryptedData(b, serviceKey, keyusage.KDC_REP_TICKET, kvno)
 	if err != nil {
 		return Ticket{}, types.EncryptionKey{}, krberror.Errorf(err, krberror.EncryptingError, "error encrypting ticket encpart")
 	}
@@ -254,14 +262,19 @@ func (t *Ticket) GetPACTypeWithOptions(keytab *keytab.Keytab, sname *types.Princ
 
 // Valid checks it the ticket is currently valid. Max duration passed endtime passed in as argument.
 func (t *Ticket) Valid(d time.Duration) (bool, error) {
+	return t.ValidAt(time.Now().UTC(), d)
+}
+
+// ValidAt checks whether the ticket is valid at the supplied time, allowing d
+// of clock skew.
+func (t *Ticket) ValidAt(now time.Time, d time.Duration) (bool, error) {
 	// Check for future tickets or invalid tickets
-	time := time.Now().UTC()
-	if t.DecryptedEncPart.StartTime.Sub(time) > d || types.IsFlagSet(&t.DecryptedEncPart.Flags, flags.Invalid) {
+	if t.DecryptedEncPart.StartTime.Sub(now) > d || types.IsFlagSet(&t.DecryptedEncPart.Flags, flags.Invalid) {
 		return false, NewKRBError(t.SName, t.Realm, errorcode.KRB_AP_ERR_TKT_NYV, "service ticket provided is not yet valid")
 	}
 
 	// Check for expired ticket
-	if time.Sub(t.DecryptedEncPart.EndTime) > d {
+	if now.Sub(t.DecryptedEncPart.EndTime) > d {
 		return false, NewKRBError(t.SName, t.Realm, errorcode.KRB_AP_ERR_TKT_EXPIRED, "service ticket provided has expired")
 	}
 

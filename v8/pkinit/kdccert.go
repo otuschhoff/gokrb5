@@ -36,10 +36,20 @@ type KDCCertificatePolicy struct {
 	HTTPClient        *http.Client
 }
 
-// ValidateKDCCertificate validates the signer and returns its verified chain.
-func ValidateKDCCertificate(signed *VerifiedSignedData, policy KDCCertificatePolicy) ([]*x509.Certificate, error) {
+// CertificateChainPolicy controls generic CMS signer chain validation.
+type CertificateChainPolicy struct {
+	Roots             *x509.CertPool
+	Intermediates     *x509.CertPool
+	RequireRevocation bool
+	CurrentTime       time.Time
+	HTTPClient        *http.Client
+}
+
+// ValidateCertificateChain verifies a CMS signer against configured trust
+// anchors without imposing PKINIT KDC EKU or name requirements.
+func ValidateCertificateChain(signed *VerifiedSignedData, policy CertificateChainPolicy) ([]*x509.Certificate, error) {
 	if signed == nil || signed.Signer == nil || policy.Roots == nil {
-		return nil, fmt.Errorf("PKINIT KDC signer and trust anchors are required")
+		return nil, fmt.Errorf("PKINIT signer and trust anchors are required")
 	}
 	intermediates := x509.NewCertPool()
 	if policy.Intermediates != nil {
@@ -59,7 +69,28 @@ func ValidateKDCCertificate(signed *VerifiedSignedData, policy KDCCertificatePol
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("verify PKINIT KDC certificate chain: %w", err)
+		return nil, fmt.Errorf("verify PKINIT certificate chain: %w", err)
+	}
+	chain := chains[0]
+	if err := checkChainRevocation(chain, KDCCertificatePolicy{
+		RequireRevocation: policy.RequireRevocation,
+		CurrentTime:       policy.CurrentTime,
+		HTTPClient:        policy.HTTPClient,
+	}); err != nil {
+		return nil, err
+	}
+	return chain, nil
+}
+
+// ValidateKDCCertificate validates the signer and returns its verified chain.
+func ValidateKDCCertificate(signed *VerifiedSignedData, policy KDCCertificatePolicy) ([]*x509.Certificate, error) {
+	chains, err := ValidateCertificateChain(signed, CertificateChainPolicy{
+		Roots: policy.Roots, Intermediates: policy.Intermediates,
+		RequireRevocation: policy.RequireRevocation, CurrentTime: policy.CurrentTime,
+		HTTPClient: policy.HTTPClient,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("verify PKINIT KDC certificate: %w", err)
 	}
 	ekuMode := policy.EKUChecking
 	if ekuMode == "" {
@@ -81,11 +112,7 @@ func ValidateKDCCertificate(signed *VerifiedSignedData, policy KDCCertificatePol
 	if err := validateKDCName(signed.Signer, policy.Hostname, policy.Realm); err != nil {
 		return nil, err
 	}
-	chain := chains[0]
-	if err := checkChainRevocation(chain, policy); err != nil {
-		return nil, err
-	}
-	return chain, nil
+	return chains, nil
 }
 
 func validateKDCName(certificate *x509.Certificate, hostname, realm string) error {

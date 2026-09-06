@@ -23,14 +23,17 @@ It has been reported that gokrb5 also works with the [gollvm](https://go.googles
 * No platform specific code
 * Server Side
   * HTTP handler wrapper implements SPNEGO Kerberos authentication
+  * Generic multi-round SPNEGO handler supports NEGOEX with PKU2U certificate authentication
   * HTTP handler wrapper decodes Microsoft AD PAC authorization data
 * Client Side
   * Client that can authenticate to an SPNEGO Kerberos authenticated web service
   * Ability to change client's password
   * MIT-compatible `gokinit`, `goklist`, and `gokdestroy` command-line tools
   * PKINIT certificate authentication with DH or RSA key delivery, KDF agility, freshness tokens, and FAST
+  * KDC-less PKU2U certificate authentication over NEGOEX using AES and DH
 * General
   * Kerberos libraries for custom integration
+  * RFC 4121 AES per-message integrity, confidentiality, replay detection, and NEGOEX key export
   * Parsing, creating, modifying, and atomically writing MIT keytab files
   * Parsing krb5.conf files
   * Parsing and writing MIT FILE credential caches such as `/tmp/krb5cc_$(id -u $(whoami))`
