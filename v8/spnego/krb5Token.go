@@ -33,24 +33,24 @@ const (
 
 // KRB5Token context token implementation for GSSAPI.
 type KRB5Token struct {
-	OID      asn1.ObjectIdentifier
-	tokID    []byte
-	APReq    messages.APReq
-	APRep    messages.APRep
-	KRBError messages.KRBError
-	settings *service.Settings
-	context  context.Context
-	raw      bool
-	checksum gssapi.AuthenticatorChecksum
-	replyKey types.EncryptionKey
+	OID                   asn1.ObjectIdentifier
+	tokID                 []byte
+	APReq                 messages.APReq
+	APRep                 messages.APRep
+	KRBError              messages.KRBError
+	settings              *service.Settings
+	context               context.Context
+	raw                   bool
+	checksum              gssapi.AuthenticatorChecksum
+	replyKey              types.EncryptionKey
 	expectedAuthenticator types.Authenticator
 }
 
 // KRB5TokenAPREQOptions controls AP-REQ context establishment behavior.
 type KRB5TokenAPREQOptions struct {
-	GSSAPIFlags        []int
-	APOptions          []int
-	ChannelBindings    *gssapi.ChannelBindings
+	GSSAPIFlags         []int
+	APOptions           []int
+	ChannelBindings     *gssapi.ChannelBindings
 	DelegatedCredential []byte
 	Delegate            bool
 	ForceDelegation     bool
