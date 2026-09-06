@@ -251,7 +251,7 @@ func (a AuthorizationData) EntriesOfType(adType int32) ([]AuthorizationDataEntry
 - Acceptor (`service`/`spnego`): parse 0x8003; if `Settings.ChannelBindings` set: compare `Bnd`; policy `ExtendedProtection{Never, WhenSupported, Always}` — `WhenSupported` enforces only when the client set `KERB_AP_OPTIONS_CBT` or non-zero `Bnd`. Extract `Deleg` KRB-CRED into `credentials.Credentials.DelegatedCredentials()` (a `*client.Client` constructible from the forwarded TGT). Generate AP-REP with `subkey` and `seq-number` when `Mutual` requested; DCE-style: expect the client's final AP-REP leg and verify it.
 - Legacy tokens: `gssapi.RC4MICToken` / `gssapi.RC4WrapToken` (RFC 4757 §7.2–7.3): `TOK_ID`, `SGN_ALG 0x1100`, `SEAL_ALG 0x1000|0xFFFF`, `Filler 0xFFFF`, `SND_SEQ` (RC4 of seq||direction with key `HMAC(Kss, checksum)`), `SGN_CKSUM` (HMAC-MD5 over `salt(15|13) || header || confounder || data`, truncated to 8), `Confounder` (RC4 keyed with `HMAC(Klocal, seq)` where `Klocal = Kss XOR 0xF0…`), all wrapped in the RFC 2743 `InitialContextToken` framing with the KRB5 OID. Token selection: if the negotiated key etype is `RC4_HMAC` → legacy tokens; else RFC 4121. `gssapi.Context` abstraction (`Wrap`, `Unwrap`, `GetMIC`, `VerifyMIC`, sequence-window replay detection) hides the choice.
 - SPNEGO: implement MS-SPNG `mechListMIC` rules on both sides (compute over the DER `MechTypeList`, key usage 15/23 per token direction), accept `NegTokenInit2` (`negHints`) from Windows acceptors, send `1.2.840.48018.1.2.2` first when talking to a Windows acceptor that offered it (configurable), answer `accept-incomplete` with the AP-REP `responseToken` for mutual auth.
-- Mechanism abstraction: `gssapi.Mechanism` interface (`OID()`, `InitSecContext`, `AcceptSecContext`, `Context`) implemented by KRB5 (existing code), NEGOEX (§3.7) and PKU2U (§3.8); `spnego` negotiates over an ordered `[]Mechanism` instead of KRB5 only, and tolerates unknown optimistic tokens by selecting the first mutually supported mechanism.
+- Mechanism abstraction: retain the legacy `gssapi.Mechanism` API and add a byte-oriented `gssapi.ContextMechanism` (`OID`, step-wise `InitSecContext`/`AcceptSecContext`) plus `gssapi.Context`. NEGOEX implements this interface; `spnego.Negotiator` negotiates an ordered mechanism list and tolerates an optimistic token for an unselected mechanism by selecting the first mutually supported mechanism.
 
 ### 3.6 NEGOEX (`v8/negoex`)
 
@@ -265,26 +265,26 @@ type VerifyMessage   struct { Header MessageHeader; AuthScheme AuthScheme; Check
 type AlertMessage    struct { Header MessageHeader; AuthScheme AuthScheme; ErrorCode uint32; Alerts []Alert }
 ```
 
-Message types: `INITIATOR_NEGO 0`, `ACCEPTOR_NEGO 1`, `INITIATOR_META_DATA 2`, `ACCEPTOR_META_DATA 3`, `CHALLENGE 4`, `AP_REQUEST 5`, `VERIFY 6`, `ALERT 7`. Vectors use `(Offset uint32, Count uint16, Pad uint16)` / `(Offset, Length)` byte-vector encodings relative to the message start; the encoder writes fixed parts first and appends variable data 8-byte aligned; the decoder bounds-checks every vector.
+Message types: `INITIATOR_NEGO 0`, `ACCEPTOR_NEGO 1`, `INITIATOR_META_DATA 2`, `ACCEPTOR_META_DATA 3`, `CHALLENGE 4`, `AP_REQUEST 5`, `VERIFY 6`, `ALERT 7`. Vectors use `(Offset uint32, Count uint16)` plus structure-specific reserved padding, or `(Offset, Length)` byte-vector encodings relative to the message start. Fixed headers are padded to their specified lengths (96/64/80/72); variable extension values are not generally 8-byte aligned. The decoder bounds-checks every vector.
 
 Behaviour (MS-NEGOEX §3):
 
-- A NEGOEX token is the concatenation of one or more messages sharing `ConversationID`; `SequenceNum` increments per message across the conversation. The initiator's first token holds `INITIATOR_NEGO`, optional `INITIATOR_META_DATA` per scheme, and optionally an optimistic `AP_REQUEST` for its preferred scheme. The acceptor answers `ACCEPTOR_NEGO` (its scheme list restricted to the intersection, ordered by initiator preference), optional `ACCEPTOR_META_DATA`, then `CHALLENGE`. Subsequent tokens carry `AP_REQUEST`/`CHALLENGE` for the selected scheme until the scheme's context completes.
+- A NEGOEX token is the concatenation of one or more messages sharing `ConversationID`; `SequenceNum` increments per message across the conversation. The initiator's first token holds `INITIATOR_NEGO`, optional `INITIATOR_META_DATA` per scheme, and optionally an optimistic `AP_REQUEST` for its preferred scheme. The acceptor answers `ACCEPTOR_NEGO` with the intersection in its own preference order, optional `ACCEPTOR_META_DATA`, then `CHALLENGE`; the initiator selects the first surviving scheme in that order. Subsequent tokens carry `AP_REQUEST`/`CHALLENGE` for the selected scheme until the scheme's context completes.
 - `Random` (32 bytes) is cryptographically random; `ProtocolVersion` is 0.
-- `VERIFY`: once a side has the scheme's context key it appends a `VERIFY` message whose checksum (RFC 3961 `get_mic`-style with the scheme's checksum type) covers every message exchanged so far in order. The key is obtained from the selected mechanism's context via `Mechanism.NegoExKey()`/`NegoExVerifyKey()`, derived with the mechanism's GSS pseudo-random function (RFC 4401) exactly as MIT krb5 implements `GSS_C_INQ_NEGOEX_KEY`/`GSS_C_INQ_NEGOEX_VERIFY_KEY`; key usage numbers for initiator and acceptor checksums are taken from MS-NEGOEX §2.2.5 (record the values in `iana/keyusage` after verification). A received `VERIFY` must be validated before the context is reported complete; a missing `VERIFY` when a key is available is fatal. `ALERT` with `ALERT_VERIFY_NO_KEY` is sent when the peer verified but this side has no key yet.
-- Auth schemes: `negoex.SchemeKerberos` (GUID from MS-NEGOEX/MS-KILE), `negoex.SchemePKU2U` (GUID from MS-PKU2U §2.2); unknown GUIDs are carried through negotiation and skipped. Each scheme is a `gssapi.Mechanism`; the Kerberos scheme wraps the existing KRB5 initiator/acceptor so NEGOEX-encapsulated Kerberos also works.
-- Errors are surfaced as `ALERT` with the `ErrorCode` NTSTATUS mapped via `iana/ntstatus`.
+- `VERIFY`: once a side has the scheme's checksum key it appends a `VERIFY` message whose RFC 3961 keyed checksum covers every message exchanged so far in order. The selected auth scheme supplies the local checksum key and peer verification key through `Context.NegoExKey()`/`NegoExVerifyKey()`; derivation is scheme-specific, not a generic Kerberos GSS operation. Key usages are 23 for an initiator checksum and 25 for an acceptor checksum. A received `VERIFY` must be validated before the context is reported complete; a completed scheme without a local checksum key is fatal. `ALERT_VERIFY_NO_KEY` requests retransmission when the peer VERIFY arrived before the verification key became available.
+- Auth schemes are registered by their mechanism-defined GUID. PKU2U defines `235f69ad-73fb-4dbc-8203-0629e739339b`; unknown GUIDs are skipped. Kerberos V5 has no standardized NEGOEX auth-scheme GUID and MIT's Kerberos mechanism does not implement the NEGOEX metadata/key SPIs, so this design does not invent or advertise a Kerberos auth scheme. Kerberos remains a direct SPNEGO mechanism; PKU2U is added as a NEGOEX scheme in Phase 11.
+- A nonzero peer `ALERT.ErrorCode` is surfaced as `negoex.AlertError`, preserving its `iana/ntstatus.Code`; `ALERT_VERIFY_NO_KEY` is generated and consumed for checksum retry. Scheme-specific failures remain scheme tokens unless that scheme defines an ALERT mapping.
 - After completion, per-message tokens are those of the negotiated scheme (RFC 4121 for Kerberos and PKU2U).
 
 API:
 
 ```go
-func New(schemes ...gssapi.Mechanism) *Mechanism                 // implements gssapi.Mechanism with OID 1.3.6.1.4.1.311.2.2.30
-func (m *Mechanism) InitSecContext(target string, in []byte, opts ...Option) (out []byte, ctx gssapi.Context, done bool, err error)
-func (m *Mechanism) AcceptSecContext(in []byte, opts ...Option) (out []byte, ctx gssapi.Context, done bool, err error)
+func New(schemes ...negoex.Scheme) *Mechanism // implements gssapi.ContextMechanism with OID 1.3.6.1.4.1.311.2.2.30
+func (m *Mechanism) InitSecContext(target string, in []byte, opts ...gssapi.MechanismOption) (out []byte, ctx gssapi.Context, done bool, err error)
+func (m *Mechanism) AcceptSecContext(in []byte, opts ...gssapi.MechanismOption) (out []byte, ctx gssapi.Context, done bool, err error)
 ```
 
-`spnego` lists NEGOEX before KRB5 when any non-Kerberos scheme is configured (Windows order), otherwise KRB5 first with NEGOEX as fallback.
+`spnego.NewNegotiator` accepts an ordered list of `gssapi.ContextMechanism` values. Applications opt into NEGOEX by including a configured `negoex.Mechanism`; legacy Kerberos constructors preserve their existing direct-SPNEGO behavior.
 
 ### 3.7 PKU2U (`v8/pku2u`)
 
@@ -392,7 +392,7 @@ Capture procedure is documented in `v8/test/testdata/gen/mskile_capture.md` (Wir
 
 `v8/pkinit`: `TestAuthPackDHRoundTrip`, `TestPAChecksumOverReqBody`, `TestCMSSignedDataSignVerify`, `TestCMSEnvelopedDataRSA`, `TestClientCertSelectionEKUAndUPN`, `TestKeyTrustSelfSignedIdentity`, `TestKDCCertEKUAcceptance` (KPKdc, legacy serverAuth mode, wrong EKU rejected), `TestKDCCertDNSNameMatchesRealm`, `TestKDCCertRevocationPolicy`, `TestReplyKeyOctetString2KeyVectors`, `TestReplyKeyRFC8636KDFVectors`, `TestDHParamsNotAcceptedRetry`, `TestNoAcceptableKDFRetry`, `TestFreshnessTokenEchoed`, `TestFreshnessRequiredFailsClosed`, `TestLegacyPKASReqOldRejected`, `TestPKINITErrorsTyped`, `TestPACCredentialInfoDecrypt`, `FuzzPKASRep`, `FuzzCMS`.
 
-`v8/negoex`: `TestMessageHeaderRoundTrip`, `TestNegoMessageVectorsAlignment`, `TestDecoderRejectsOutOfRangeVectors`, `TestConversationSequenceNumbers`, `TestSchemeIntersectionOrder`, `TestVerifyChecksumOverConversation`, `TestMissingVerifyIsFatal`, `TestAlertVerifyNoKey`, `TestKerberosSchemeEndToEnd`, `FuzzNegoExUnmarshal`.
+`v8/negoex`: `TestMessageHeaderRoundTrip`, `TestNegoMessageVectors`, `TestDecoderRejectsOutOfRangeVectors`, `TestConversationSequenceNumbers`, `TestSchemeIntersectionOrder`, `TestVerifyChecksumOverConversation`, `TestConversationRejectsCompletedMechanismWithoutVerifyKey`, `TestConversationRetriesVerifyAfterNoKeyAlert`, `FuzzNegoExUnmarshal`.
 
 `v8/pku2u`: `TestMetadataTrustedCertifiers`, `TestASReqWellKnownRealm`, `TestAcceptorIssuesSelfTicket`, `TestInitiatorRejectsUntrustedAcceptorCert`, `TestMutualAPRepRequired`, `TestCertificateToPrincipalMapping`, `TestEndToEndOverNegoEx`, `FuzzPKU2UMetadata`.
 
@@ -412,7 +412,7 @@ Capture procedure is documented in `v8/test/testdata/gen/mskile_capture.md` (Wir
 10. KKDCP: Samba/`kdcproxy` container in front of the KDC; client configured with `https://` KDC only.
 11. PKINIT: certificate logon in DH and RSA modes against Samba `pkinit` and a Windows CA-issued certificate; RFC 8636 KDF negotiated with Windows Server 2012+; freshness token echoed against Windows Server 2016+; untrusted client certificate → `KDC_ERR_CLIENT_NOT_TRUSTED` typed error with trusted certifiers listed; PAC_CREDENTIAL_INFO NT hash decrypted equals the account's NT hash (Samba test account); `gokinit -X X509_user_identity=…` produces a ccache MIT `klist` accepts.
 12. All existing MIT suites unchanged.
-13. NEGOEX: gokrb5 acceptor completes with MIT `gss-client` using SPNEGO+NEGOEX (Kerberos scheme) and with MIT's `negoextest` scheme; gokrb5 initiator completes against MIT `gss-server`; `VERIFY` failures are rejected. Windows manual: browser/`curl --negotiate` from Windows to the gokrb5 HTTP acceptor and gokrb5 client to IIS both succeed with NEGOEX present in `mechTypes`.
+13. NEGOEX: byte fixtures from MIT's `negoextest` and captured Windows PKU2U exchanges decode and re-encode exactly; equivalent multi-hop, metadata-pruning, VERIFY retry, and failure scenarios run against gokrb5's scheme interface. Windows end-to-end NEGOEX interop is exercised with PKU2U after Phase 11; direct Kerberos SPNEGO remains a separate scenario.
 14. PKU2U (manual): gokrb5 initiator ↔ Windows acceptor and Windows initiator ↔ gokrb5 acceptor with test-CA certificates; untrusted certificate → `ALERT` and failure; gokrb5 ↔ gokrb5 automated in CI.
 
 ---
@@ -451,7 +451,7 @@ Capture procedure is documented in `v8/test/testdata/gen/mskile_capture.md` (Wir
 ### 5.4 NEGOEX and PKU2U (MS-NEGOEX, MS-PKU2U)
 
 - [ ] EC-N1: NEGOEX messages round-trip byte-exactly against fixtures 13; decoder never panics (fuzz 60 s).
-- [ ] EC-N2: Kerberos over NEGOEX inside SPNEGO completes in both directions against MIT and Windows; `VERIFY` computed and validated; tampering any prior message fails verification.
+- [ ] EC-N2: NEGOEX inside generic SPNEGO completes in both directions; `VERIFY` is computed and validated, and tampering any prior message fails verification. Windows end-to-end coverage uses PKU2U, the standardized Windows NEGOEX auth scheme in scope.
 - [ ] EC-N3: SPNEGO acceptor handles an optimistic NEGOEX token from Windows by negotiating down to KRB5 when NEGOEX is disabled, and up to NEGOEX when enabled.
 - [ ] EC-N4: PKU2U conversation completes gokrb5↔gokrb5 in CI and gokrb5↔Windows manually; certificate trust and name mapping rules enforced; no NTLM fallback ever offered.
 - [ ] EC-N5: Per-message tokens after NEGOEX/PKU2U use RFC 4121 with the negotiated key and interoperate with the peer.
@@ -644,17 +644,17 @@ Check: `go test ./pkinit/... ./client/... ./pac/... ./cmd/...` green; `go test -
 
 ### Phase 10 — Mechanism abstraction and NEGOEX (KN-1, KN-2, KN-4, KN-5)
 
-Files: new `v8/gssapi/mechanism.go` (`Mechanism`, `Context` interfaces; `NegoExKey()`/`NegoExVerifyKey()` on the KRB5 context), `v8/gssapi/gssapi.go` (OIDs `OIDNegoEx`, `OIDPKU2U`), new package `v8/negoex/` (`message.go`, `vectors.go`, `conversation.go`, `verify.go`, `scheme_kerberos.go`, `negoex_test.go`, `fuzz_test.go`), `v8/spnego/negotiationToken.go`, `v8/spnego/spnego.go`, `v8/spnego/http.go`, `v8/iana/keyusage/constants.go`, `v8/test/testdata/mskile_vectors.go` (fixture 13), tests alongside, `USAGE.md`.
+Files: new `v8/gssapi/mechanism.go` (`ContextMechanism`, `Context` interfaces), `v8/gssapi/gssapi.go` (OIDs `OIDNegoEx`, `OIDPKU2U`), new package `v8/negoex/` (`message.go`, `vectors.go`, `conversation.go`, `verify.go`, `negoex_test.go`, `fuzz_test.go`), new `v8/spnego/mechanism.go` and tests, `v8/iana/keyusage/constants.go`; fixture and user documentation work completes with the PKU2U integration in Phases 11–12.
 
 Steps:
 
-1. Define `gssapi.Mechanism`/`gssapi.Context`; adapt the existing KRB5 initiator/acceptor (`spnego/krb5Token.go`, Phase 3/5 context) to implement them without changing exported behaviour. Implement the KRB5 NEGOEX key derivation with the GSS PRF (RFC 4401) mirroring MIT's `krb5_gss_inquire_sec_context_by_oid`; add the verified key-usage constants.
+1. Preserve `gssapi.Mechanism`; define the compatibility-safe byte-oriented `gssapi.ContextMechanism`/`gssapi.Context` boundary. Auth schemes provide their own directional NEGOEX keys; do not add a Kerberos-specific derivation or GUID because neither is standardized or implemented by MIT Kerberos.
 2. Implement NEGOEX structures and vector encoding with strict bounds checks; `FuzzNegoExUnmarshal` seeded with fixture 13.
 3. Implement the conversation state machine for initiator and acceptor (scheme intersection, optimistic `AP_REQUEST`, `CHALLENGE` loop, `VERIFY` computation/validation over the message log, `ALERT` handling, NTSTATUS mapping).
-4. Register the Kerberos scheme; wire NEGOEX into `spnego` as a negotiable mechanism with configurable ordering; make the SPNEGO acceptor select the first mutually supported mechanism when the optimistic token is for an unsupported one (KN-2) and add `TestOptimisticNegoExTokenSelectsKRB5`.
-5. Tests: §4.3 `negoex` and `spnego` items; MIT interop job (`gss-client`/`gss-server` with NEGOEX) in CI.
+4. Add `spnego.Negotiator` over ordered `ContextMechanism` values; make the acceptor ignore an optimistic token for an unselected mechanism, continue with its preferred common mechanism, and protect a non-preferred selection with `mechListMIC`.
+5. Tests: §4.3 `negoex` and `spnego` items, including a complete NEGOEX exchange inside SPNEGO and scenarios equivalent to MIT `negoextest`. Real Windows interop follows when PKU2U is registered in Phase 11.
 
-Check: `go test ./gssapi/... ./negoex/... ./spnego/...` green; `go test -fuzz FuzzNegoExUnmarshal -fuzztime 30s ./negoex` clean; MIT NEGOEX interop green; existing SPNEGO tests unchanged.
+Check: `go test ./gssapi/... ./negoex/... ./spnego/...` green; `go test -fuzz FuzzNegoExUnmarshal -fuzztime 30s ./negoex` clean; existing SPNEGO tests unchanged.
 
 ### Phase 11 — PKU2U (KN-3)
 
@@ -700,8 +700,8 @@ Check: all §5 checkboxes ticked; CI green; Windows checklist executed once and 
 9. **KKDCP `dclocator-hint` (Phase 8)** — Whether to send it (Windows sends DS flags); default omit unless `ad_site` configured.
 10. **PKINIT CMS scope (Phase 9)** — Minimal CMS implementation vs. a dependency; stdlib has none. Decide after measuring the size of the required subset (SignedData with one signer incl. ECDSA/RSASSA-PSS, EnvelopedData RSA-only). Candidates: `github.com/github/smimesign/ietf-cms`, `go.mozilla.org/pkcs7`; both need auditing for the PKINIT content types.
 11. **KERB-DMSA-KEY-PACKAGE / KERB-SUPERSEDED-BY-USER (Phase 0, resolved)** — The current MS-KILE definitions were verified on 2026-09-06. `KERB-SUPERSEDED-BY-USER` uses `name [0]`, `realm [1]`. `KERB-DMSA-KEY-PACKAGE` uses `current-keys [0]`, optional `previous-keys [1]`, `expiration-interval [2]`, and `fetch-interval [4]`. Phase 0 provides strict decode/encode support without attaching client behaviour.
-12. **NEGOEX key derivation (Phase 10)** — Confirm the exact GSS PRF inputs and key-usage numbers used for `GSS_C_INQ_NEGOEX_KEY`/`GSS_C_INQ_NEGOEX_VERIFY_KEY` by reading MS-NEGOEX §2.2.5/§3.1.5 and MIT `src/lib/gssapi/krb5/inq_context.c`; capture a Windows `VERIFY` and recompute it before finalising.
-13. **NEGOEX auth-scheme GUIDs (Phase 10/11)** — Take the Kerberos and PKU2U scheme GUIDs from the current MS-NEGOEX/MS-PKU2U revisions (and MIT `negoex_util.c`), not from memory; add a test that decodes fixture 13 with them.
+12. **NEGOEX keys (Phase 10, resolved)** — `GSS_C_INQ_NEGOEX_KEY` and `GSS_C_INQ_NEGOEX_VERIFY_KEY` are mechanism extension points returning directional keys; NEGOEX itself does not derive them with a generic Kerberos PRF. The selected scheme supplies both keys. Checksum key usages are 23 (initiator) and 25 (acceptor).
+13. **NEGOEX auth-scheme GUIDs (Phase 10/11, resolved)** — Auth-scheme GUIDs are supplied by mechanisms through the NEGOEX SPI. Kerberos V5 has no standardized GUID and is not registered as a NEGOEX mechanism by MIT. PKU2U defines `235f69ad-73fb-4dbc-8203-0629e739339b`; add that constant and captured fixtures with Phase 11.
 14. **PKU2U acceptor certificate rules (Phase 11)** — Determine which EKU/SAN rules MS-PKU2U applies to the acceptor certificate (it is not a KDC certificate under MS-PKCA) and whether Azure-AD-style certificates require additional name mapping; decide the default anchors policy.
 15. **PKU2U without NEGOEX (Phase 11)** — Windows only negotiates PKU2U via NEGOEX; decide whether the standalone SPNEGO mechanism is exposed by default or behind an option to avoid advertising an OID Windows will never select.
 16. **MS-PKCA KDC certificate name rule (Phase 9)** — Confirm from the current MS-PKCA §3.2.5.2 whether the `dNSName` SAN must equal the realm's DNS domain, the responding DC's FQDN, or either; capture DC certificates issued by the default "Kerberos Authentication" template (which carries both) and the older "Domain Controller" template.
