@@ -2,6 +2,7 @@ package rfc3961
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/otuschhoff/gokrb5/v8/crypto/etype"
 )
@@ -75,7 +76,11 @@ func DES3StringToKey(secret, salt string, e etype.EType) ([]byte, error) {
 func PseudoRandom(key, b []byte, e etype.EType) ([]byte, error) {
 	h := e.GetHashFunc()()
 	h.Write(b)
-	tmp := h.Sum(nil)[:e.GetMessageBlockByteSize()]
+	blockSize := e.GetCypherBlockBitLength() / 8
+	if blockSize <= 0 || blockSize > h.Size() {
+		return nil, fmt.Errorf("invalid pseudo-random block size %d for enctype %d", blockSize, e.GetETypeID())
+	}
+	tmp := h.Sum(nil)[:blockSize]
 	k, err := e.DeriveKey(key, []byte(prfconstant))
 	if err != nil {
 		return []byte{}, err

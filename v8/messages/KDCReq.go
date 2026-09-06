@@ -460,46 +460,66 @@ func appendPACOption(options []int, option int) []int {
 }
 
 func (k *TGSReq) setPAData(tgt Ticket, sessionKey types.EncryptionKey) error {
+	_, _, err := k.setPADataWithSubkey(tgt, sessionKey, false)
+	return err
+}
+
+// SetPADataWithSubkey rebuilds PA-TGS-REQ with an authenticator subkey and
+// returns the subkey and encoded AP-REQ for use as implicit FAST armor.
+func (k *TGSReq) SetPADataWithSubkey(tgt Ticket, sessionKey types.EncryptionKey) (types.EncryptionKey, []byte, error) {
+	return k.setPADataWithSubkey(tgt, sessionKey, true)
+}
+
+func (k *TGSReq) setPADataWithSubkey(tgt Ticket, sessionKey types.EncryptionKey, includeSubkey bool) (types.EncryptionKey, []byte, error) {
 	// Marshal the request and calculate checksum
 	b, err := k.ReqBody.Marshal()
 	if err != nil {
-		return krberror.Errorf(err, krberror.EncodingError, "error marshaling TGS_REQ body")
+		return types.EncryptionKey{}, nil, krberror.Errorf(err, krberror.EncodingError, "error marshaling TGS_REQ body")
 	}
 	etype, err := crypto.GetEtype(sessionKey.KeyType)
 	if err != nil {
-		return krberror.Errorf(err, krberror.EncryptingError, "error getting etype to encrypt authenticator")
+		return types.EncryptionKey{}, nil, krberror.Errorf(err, krberror.EncryptingError, "error getting etype to encrypt authenticator")
 	}
 	cb, err := etype.GetChecksumHash(sessionKey.KeyValue, b, keyusage.TGS_REQ_PA_TGS_REQ_AP_REQ_AUTHENTICATOR_CHKSUM)
 	if err != nil {
-		return krberror.Errorf(err, krberror.ChksumError, "error getting etype checksum hash")
+		return types.EncryptionKey{}, nil, krberror.Errorf(err, krberror.ChksumError, "error getting etype checksum hash")
 	}
 
 	// Form PAData for TGS_REQ
 	// Create authenticator
 	auth, err := types.NewAuthenticator(tgt.Realm, k.ReqBody.CName)
 	if err != nil {
-		return krberror.Errorf(err, krberror.KRBMsgError, "error generating new authenticator")
+		return types.EncryptionKey{}, nil, krberror.Errorf(err, krberror.KRBMsgError, "error generating new authenticator")
 	}
 	auth.Cksum = types.Checksum{
 		CksumType: etype.GetHashID(),
 		Checksum:  cb,
 	}
+	if includeSubkey {
+		if err := auth.GenerateSeqNumberAndSubKey(sessionKey.KeyType, etype.GetKeyByteSize()); err != nil {
+			return types.EncryptionKey{}, nil, krberror.Errorf(err, krberror.KRBMsgError, "error generating TGS authenticator subkey")
+		}
+	}
 	// Create AP_REQ
 	apReq, err := NewAPReq(tgt, sessionKey, auth)
 	if err != nil {
-		return krberror.Errorf(err, krberror.KRBMsgError, "error generating new AP_REQ")
+		return types.EncryptionKey{}, nil, krberror.Errorf(err, krberror.KRBMsgError, "error generating new AP_REQ")
 	}
 	apb, err := apReq.Marshal()
 	if err != nil {
-		return krberror.Errorf(err, krberror.EncodingError, "error marshaling AP_REQ for pre-authentication data")
+		return types.EncryptionKey{}, nil, krberror.Errorf(err, krberror.EncodingError, "error marshaling AP_REQ for pre-authentication data")
 	}
-	k.PAData = types.PADataSequence{
-		types.PAData{
-			PADataType:  patype.PA_TGS_REQ,
-			PADataValue: apb,
-		},
+	paData := types.PADataSequence{{
+		PADataType:  patype.PA_TGS_REQ,
+		PADataValue: apb,
+	}}
+	for _, pa := range k.PAData {
+		if pa.PADataType != patype.PA_TGS_REQ {
+			paData = append(paData, pa)
+		}
 	}
-	return nil
+	k.PAData = paData
+	return auth.SubKey, apb, nil
 }
 
 // Unmarshal bytes b into the ASReq struct.

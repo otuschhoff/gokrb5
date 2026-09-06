@@ -18,7 +18,7 @@ const (
 // DeriveRandom for key derivation as defined in RFC 8009
 func DeriveRandom(protocolKey, usage []byte, e etype.EType) ([]byte, error) {
 	h := e.GetHashFunc()()
-	return KDF_HMAC_SHA2(protocolKey, []byte("prf"), usage, h.Size(), e), nil
+	return KDF_HMAC_SHA2(protocolKey, []byte("prf"), usage, h.Size()*8, e), nil
 }
 
 // DeriveKey derives a key from the protocol key based on the usage and the etype's specific methods.
@@ -26,34 +26,12 @@ func DeriveRandom(protocolKey, usage []byte, e etype.EType) ([]byte, error) {
 // https://tools.ietf.org/html/rfc8009#section-5
 func DeriveKey(protocolKey, label []byte, e etype.EType) []byte {
 	var context []byte
-	var kl int
-	// Key length is longer for aes256-cts-hmac-sha384-192 is it is a Ke or from StringToKey (where label is "kerberos")
+	kl := e.GetKeySeedBitLength()
 	if e.GetETypeID() == etypeID.AES256_CTS_HMAC_SHA384_192 {
-	Swtch:
-		switch label[len(label)-1] {
-		case 0x73:
-			// 0x73 is "s" so label could be kerberos meaning StringToKey so now check if the label is "kerberos"
-			kerblabel := []byte("kerberos")
-			if len(label) != len(kerblabel) {
-				break
-			}
-			for i, b := range label {
-				if b != kerblabel[i] {
-					kl = e.GetKeySeedBitLength()
-					break Swtch
-				}
-			}
-			if kl == 0 {
-				// This is StringToKey
-				kl = 256
-			}
-		case 0xAA:
-			// This is a Ke
+		kl = 192
+		if string(label) == "kerberos" || len(label) > 0 && label[len(label)-1] == 0xAA {
 			kl = 256
 		}
-	}
-	if kl == 0 {
-		kl = e.GetKeySeedBitLength()
 	}
 	return e.RandomToKey(KDF_HMAC_SHA2(protocolKey, label, context, kl, e))
 }

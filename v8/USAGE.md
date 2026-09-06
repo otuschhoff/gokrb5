@@ -108,15 +108,37 @@ A client can be **destroyed** with the following method:
 cl.Destroy()
 ```
 
-#### Active Directory KDC and FAST negotiation
-Active Directory does not commonly support FAST negotiation so you will need to disable this on the client.
-If this is the case you will see this error:
-```KDC did not respond appropriately to FAST negotiation```
-To resolve this disable PA-FX-Fast on the client before performing Login().
-This is done with one of the optional client settings as shown below:
+#### FAST armoring and Active Directory claims
+
+The client can armor AS exchanges with an existing TGT and session key:
+
 ```go
-cl := client.NewWithPassword("username", "REALM.COM", "password", cfg, client.DisablePAFXFAST(true))
+cl := client.NewWithPassword("username", "REALM.COM", "password", cfg,
+	client.FASTArmor(armorTGT, armorSessionKey),
+)
 ```
+
+When the armor identity differs from the client identity, provide it explicitly:
+
+```go
+cl := client.NewWithPassword("username", "REALM.COM", "password", cfg,
+	client.FASTArmorWithIdentity(armorTGT, armorSessionKey, armorPrincipal, armorRealm),
+)
+```
+
+Alternatively, `client.FASTArmorFromKeytab(kt)` acquires the armor TGT. A
+machine-account principal (a single component ending in `$`) is preferred when
+the keytab contains one; this is the form used for Active Directory compound
+identity and device claims. User keytabs are also accepted, but do not provide
+a device identity.
+
+With armor configured, FAST activates when the KDC advertises PA-FX-FAST or
+the realm metadata advertises FAST support. `client.RequireFAST(true)` activates
+it immediately and rejects unprotected errors or replies. AS exchanges use an
+AP-REQ armor and PA-ENCRYPTED-CHALLENGE; TGS exchanges use the ticket's implicit
+armor. Claims are requested through PA-PAC-OPTIONS when the KDC advertises
+claims support, and validated user and device claims are available through
+`credentials.ADCredentials`.
 
 #### Authenticate to a Service
 

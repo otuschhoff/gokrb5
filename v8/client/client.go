@@ -33,6 +33,8 @@ type Client struct {
 	s4uCache      *Cache
 	kdcTimeOffset time.Duration
 	kdcTimeMux    sync.RWMutex
+	fastArmorMux  sync.Mutex
+	fastArmorCl   *Client
 	sendToKDCFunc func([]byte, string) ([]byte, error)
 }
 
@@ -397,6 +399,12 @@ func (cl *Client) realmLogin(realm string) error {
 // Destroy stops the auto-renewal of all sessions and removes the sessions and cache entries from the client.
 func (cl *Client) Destroy() {
 	creds := credentials.New("", "")
+	cl.fastArmorMux.Lock()
+	if cl.fastArmorCl != nil {
+		cl.fastArmorCl.Destroy()
+		cl.fastArmorCl = nil
+	}
+	cl.fastArmorMux.Unlock()
 	cl.sessions.destroy()
 	cl.cache.clear()
 	cl.s4uCache.clear()

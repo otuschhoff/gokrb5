@@ -20,18 +20,35 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 		return messages.ASRep{}, krberror.Errorf(err, krberror.ConfigError, "AS Exchange cannot be performed")
 	}
 
+	fast, err := cl.newFASTState(realm, cl.settings.RequireFAST() || cl.settings.AssumePreAuthentication())
+	if err != nil {
+		return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: could not initialize FAST")
+	}
 	// Set PAData if required
-	err := setPAData(cl, nil, &ASReq)
+	err = setPAData(cl, nil, &ASReq)
 	if err != nil {
 		return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: issue with setting PAData on AS_REQ")
+	}
+	if fast != nil && fast.active && cl.settings.AssumePreAuthentication() {
+		if err := fast.setASPreAuth(cl, nil, &ASReq); err != nil {
+			return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: issue with setting FAST PAData on AS_REQ")
+		}
 	}
 
 	var ASRep messages.ASRep
 	preAuthRetried := false
 	skewRetried := false
+	preAuthRounds := 0
 	var rb []byte
 	for {
-		b, err := ASReq.Marshal()
+		request := ASReq
+		if fast != nil && fast.active {
+			request, err = fast.wrapASRequest(request)
+			if err != nil {
+				return messages.ASRep{}, krberror.Errorf(err, krberror.EncodingError, "AS Exchange Error: failed building FAST request")
+			}
+		}
+		b, err := request.Marshal()
 		if err != nil {
 			return messages.ASRep{}, krberror.Errorf(err, krberror.EncodingError, "AS Exchange Error: failed marshaling AS_REQ")
 		}
@@ -42,6 +59,16 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 		e, ok := err.(messages.KRBError)
 		if !ok {
 			return messages.ASRep{}, krberror.Errorf(err, krberror.NetworkingError, "AS Exchange Error: failed sending AS_REQ to KDC")
+		}
+		if fast != nil && fast.active {
+			e, err = fast.unwrapError(e, ASReq.ReqBody.Nonce)
+			if err != nil {
+				return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: invalid FAST error response")
+			}
+		} else if fast != nil && fastAdvertised(e) {
+			if err := fast.activate(cl, realm); err != nil {
+				return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: could not activate FAST")
+			}
 		}
 		if e.ErrorCode == errorcode.KDC_ERR_WRONG_REALM {
 			if referral > 5 {
@@ -56,15 +83,27 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 			if e.ErrorCode == errorcode.KDC_ERR_PREAUTH_FAILED && len(e.EData) > 0 {
 				hint = &e
 			}
-			if err := setPAData(cl, hint, &ASReq); err != nil {
+			if fast != nil && fast.active {
+				if err := fast.setASPreAuth(cl, hint, &ASReq); err != nil {
+					return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: failed setting FAST PAData after clock skew")
+				}
+			} else if err := setPAData(cl, hint, &ASReq); err != nil {
 				return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: failed setting AS_REQ PAData after clock skew")
 			}
 			skewRetried = true
 			continue
 		}
-		if !preAuthRetried && (e.ErrorCode == errorcode.KDC_ERR_PREAUTH_REQUIRED || e.ErrorCode == errorcode.KDC_ERR_PREAUTH_FAILED) {
+		if (e.ErrorCode == errorcode.KDC_ERR_PREAUTH_REQUIRED || e.ErrorCode == errorcode.KDC_ERR_PREAUTH_FAILED || e.ErrorCode == errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED) && (!preAuthRetried || e.ErrorCode == errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED) {
+			preAuthRounds++
+			if preAuthRounds > 5 {
+				return messages.ASRep{}, krberror.NewErrorf(krberror.KRBMsgError, "AS Exchange Error: maximum FAST pre-authentication rounds exceeded")
+			}
 			cl.settings.assumePreAuthentication = true
-			if err := setPAData(cl, &e, &ASReq); err != nil {
+			if fast != nil && fast.active {
+				if err := fast.setASPreAuth(cl, &e, &ASReq); err != nil {
+					return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: failed setting FAST pre-authentication data")
+				}
+			} else if err := setPAData(cl, &e, &ASReq); err != nil {
 				return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: failed setting AS_REQ PAData for pre-authentication required")
 			}
 			preAuthRetried = true
@@ -75,6 +114,15 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 	err = ASRep.Unmarshal(rb)
 	if err != nil {
 		return messages.ASRep{}, krberror.Errorf(err, krberror.EncodingError, "AS Exchange Error: failed to process the AS_REP")
+	}
+	if fast != nil && fast.active {
+		if err := fast.verifyASReply(cl, &ASRep, ASReq); err != nil {
+			return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: FAST AS_REP is not valid")
+		}
+		return ASRep, nil
+	}
+	if cl.settings.RequireFAST() {
+		return messages.ASRep{}, krberror.NewErrorf(krberror.KRBMsgError, "AS Exchange Error: KDC did not negotiate required FAST")
 	}
 	if ok, err := ASRep.Verify(cl.Config, cl.Credentials, ASReq); !ok {
 		return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: AS_REP is not valid or client password/keytab incorrect")

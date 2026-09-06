@@ -4,7 +4,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+
+	"github.com/otuschhoff/gokrb5/v8/keytab"
+	"github.com/otuschhoff/gokrb5/v8/messages"
+	"github.com/otuschhoff/gokrb5/v8/types"
 )
+
+type fastArmorCredentials struct {
+	ticket messages.Ticket
+	key    types.EncryptionKey
+	cname  types.PrincipalName
+	realm  string
+}
 
 // Settings holds optional client settings.
 type Settings struct {
@@ -12,6 +23,9 @@ type Settings struct {
 	assumePreAuthentication bool
 	preAuthEType            int32
 	preAuthType             int32
+	fastArmor               *fastArmorCredentials
+	fastArmorKeytab         *keytab.Keytab
+	requireFAST             bool
 	logger                  *log.Logger
 }
 
@@ -19,6 +33,7 @@ type Settings struct {
 type jsonSettings struct {
 	DisablePAFXFast         bool
 	AssumePreAuthentication bool
+	RequireFAST             bool
 }
 
 // NewSettings creates a new client settings struct.
@@ -73,6 +88,40 @@ func (s *Settings) AssumePreAuthentication() bool {
 	return s.assumePreAuthentication
 }
 
+// FASTArmor configures an armor TGT belonging to the client's principal.
+func FASTArmor(ticket messages.Ticket, key types.EncryptionKey) func(*Settings) {
+	return func(s *Settings) {
+		s.fastArmor = &fastArmorCredentials{ticket: ticket, key: key}
+	}
+}
+
+// FASTArmorWithIdentity configures an armor TGT and its client identity.
+func FASTArmorWithIdentity(ticket messages.Ticket, key types.EncryptionKey, cname types.PrincipalName, realm string) func(*Settings) {
+	return func(s *Settings) {
+		s.fastArmor = &fastArmorCredentials{ticket: ticket, key: key, cname: cname, realm: realm}
+	}
+}
+
+// FASTArmorFromKeytab configures the client to acquire an armor TGT. A
+// machine-account principal is preferred when the keytab contains one.
+func FASTArmorFromKeytab(kt *keytab.Keytab) func(*Settings) {
+	return func(s *Settings) {
+		s.fastArmorKeytab = kt
+	}
+}
+
+// RequireFAST requires every configured AS and TGS exchange to be armored.
+func RequireFAST(required bool) func(*Settings) {
+	return func(s *Settings) {
+		s.requireFAST = required
+	}
+}
+
+// RequireFAST indicates whether unarmored KDC responses must be rejected.
+func (s *Settings) RequireFAST() bool {
+	return s.requireFAST
+}
+
 // Logger used to configure client with a logger.
 //
 // s := NewSettings(kt, Logger(l))
@@ -99,6 +148,7 @@ func (s *Settings) JSON() (string, error) {
 	js := jsonSettings{
 		DisablePAFXFast:         s.disablePAFXFast,
 		AssumePreAuthentication: s.assumePreAuthentication,
+		RequireFAST:             s.requireFAST,
 	}
 	b, err := json.MarshalIndent(js, "", "  ")
 	if err != nil {

@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"github.com/otuschhoff/gokrb5/v8/crypto/etype"
+	"github.com/otuschhoff/gokrb5/v8/crypto/rfc3961"
+	"github.com/otuschhoff/gokrb5/v8/crypto/rfc8009"
 	"github.com/otuschhoff/gokrb5/v8/iana/chksumtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
@@ -176,6 +178,62 @@ func firstSupportedKeyParameters(parameters []passwordKeyParameters) (passwordKe
 		}
 	}
 	return passwordKeyParameters{}, nil, false
+}
+
+// KRBFXCF2 combines two protocol keys using KRB-FX-CF2 from RFC 6113.
+// The result uses the enctype of key1.
+func KRBFXCF2(key1, key2 types.EncryptionKey, pepper1, pepper2 []byte) (types.EncryptionKey, error) {
+	et1, err := GetEtype(key1.KeyType)
+	if err != nil {
+		return types.EncryptionKey{}, fmt.Errorf("error getting first key enctype: %w", err)
+	}
+	et2, err := GetEtype(key2.KeyType)
+	if err != nil {
+		return types.EncryptionKey{}, fmt.Errorf("error getting second key enctype: %w", err)
+	}
+	seedBytes := et1.GetKeySeedBitLength() / 8
+	if seedBytes == 0 || et1.GetKeySeedBitLength()%8 != 0 {
+		return types.EncryptionKey{}, fmt.Errorf("invalid key seed length for enctype %d", key1.KeyType)
+	}
+	prf1, err := krbFXPRFPlus(key1.KeyValue, pepper1, seedBytes, et1)
+	if err != nil {
+		return types.EncryptionKey{}, fmt.Errorf("error expanding first key: %w", err)
+	}
+	prf2, err := krbFXPRFPlus(key2.KeyValue, pepper2, seedBytes, et2)
+	if err != nil {
+		return types.EncryptionKey{}, fmt.Errorf("error expanding second key: %w", err)
+	}
+	for i := range prf1 {
+		prf1[i] ^= prf2[i]
+	}
+	return types.EncryptionKey{KeyType: key1.KeyType, KeyValue: et1.RandomToKey(prf1)}, nil
+}
+
+func krbFXPRFPlus(key, pepper []byte, length int, et etype.EType) ([]byte, error) {
+	out := make([]byte, 0, length)
+	for counter := byte(1); len(out) < length; counter++ {
+		if counter == 0 {
+			return nil, fmt.Errorf("PRF+ output exceeds 255 iterations")
+		}
+		input := make([]byte, 1, len(pepper)+1)
+		input[0] = counter
+		input = append(input, pepper...)
+		block, err := krbFXPseudoRandom(key, input, et)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, block...)
+	}
+	return out[:length], nil
+}
+
+func krbFXPseudoRandom(key, input []byte, et etype.EType) ([]byte, error) {
+	switch et.GetETypeID() {
+	case etypeID.AES128_CTS_HMAC_SHA256_128, etypeID.AES256_CTS_HMAC_SHA384_192:
+		return rfc8009.DeriveRandom(key, input, et)
+	default:
+		return rfc3961.PseudoRandom(key, input, et)
+	}
 }
 
 // GetEncryptedData encrypts the data provided and returns and EncryptedData type.

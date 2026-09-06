@@ -26,13 +26,29 @@ func (cl *Client) TGSREQGenerateAndExchange(spn types.PrincipalName, kdcRealm st
 // The client's cache is updated with the ticket received.
 func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messages.Ticket, sessionKey types.EncryptionKey, referral int) (messages.TGSReq, messages.TGSRep, error) {
 	var tgsRep messages.TGSRep
-	b, err := tgsReq.Marshal()
+	request := tgsReq
+	fast := cl.newTGSFASTState(kdcRealm)
+	var err error
+	if fast != nil {
+		request, err = fast.wrapTGSRequest(request, tgt, sessionKey)
+		if err != nil {
+			return tgsReq, tgsRep, krberror.Errorf(err, krberror.KRBMsgError, "TGS Exchange Error: failed to build FAST request")
+		}
+	}
+	b, err := request.Marshal()
 	if err != nil {
 		return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: failed to marshal TGS_REQ")
 	}
 	r, err := cl.sendToKDC(b, kdcRealm)
 	if err != nil {
-		if _, ok := err.(messages.KRBError); ok {
+		if kdcErr, ok := err.(messages.KRBError); ok {
+			if fast != nil {
+				kdcErr, unwrapErr := fast.unwrapError(kdcErr, tgsReq.ReqBody.Nonce)
+				if unwrapErr != nil {
+					return tgsReq, tgsRep, krberror.Errorf(unwrapErr, krberror.KRBMsgError, "TGS Exchange Error: invalid FAST error response")
+				}
+				err = kdcErr
+			}
 			return tgsReq, tgsRep, krberror.Errorf(err, krberror.KDCError, "TGS Exchange Error: kerberos error response from KDC when requesting for %s", tgsReq.ReqBody.SName.PrincipalNameString())
 		}
 		return tgsReq, tgsRep, krberror.Errorf(err, krberror.NetworkingError, "TGS Exchange Error: issue sending TGS_REQ to KDC")
@@ -41,12 +57,18 @@ func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messa
 	if err != nil {
 		return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: failed to process the TGS_REP")
 	}
-	err = tgsRep.DecryptEncPart(sessionKey)
-	if err != nil {
-		return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: failed to process the TGS_REP")
-	}
-	if ok, err := tgsRep.Verify(cl.Config, tgsReq); !ok {
-		return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: TGS_REP is not valid")
+	if fast != nil {
+		if err := fast.verifyTGSReply(cl, &tgsRep, tgsReq); err != nil {
+			return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: FAST TGS_REP is not valid")
+		}
+	} else {
+		err = tgsRep.DecryptEncPart(sessionKey)
+		if err != nil {
+			return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: failed to process the TGS_REP")
+		}
+		if ok, err := tgsRep.Verify(cl.Config, tgsReq); !ok {
+			return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: TGS_REP is not valid")
+		}
 	}
 
 	if tgsRep.Ticket.SName.NameString[0] == "krbtgt" && !tgsRep.Ticket.SName.Equal(tgsReq.ReqBody.SName) {

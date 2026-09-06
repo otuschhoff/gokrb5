@@ -232,31 +232,53 @@ func (k *ASRep) DecryptEncPart(c *credentials.Credentials) (types.EncryptionKey,
 	if !c.HasKeytab() && !c.HasPassword() {
 		return key, krberror.NewErrorf(krberror.DecryptingError, "no secret available in credentials to perform decryption of AS_REP encrypted part")
 	}
+	if err := k.DecryptEncPartWithKey(key); err != nil {
+		return key, err
+	}
+	return key, nil
+}
+
+// DecryptEncPartWithKey decrypts an AS-REP with an explicitly supplied reply
+// key, such as a FAST-strengthened key.
+func (k *ASRep) DecryptEncPartWithKey(key types.EncryptionKey) error {
 	b, err := crypto.DecryptEncPart(k.EncPart, key, keyusage.AS_REP_ENCPART)
 	if err != nil {
-		return key, krberror.Errorf(err, krberror.DecryptingError, "error decrypting AS_REP encrypted part")
+		return krberror.Errorf(err, krberror.DecryptingError, "error decrypting AS_REP encrypted part")
 	}
 	var denc EncKDCRepPart
 	err = denc.Unmarshal(b)
 	if err != nil {
-		return key, krberror.Errorf(err, krberror.EncodingError, "error unmarshaling decrypted encpart of AS_REP")
+		return krberror.Errorf(err, krberror.EncodingError, "error unmarshaling decrypted encpart of AS_REP")
 	}
 	k.DecryptedEncPart = denc
-	return key, nil
+	return nil
 }
 
 // Verify checks the validity of AS_REP message.
 func (k *ASRep) Verify(cfg *config.Config, creds *credentials.Credentials, asReq ASReq) (bool, error) {
+	key, err := k.DecryptEncPart(creds)
+	if err != nil {
+		return false, krberror.Errorf(err, krberror.DecryptingError, "error decrypting EncPart of AS_REP")
+	}
+	return k.verifyWithReplyKey(cfg, creds, asReq, key)
+}
+
+// VerifyWithReplyKey verifies and decrypts an AS-REP using an explicitly
+// supplied reply key.
+func (k *ASRep) VerifyWithReplyKey(cfg *config.Config, creds *credentials.Credentials, asReq ASReq, key types.EncryptionKey) (bool, error) {
+	if err := k.DecryptEncPartWithKey(key); err != nil {
+		return false, krberror.Errorf(err, krberror.DecryptingError, "error decrypting EncPart of AS_REP")
+	}
+	return k.verifyWithReplyKey(cfg, creds, asReq, key)
+}
+
+func (k *ASRep) verifyWithReplyKey(cfg *config.Config, creds *credentials.Credentials, asReq ASReq, key types.EncryptionKey) (bool, error) {
 	//Ref RFC 4120 Section 3.1.5
 	if !k.CName.Equal(asReq.ReqBody.CName) && !requestAllowsCanonicalName(asReq.ReqBody) {
 		return false, krberror.NewErrorf(krberror.KRBMsgError, "CName in response does not match what was requested. Requested: %+v; Reply: %+v", asReq.ReqBody.CName, k.CName)
 	}
 	if !types.RealmEqual(k.CRealm, asReq.ReqBody.Realm) {
 		return false, krberror.NewErrorf(krberror.KRBMsgError, "CRealm in response does not match what was requested. Requested: %s; Reply: %s", asReq.ReqBody.Realm, k.CRealm)
-	}
-	key, err := k.DecryptEncPart(creds)
-	if err != nil {
-		return false, krberror.Errorf(err, krberror.DecryptingError, "error decrypting EncPart of AS_REP")
 	}
 	if k.DecryptedEncPart.Nonce != asReq.ReqBody.Nonce {
 		return false, krberror.NewErrorf(krberror.KRBMsgError, "possible replay attack, nonce in response does not match that in request")
@@ -320,7 +342,13 @@ func (k *ASRep) verifyEncPARep(asReq ASReq, key types.EncryptionKey) error {
 
 // DecryptEncPart decrypts the encrypted part of an TGS_REP.
 func (k *TGSRep) DecryptEncPart(key types.EncryptionKey) error {
-	b, err := crypto.DecryptEncPart(k.EncPart, key, keyusage.TGS_REP_ENCPART_SESSION_KEY)
+	return k.DecryptEncPartWithKeyUsage(key, keyusage.TGS_REP_ENCPART_SESSION_KEY)
+}
+
+// DecryptEncPartWithKeyUsage decrypts a TGS-REP with the selected reply key
+// usage. FAST TGS exchanges use the authenticator subkey and usage 9.
+func (k *TGSRep) DecryptEncPartWithKeyUsage(key types.EncryptionKey, usage uint32) error {
+	b, err := crypto.DecryptEncPart(k.EncPart, key, usage)
 	if err != nil {
 		return krberror.Errorf(err, krberror.DecryptingError, "error decrypting TGS_REP EncPart")
 	}
