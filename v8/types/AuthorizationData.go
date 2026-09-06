@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
-	"github.com/jcmturner/gokrb5/v8/iana/adtype"
+	"github.com/otuschhoff/gokrb5/v8/iana/adtype"
 )
 
 const maxAuthorizationDataDepth = 8

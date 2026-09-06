@@ -7,7 +7,7 @@ import (
 	"os/user"
 	"strings"
 
-	"github.com/jcmturner/gokrb5/v8/config"
+	"github.com/otuschhoff/gokrb5/v8/config"
 )
 
 const defaultCCacheName = "FILE:/tmp/krb5cc_%{uid}"

@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
-	"github.com/jcmturner/gokrb5/v8/iana/asnAppTag"
-	"github.com/jcmturner/gokrb5/v8/iana/patype"
+	"github.com/otuschhoff/gokrb5/v8/iana/asnAppTag"
+	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 )
 
 // KrbFastArmor identifies and carries a FAST armor value.

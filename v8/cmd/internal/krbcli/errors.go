@@ -4,8 +4,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/jcmturner/gokrb5/v8/iana/errorcode"
-	"github.com/jcmturner/gokrb5/v8/messages"
+	"github.com/otuschhoff/gokrb5/v8/iana/errorcode"
+	"github.com/otuschhoff/gokrb5/v8/messages"
 )
 
 // KDCError returns the KDC error embedded in err, if any.

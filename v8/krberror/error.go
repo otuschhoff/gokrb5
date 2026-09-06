@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jcmturner/gokrb5/v8/iana/ntstatus"
+	"github.com/otuschhoff/gokrb5/v8/iana/ntstatus"
 )
 
 // Error type descriptions.

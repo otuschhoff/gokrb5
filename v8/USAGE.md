@@ -6,9 +6,9 @@ Version 8 includes MIT-compatible command-line tools for acquiring, inspecting,
 and destroying credentials:
 
 ```sh
-go install github.com/jcmturner/gokrb5/v8/cmd/gokinit
-go install github.com/jcmturner/gokrb5/v8/cmd/goklist
-go install github.com/jcmturner/gokrb5/v8/cmd/gokdestroy
+go install github.com/otuschhoff/gokrb5/v8/cmd/gokinit
+go install github.com/otuschhoff/gokrb5/v8/cmd/goklist
+go install github.com/otuschhoff/gokrb5/v8/cmd/gokdestroy
 ```
 
 `gokinit` honors `KRB5_CONFIG`, `KRB5CCNAME`, `KRB5_KTNAME`, and
@@ -40,7 +40,7 @@ described [here](https://web.mit.edu/kerberos/krb5-latest/doc/admin/conf_files/k
 Config instances can be created by loading from a file path or by passing a string, io.Reader or bufio.Scanner to the 
 relevant method:
 ```go
-import "github.com/jcmturner/gokrb5/v8/config"
+import "github.com/otuschhoff/gokrb5/v8/config"
 cfg, err := config.Load("/path/to/config/file")
 cfg, err := config.NewFromString(krb5Str) //String must have appropriate newline separations
 cfg, err := config.NewFromReader(reader)
@@ -49,7 +49,7 @@ cfg, err := config.NewFromScanner(scanner)
 ### Keytab files
 Standard keytab files can be read from a file or from a slice of bytes:
 ```go
-import 	"github.com/jcmturner/gokrb5/v8/keytab"
+import 	"github.com/otuschhoff/gokrb5/v8/keytab"
 ktFromFile, err := keytab.Load("/path/to/file.keytab")
 ktFromBytes, err := keytab.Parse(b)
 
@@ -91,7 +91,7 @@ caches are currently supported for writing.
 **Create** a client instance with either a password or a keytab.
 A configuration must also be passed. Additionally optional additional settings can be provided.
 ```go
-import 	"github.com/jcmturner/gokrb5/v8/client"
+import 	"github.com/otuschhoff/gokrb5/v8/client"
 cl := client.NewWithPassword("username", "REALM.COM", "password", cfg)
 cl := client.NewWithKeytab("username", "REALM.COM", kt, cfg)
 ```
@@ -300,7 +300,7 @@ if creds != nil && creds.Authenticated() {
 #### Generic Kerberised Service - Validating Client Details
 To validate the AP_REQ sent by the client on the service side call this method:
 ```go
-import 	"github.com/jcmturner/gokrb5/v8/service"
+import 	"github.com/otuschhoff/gokrb5/v8/service"
 s := service.NewSettings(&kt) // kt is a keytab and optional settings can also be provided.
 if ok, creds, err := service.VerifyAPREQ(&APReq, s); ok {
         // Perform application specific actions

@@ -6,8 +6,8 @@ import (
 	"log"
 	"testing"
 
-	"github.com/jcmturner/gokrb5/v8/test/testdata"
-	"github.com/jcmturner/gokrb5/v8/types"
+	"github.com/otuschhoff/gokrb5/v8/test/testdata"
+	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
 func FuzzPACUnmarshal(f *testing.F) {

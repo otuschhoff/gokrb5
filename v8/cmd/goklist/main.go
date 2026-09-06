@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jcmturner/gokrb5/v8/cmd/internal/krbcli"
-	"github.com/jcmturner/gokrb5/v8/credentials"
-	"github.com/jcmturner/gokrb5/v8/iana/etypeID"
-	"github.com/jcmturner/gokrb5/v8/keytab"
-	"github.com/jcmturner/gokrb5/v8/messages"
+	"github.com/otuschhoff/gokrb5/v8/cmd/internal/krbcli"
+	"github.com/otuschhoff/gokrb5/v8/credentials"
+	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
+	"github.com/otuschhoff/gokrb5/v8/keytab"
+	"github.com/otuschhoff/gokrb5/v8/messages"
 )
 
 const usageLine = "usage: goklist [-e] [-s] [-c cache_name] | [-k [-t] [-K] [-e] [keytab_name]]"

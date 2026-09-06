@@ -7,9 +7,9 @@ import (
 	"os/user"
 	"strings"
 
-	"github.com/jcmturner/gokrb5/v8/config"
-	"github.com/jcmturner/gokrb5/v8/credentials"
-	"github.com/jcmturner/gokrb5/v8/keytab"
+	"github.com/otuschhoff/gokrb5/v8/config"
+	"github.com/otuschhoff/gokrb5/v8/credentials"
+	"github.com/otuschhoff/gokrb5/v8/keytab"
 )
 
 // ResolvePrincipal applies kinit's explicit, cache, keytab, and local-user defaults.

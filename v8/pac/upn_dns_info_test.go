@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jcmturner/gokrb5/v8/test/testdata"
+	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/stretchr/testify/assert"
 )
 

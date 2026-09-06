@@ -1,7 +1,7 @@
 # Design Spec: MS-KILE Compliance — Kerberos Protocol Extensions for Active Directory
 
 Status: Draft
-Scope: `v8` module (`github.com/jcmturner/gokrb5/v8`)
+Scope: `v8` module (`github.com/otuschhoff/gokrb5/v8`)
 Normative references (verify against the latest published revision before each phase):
 
 | Reference | Title | Used for |

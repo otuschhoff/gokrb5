@@ -6,8 +6,8 @@ import (
 	"strconv"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
-	"github.com/jcmturner/gokrb5/v8/credentials"
-	"github.com/jcmturner/gokrb5/v8/types"
+	"github.com/otuschhoff/gokrb5/v8/credentials"
+	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
 // CCache exports the client's current TGT sessions and cached service tickets.

@@ -11,9 +11,9 @@ import (
 	"testing"
 
 	"github.com/jcmturner/goidentity/v6"
-	"github.com/jcmturner/gokrb5/v8/client"
-	"github.com/jcmturner/gokrb5/v8/service"
-	"github.com/jcmturner/gokrb5/v8/test/ad"
+	"github.com/otuschhoff/gokrb5/v8/client"
+	"github.com/otuschhoff/gokrb5/v8/service"
+	"github.com/otuschhoff/gokrb5/v8/test/ad"
 	"github.com/stretchr/testify/assert"
 )
 

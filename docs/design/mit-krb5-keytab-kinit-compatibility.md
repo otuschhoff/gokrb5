@@ -1,7 +1,7 @@
 # Design Spec: MIT krb5 Compatibility — Keytab Handling and `kinit`
 
 Status: Implemented; compatibility questions resolved against MIT krb5 1.21.3
-Scope: `v8` module (`github.com/jcmturner/gokrb5/v8`)
+Scope: `v8` module (`github.com/otuschhoff/gokrb5/v8`)
 Reference implementation: MIT Kerberos 5 (krb5 ≥ 1.18; verify against latest stable)
 
 ---

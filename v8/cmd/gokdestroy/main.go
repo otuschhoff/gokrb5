@@ -7,8 +7,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/jcmturner/gokrb5/v8/cmd/internal/krbcli"
-	"github.com/jcmturner/gokrb5/v8/credentials"
+	"github.com/otuschhoff/gokrb5/v8/cmd/internal/krbcli"
+	"github.com/otuschhoff/gokrb5/v8/credentials"
 )
 
 const usageLine = "usage: gokdestroy [-A] [-q] [-c cache_name]"

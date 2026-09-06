@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jcmturner/gokrb5/v8/iana/etypeID"
+	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 )
 
 // Klist renders the keytab in the format produced by MIT klist -k.

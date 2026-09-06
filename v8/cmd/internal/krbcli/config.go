@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jcmturner/gokrb5/v8/config"
+	"github.com/otuschhoff/gokrb5/v8/config"
 )
 
 // LoadConfig loads the first usable path from KRB5_CONFIG or the platform default.

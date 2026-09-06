@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
-	"github.com/jcmturner/gokrb5/v8/iana/adtype"
-	"github.com/jcmturner/gokrb5/v8/iana/msflags"
-	"github.com/jcmturner/gokrb5/v8/iana/ntstatus"
-	"github.com/jcmturner/gokrb5/v8/iana/patype"
+	"github.com/otuschhoff/gokrb5/v8/iana/adtype"
+	"github.com/otuschhoff/gokrb5/v8/iana/msflags"
+	"github.com/otuschhoff/gokrb5/v8/iana/ntstatus"
+	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 )
 
 // KerbPAPACRequest controls whether the KDC includes a PAC in the ticket.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jcmturner/gokrb5/v8/iana/ntstatus"
+	"github.com/otuschhoff/gokrb5/v8/iana/ntstatus"
 	"github.com/stretchr/testify/assert"
 )
 

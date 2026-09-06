@@ -16,10 +16,10 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/jcmturner/gokrb5/v8/config"
-	"github.com/jcmturner/gokrb5/v8/iana/errorcode"
-	"github.com/jcmturner/gokrb5/v8/krberror"
-	"github.com/jcmturner/gokrb5/v8/messages"
+	"github.com/otuschhoff/gokrb5/v8/config"
+	"github.com/otuschhoff/gokrb5/v8/iana/errorcode"
+	"github.com/otuschhoff/gokrb5/v8/krberror"
+	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/stretchr/testify/assert"
 )
 
