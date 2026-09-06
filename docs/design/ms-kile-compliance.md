@@ -546,6 +546,12 @@ Steps:
 
 Check: `go test ./pac/... ./service/... ./credentials/...` green; fixture 6 PACs verify; `go test -fuzz FuzzPACUnmarshal -fuzztime 30s ./pac` clean.
 
+Implementation note: `rpc/v2` provides an NDR decoder but no general encoder.
+Phase 4 therefore preserves existing complex NDR buffer payloads byte-for-byte
+when rebuilding or re-signing a PAC, and provides typed marshalers for the
+simple PAC buffers changed in this phase. This avoids emitting partial or
+non-conformant NDR while retaining lossless PAC re-signing.
+
 ### Phase 5 — Legacy RC4 GSS tokens and SPNEGO mechListMIC (KC-12, KA-6, KA-9)
 
 Files: new `v8/gssapi/rc4Tokens.go`, new `v8/gssapi/context.go` (token-family selection, sequence window), `v8/gssapi/MICToken.go`, `v8/gssapi/wrapToken.go`, `v8/spnego/negotiationToken.go`, `v8/spnego/spnego.go`, `v8/spnego/http.go`, `v8/crypto/rfc4757/*.go` (export `HMAC` helpers if needed), tests alongside.

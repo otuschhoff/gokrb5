@@ -214,6 +214,11 @@ func (t *Ticket) Decrypt(key types.EncryptionKey) error {
 
 // GetPACType returns a Microsoft PAC that has been extracted from the ticket and processed.
 func (t *Ticket) GetPACType(keytab *keytab.Keytab, sname *types.PrincipalName, l *log.Logger) (bool, pac.PACType, error) {
+	return t.GetPACTypeWithOptions(keytab, sname, l, pac.VerifyOptions{})
+}
+
+// GetPACTypeWithOptions returns a processed PAC with additional verification context.
+func (t *Ticket) GetPACTypeWithOptions(keytab *keytab.Keytab, sname *types.PrincipalName, l *log.Logger, options pac.VerifyOptions) (bool, pac.PACType, error) {
 	entries, err := t.DecryptedEncPart.AuthorizationData.EntriesOfType(adtype.ADWin2KPAC)
 	if err != nil {
 		return false, pac.PACType{}, fmt.Errorf("PAC authorization data could not be traversed: %w", err)
@@ -232,8 +237,19 @@ func (t *Ticket) GetPACType(keytab *keytab.Keytab, sname *types.PrincipalName, l
 	if err != nil {
 		return true, p, NewKRBError(t.SName, t.Realm, errorcode.KRB_AP_ERR_NOKEY, fmt.Sprintf("Could not get key from keytab: %v", err))
 	}
-	err = p.ProcessPACInfoBuffers(key, l)
-	return true, p, err
+	if err := p.ProcessPACInfoBuffers(key, l); err != nil {
+		return true, p, err
+	}
+	if options.ExpectedClientName == "" {
+		options.ExpectedClientName = t.DecryptedEncPart.CName.PrincipalNameString()
+	}
+	if options.ExpectedAuthTime == nil && !t.DecryptedEncPart.AuthTime.IsZero() {
+		options.ExpectedAuthTime = &t.DecryptedEncPart.AuthTime
+	}
+	if err := p.Verify(key, options); err != nil {
+		return true, p, err
+	}
+	return true, p, nil
 }
 
 // Valid checks it the ticket is currently valid. Max duration passed endtime passed in as argument.

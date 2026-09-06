@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/otuschhoff/gokrb5/v8/pac/internal/ndr"
 	"github.com/jcmturner/rpc/v2/mstypes"
+	"github.com/otuschhoff/gokrb5/v8/pac/internal/ndr"
 )
 
 // S4UDelegationInfo implements https://msdn.microsoft.com/en-us/library/cc237944.aspx
@@ -23,4 +23,18 @@ func (k *S4UDelegationInfo) Unmarshal(b []byte) (err error) {
 		err = fmt.Errorf("error unmarshaling S4UDelegationInfo: %v", err)
 	}
 	return
+}
+
+// ProxyTarget returns the service to which the ticket may be forwarded.
+func (k S4UDelegationInfo) ProxyTarget() string {
+	return k.S4U2proxyTarget.Value
+}
+
+// TransitedServices returns a copy of the services in the delegation path.
+func (k S4UDelegationInfo) TransitedServices() []string {
+	services := make([]string, len(k.S4UTransitedServices))
+	for i := range k.S4UTransitedServices {
+		services[i] = k.S4UTransitedServices[i].Value
+	}
+	return services
 }

@@ -86,19 +86,7 @@ func VerifyAPREQWithResult(APReq *messages.APReq, s *Settings) (APREQResult, err
 		}
 		if isPAC {
 			// There is a valid PAC. Adding attributes to creds
-			c.SetADCredentials(credentials.ADCredentials{
-				GroupMembershipSIDs: pac.KerbValidationInfo.GetGroupMembershipSIDs(),
-				LogOnTime:           pac.KerbValidationInfo.LogOnTime.Time(),
-				LogOffTime:          pac.KerbValidationInfo.LogOffTime.Time(),
-				PasswordLastSet:     pac.KerbValidationInfo.PasswordLastSet.Time(),
-				EffectiveName:       pac.KerbValidationInfo.EffectiveName.Value,
-				FullName:            pac.KerbValidationInfo.FullName.Value,
-				UserID:              int(pac.KerbValidationInfo.UserID),
-				PrimaryGroupID:      int(pac.KerbValidationInfo.PrimaryGroupID),
-				LogonServer:         pac.KerbValidationInfo.LogonServer.Value,
-				LogonDomainName:     pac.KerbValidationInfo.LogonDomainName.Value,
-				LogonDomainID:       pac.KerbValidationInfo.LogonDomainID.String(),
-			})
+			c.SetADCredentials(adCredentialsFromPAC(pac, APReq.Ticket.DecryptedEncPart.AuthTime))
 		}
 	}
 	return result, nil

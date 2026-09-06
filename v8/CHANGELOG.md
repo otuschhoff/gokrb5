@@ -13,6 +13,10 @@
   explicit TGT renewal.
 - `gokinit`, `goklist`, and `gokdestroy` command-line tools.
 - MIT Kerberos interoperability and parser fuzz test suites.
+- Complete PAC buffer 16-19 parsing, deterministic PAC marshaling and signing,
+  UPN/DNS SAM and SID extensions, and options-aware checksum verification.
+- Ticket-bound PAC identity validation and expanded Active Directory
+  credentials for claims, device, delegation, requestor, and SID metadata.
 
 ### Changed
 

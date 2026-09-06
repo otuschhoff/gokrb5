@@ -50,6 +50,39 @@ func TestPACBoundsChecks(t *testing.T) {
 	}
 }
 
+func TestPACRejectsDuplicateValidationInfo(t *testing.T) {
+	b, err := hex.DecodeString(testdata.MarshaledPAC_AD_WIN2K_PAC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var original PACType
+	if err := original.Unmarshal(b); err != nil {
+		t.Fatal(err)
+	}
+	var buffers []pacBuffer
+	var validation pacBuffer
+	for _, info := range original.Buffers {
+		payload := append([]byte(nil), original.Data[int(info.Offset):int(info.Offset)+int(info.CBBufferSize)]...)
+		buffer := pacBuffer{typeID: info.ULType, data: payload}
+		buffers = append(buffers, buffer)
+		if info.ULType == infoTypeKerbValidationInfo {
+			validation = buffer
+		}
+	}
+	data, err := marshalPACBuffers(0, append(buffers, validation))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var duplicate PACType
+	if err := duplicate.Unmarshal(data); err != nil {
+		t.Fatal(err)
+	}
+	err = duplicate.ProcessPACInfoBuffers(types.EncryptionKey{}, log.New(&bytes.Buffer{}, "", 0))
+	if !errors.Is(err, ErrPACMalformed) {
+		t.Fatalf("ProcessPACInfoBuffers error = %v, want ErrPACMalformed", err)
+	}
+}
+
 func TestPACTypeVerify(t *testing.T) {
 	t.Parallel()
 	b, err := hex.DecodeString(testdata.MarshaledPAC_AD_WIN2K_PAC)

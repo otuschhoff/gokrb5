@@ -9,7 +9,6 @@ import (
 	goidentity "github.com/jcmturner/goidentity/v6"
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/config"
-	"github.com/otuschhoff/gokrb5/v8/credentials"
 )
 
 // NewKRB5BasicAuthenticator creates a new NewKRB5BasicAuthenticator
@@ -67,19 +66,7 @@ func (a KRB5BasicAuthenticator) Authenticate() (i goidentity.Identity, ok bool, 
 	}
 	if isPAC {
 		// There is a valid PAC. Adding attributes to creds
-		cl.Credentials.SetADCredentials(credentials.ADCredentials{
-			GroupMembershipSIDs: pac.KerbValidationInfo.GetGroupMembershipSIDs(),
-			LogOnTime:           pac.KerbValidationInfo.LogOnTime.Time(),
-			LogOffTime:          pac.KerbValidationInfo.LogOffTime.Time(),
-			PasswordLastSet:     pac.KerbValidationInfo.PasswordLastSet.Time(),
-			EffectiveName:       pac.KerbValidationInfo.EffectiveName.Value,
-			FullName:            pac.KerbValidationInfo.FullName.Value,
-			UserID:              int(pac.KerbValidationInfo.UserID),
-			PrimaryGroupID:      int(pac.KerbValidationInfo.PrimaryGroupID),
-			LogonServer:         pac.KerbValidationInfo.LogonServer.Value,
-			LogonDomainName:     pac.KerbValidationInfo.LogonDomainName.Value,
-			LogonDomainID:       pac.KerbValidationInfo.LogonDomainID.String(),
-		})
+		cl.Credentials.SetADCredentials(adCredentialsFromPAC(pac, tkt.DecryptedEncPart.AuthTime))
 	}
 	ok = true
 	i = cl.Credentials

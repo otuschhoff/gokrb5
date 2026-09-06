@@ -1,6 +1,7 @@
 package pac
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"testing"
 
@@ -26,6 +27,32 @@ func TestPAC_SignatureData_Unmarshal_Server_Signature(t *testing.T) {
 	assert.Equal(t, sig, k.Signature, "Server signature not as expected")
 	assert.Equal(t, uint16(0), k.RODCIdentifier, "RODC Identifier not as expected")
 	assert.Equal(t, zeroed, bz, "Returned bytes with zeroed signature not as expected")
+}
+
+func TestSignatureDataStrictMarshal(t *testing.T) {
+	b := make([]byte, 22)
+	binary.LittleEndian.PutUint32(b, chksumtype.KERB_CHECKSUM_HMAC_MD5_UNSIGNED)
+	var signature SignatureData
+	if _, err := signature.Unmarshal(b); err != nil {
+		t.Fatal(err)
+	}
+	if !signature.HasRODCIdentifier {
+		t.Fatal("zero-valued RODC identifier presence was lost")
+	}
+	roundTrip, err := signature.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, b, roundTrip)
+
+	unknown := make([]byte, 4)
+	binary.LittleEndian.PutUint32(unknown, 12345)
+	if _, err := (&SignatureData{}).Unmarshal(unknown); err == nil {
+		t.Fatal("unknown checksum type was accepted")
+	}
+	if _, err := (&SignatureData{SignatureType: uint32(chksumtype.HMAC_SHA1_96_AES128)}).Marshal(); err == nil {
+		t.Fatal("invalid signature length was accepted")
+	}
 }
 
 func TestPAC_SignatureData_Unmarshal_KDC_Signature(t *testing.T) {

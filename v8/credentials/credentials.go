@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-uuid"
+	"github.com/jcmturner/rpc/v2/mstypes"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
 	"github.com/otuschhoff/gokrb5/v8/types"
@@ -69,6 +70,41 @@ type ADCredentials struct {
 	LogonDomainName     string
 	LogonDomainID       string
 	LogonServer         string
+	UPN                 string
+	DNSDomain           string
+	SAMAccountName      string
+	UserSID             string
+	ExtraSIDs           []SIDAndAttributes
+	ResourceGroupSIDs   []SIDAndAttributes
+	UserAccountControl  uint32
+	ClientClaims        *mstypes.ClaimsSet
+	DeviceClaims        *mstypes.ClaimsSet
+	DeviceInfo          *ADDeviceInfo
+	S4UDelegationInfo   *ADS4UDelegationInfo
+	PACAttributes       uint32
+	PACRequestorSID     string
+	TicketAuthTime      time.Time
+}
+
+// SIDAndAttributes is a stable credential view of a PAC SID and its flags.
+type SIDAndAttributes struct {
+	SID        string
+	Attributes uint32
+}
+
+// ADDeviceInfo is the device identity and group data carried by a PAC.
+type ADDeviceInfo struct {
+	UserSID         string
+	PrimaryGroupSID string
+	GroupSIDs       []SIDAndAttributes
+	ExtraSIDs       []SIDAndAttributes
+	DomainGroupSIDs []SIDAndAttributes
+}
+
+// ADS4UDelegationInfo describes constrained-delegation traversal from a PAC.
+type ADS4UDelegationInfo struct {
+	ProxyTarget       string
+	TransitedServices []string
 }
 
 // New creates a new Credentials instance.

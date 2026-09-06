@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/otuschhoff/gokrb5/v8/crypto"
-	"github.com/otuschhoff/gokrb5/v8/iana/keyusage"
-	"github.com/otuschhoff/gokrb5/v8/types"
 	"github.com/jcmturner/rpc/v2/mstypes"
+	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
 // ErrPACMalformed indicates that a PAC has an invalid buffer table or range.
@@ -37,6 +35,10 @@ const (
 	infoTypePACClientClaimsInfo    uint32 = 13
 	infoTypePACDeviceInfo          uint32 = 14
 	infoTypePACDeviceClaimsInfo    uint32 = 15
+	infoTypePACTicketChecksum      uint32 = 16
+	infoTypePACAttributesInfo      uint32 = 17
+	infoTypePACRequestor           uint32 = 18
+	infoTypePACFullChecksum        uint32 = 19
 )
 
 // PACType implements: https://msdn.microsoft.com/en-us/library/cc237950.aspx
@@ -55,6 +57,10 @@ type PACType struct {
 	ClientClaimsInfo   *ClientClaimsInfo
 	DeviceInfo         *DeviceInfo
 	DeviceClaimsInfo   *DeviceClaimsInfo
+	TicketChecksum     *SignatureData
+	AttributesInfo     *AttributesInfo
+	Requestor          *Requestor
+	FullChecksum       *SignatureData
 	ZeroSigData        []byte
 }
 
@@ -151,7 +157,29 @@ func (pac *PACType) ProcessPACInfoBuffers(key types.EncryptionKey, l *log.Logger
 	if err := pac.validateInfoBuffers(); err != nil {
 		return err
 	}
+	pac.KerbValidationInfo = nil
+	pac.CredentialsInfo = nil
+	pac.ServerChecksum = nil
+	pac.KDCChecksum = nil
+	pac.ClientInfo = nil
+	pac.S4UDelegationInfo = nil
+	pac.UPNDNSInfo = nil
+	pac.ClientClaimsInfo = nil
+	pac.DeviceInfo = nil
+	pac.DeviceClaimsInfo = nil
+	pac.TicketChecksum = nil
+	pac.AttributesInfo = nil
+	pac.Requestor = nil
+	pac.FullChecksum = nil
+	pac.ZeroSigData = append(pac.ZeroSigData[:0], pac.Data...)
+	seenKnown := make(map[uint32]struct{})
 	for _, buf := range pac.Buffers {
+		if isKnownPACBuffer(buf.ULType) {
+			if _, ok := seenKnown[buf.ULType]; ok {
+				return fmt.Errorf("%w: duplicate buffer type %d", ErrPACMalformed, buf.ULType)
+			}
+			seenKnown[buf.ULType] = struct{}{}
+		}
 		p, err := copyPACRange(pac.Data, buf.Offset, uint64(buf.CBBufferSize))
 		if err != nil {
 			return err
@@ -159,8 +187,7 @@ func (pac *PACType) ProcessPACInfoBuffers(key types.EncryptionKey, l *log.Logger
 		switch buf.ULType {
 		case infoTypeKerbValidationInfo:
 			if pac.KerbValidationInfo != nil {
-				//Must ignore subsequent buffers of this type
-				continue
+				return fmt.Errorf("%w: duplicate KerbValidationInfo buffer", ErrPACMalformed)
 			}
 			var k KerbValidationInfo
 			err := k.Unmarshal(p)
@@ -185,8 +212,7 @@ func (pac *PACType) ProcessPACInfoBuffers(key types.EncryptionKey, l *log.Logger
 			//pac.CredentialsInfo = &k
 		case infoTypePACServerSignatureData:
 			if pac.ServerChecksum != nil {
-				//Must ignore subsequent buffers of this type
-				continue
+				return fmt.Errorf("%w: duplicate ServerChecksum buffer", ErrPACMalformed)
 			}
 			var k SignatureData
 			zb, err := k.Unmarshal(p)
@@ -197,8 +223,7 @@ func (pac *PACType) ProcessPACInfoBuffers(key types.EncryptionKey, l *log.Logger
 			pac.ServerChecksum = &k
 		case infoTypePACKDCSignatureData:
 			if pac.KDCChecksum != nil {
-				//Must ignore subsequent buffers of this type
-				continue
+				return fmt.Errorf("%w: duplicate KDCChecksum buffer", ErrPACMalformed)
 			}
 			var k SignatureData
 			zb, err := k.Unmarshal(p)
@@ -209,8 +234,7 @@ func (pac *PACType) ProcessPACInfoBuffers(key types.EncryptionKey, l *log.Logger
 			pac.KDCChecksum = &k
 		case infoTypePACClientInfo:
 			if pac.ClientInfo != nil {
-				//Must ignore subsequent buffers of this type
-				continue
+				return fmt.Errorf("%w: duplicate ClientInfo buffer", ErrPACMalformed)
 			}
 			var k ClientInfo
 			err := k.Unmarshal(p)
@@ -219,65 +243,83 @@ func (pac *PACType) ProcessPACInfoBuffers(key types.EncryptionKey, l *log.Logger
 			}
 			pac.ClientInfo = &k
 		case infoTypeS4UDelegationInfo:
-			if pac.S4UDelegationInfo != nil {
-				//Must ignore subsequent buffers of this type
-				continue
-			}
 			var k S4UDelegationInfo
 			err := k.Unmarshal(p)
 			if err != nil {
-				l.Printf("could not process S4U_DelegationInfo: %v", err)
-				continue
+				return fmt.Errorf("error processing S4U_DelegationInfo: %v", err)
 			}
 			pac.S4UDelegationInfo = &k
 		case infoTypeUPNDNSInfo:
-			if pac.UPNDNSInfo != nil {
-				//Must ignore subsequent buffers of this type
-				continue
-			}
 			var k UPNDNSInfo
 			err := k.Unmarshal(p)
 			if err != nil {
-				l.Printf("could not process UPN_DNSInfo: %v", err)
-				continue
+				return fmt.Errorf("error processing UPN_DNSInfo: %v", err)
 			}
 			pac.UPNDNSInfo = &k
 		case infoTypePACClientClaimsInfo:
-			if pac.ClientClaimsInfo != nil || len(p) < 1 {
-				//Must ignore subsequent buffers of this type
-				continue
+			if len(p) < 1 {
+				return fmt.Errorf("%w: ClientClaimsInfo is empty", ErrPACMalformed)
 			}
 			var k ClientClaimsInfo
 			err := k.Unmarshal(p)
 			if err != nil {
-				l.Printf("could not process ClientClaimsInfo: %v", err)
-				continue
+				return fmt.Errorf("error processing ClientClaimsInfo: %v", err)
 			}
 			pac.ClientClaimsInfo = &k
 		case infoTypePACDeviceInfo:
-			if pac.DeviceInfo != nil {
-				//Must ignore subsequent buffers of this type
-				continue
-			}
 			var k DeviceInfo
 			err := k.Unmarshal(p)
 			if err != nil {
-				l.Printf("could not process DeviceInfo: %v", err)
-				continue
+				return fmt.Errorf("error processing DeviceInfo: %v", err)
 			}
 			pac.DeviceInfo = &k
 		case infoTypePACDeviceClaimsInfo:
-			if pac.DeviceClaimsInfo != nil {
-				//Must ignore subsequent buffers of this type
-				continue
-			}
 			var k DeviceClaimsInfo
 			err := k.Unmarshal(p)
 			if err != nil {
-				l.Printf("could not process DeviceClaimsInfo: %v", err)
-				continue
+				return fmt.Errorf("error processing DeviceClaimsInfo: %v", err)
 			}
 			pac.DeviceClaimsInfo = &k
+		case infoTypePACTicketChecksum:
+			if pac.TicketChecksum != nil {
+				return fmt.Errorf("%w: duplicate TicketChecksum buffer", ErrPACMalformed)
+			}
+			var k SignatureData
+			zb, err := k.Unmarshal(p)
+			if err != nil {
+				return fmt.Errorf("error processing TicketChecksum: %v", err)
+			}
+			copy(pac.ZeroSigData[int(buf.Offset):int(buf.Offset)+int(buf.CBBufferSize)], zb)
+			pac.TicketChecksum = &k
+		case infoTypePACAttributesInfo:
+			if pac.AttributesInfo != nil {
+				return fmt.Errorf("%w: duplicate AttributesInfo buffer", ErrPACMalformed)
+			}
+			var k AttributesInfo
+			if err := k.Unmarshal(p); err != nil {
+				return fmt.Errorf("error processing AttributesInfo: %v", err)
+			}
+			pac.AttributesInfo = &k
+		case infoTypePACRequestor:
+			if pac.Requestor != nil {
+				return fmt.Errorf("%w: duplicate Requestor buffer", ErrPACMalformed)
+			}
+			var k Requestor
+			if err := k.Unmarshal(p); err != nil {
+				return fmt.Errorf("error processing Requestor: %v", err)
+			}
+			pac.Requestor = &k
+		case infoTypePACFullChecksum:
+			if pac.FullChecksum != nil {
+				return fmt.Errorf("%w: duplicate FullChecksum buffer", ErrPACMalformed)
+			}
+			var k SignatureData
+			zb, err := k.Unmarshal(p)
+			if err != nil {
+				return fmt.Errorf("error processing FullChecksum: %v", err)
+			}
+			copy(pac.ZeroSigData[int(buf.Offset):int(buf.Offset)+int(buf.CBBufferSize)], zb)
+			pac.FullChecksum = &k
 		}
 	}
 
@@ -289,28 +331,21 @@ func (pac *PACType) ProcessPACInfoBuffers(key types.EncryptionKey, l *log.Logger
 }
 
 func (pac *PACType) verify(key types.EncryptionKey) (bool, error) {
-	if pac.KerbValidationInfo == nil {
-		return false, errors.New("PAC Info Buffers does not contain a KerbValidationInfo")
-	}
-	if pac.ServerChecksum == nil {
-		return false, errors.New("PAC Info Buffers does not contain a ServerChecksum")
-	}
-	if pac.KDCChecksum == nil {
-		return false, errors.New("PAC Info Buffers does not contain a KDCChecksum")
-	}
-	if pac.ClientInfo == nil {
-		return false, errors.New("PAC Info Buffers does not contain a ClientInfo")
-	}
-	etype, err := crypto.GetChksumEtype(int32(pac.ServerChecksum.SignatureType))
-	if err != nil {
+	if err := pac.Verify(key, VerifyOptions{}); err != nil {
 		return false, err
 	}
-	if ok := etype.VerifyChecksum(key.KeyValue,
-		pac.ZeroSigData,
-		pac.ServerChecksum.Signature,
-		keyusage.KERB_NON_KERB_CKSUM_SALT); !ok {
-		return false, errors.New("PAC service checksum verification failed")
-	}
-
 	return true, nil
+}
+
+func isKnownPACBuffer(typeID uint32) bool {
+	switch typeID {
+	case infoTypeKerbValidationInfo, infoTypeCredentials, infoTypePACServerSignatureData,
+		infoTypePACKDCSignatureData, infoTypePACClientInfo, infoTypeS4UDelegationInfo,
+		infoTypeUPNDNSInfo, infoTypePACClientClaimsInfo, infoTypePACDeviceInfo,
+		infoTypePACDeviceClaimsInfo, infoTypePACTicketChecksum, infoTypePACAttributesInfo,
+		infoTypePACRequestor, infoTypePACFullChecksum:
+		return true
+	default:
+		return false
+	}
 }

@@ -287,7 +287,13 @@ if creds != nil && creds.Authenticated() {
         // Unmarshal the AD attributes
 		err := json.Unmarshal([]byte(ADCredsJSON), ADCreds)
 		if err == nil {
-			// Now access the fields of the ADCredentials struct. For example: ADCreds.GroupMembershipSIDs
+			// Use validated PAC identity and authorization data.
+			userSID := ADCreds.UserSID
+			upn := ADCreds.UPN
+			groups := ADCreds.GroupMembershipSIDs
+			_ = userSID
+			_ = upn
+			_ = groups
 		}
 	}
 } else {
@@ -296,6 +302,14 @@ if creds != nil && creds.Authenticated() {
 	fmt.Fprint(w, "Authentication failed")
 }
 ```
+
+`ADCredentials` also exposes the SAM account and DNS domain names, extra and
+resource-group SIDs, user-account-control flags, client and device claims,
+device identity, S4U delegation path, PAC attributes, requestor SID, and the
+ticket authentication time. Optional PAC buffers are represented by nil
+pointers or empty values. These fields are only attached after the PAC service
+checksum and its client name, authentication time, requestor SID, and extended
+UPN/DNS identity have been validated against the decrypted ticket.
 
 #### Generic Kerberised Service - Validating Client Details
 To validate the AP_REQ sent by the client on the service side call this method:

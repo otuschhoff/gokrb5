@@ -36,6 +36,11 @@ func FuzzPACUnmarshal(f *testing.F) {
 		}
 		f.Add(b)
 	}
+	generated, err := minimalPAC().Marshal()
+	if err != nil {
+		f.Fatalf("could not generate PAC seed: %v", err)
+	}
+	f.Add(generated)
 
 	logger := log.New(io.Discard, "", 0)
 	f.Fuzz(func(t *testing.T, b []byte) {
