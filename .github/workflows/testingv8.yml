@@ -52,7 +52,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            go: '1.18.x'
+            go: '1.26.x'
           - os: ubuntu-latest
             go: stable
           - os: macos-latest
@@ -200,7 +200,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go: [ '1.18.x', 'stable' ]
+        go: [ '1.26.x', 'stable' ]
     env:
       TEST_KDC_ADDR: 127.0.0.1
       TEST_HTTP_URL: http://cname.test.gokrb5

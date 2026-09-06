@@ -597,7 +597,7 @@ func (cl *Client) Diagnostics(w io.Writer) error {
 	if len(errs) < 1 {
 		return nil
 	}
-	err = fmt.Errorf(strings.Join(errs, "\n"))
+	err = errors.New(strings.Join(errs, "\n"))
 	return err
 }
 

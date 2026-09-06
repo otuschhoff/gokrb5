@@ -11,9 +11,8 @@ Development will be focused on the latest major version. New features will only 
 
 
 #### Go Version Support
-![Go version](https://img.shields.io/badge/Go-1.20-brightgreen.svg)
-![Go version](https://img.shields.io/badge/Go-1.19-brightgreen.svg)
-![Go version](https://img.shields.io/badge/Go-1.18-brightgreen.svg)
+![Go version](https://img.shields.io/badge/Go-1.27-brightgreen.svg)
+![Go version](https://img.shields.io/badge/Go-1.26-brightgreen.svg)
 
 gokrb5 may work with other versions of Go but they are not formally tested.
 It has been reported that gokrb5 also works with the [gollvm](https://go.googlesource.com/gollvm/) compiler but this is not formally tested.
