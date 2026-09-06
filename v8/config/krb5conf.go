@@ -74,6 +74,13 @@ type LibDefaults struct {
 	PermittedEnctypeIDs []int32
 	//plugin_base_dir string //not supporting plugins
 	PreferredPreauthTypes []int         //default “17, 16, 15, 14”, which forces libkrb5 to attempt to use PKINIT if it is supported
+	PKINITAnchors         []string      `json:"-"`
+	PKINITIdentities      []string      `json:"-"`
+	PKINITKDCHostname     string        `json:"-"`
+	PKINITEKUChecking     string        `json:"-"`
+	PKINITRequireCRLCheck bool          `json:"-"`
+	PKINITDHMinBits       int           `json:"-"`
+	PKINITPool            []string      `json:"-"`
 	Proxiable             bool          //default false
 	RDNS                  bool          //default true
 	RealmTryDomains       int           //default -1
@@ -109,6 +116,8 @@ func newLibDefaults() LibDefaults {
 		KDCTimeSync:             1,
 		NoAddresses:             true,
 		PermittedEnctypes:       []string{"aes256-cts-hmac-sha1-96", "aes128-cts-hmac-sha1-96", "des3-cbc-sha1", "arcfour-hmac-md5", "camellia256-cts-cmac", "camellia128-cts-cmac", "des-cbc-crc", "des-cbc-md5", "des-cbc-md4"},
+		PKINITEKUChecking:       "kdc",
+		PKINITDHMinBits:         2048,
 		RDNS:                    true,
 		RealmTryDomains:         -1,
 		RequestPAC:              true,
@@ -161,6 +170,32 @@ func (l *LibDefaults) parseLines(lines []string) error {
 				return InvalidErrorf("libdefaults section line (%s): %v", line, err)
 			}
 			l.RequestPAC = v
+		case "pkinit_anchors":
+			l.PKINITAnchors = append(l.PKINITAnchors, strings.TrimSpace(p[1]))
+		case "pkinit_identities":
+			l.PKINITIdentities = append(l.PKINITIdentities, strings.TrimSpace(p[1]))
+		case "pkinit_kdc_hostname":
+			l.PKINITKDCHostname = strings.TrimSpace(p[1])
+		case "pkinit_eku_checking":
+			value := strings.TrimSpace(p[1])
+			if value != "kdc" && value != "kpServerAuth" && value != "none" {
+				return InvalidErrorf("libdefaults section line (%s): invalid PKINIT EKU checking mode", line)
+			}
+			l.PKINITEKUChecking = value
+		case "pkinit_require_crl_checking":
+			value, err := parseBoolean(p[1])
+			if err != nil {
+				return InvalidErrorf("libdefaults section line (%s): %v", line, err)
+			}
+			l.PKINITRequireCRLCheck = value
+		case "pkinit_dh_min_bits":
+			value, err := strconv.Atoi(strings.TrimSpace(p[1]))
+			if err != nil || value < 1024 {
+				return InvalidErrorf("libdefaults section line (%s): invalid PKINIT DH minimum", line)
+			}
+			l.PKINITDHMinBits = value
+		case "pkinit_pool":
+			l.PKINITPool = append(l.PKINITPool, strings.TrimSpace(p[1]))
 		case "ccache_type":
 			p[1] = strings.TrimSpace(p[1])
 			v, err := strconv.ParseUint(p[1], 10, 32)

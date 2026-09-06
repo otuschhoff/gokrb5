@@ -81,6 +81,23 @@ func TestParseArgsAcceptsCombinedKeytabFlags(t *testing.T) {
 	assert.True(t, opts.clientKeytab)
 }
 
+func TestParseArgsAcceptsPKINITOptions(t *testing.T) {
+	var stderr bytes.Buffer
+	opts, err := parseArgs([]string{"-X", "X509_user_identity=PKCS12:user.p12", "-X", "X509_anchors=FILE:ca.pem", "user@REALM"}, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, stringList{"X509_user_identity=PKCS12:user.p12", "X509_anchors=FILE:ca.pem"}, opts.pkinitOptions)
+}
+
+func TestPKINITFilePath(t *testing.T) {
+	path, err := pkinitFilePath("FILE:/etc/krb5/ca.pem")
+	assert.NoError(t, err)
+	assert.Equal(t, "/etc/krb5/ca.pem", path)
+	_, err = pkinitFilePath("DIR:/etc/krb5/certs")
+	assert.EqualError(t, err, `unsupported PKINIT anchor source "DIR:/etc/krb5/certs"`)
+}
+
 func TestValidateIsExplicitlyUnsupported(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	assert.Equal(t, 1, run([]string{"-v"}, bytes.NewReader(nil), &stdout, &stderr))

@@ -87,7 +87,8 @@ func (k KRBError) Error() string {
 func (k KRBError) MethodData() (types.PADataSequence, error) {
 	if k.ErrorCode != errorcode.KDC_ERR_PREAUTH_REQUIRED &&
 		k.ErrorCode != errorcode.KDC_ERR_PREAUTH_FAILED &&
-		k.ErrorCode != errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED {
+		k.ErrorCode != errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED &&
+		k.ErrorCode != errorcode.KDC_ERR_PREAUTH_EXPIRED {
 		return nil, fmt.Errorf("KRB-ERROR code %d does not carry METHOD-DATA", k.ErrorCode)
 	}
 	var methodData types.PADataSequence

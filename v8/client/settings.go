@@ -1,6 +1,7 @@
 package client
 
 import (
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/otuschhoff/gokrb5/v8/keytab"
 	"github.com/otuschhoff/gokrb5/v8/messages"
+	"github.com/otuschhoff/gokrb5/v8/pkinit"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
@@ -29,7 +31,78 @@ type Settings struct {
 	fastArmorKeytab         *keytab.Keytab
 	requireFAST             bool
 	kkdcpClient             *http.Client
+	pkinitOptions           *pkinit.ExchangeOptions
 	logger                  *log.Logger
+}
+
+// PKINITIdentity enables certificate-based initial authentication.
+func PKINITIdentity(identity *pkinit.Identity) func(*Settings) {
+	return func(settings *Settings) {
+		if settings.pkinitOptions == nil {
+			settings.pkinitOptions = &pkinit.ExchangeOptions{}
+		}
+		settings.pkinitOptions.Identity = identity
+	}
+}
+
+// PKINITAnchors configures trust anchors for KDC certificate validation.
+func PKINITAnchors(anchors *x509.CertPool) func(*Settings) {
+	return func(settings *Settings) {
+		if settings.pkinitOptions == nil {
+			settings.pkinitOptions = &pkinit.ExchangeOptions{}
+		}
+		settings.pkinitOptions.KDCCertificate.Roots = anchors
+	}
+}
+
+// PKINITKDCCertificatePolicy configures KDC certificate name, EKU, and revocation validation.
+func PKINITKDCCertificatePolicy(policy pkinit.KDCCertificatePolicy) func(*Settings) {
+	return func(settings *Settings) {
+		if settings.pkinitOptions == nil {
+			settings.pkinitOptions = &pkinit.ExchangeOptions{}
+		}
+		settings.pkinitOptions.KDCCertificate = policy
+	}
+}
+
+// PKINITMode selects Diffie-Hellman or RSA reply-key transport.
+func PKINITMode(mode pkinit.Mode) func(*Settings) {
+	return func(settings *Settings) {
+		if settings.pkinitOptions == nil {
+			settings.pkinitOptions = &pkinit.ExchangeOptions{}
+		}
+		settings.pkinitOptions.Mode = mode
+	}
+}
+
+// PKINITMinimumDHBits sets the minimum accepted finite-field DH size.
+func PKINITMinimumDHBits(bits int) func(*Settings) {
+	return func(settings *Settings) {
+		if settings.pkinitOptions == nil {
+			settings.pkinitOptions = &pkinit.ExchangeOptions{}
+		}
+		settings.pkinitOptions.MinimumDHBits = bits
+	}
+}
+
+// PKINITRequireFreshness requires an RFC 8070 token from the KDC.
+func PKINITRequireFreshness(required bool) func(*Settings) {
+	return func(settings *Settings) {
+		if settings.pkinitOptions == nil {
+			settings.pkinitOptions = &pkinit.ExchangeOptions{}
+		}
+		settings.pkinitOptions.RequireFreshness = required
+	}
+}
+
+// PKINITOCSPResponse includes a caller-provided PA-PK-OCSP-RESPONSE value.
+func PKINITOCSPResponse(response []byte) func(*Settings) {
+	return func(settings *Settings) {
+		if settings.pkinitOptions == nil {
+			settings.pkinitOptions = &pkinit.ExchangeOptions{}
+		}
+		settings.pkinitOptions.OCSPResponse = append([]byte(nil), response...)
+	}
 }
 
 // jsonSettings is used when marshaling the Settings details to JSON format.

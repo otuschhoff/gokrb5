@@ -380,45 +380,55 @@ func (state *fastState) unwrapError(outer messages.KRBError, nonce int) (message
 }
 
 func (state *fastState) verifyASReply(cl *Client, reply *messages.ASRep, request messages.ASReq) error {
+	_, err := state.verifyASReplyWithKey(cl, reply, request, nil)
+	return err
+}
+
+func (state *fastState) verifyASReplyWithKey(cl *Client, reply *messages.ASRep, request messages.ASReq, deriveReplyKey func(types.PADataSequence) (types.EncryptionKey, error)) (types.EncryptionKey, error) {
 	response, err := state.unwrapResponse(reply.PAData, request.ReqBody.Nonce)
 	if err != nil {
-		return err
+		return types.EncryptionKey{}, err
 	}
 	if err := state.verifyFinished(reply.Ticket, reply.CName, reply.CRealm, response.Finished); err != nil {
-		return err
+		return types.EncryptionKey{}, err
 	}
 	if state.sentChallenge {
 		if err := state.verifyKDCChallenge(response.PAData); err != nil {
-			return err
+			return types.EncryptionKey{}, err
 		}
 		if len(response.StrengthenKey.KeyValue) == 0 {
-			return fmt.Errorf("FAST encrypted-challenge reply omitted strengthen-key")
+			return types.EncryptionKey{}, fmt.Errorf("FAST encrypted-challenge reply omitted strengthen-key")
 		}
 	}
 	replyKey := state.replyKey
-	if len(replyKey.KeyValue) == 0 {
+	if deriveReplyKey != nil {
+		replyKey, err = deriveReplyKey(response.PAData)
+		if err != nil {
+			return types.EncryptionKey{}, err
+		}
+	} else if len(replyKey.KeyValue) == 0 {
 		et, err := crypto.GetEtype(reply.EncPart.EType)
 		if err != nil {
-			return err
+			return types.EncryptionKey{}, err
 		}
 		replyKey, _, err = cl.Key(et, reply.EncPart.KVNO, nil)
 		if err != nil {
-			return err
+			return types.EncryptionKey{}, err
 		}
 	}
 	if len(response.StrengthenKey.KeyValue) > 0 {
 		replyKey, err = crypto.KRBFXCF2(response.StrengthenKey, replyKey, []byte("strengthenkey"), []byte("replykey"))
 		if err != nil {
-			return fmt.Errorf("strengthen FAST reply key: %w", err)
+			return types.EncryptionKey{}, fmt.Errorf("strengthen FAST reply key: %w", err)
 		}
 	}
 	reply.PAData = append(types.PADataSequence(nil), response.PAData...)
 	if ok, err := reply.VerifyWithReplyKey(cl.Config, cl.Credentials, request, replyKey); !ok {
-		return err
+		return types.EncryptionKey{}, err
 	}
 	finishedTime := response.Finished.Timestamp.UTC().Truncate(time.Second).Add(time.Duration(response.Finished.Usec) * time.Microsecond)
 	cl.setKDCTimeOffset(finishedTime.Sub(clientNow().UTC()).Truncate(time.Microsecond))
-	return nil
+	return replyKey, nil
 }
 
 func (state *fastState) verifyTGSReply(cl *Client, reply *messages.TGSRep, request messages.TGSReq) error {

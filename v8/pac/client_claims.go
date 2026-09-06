@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/otuschhoff/gokrb5/v8/pac/internal/ndr"
 	"github.com/jcmturner/rpc/v2/mstypes"
+	"github.com/otuschhoff/gokrb5/v8/pac/internal/ndr"
 )
 
 // Claims reference: https://msdn.microsoft.com/en-us/library/hh553895.aspx

@@ -41,6 +41,7 @@ const (
 	TD_KRB_REALM               int32 = 103
 	TD_TRUSTED_CERTIFIERS      int32 = 104
 	TD_CERTIFICATE_INDEX       int32 = 105
+	TD_INVALID_CERTIFICATES    int32 = TD_CERTIFICATE_INDEX
 	TD_APP_DEFINED_ERROR       int32 = 106
 	TD_REQ_NONCE               int32 = 107
 	TD_REQ_SEQ                 int32 = 108

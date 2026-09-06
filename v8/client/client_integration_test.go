@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"fmt"
+	"strings"
+	"sync"
+
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/credentials"
@@ -23,8 +26,6 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/test"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/stretchr/testify/assert"
-	"strings"
-	"sync"
 )
 
 func TestClient_SuccessfulLogin_Keytab(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,11 +16,13 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/credentials"
 	"github.com/otuschhoff/gokrb5/v8/crypto"
 	"github.com/otuschhoff/gokrb5/v8/crypto/etype"
+	"github.com/otuschhoff/gokrb5/v8/iana/adtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/errorcode"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
 	"github.com/otuschhoff/gokrb5/v8/krberror"
 	"github.com/otuschhoff/gokrb5/v8/messages"
+	"github.com/otuschhoff/gokrb5/v8/pac"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
@@ -35,7 +38,52 @@ type Client struct {
 	kdcTimeMux    sync.RWMutex
 	fastArmorMux  sync.Mutex
 	fastArmorCl   *Client
+	pkinitMux     sync.Mutex
+	pkinitKeys    map[string]types.EncryptionKey
+	pkinitCreds   *pac.CredentialData
+	pkinitCredErr error
 	sendToKDCFunc func([]byte, string) ([]byte, error)
+}
+
+func (cl *Client) setPKINITReplyKey(realm string, key types.EncryptionKey) {
+	cl.pkinitMux.Lock()
+	defer cl.pkinitMux.Unlock()
+	if cl.pkinitKeys == nil {
+		cl.pkinitKeys = make(map[string]types.EncryptionKey)
+	}
+	key.KeyValue = append([]byte(nil), key.KeyValue...)
+	cl.pkinitKeys[strings.ToUpper(realm)] = key
+}
+
+func (cl *Client) takePKINITReplyKey(realm string) (types.EncryptionKey, bool) {
+	cl.pkinitMux.Lock()
+	defer cl.pkinitMux.Unlock()
+	key, ok := cl.pkinitKeys[strings.ToUpper(realm)]
+	delete(cl.pkinitKeys, strings.ToUpper(realm))
+	return key, ok
+}
+
+// PKINITCredentials returns credentials recovered from PAC_CREDENTIAL_INFO
+// after certificate authentication. The returned value is a defensive copy.
+func (cl *Client) PKINITCredentials() (pac.CredentialData, error) {
+	cl.pkinitMux.Lock()
+	defer cl.pkinitMux.Unlock()
+	if cl.pkinitCreds == nil {
+		if cl.pkinitCredErr != nil {
+			return pac.CredentialData{}, cl.pkinitCredErr
+		}
+		return pac.CredentialData{}, errors.New("PKINIT PAC credentials are not available")
+	}
+	return clonePKINITCredentialData(*cl.pkinitCreds), nil
+}
+
+func clonePKINITCredentialData(data pac.CredentialData) pac.CredentialData {
+	copyData := data
+	copyData.Credentials = append([]pac.SECPKGSupplementalCred(nil), data.Credentials...)
+	for index := range copyData.Credentials {
+		copyData.Credentials[index].Credentials = append([]byte(nil), data.Credentials[index].Credentials...)
+	}
+	return copyData
 }
 
 // NewWithPassword creates a new client from a password credential.
@@ -250,7 +298,7 @@ func (cl *Client) IsConfigured() (bool, error) {
 		cl.Credentials.SetDomain(cl.Config.LibDefaults.DefaultRealm)
 	}
 	// Client needs to have either a password, keytab or a session already (later when loading from CCache)
-	if !cl.Credentials.HasPassword() && !cl.Credentials.HasKeytab() {
+	if !cl.Credentials.HasPassword() && !cl.Credentials.HasKeytab() && (cl.settings.pkinitOptions == nil || cl.settings.pkinitOptions.Identity == nil) {
 		authTime, _, _, _, err := cl.sessionTimes(cl.Credentials.Domain())
 		if err != nil || authTime.IsZero() {
 			return false, errors.New("client has neither a keytab nor a password set and no session")
@@ -279,7 +327,8 @@ func (cl *Client) LoginWithOptions(options messages.ASReqOptions) error {
 	if ok, err := cl.IsConfigured(); !ok {
 		return err
 	}
-	if !cl.Credentials.HasPassword() && !cl.Credentials.HasKeytab() {
+	pkinitConfigured := cl.settings.pkinitOptions != nil && cl.settings.pkinitOptions.Identity != nil
+	if !cl.Credentials.HasPassword() && !cl.Credentials.HasKeytab() && !pkinitConfigured {
 		_, endTime, _, _, err := cl.sessionTimes(cl.Credentials.Domain())
 		if err != nil {
 			return krberror.Errorf(err, krberror.KRBMsgError, "no user credentials available and error getting any existing session")
@@ -300,6 +349,18 @@ func (cl *Client) LoginWithOptions(options messages.ASReqOptions) error {
 	}
 	if len(ASRep.Ticket.SName.NameString) > 0 && strings.EqualFold(ASRep.Ticket.SName.NameString[0], "krbtgt") {
 		cl.addSession(ASRep.Ticket, ASRep.DecryptedEncPart)
+		if replyKey, ok := cl.takePKINITReplyKey(cl.Credentials.Domain()); ok {
+			cl.pkinitMux.Lock()
+			cl.pkinitCreds = nil
+			cl.pkinitCredErr = nil
+			cl.pkinitMux.Unlock()
+			if err := cl.retrievePKINITCredentials(ASRep.Ticket, ASRep.DecryptedEncPart, replyKey); err != nil {
+				cl.pkinitMux.Lock()
+				cl.pkinitCredErr = err
+				cl.pkinitMux.Unlock()
+				cl.Log("could not retrieve PKINIT PAC credentials: %v", err)
+			}
+		}
 	} else {
 		cl.cache.addEntryWithDetails(
 			ASRep.Ticket,
@@ -315,6 +376,53 @@ func (cl *Client) LoginWithOptions(options messages.ASReqOptions) error {
 			nil,
 		)
 	}
+	return nil
+}
+
+func (cl *Client) retrievePKINITCredentials(tgt messages.Ticket, reply messages.EncKDCRepPart, replyKey types.EncryptionKey) error {
+	request, err := messages.NewUser2UserTGSReq(cl.Credentials.CName(), cl.Credentials.Domain(), cl.Config, tgt, reply.Key, cl.Credentials.CName(), false, tgt)
+	if err != nil {
+		return fmt.Errorf("build PKINIT credential U2U request: %w", err)
+	}
+	_, response, err := cl.TGSExchange(request, cl.Credentials.Domain(), tgt, reply.Key, 0)
+	if err != nil {
+		return fmt.Errorf("request PKINIT credential U2U ticket: %w", err)
+	}
+	if err := response.Ticket.Decrypt(reply.Key); err != nil {
+		return fmt.Errorf("decrypt PKINIT credential U2U ticket: %w", err)
+	}
+	entries, err := response.Ticket.DecryptedEncPart.AuthorizationData.EntriesOfType(adtype.ADWin2KPAC)
+	if err != nil {
+		return fmt.Errorf("find PKINIT credential PAC: %w", err)
+	}
+	if len(entries) != 1 {
+		return fmt.Errorf("PKINIT credential U2U ticket contains %d PAC values", len(entries))
+	}
+	var parsed pac.PACType
+	if err := parsed.Unmarshal(entries[0].ADData); err != nil {
+		return fmt.Errorf("decode PKINIT credential PAC: %w", err)
+	}
+	logger := cl.settings.Logger()
+	if logger == nil {
+		logger = log.New(io.Discard, "", 0)
+	}
+	if err := parsed.ProcessPACInfoBuffersWithCredentialKey(reply.Key, replyKey, logger); err != nil {
+		return fmt.Errorf("process PKINIT credential PAC: %w", err)
+	}
+	if err := parsed.Verify(reply.Key, pac.VerifyOptions{
+		ExpectedClientName: cl.Credentials.CName().PrincipalNameString(),
+		ExpectedAuthTime:   &response.Ticket.DecryptedEncPart.AuthTime,
+	}); err != nil {
+		return fmt.Errorf("verify PKINIT credential PAC: %w", err)
+	}
+	if parsed.CredentialsInfo == nil {
+		return errors.New("PKINIT credential PAC omitted PAC_CREDENTIAL_INFO")
+	}
+	credentials := clonePKINITCredentialData(parsed.CredentialsInfo.PACCredentialData)
+	cl.pkinitMux.Lock()
+	cl.pkinitCreds = &credentials
+	cl.pkinitCredErr = nil
+	cl.pkinitMux.Unlock()
 	return nil
 }
 
@@ -408,6 +516,23 @@ func (cl *Client) Destroy() {
 	cl.sessions.destroy()
 	cl.cache.clear()
 	cl.s4uCache.clear()
+	cl.pkinitMux.Lock()
+	for realm, key := range cl.pkinitKeys {
+		for index := range key.KeyValue {
+			key.KeyValue[index] = 0
+		}
+		delete(cl.pkinitKeys, realm)
+	}
+	if cl.pkinitCreds != nil {
+		for index := range cl.pkinitCreds.Credentials {
+			for byteIndex := range cl.pkinitCreds.Credentials[index].Credentials {
+				cl.pkinitCreds.Credentials[index].Credentials[byteIndex] = 0
+			}
+		}
+	}
+	cl.pkinitCreds = nil
+	cl.pkinitCredErr = nil
+	cl.pkinitMux.Unlock()
 	cl.Credentials = creds
 	cl.Log("client destroyed")
 }

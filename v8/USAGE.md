@@ -28,6 +28,24 @@ password from standard input requires the explicit `--password-stdin` option.
 Credential cache commands currently support FILE caches. Validation with `-v`
 is not implemented and returns `kinit: -v not supported`.
 
+PKINIT accepts PEM certificate/private-key pairs and PKCS#12 identities. An
+encrypted private key or PKCS#12 file prompts for its PIN without echo:
+
+```sh
+gokinit -X X509_user_identity=FILE:user.pem,user.key \
+	-X X509_anchors=FILE:ca.pem user@EXAMPLE.COM
+gokinit -X X509_user_identity=PKCS12:user.p12 \
+	-X X509_anchors=FILE:ca.pem user@EXAMPLE.COM
+```
+
+The equivalent `krb5.conf` settings are `pkinit_identities`,
+`pkinit_anchors`, `pkinit_kdc_hostname`, `pkinit_eku_checking` (`kdc`,
+`kpServerAuth`, or `none`), `pkinit_require_crl_checking`, and
+`pkinit_dh_min_bits`. `pkinit_pool` supplies additional intermediate CA
+certificates. Command-line `-X` identity and anchor values override
+their configured values. Only `FILE:` identity and anchor sources are
+supported by `gokinit`.
+
 ```sh
 goklist -c FILE:/tmp/krb5cc_1000 -e
 goklist -k -t -K -e /path/to/user.keytab
@@ -107,6 +125,33 @@ A client can be **destroyed** with the following method:
 ```go
 cl.Destroy()
 ```
+
+#### PKINIT certificate authentication
+
+Create a certificate-only client with a validated `pkinit.Identity` and an
+explicit KDC trust policy. DH mode is the default; use `client.PKINITMode` for
+RSA key delivery. KDC certificate chains, EKUs, names, and optional CRL/OCSP
+status are validated before the AS reply key is accepted.
+
+```go
+identity, err := pkinit.FromPEM(certificatePEM, privateKeyPEM, pin)
+cl := client.NewFromPrincipalName(principal, "EXAMPLE.COM", cfg,
+	client.PKINITIdentity(identity),
+	client.PKINITKDCCertificatePolicy(pkinit.KDCCertificatePolicy{
+		Roots: roots,
+		Hostname: "dc.example.com",
+		EKUChecking: pkinit.KDCEKUKDCAuthentication,
+		RequireRevocation: true,
+	}),
+	client.PKINITMinimumDHBits(2048),
+)
+err = cl.Login()
+```
+
+PKINIT exchanges support RFC 8070 freshness tokens, RFC 8636 SHA-2 KDFs,
+bounded KDF/DH negotiation retries, and FAST reply-key strengthening. External
+hardware-backed keys can be supplied by constructing a `pkinit.Identity` with
+a `crypto.Signer` (and `crypto.Decrypter` when RSA key delivery is selected).
 
 #### FAST armoring and Active Directory claims
 

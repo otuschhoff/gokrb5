@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 	"github.com/otuschhoff/gokrb5/v8/krberror"
 	"github.com/otuschhoff/gokrb5/v8/messages"
+	"github.com/otuschhoff/gokrb5/v8/pkinit"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
@@ -29,8 +31,28 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 	if err != nil {
 		return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: issue with setting PAData on AS_REQ")
 	}
+	pkinitEnabled := cl.settings.pkinitOptions != nil && cl.settings.pkinitOptions.Identity != nil
+	var pkinitExchange *pkinit.Exchange
+	var pkinitOptions pkinit.ExchangeOptions
+	var freshnessToken []byte
+	if pkinitEnabled {
+		pkinitOptions = *cl.settings.pkinitOptions
+		pkinitOptions.KDCCertificate.Realm = realm
+		if pkinitOptions.KDCCertificate.HTTPClient == nil {
+			pkinitOptions.KDCCertificate.HTTPClient = cl.settings.httpClient()
+		}
+		ASReq.PAData = append(removePAData(ASReq.PAData, patype.PA_ENC_TIMESTAMP, patype.PA_PK_AS_REQ, patype.PA_PK_OCSP_RESPONSE, patype.PA_AS_FRESHNESS), types.PAData{PADataType: patype.PA_AS_FRESHNESS})
+		if cl.settings.AssumePreAuthentication() && !pkinitOptions.RequireFreshness {
+			pkinitExchange, err = beginPKINITExchange(&ASReq, pkinitOptions, nil)
+			if err != nil {
+				return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: could not build PKINIT request")
+			}
+		}
+	}
 	if fast != nil && fast.active && cl.settings.AssumePreAuthentication() {
-		if err := fast.setASPreAuth(cl, nil, &ASReq); err != nil {
+		if pkinitEnabled {
+			// PKINIT supplies the inner pre-authentication mechanism.
+		} else if err := fast.setASPreAuth(cl, nil, &ASReq); err != nil {
 			return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: issue with setting FAST PAData on AS_REQ")
 		}
 	}
@@ -39,6 +61,8 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 	preAuthRetried := false
 	skewRetried := false
 	preAuthRounds := 0
+	pkinitRetried := false
+	freshnessRetried := false
 	var rb []byte
 	for {
 		request := ASReq
@@ -76,6 +100,63 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 			}
 			return cl.ASExchange(e.CRealm, ASReq, referral+1)
 		}
+		if pkinitEnabled {
+			if isPKINITPreAuthError(e.ErrorCode) {
+				token, found, tokenErr := pkinitFreshnessToken(e)
+				if tokenErr != nil {
+					return messages.ASRep{}, krberror.Errorf(tokenErr, krberror.EncodingError, "AS Exchange Error: invalid PKINIT freshness response")
+				}
+				if e.ErrorCode == errorcode.KDC_ERR_PREAUTH_FAILED && pkinitExchange != nil && !found {
+					// Let clock-skew handling below inspect this otherwise generic error.
+				} else if pkinitOptions.RequireFreshness && !found {
+					return messages.ASRep{}, krberror.NewErrorf(krberror.KRBMsgError, "AS Exchange Error: KDC did not provide required PKINIT freshness token")
+				} else if e.ErrorCode == errorcode.KDC_ERR_PREAUTH_EXPIRED {
+					if freshnessRetried || !found {
+						return messages.ASRep{}, krberror.Errorf(e, krberror.KDCError, "AS Exchange Error: PKINIT freshness retry failed")
+					}
+					freshnessRetried = true
+					freshnessToken = token
+				} else {
+					freshnessToken = token
+				}
+				if !(e.ErrorCode == errorcode.KDC_ERR_PREAUTH_FAILED && pkinitExchange != nil && !found) {
+					preAuthRounds++
+					if preAuthRounds > 5 {
+						return messages.ASRep{}, krberror.NewErrorf(krberror.KRBMsgError, "AS Exchange Error: maximum PKINIT pre-authentication rounds exceeded")
+					}
+					pkinitExchange, err = beginPKINITExchange(&ASReq, pkinitOptions, freshnessToken)
+					if err != nil {
+						return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: could not build PKINIT request")
+					}
+					continue
+				}
+			}
+			if typed, ok := pkinit.DecodeKRBError(e); ok {
+				if !pkinitRetried {
+					switch {
+					case errors.Is(typed, pkinit.ErrDHParametersNotAccepted):
+						group, selectErr := pkinit.SelectDHGroup(typed.DHParameters, pkinitOptions.MinimumDHBits)
+						if selectErr != nil {
+							return messages.ASRep{}, typed
+						}
+						pkinitOptions.DHGroup = group
+					case errors.Is(typed, pkinit.ErrNoAcceptableKDF):
+						pkinitOptions.SupportedKDFs = make([]pkinit.KDFAlgorithmID, 0)
+					case errors.Is(typed, pkinit.ErrPublicKeyEncryptionUnsupported) && pkinitOptions.Mode == pkinit.ModeRSA:
+						pkinitOptions.Mode = pkinit.ModeDH
+					default:
+						return messages.ASRep{}, typed
+					}
+					pkinitRetried = true
+					pkinitExchange, err = beginPKINITExchange(&ASReq, pkinitOptions, freshnessToken)
+					if err != nil {
+						return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: could not rebuild PKINIT request")
+					}
+					continue
+				}
+				return messages.ASRep{}, typed
+			}
+		}
 		if !skewRetried && cl.shouldRetryClockSkew(e) {
 			cl.setKDCTimeOffset(kdcErrorTime(e).Sub(clientNow().UTC()).Truncate(time.Microsecond))
 			cl.settings.assumePreAuthentication = true
@@ -83,7 +164,12 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 			if e.ErrorCode == errorcode.KDC_ERR_PREAUTH_FAILED && len(e.EData) > 0 {
 				hint = &e
 			}
-			if fast != nil && fast.active {
+			if pkinitEnabled {
+				pkinitExchange, err = beginPKINITExchange(&ASReq, pkinitOptions, freshnessToken)
+				if err != nil {
+					return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: failed rebuilding PKINIT data after clock skew")
+				}
+			} else if fast != nil && fast.active {
 				if err := fast.setASPreAuth(cl, hint, &ASReq); err != nil {
 					return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: failed setting FAST PAData after clock skew")
 				}
@@ -116,6 +202,19 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 		return messages.ASRep{}, krberror.Errorf(err, krberror.EncodingError, "AS Exchange Error: failed to process the AS_REP")
 	}
 	if fast != nil && fast.active {
+		if pkinitEnabled {
+			if pkinitExchange == nil {
+				return messages.ASRep{}, krberror.NewErrorf(krberror.KRBMsgError, "AS Exchange Error: KDC returned AS_REP before PKINIT negotiation")
+			}
+			replyKey, err := fast.verifyASReplyWithKey(cl, &ASRep, ASReq, func(paData types.PADataSequence) (types.EncryptionKey, error) {
+				return processPKINITReply(pkinitExchange, paData, ASRep.EncPart.EType)
+			})
+			if err != nil {
+				return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: FAST PKINIT AS_REP is not valid")
+			}
+			cl.setPKINITReplyKey(realm, replyKey)
+			return ASRep, nil
+		}
 		if err := fast.verifyASReply(cl, &ASRep, ASReq); err != nil {
 			return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: FAST AS_REP is not valid")
 		}
@@ -123,6 +222,20 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 	}
 	if cl.settings.RequireFAST() {
 		return messages.ASRep{}, krberror.NewErrorf(krberror.KRBMsgError, "AS Exchange Error: KDC did not negotiate required FAST")
+	}
+	if pkinitEnabled {
+		if pkinitExchange == nil {
+			return messages.ASRep{}, krberror.NewErrorf(krberror.KRBMsgError, "AS Exchange Error: KDC returned AS_REP before PKINIT negotiation")
+		}
+		replyKey, err := processPKINITReply(pkinitExchange, ASRep.PAData, ASRep.EncPart.EType)
+		if err != nil {
+			return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: invalid PA-PK-AS-REP")
+		}
+		if ok, err := ASRep.VerifyWithReplyKey(cl.Config, cl.Credentials, ASReq, replyKey); !ok {
+			return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: PKINIT AS_REP is not valid")
+		}
+		cl.setPKINITReplyKey(realm, replyKey)
+		return ASRep, nil
 	}
 	if ok, err := ASRep.Verify(cl.Config, cl.Credentials, ASReq); !ok {
 		return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: AS_REP is not valid or client password/keytab incorrect")
@@ -146,6 +259,9 @@ func setPAData(cl *Client, krberr *messages.KRBError, ASReq *messages.ASReq) err
 	if !cl.settings.DisablePAReqEncPARep() && !ASReq.PAData.Contains(patype.PA_REQ_ENC_PA_REP) {
 		pa := types.PAData{PADataType: patype.PA_REQ_ENC_PA_REP}
 		ASReq.PAData = append(ASReq.PAData, pa)
+	}
+	if cl.settings.pkinitOptions != nil && cl.settings.pkinitOptions.Identity != nil {
+		return nil
 	}
 	if cl.settings.AssumePreAuthentication() {
 		// Identify the etype to use to encrypt the PA Data
@@ -200,6 +316,69 @@ func setPAData(cl *Client, krberr *messages.KRBError, ASReq *messages.ASReq) err
 		cl.settings.preAuthType = patype.PA_ENC_TIMESTAMP
 	}
 	return nil
+}
+
+func beginPKINITExchange(request *messages.ASReq, options pkinit.ExchangeOptions, freshness []byte) (*pkinit.Exchange, error) {
+	request.PAData = removePAData(request.PAData, patype.PA_PK_AS_REQ, patype.PA_PK_OCSP_RESPONSE, patype.PA_AS_FRESHNESS, patype.PA_ENC_TIMESTAMP)
+	options.FreshnessToken = append([]byte(nil), freshness...)
+	options.CurrentTime = clientNow().UTC()
+	return pkinit.BeginExchange(request, options)
+}
+
+func removePAData(data types.PADataSequence, kinds ...int32) types.PADataSequence {
+	remove := make(map[int32]struct{}, len(kinds))
+	for _, kind := range kinds {
+		remove[kind] = struct{}{}
+	}
+	filtered := data[:0]
+	for _, item := range data {
+		if _, found := remove[item.PADataType]; !found {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func isPKINITPreAuthError(code int32) bool {
+	return code == errorcode.KDC_ERR_PREAUTH_REQUIRED || code == errorcode.KDC_ERR_PREAUTH_FAILED ||
+		code == errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED || code == errorcode.KDC_ERR_PREAUTH_EXPIRED
+}
+
+func pkinitFreshnessToken(response messages.KRBError) ([]byte, bool, error) {
+	if len(response.EData) == 0 {
+		return nil, false, nil
+	}
+	data, err := response.MethodData()
+	if err != nil {
+		return nil, false, err
+	}
+	for _, item := range data {
+		if item.PADataType == patype.PA_AS_FRESHNESS {
+			return append([]byte(nil), item.PADataValue...), true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+func processPKINITReply(exchange *pkinit.Exchange, data types.PADataSequence, etype int32) (types.EncryptionKey, error) {
+	var value []byte
+	for _, item := range data {
+		if item.PADataType != patype.PA_PK_AS_REP {
+			continue
+		}
+		if value != nil {
+			return types.EncryptionKey{}, fmt.Errorf("KDC returned multiple PA-PK-AS-REP values")
+		}
+		value = item.PADataValue
+	}
+	if value == nil {
+		return types.EncryptionKey{}, fmt.Errorf("KDC omitted PA-PK-AS-REP")
+	}
+	result, err := exchange.ProcessReply(value, etype)
+	if err != nil {
+		return types.EncryptionKey{}, err
+	}
+	return result.ReplyKey, nil
 }
 
 func firstAvailablePreAuthKey(cl *Client, requested []int32) (etype.EType, types.EncryptionKey, int, error) {

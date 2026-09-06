@@ -5,8 +5,9 @@ import (
 	"net"
 	"reflect"
 
-	"github.com/otuschhoff/gokrb5/v8/test"
 	"testing"
+
+	"github.com/otuschhoff/gokrb5/v8/test"
 
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/stretchr/testify/assert"

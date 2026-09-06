@@ -28,6 +28,7 @@ It has been reported that gokrb5 also works with the [gollvm](https://go.googles
   * Client that can authenticate to an SPNEGO Kerberos authenticated web service
   * Ability to change client's password
   * MIT-compatible `gokinit`, `goklist`, and `gokdestroy` command-line tools
+  * PKINIT certificate authentication with DH or RSA key delivery, KDF agility, freshness tokens, and FAST
 * General
   * Kerberos libraries for custom integration
   * Parsing, creating, modifying, and atomically writing MIT keytab files
