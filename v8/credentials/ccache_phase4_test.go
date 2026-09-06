@@ -241,6 +241,70 @@ func TestCCacheV3WritesRepeatedEnctype(t *testing.T) {
 	assert.Error(t, reparsed.Unmarshal(data))
 }
 
+func TestCCacheAddressAndAuthDataRoundTrip(t *testing.T) {
+	cache := NewCCache(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user"), "EXAMPLE.ORG")
+	credential := &Credential{
+		Client:       clonePrincipal(cache.DefaultPrincipal),
+		Server:       Principal{Realm: "EXAMPLE.ORG", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_HST, "host/server.example.org")},
+		Key:          types.EncryptionKey{KeyType: 18, KeyValue: bytes.Repeat([]byte{1}, 32)},
+		AuthTime:     time.Unix(1, 0),
+		StartTime:    time.Unix(2, 0),
+		EndTime:      time.Unix(3, 0),
+		RenewTill:    time.Unix(4, 0),
+		TicketFlags:  types.NewKrbFlags(),
+		Addresses:    []types.HostAddress{{AddrType: 2, Address: []byte{127, 0, 0, 1}}},
+		AuthData:     []types.AuthorizationDataEntry{{ADType: 1, ADData: []byte("authorization-data")}},
+		Ticket:       []byte("ticket"),
+		SecondTicket: []byte("second-ticket"),
+	}
+	cache.AddCredential(credential)
+
+	encoded, err := cache.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded := new(CCache)
+	if err := decoded.Unmarshal(encoded); err != nil {
+		t.Fatal(err)
+	}
+	if assert.Len(t, decoded.Credentials, 1) {
+		assert.Equal(t, credential.Addresses, decoded.Credentials[0].Addresses)
+		assert.Equal(t, credential.AuthData, decoded.Credentials[0].AuthData)
+		assert.Equal(t, credential.Ticket, decoded.Credentials[0].Ticket)
+		assert.Equal(t, credential.SecondTicket, decoded.Credentials[0].SecondTicket)
+	}
+}
+
+func TestCCacheAddressAndAuthDataRejectMalformedLengths(t *testing.T) {
+	tests := []struct {
+		name string
+		read func([]byte, *int, binary.ByteOrder) error
+	}{
+		{name: "address", read: func(data []byte, offset *int, order binary.ByteOrder) error {
+			_, err := readAddress(data, offset, order)
+			return err
+		}},
+		{name: "authorization data", read: func(data []byte, offset *int, order binary.ByteOrder) error {
+			_, err := readAuthDataEntry(data, offset, order)
+			return err
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, data := range [][]byte{
+				{0},
+				{0, 1, 0, 0, 0, 2, 1},
+				{0, 1, 0xff, 0xff, 0xff, 0xff},
+			} {
+				offset := 0
+				if err := test.read(data, &offset, binary.BigEndian); err == nil {
+					t.Fatalf("malformed field %x was accepted", data)
+				}
+			}
+		})
+	}
+}
+
 func TestCCacheMarshalRejectsInvalidState(t *testing.T) {
 	cache := NewCCache(types.PrincipalName{NameString: []string{"user"}}, "EXAMPLE.ORG")
 	cache.Version = 2

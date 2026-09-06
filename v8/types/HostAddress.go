@@ -37,7 +37,7 @@ func GetHostAddress(s string) (HostAddress, error) {
 		ht = addrtype.IPv6
 		ip = ip.To16()
 	} else {
-		return h, fmt.Errorf("could not determine client's address types: %v", err)
+		return h, fmt.Errorf("could not determine client address type for %q", cAddr)
 	}
 	h = HostAddress{
 		AddrType: ht,
@@ -112,6 +112,9 @@ func HostAddressFromNetIP(ip net.IP) HostAddress {
 			Address:  ip.To4(),
 		}
 	}
+	if ip.To16() == nil {
+		return HostAddress{}
+	}
 	return HostAddress{
 		AddrType: addrtype.IPv6,
 		Address:  ip.To16(),
@@ -123,10 +126,12 @@ func HostAddressesEqual(h, a []HostAddress) bool {
 	if len(h) != len(a) {
 		return false
 	}
+	matched := make([]bool, len(h))
 	for _, e := range a {
 		var found bool
-		for _, i := range h {
-			if e.Equal(i) {
+		for index, candidate := range h {
+			if !matched[index] && e.Equal(candidate) {
+				matched[index] = true
 				found = true
 				break
 			}

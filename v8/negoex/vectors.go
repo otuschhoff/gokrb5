@@ -10,17 +10,17 @@ func (m *NegoMessage) MarshalBinary() ([]byte, error) {
 	if len(m.AuthSchemes) > math.MaxUint16 || len(m.Extensions) > math.MaxUint16 {
 		return nil, ErrInvalidMessageSize
 	}
-	payloadLength := len(m.AuthSchemes) * len(AuthScheme{})
+	payloadLength := uint64(len(m.AuthSchemes)) * uint64(len(AuthScheme{}))
 	for _, extension := range m.Extensions {
-		if len(extension.Value) > math.MaxUint32 {
+		if uint64(len(extension.Value)) > math.MaxUint32 {
 			return nil, ErrInvalidMessageSize
 		}
-		payloadLength += extensionLength + len(extension.Value)
+		payloadLength += uint64(extensionLength) + uint64(len(extension.Value))
 	}
-	if payloadLength > math.MaxUint32-negoHeaderLength {
+	if payloadLength > math.MaxUint32-negoHeaderLength || payloadLength > uint64(int(^uint(0)>>1)-negoHeaderLength) {
 		return nil, ErrInvalidMessageSize
 	}
-	data := marshalHeader(m.Header, m.Header.MessageType, negoHeaderLength, uint32(negoHeaderLength+payloadLength))
+	data := marshalHeader(m.Header, m.Header.MessageType, negoHeaderLength, uint32(negoHeaderLength+int(payloadLength)))
 	copy(data[40:72], m.Random[:])
 	binary.LittleEndian.PutUint64(data[72:80], m.ProtocolVersion)
 	authOffset := len(data)
@@ -87,7 +87,7 @@ func unmarshalNego(header MessageHeader, data []byte) (*NegoMessage, error) {
 }
 
 func (m *ExchangeMessage) MarshalBinary() ([]byte, error) {
-	if len(m.Exchange) > math.MaxUint32-exchangeHeaderLength {
+	if uint64(len(m.Exchange)) > math.MaxUint32-exchangeHeaderLength || len(m.Exchange) > int(^uint(0)>>1)-exchangeHeaderLength {
 		return nil, ErrInvalidMessageSize
 	}
 	if m.Header.MessageType < MessageTypeInitiatorMetaData || m.Header.MessageType > MessageTypeAPRequest {
@@ -114,7 +114,7 @@ func unmarshalExchange(header MessageHeader, data []byte) (*ExchangeMessage, err
 }
 
 func (m *VerifyMessage) MarshalBinary() ([]byte, error) {
-	if len(m.Checksum.Value) > math.MaxUint32-verifyHeaderLength {
+	if uint64(len(m.Checksum.Value)) > math.MaxUint32-verifyHeaderLength || len(m.Checksum.Value) > int(^uint(0)>>1)-verifyHeaderLength {
 		return nil, ErrInvalidMessageSize
 	}
 	if m.Checksum.Scheme != 0 && m.Checksum.Scheme != ChecksumSchemeRFC3961 {
@@ -156,17 +156,17 @@ func (m *AlertMessage) MarshalBinary() ([]byte, error) {
 	if len(m.Alerts) > math.MaxUint16 {
 		return nil, ErrInvalidMessageSize
 	}
-	payloadLength := len(m.Alerts) * alertLength
+	payloadLength := uint64(len(m.Alerts)) * uint64(alertLength)
 	for _, alert := range m.Alerts {
-		if len(alert.Value) > math.MaxUint32 {
+		if uint64(len(alert.Value)) > math.MaxUint32 {
 			return nil, ErrInvalidMessageSize
 		}
-		payloadLength += len(alert.Value)
+		payloadLength += uint64(len(alert.Value))
 	}
-	if payloadLength > math.MaxUint32-alertHeaderLength {
+	if payloadLength > math.MaxUint32-alertHeaderLength || payloadLength > uint64(int(^uint(0)>>1)-alertHeaderLength) {
 		return nil, ErrInvalidMessageSize
 	}
-	data := marshalHeader(m.Header, MessageTypeAlert, alertHeaderLength, uint32(alertHeaderLength+payloadLength))
+	data := marshalHeader(m.Header, MessageTypeAlert, alertHeaderLength, uint32(alertHeaderLength+int(payloadLength)))
 	copy(data[40:56], m.AuthScheme[:])
 	binary.LittleEndian.PutUint32(data[56:60], m.ErrorCode)
 	alertsOffset := len(data)

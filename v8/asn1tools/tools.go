@@ -13,6 +13,9 @@ import (
 //
 // Long form: Two to 127 octets. Bit 8 of first octet has value "1" and bits 7-1 give the number of additional length octets. Second and following octets give the length, base 256, most significant digit first.
 func MarshalLengthBytes(l int) []byte {
+	if l < 0 {
+		return nil
+	}
 	if l <= 127 {
 		return []byte{byte(l)}
 	}
@@ -31,27 +34,41 @@ func MarshalLengthBytes(l int) []byte {
 
 // GetLengthFromASN returns the length of a slice of ASN1 encoded bytes from the ASN1 length header it contains.
 func GetLengthFromASN(b []byte) int {
-	if int(b[1]) <= 127 {
-		return int(b[1])
+	length, _, ok := parseLengthHeader(b)
+	if !ok {
+		return 0
 	}
-	// The bytes that indicate the length
-	lb := b[2 : 2+int(b[1])-128]
-	base := 1
-	l := 0
-	for i := len(lb) - 1; i >= 0; i-- {
-		l += int(lb[i]) * base
-		base = base * 256
-	}
-	return l
+	return length
 }
 
 // GetNumberBytesInLengthHeader returns the number of bytes in the ASn1 header that indicate the length.
 func GetNumberBytesInLengthHeader(b []byte) int {
-	if int(b[1]) <= 127 {
-		return 1
+	_, headerBytes, ok := parseLengthHeader(b)
+	if !ok {
+		return 0
 	}
-	// The bytes that indicate the length
-	return 1 + int(b[1]) - 128
+	return headerBytes
+}
+
+func parseLengthHeader(b []byte) (length, headerBytes int, ok bool) {
+	if len(b) < 2 {
+		return 0, 0, false
+	}
+	if b[1]&0x80 == 0 {
+		return int(b[1]), 1, true
+	}
+	lengthBytes := int(b[1] & 0x7f)
+	if lengthBytes == 0 || lengthBytes > len(b)-2 {
+		return 0, 0, false
+	}
+	maximum := int(^uint(0) >> 1)
+	for _, value := range b[2 : 2+lengthBytes] {
+		if length > (maximum-int(value))/256 {
+			return 0, 0, false
+		}
+		length = length*256 + int(value)
+	}
+	return length, 1 + lengthBytes, true
 }
 
 // AddASNAppTag adds an ASN1 encoding application tag value to the raw bytes provided.

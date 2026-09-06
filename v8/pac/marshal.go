@@ -103,7 +103,7 @@ func marshalPACBuffers(version uint32, buffers []pacBuffer) ([]byte, error) {
 	headerLength := uint64(8 + len(buffers)*16)
 	offset := alignPAC(headerLength)
 	for _, buffer := range buffers {
-		if len(buffer.data) > math.MaxUint32 || offset > math.MaxUint64-uint64(len(buffer.data))-pacAlignment+1 {
+		if uint64(len(buffer.data)) > math.MaxUint32 || offset > math.MaxUint64-uint64(len(buffer.data))-pacAlignment+1 {
 			return nil, fmt.Errorf("%w: PAC is too large", ErrPACMalformed)
 		}
 		offset = alignPAC(offset + uint64(len(buffer.data)))
