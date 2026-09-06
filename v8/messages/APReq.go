@@ -38,8 +38,14 @@ type APReq struct {
 
 // NewAPReq generates a new KRB_AP_REQ struct.
 func NewAPReq(tkt Ticket, sessionKey types.EncryptionKey, auth types.Authenticator) (APReq, error) {
+	return NewAPReqWithKeyUsage(tkt, sessionKey, auth, uint32(authenticatorKeyUsage(tkt.SName)))
+}
+
+// NewAPReqWithKeyUsage generates a new KRB_AP_REQ using the specified
+// authenticator key usage.
+func NewAPReqWithKeyUsage(tkt Ticket, sessionKey types.EncryptionKey, auth types.Authenticator, usage uint32) (APReq, error) {
 	var a APReq
-	ed, err := encryptAuthenticator(auth, sessionKey, tkt)
+	ed, err := encryptAuthenticator(auth, sessionKey, tkt, usage)
 	if err != nil {
 		return a, krberror.Errorf(err, krberror.KRBMsgError, "error creating Authenticator for AP_REQ")
 	}
@@ -54,14 +60,13 @@ func NewAPReq(tkt Ticket, sessionKey types.EncryptionKey, auth types.Authenticat
 }
 
 // Encrypt Authenticator
-func encryptAuthenticator(a types.Authenticator, sessionKey types.EncryptionKey, tkt Ticket) (types.EncryptedData, error) {
+func encryptAuthenticator(a types.Authenticator, sessionKey types.EncryptionKey, tkt Ticket, usage uint32) (types.EncryptedData, error) {
 	var ed types.EncryptedData
 	m, err := a.Marshal()
 	if err != nil {
 		return ed, krberror.Errorf(err, krberror.EncodingError, "marshaling error of EncryptedData form of Authenticator")
 	}
-	usage := authenticatorKeyUsage(tkt.SName)
-	ed, err = crypto.GetEncryptedData(m, sessionKey, uint32(usage), tkt.EncPart.KVNO)
+	ed, err = crypto.GetEncryptedData(m, sessionKey, usage, tkt.EncPart.KVNO)
 	if err != nil {
 		return ed, krberror.Errorf(err, krberror.EncryptingError, "error encrypting Authenticator")
 	}
@@ -71,8 +76,13 @@ func encryptAuthenticator(a types.Authenticator, sessionKey types.EncryptionKey,
 // DecryptAuthenticator decrypts the Authenticator within the AP_REQ.
 // sessionKey may simply be the key within the decrypted EncPart of the ticket within the AP_REQ.
 func (a *APReq) DecryptAuthenticator(sessionKey types.EncryptionKey) error {
-	usage := authenticatorKeyUsage(a.Ticket.SName)
-	ab, e := crypto.DecryptEncPart(a.EncryptedAuthenticator, sessionKey, uint32(usage))
+	return a.DecryptAuthenticatorWithKeyUsage(sessionKey, uint32(authenticatorKeyUsage(a.Ticket.SName)))
+}
+
+// DecryptAuthenticatorWithKeyUsage decrypts the Authenticator using the
+// specified protocol key usage.
+func (a *APReq) DecryptAuthenticatorWithKeyUsage(sessionKey types.EncryptionKey, usage uint32) error {
+	ab, e := crypto.DecryptEncPart(a.EncryptedAuthenticator, sessionKey, usage)
 	if e != nil {
 		return fmt.Errorf("error decrypting authenticator: %v", e)
 	}

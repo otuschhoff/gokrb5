@@ -67,8 +67,11 @@ func TestFASTASRequestEncryptsInnerRequest(t *testing.T) {
 	if err := armorAPReq.Unmarshal(fastPA.ArmoredData.Armor.ArmorValue); err != nil {
 		t.Fatal(err)
 	}
-	if err := armorAPReq.DecryptAuthenticator(state.armor.key); err != nil {
+	if err := armorAPReq.DecryptAuthenticatorWithKeyUsage(state.armor.key, keyusage.AP_REQ_AUTHENTICATOR); err != nil {
 		t.Fatal(err)
+	}
+	if err := armorAPReq.DecryptAuthenticatorWithKeyUsage(state.armor.key, keyusage.TGS_REQ_PA_TGS_REQ_AP_REQ_AUTHENTICATOR); err == nil {
+		t.Fatal("FAST armor authenticator accepted TGS-REQ key usage")
 	}
 	if len(armorAPReq.Authenticator.SubKey.KeyValue) == 0 {
 		t.Fatal("FAST armor authenticator omitted its subkey")
@@ -315,7 +318,7 @@ func TestFASTVerifyASReplyStrengthensKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	reply.PAData = types.PADataSequence{fastPA}
-	if err := state.verifyASReply(cl, &reply, request); err != nil {
+	if err := state.verifyASReply(cl, &reply, request, nil); err != nil {
 		t.Fatal(err)
 	}
 	if reply.DecryptedEncPart.Nonce != request.ReqBody.Nonce {
@@ -327,7 +330,7 @@ func TestFASTVerifyASReplyStrengthensKey(t *testing.T) {
 	fastEncrypted, _ = crypto.GetEncryptedData(responseBytes, state.armorKey, keyusage.FAST_REP, 0)
 	fastPA, _ = types.NewPAFXFastReplyPAData(types.PAFXFastReply{ArmoredData: types.KrbFastArmoredRep{EncFastRep: fastEncrypted}})
 	reply.PAData = types.PADataSequence{fastPA}
-	if err := state.verifyASReply(cl, &reply, request); err == nil {
+	if err := state.verifyASReply(cl, &reply, request, nil); err == nil {
 		t.Fatal("tampered FAST finished checksum was accepted")
 	}
 }

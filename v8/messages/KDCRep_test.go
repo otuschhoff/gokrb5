@@ -6,10 +6,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/otuschhoff/gokrb5/v8/credentials"
+	"github.com/otuschhoff/gokrb5/v8/crypto"
 	"github.com/otuschhoff/gokrb5/v8/iana"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/iana/flags"
+	"github.com/otuschhoff/gokrb5/v8/iana/keyusage"
 	"github.com/otuschhoff/gokrb5/v8/iana/msgtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
@@ -43,12 +46,42 @@ func TestRequestAllowsCanonicalName(t *testing.T) {
 func TestVerifyEncPARepRequiresAcknowledgementAndChecksum(t *testing.T) {
 	rep := ASRep{KDCRepFields: KDCRepFields{DecryptedEncPart: EncKDCRepPart{Flags: types.NewKrbFlags()}}}
 	req := ASReq{KDCReqFields: KDCReqFields{PAData: types.PADataSequence{{PADataType: patype.PA_REQ_ENC_PA_REP}}}}
-	err := rep.verifyEncPARep(req, types.EncryptionKey{})
+	err := rep.verifyEncPARep(req, types.EncryptionKey{}, nil)
 	assert.ErrorContains(t, err, "did not acknowledge")
 
 	types.SetFlag(&rep.DecryptedEncPart.Flags, flags.EncPARep)
-	err = rep.verifyEncPARep(req, types.EncryptionKey{})
+	err = rep.verifyEncPARep(req, types.EncryptionKey{}, nil)
 	assert.ErrorContains(t, err, "omitted PA-REQ-ENC-PA-REP")
+}
+
+func TestVerifyEncPARepUsesExplicitRequestBytes(t *testing.T) {
+	request := ASReq{KDCReqFields: KDCReqFields{PAData: types.PADataSequence{{PADataType: patype.PA_REQ_ENC_PA_REP}}}}
+	replyKey := types.EncryptionKey{KeyType: etypeID.AES256_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef0123456789abcdef")}
+	requestBytes := []byte("outer FAST AS-REQ")
+	etype, err := crypto.GetEtype(replyKey.KeyType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checksum, err := etype.GetChecksumHash(replyKey.KeyValue, requestBytes, keyusage.KEY_USAGE_AS_REQ)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := asn1.Marshal(types.PAReqEncPARep{ChksumType: etype.GetHashID(), Chksum: checksum})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply := ASRep{KDCRepFields: KDCRepFields{DecryptedEncPart: EncKDCRepPart{
+		Flags:     types.NewKrbFlags(),
+		EncPAData: types.PADataSequence{{PADataType: patype.PA_REQ_ENC_PA_REP, PADataValue: value}},
+	}}}
+	types.SetFlag(&reply.DecryptedEncPart.Flags, flags.EncPARep)
+
+	if err := reply.verifyEncPARep(request, replyKey, requestBytes); err != nil {
+		t.Fatalf("valid checksum over outer request rejected: %v", err)
+	}
+	if err := reply.verifyEncPARep(request, replyKey, []byte("inner AS-REQ")); err == nil {
+		t.Fatal("checksum over outer request accepted for different inner request bytes")
+	}
 }
 
 func TestUnmarshalASRep(t *testing.T) {

@@ -91,7 +91,7 @@ func (state *fastState) activate(cl *Client, realm string) error {
 	if err := auth.GenerateSeqNumberAndSubKey(armor.key.KeyType, et.GetKeyByteSize()); err != nil {
 		return fmt.Errorf("create FAST armor subkey: %w", err)
 	}
-	apReq, err := messages.NewAPReq(armor.ticket, armor.key, auth)
+	apReq, err := messages.NewAPReqWithKeyUsage(armor.ticket, armor.key, auth, keyusage.AP_REQ_AUTHENTICATOR)
 	if err != nil {
 		return fmt.Errorf("create FAST armor AP-REQ: %w", err)
 	}
@@ -346,7 +346,7 @@ func (state *fastState) unwrapResponse(paData types.PADataSequence, nonce int) (
 func (state *fastState) unwrapError(outer messages.KRBError, nonce int) (messages.KRBError, error) {
 	var methodData types.PADataSequence
 	if err := methodData.Unmarshal(outer.EData); err != nil {
-		return messages.KRBError{}, fmt.Errorf("decode armored KRB-ERROR METHOD-DATA: %w", err)
+		return messages.KRBError{}, fmt.Errorf("decode armored KRB-ERROR METHOD-DATA (outer error %d, e-data %d bytes): %w", outer.ErrorCode, len(outer.EData), err)
 	}
 	response, err := state.unwrapResponse(methodData, nonce)
 	if err != nil {
@@ -379,12 +379,12 @@ func (state *fastState) unwrapError(outer messages.KRBError, nonce int) (message
 	return inner, nil
 }
 
-func (state *fastState) verifyASReply(cl *Client, reply *messages.ASRep, request messages.ASReq) error {
-	_, err := state.verifyASReplyWithKey(cl, reply, request, nil)
+func (state *fastState) verifyASReply(cl *Client, reply *messages.ASRep, request messages.ASReq, requestBytes []byte) error {
+	_, err := state.verifyASReplyWithKey(cl, reply, request, requestBytes, nil)
 	return err
 }
 
-func (state *fastState) verifyASReplyWithKey(cl *Client, reply *messages.ASRep, request messages.ASReq, deriveReplyKey func(types.PADataSequence) (types.EncryptionKey, error)) (types.EncryptionKey, error) {
+func (state *fastState) verifyASReplyWithKey(cl *Client, reply *messages.ASRep, request messages.ASReq, requestBytes []byte, deriveReplyKey func(types.PADataSequence) (types.EncryptionKey, error)) (types.EncryptionKey, error) {
 	response, err := state.unwrapResponse(reply.PAData, request.ReqBody.Nonce)
 	if err != nil {
 		return types.EncryptionKey{}, err
@@ -423,7 +423,7 @@ func (state *fastState) verifyASReplyWithKey(cl *Client, reply *messages.ASRep, 
 		}
 	}
 	reply.PAData = append(types.PADataSequence(nil), response.PAData...)
-	if ok, err := reply.VerifyWithReplyKey(cl.Config, cl.Credentials, request, replyKey); !ok {
+	if ok, err := reply.VerifyWithReplyKeyAndRequestBytes(cl.Config, cl.Credentials, request, replyKey, requestBytes); !ok {
 		return types.EncryptionKey{}, err
 	}
 	finishedTime := response.Finished.Timestamp.UTC().Truncate(time.Second).Add(time.Duration(response.Finished.Usec) * time.Microsecond)

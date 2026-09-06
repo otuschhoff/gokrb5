@@ -64,6 +64,7 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 	pkinitRetried := false
 	freshnessRetried := false
 	var rb []byte
+	var requestBytes []byte
 	for {
 		request := ASReq
 		if fast != nil && fast.active {
@@ -78,6 +79,7 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 		}
 		rb, err = cl.sendASRequest(b, realm)
 		if err == nil {
+			requestBytes = b
 			break
 		}
 		e, ok := err.(messages.KRBError)
@@ -206,7 +208,7 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 			if pkinitExchange == nil {
 				return messages.ASRep{}, krberror.NewErrorf(krberror.KRBMsgError, "AS Exchange Error: KDC returned AS_REP before PKINIT negotiation")
 			}
-			replyKey, err := fast.verifyASReplyWithKey(cl, &ASRep, ASReq, func(paData types.PADataSequence) (types.EncryptionKey, error) {
+			replyKey, err := fast.verifyASReplyWithKey(cl, &ASRep, ASReq, requestBytes, func(paData types.PADataSequence) (types.EncryptionKey, error) {
 				return processPKINITReply(pkinitExchange, paData, ASRep.EncPart.EType)
 			})
 			if err != nil {
@@ -215,7 +217,7 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 			cl.setPKINITReplyKey(realm, replyKey)
 			return ASRep, nil
 		}
-		if err := fast.verifyASReply(cl, &ASRep, ASReq); err != nil {
+		if err := fast.verifyASReply(cl, &ASRep, ASReq, requestBytes); err != nil {
 			return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: FAST AS_REP is not valid")
 		}
 		return ASRep, nil

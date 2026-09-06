@@ -260,19 +260,25 @@ func (k *ASRep) Verify(cfg *config.Config, creds *credentials.Credentials, asReq
 	if err != nil {
 		return false, krberror.Errorf(err, krberror.DecryptingError, "error decrypting EncPart of AS_REP")
 	}
-	return k.verifyWithReplyKey(cfg, creds, asReq, key)
+	return k.verifyWithReplyKey(cfg, creds, asReq, key, nil)
 }
 
 // VerifyWithReplyKey verifies and decrypts an AS-REP using an explicitly
 // supplied reply key.
 func (k *ASRep) VerifyWithReplyKey(cfg *config.Config, creds *credentials.Credentials, asReq ASReq, key types.EncryptionKey) (bool, error) {
+	return k.VerifyWithReplyKeyAndRequestBytes(cfg, creds, asReq, key, nil)
+}
+
+// VerifyWithReplyKeyAndRequestBytes verifies and decrypts an AS-REP using an
+// explicitly supplied reply key and the exact AS-REQ encoding sent to the KDC.
+func (k *ASRep) VerifyWithReplyKeyAndRequestBytes(cfg *config.Config, creds *credentials.Credentials, asReq ASReq, key types.EncryptionKey, requestBytes []byte) (bool, error) {
 	if err := k.DecryptEncPartWithKey(key); err != nil {
 		return false, krberror.Errorf(err, krberror.DecryptingError, "error decrypting EncPart of AS_REP")
 	}
-	return k.verifyWithReplyKey(cfg, creds, asReq, key)
+	return k.verifyWithReplyKey(cfg, creds, asReq, key, requestBytes)
 }
 
-func (k *ASRep) verifyWithReplyKey(cfg *config.Config, creds *credentials.Credentials, asReq ASReq, key types.EncryptionKey) (bool, error) {
+func (k *ASRep) verifyWithReplyKey(cfg *config.Config, creds *credentials.Credentials, asReq ASReq, key types.EncryptionKey, requestBytes []byte) (bool, error) {
 	//Ref RFC 4120 Section 3.1.5
 	if !k.CName.Equal(asReq.ReqBody.CName) && !requestAllowsCanonicalName(asReq.ReqBody) {
 		return false, krberror.NewErrorf(krberror.KRBMsgError, "CName in response does not match what was requested. Requested: %+v; Reply: %+v", asReq.ReqBody.CName, k.CName)
@@ -299,7 +305,7 @@ func (k *ASRep) verifyWithReplyKey(cfg *config.Config, creds *credentials.Creden
 		return false, krberror.NewErrorf(krberror.KRBMsgError, "clock skew with KDC too large. Greater than %v seconds", cfg.LibDefaults.Clockskew.Seconds())
 	}
 	if asReq.PAData.Contains(patype.PA_REQ_ENC_PA_REP) {
-		if err := k.verifyEncPARep(asReq, key); err != nil {
+		if err := k.verifyEncPARep(asReq, key, requestBytes); err != nil {
 			return false, err
 		}
 	}
@@ -312,7 +318,7 @@ func requestAllowsCanonicalName(req KDCReqBody) bool {
 	return types.IsFlagSet(&req.KDCOptions, flags.Canonicalize) || req.CName.NameType == nametype.KRB_NT_ENTERPRISE
 }
 
-func (k *ASRep) verifyEncPARep(asReq ASReq, key types.EncryptionKey) error {
+func (k *ASRep) verifyEncPARep(asReq ASReq, key types.EncryptionKey, requestBytes []byte) error {
 	if !types.IsFlagSet(&k.DecryptedEncPart.Flags, flags.EncPARep) {
 		return krberror.NewErrorf(krberror.KRBMsgError, "KDC did not acknowledge PA-REQ-ENC-PA-REP")
 	}
@@ -328,9 +334,11 @@ func (k *ASRep) verifyEncPARep(asReq ASReq, key types.EncryptionKey) error {
 		if err != nil {
 			return krberror.Errorf(err, krberror.ChksumError, "unsupported PA-REQ-ENC-PA-REP checksum type")
 		}
-		requestBytes, err := asReq.Marshal()
-		if err != nil {
-			return krberror.Errorf(err, krberror.EncodingError, "could not marshal AS-REQ for PA-REQ-ENC-PA-REP verification")
+		if len(requestBytes) == 0 {
+			requestBytes, err = asReq.Marshal()
+			if err != nil {
+				return krberror.Errorf(err, krberror.EncodingError, "could not marshal AS-REQ for PA-REQ-ENC-PA-REP verification")
+			}
 		}
 		if !checksumType.VerifyChecksum(key.KeyValue, requestBytes, encPARep.Chksum, keyusage.KEY_USAGE_AS_REQ) {
 			return krberror.NewErrorf(krberror.ChksumError, "PA-REQ-ENC-PA-REP checksum invalid")

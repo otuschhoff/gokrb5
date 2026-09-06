@@ -698,6 +698,12 @@ IIS/RPC/CA, bidirectional PKU2U, fixture 14, claims, PKINIT, and KKDCP remain
 external release gates and must not be represented as completed by synthetic
 tests.
 
+Required FAST was validated against live Windows AD with a keytab armor TGT:
+the encrypted-challenge AS exchange and the subsequent armored TGS exchange
+both pass under the race detector. FAST armor AP-REQ authenticators use key
+usage 11, and RFC 6806 PA-REQ-ENC-PA-REP verification covers the exact outer
+AS-REQ bytes sent on the wire with the strengthened reply key and usage 56.
+
 Files: new `v8/test/testdata/docker/samba-ad-dc/` (Containerfile and provisioning script creating the automated accounts and exporting `krb5.keytab`, `user`, `pw`, and `environment` for `test/ad`), `.github/workflows/testingv8.yml` (quality, cross-platform unit, race, MIT integration, Samba AD, and 60-second fuzz jobs for every fuzz target), `v8/test/ad/ad.go` (environment kind and deterministic KDC/SPN/delegator overrides), new `v8/test/adintegration/ad_test.go` (build tag `adintegration`) implementing the automated subset of §4.4, `v8/USAGE.md`, `v8/README.md`, `v8/CHANGELOG.md`, this document (§7 resolutions, status → Implemented).
 
 Steps:
