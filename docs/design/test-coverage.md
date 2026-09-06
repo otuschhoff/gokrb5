@@ -4,7 +4,7 @@
 
 **Scope:** `v8` module (`github.com/otuschhoff/gokrb5/v8`)
 
-**Baseline:** 70.1% cross-package statement coverage on 2026-09-07, measured with:
+**Baseline:** 70.9% cross-package statement coverage on 2026-09-07, measured with:
 
 ```sh
 go test -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
@@ -31,7 +31,7 @@ Status: implemented.
 
 - Collect coverage with `-coverpkg=./...` so calls through public wrappers count toward internal packages.
 - Publish `coverage.out` from CI for function-level inspection.
-- Fail CI below 69.0%. The floor is intentionally below the 70.1% baseline to tolerate minor instrumentation differences across Go releases.
+- Fail CI below 70.0%. The floor is intentionally below the 70.9% baseline to tolerate minor instrumentation differences across Go releases.
 - Cover hardened TCP and UDP framing, endpoint failover, malformed ciphertext, scanner failures, HTTP body failures, atomic persistence, FAST hint parsing, and PKINIT revocation evidence.
 
 Exit gate: CI cannot merge a material aggregate coverage regression, and every defect fixed by the error-hardening initiative has a regression test where failure can be injected deterministically.

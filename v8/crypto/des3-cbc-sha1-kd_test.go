@@ -1,10 +1,11 @@
 package crypto
 
 import (
+	"bytes"
 	"encoding/hex"
-	"fmt"
 	"testing"
 
+	"github.com/otuschhoff/gokrb5/v8/iana/chksumtype"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -33,12 +34,12 @@ func TestDes3CbcSha1Kd_DR_DK(t *testing.T) {
 		usage, _ := hex.DecodeString(test.usage)
 		derivedRandom, err := e.DeriveRandom(key, usage)
 		if err != nil {
-			t.Fatal(fmt.Sprintf("Error in deriveRandom: %v", err))
+			t.Fatalf("Error in deriveRandom: %v", err)
 		}
 		assert.Equal(t, test.dr, hex.EncodeToString(derivedRandom), "DR not as expected")
 		derivedKey, err := e.DeriveKey(key, usage)
 		if err != nil {
-			t.Fatal(fmt.Sprintf("Error in deriveKey: %v", err))
+			t.Fatalf("Error in deriveKey: %v", err)
 		}
 		assert.Equal(t, test.dk, hex.EncodeToString(derivedKey), "DK not as expected")
 	}
@@ -77,5 +78,63 @@ func TestDes3CbcSha1KdRejectsMalformedInput(t *testing.T) {
 	}
 	if _, err := enctype.DecryptMessage(key, []byte{1}, 1); err == nil {
 		t.Fatal("truncated ciphertext was accepted")
+	}
+}
+
+func TestDes3CbcSha1KdEncryptionAndChecksums(t *testing.T) {
+	t.Parallel()
+	enctype := Des3CbcSha1Kd{}
+	key, err := hex.DecodeString("dce06b1f64c857a11c3db57c51899b2cc1791008ce973b92")
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := []byte("12345678")
+	const usage = uint32(2)
+
+	if enctype.GetHashID() != chksumtype.HMAC_SHA1_DES3_KD {
+		t.Fatalf("hash ID = %d", enctype.GetHashID())
+	}
+	_, ciphertext, err := enctype.EncryptData(key, message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plaintext, err := enctype.DecryptData(key, ciphertext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(plaintext, message) {
+		t.Fatalf("raw round trip = %x", plaintext)
+	}
+
+	_, encryptedMessage, err := enctype.EncryptMessage(key, message, usage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decryptedMessage, err := enctype.DecryptMessage(key, encryptedMessage, usage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decryptedMessage, message) {
+		t.Fatalf("message round trip = %x", decryptedMessage)
+	}
+	tamperedMessage := append([]byte(nil), encryptedMessage...)
+	tamperedMessage[len(tamperedMessage)-1] ^= 0xff
+	if _, err := enctype.DecryptMessage(key, tamperedMessage, usage); err == nil {
+		t.Fatal("tampered ciphertext was accepted")
+	}
+
+	checksum, err := enctype.GetChecksumHash(key, message, usage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !enctype.VerifyChecksum(key, message, checksum, usage) {
+		t.Fatal("valid checksum rejected")
+	}
+	checksum[0] ^= 0xff
+	if enctype.VerifyChecksum(key, message, checksum, usage) {
+		t.Fatal("tampered checksum accepted")
+	}
+	if enctype.VerifyChecksum(key[:1], message, checksum, usage) {
+		t.Fatal("checksum with invalid key accepted")
 	}
 }
