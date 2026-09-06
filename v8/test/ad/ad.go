@@ -24,6 +24,21 @@ const (
 	KeytabEnvVar       = "TESTAD_KEYTAB"
 	UserFileEnvVar     = "TESTAD_USER_FILE"
 	PasswordFileEnvVar = "TESTAD_PASSWORD_FILE"
+	KindEnvVar         = "TESTAD_KIND"
+	KDCEnvVar          = "TESTAD_KDC"
+	ServiceSPNEnvVar   = "TESTAD_SERVICE_SPN"
+	TargetSPNEnvVar    = "TESTAD_TARGET_SPN"
+	DeniedSPNEnvVar    = "TESTAD_DENIED_SPN"
+	DisabledUserEnvVar = "TESTAD_DISABLED_USER"
+	DisabledPassEnvVar = "TESTAD_DISABLED_PASSWORD"
+)
+
+// Kind identifies the AD implementation used by an integration environment.
+type Kind string
+
+const (
+	KindSamba   Kind = "samba"
+	KindWindows Kind = "windows"
 )
 
 // Default credential file names, resolved relative to the repository root.
@@ -50,8 +65,17 @@ type Env struct {
 	Keytab     *keytab.Keytab
 	KeytabPath string
 	// Config discovers KDCs for Realm through DNS SRV records.
-	Config *config.Config
+	Config           *config.Config
+	kind             Kind
+	serviceSPN       string
+	targetSPN        string
+	deniedSPN        string
+	disabledUser     string
+	disabledPassword string
 }
+
+// Kind reports whether this environment uses Samba or Windows AD.
+func (e *Env) Kind() Kind { return e.kind }
 
 // Environment skips the test unless TESTAD is set, then discovers the AD
 // domain from the host's FQDN and loads credentials from the repository root.
@@ -81,6 +105,10 @@ func Discover() (*Env, error) {
 	}
 	if domain == "" {
 		domain = strings.ToLower(realm)
+	}
+	kind, err := environmentKind(os.Getenv(KindEnvVar), realm, domain)
+	if err != nil {
+		return nil, err
 	}
 
 	keytabPath, userPath, passwordPath, err := credentialPaths()
@@ -113,18 +141,52 @@ func Discover() (*Env, error) {
 	cfg.LibDefaults.UDPPreferenceLimit = 1
 	cfg.DomainRealm[domain] = realm
 	cfg.DomainRealm["."+domain] = realm
+	if kdcs := splitCommaList(os.Getenv(KDCEnvVar)); len(kdcs) > 0 {
+		cfg.LibDefaults.DNSLookupKDC = false
+		cfg.Realms = []config.Realm{{Realm: realm, KDC: kdcs}}
+	}
 
 	return &Env{
-		Realm:      realm,
-		Domain:     domain,
-		HostFQDN:   fqdn,
-		User:       user,
-		UserRealm:  userRealm,
-		Password:   password,
-		Keytab:     kt,
-		KeytabPath: keytabPath,
-		Config:     cfg,
+		Realm:            realm,
+		Domain:           domain,
+		HostFQDN:         fqdn,
+		User:             user,
+		UserRealm:        userRealm,
+		Password:         password,
+		Keytab:           kt,
+		KeytabPath:       keytabPath,
+		Config:           cfg,
+		kind:             kind,
+		serviceSPN:       strings.TrimSpace(os.Getenv(ServiceSPNEnvVar)),
+		targetSPN:        strings.TrimSpace(os.Getenv(TargetSPNEnvVar)),
+		deniedSPN:        strings.TrimSpace(os.Getenv(DeniedSPNEnvVar)),
+		disabledUser:     strings.TrimSpace(os.Getenv(DisabledUserEnvVar)),
+		disabledPassword: os.Getenv(DisabledPassEnvVar),
 	}, nil
+}
+
+func splitCommaList(value string) []string {
+	var values []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			values = append(values, item)
+		}
+	}
+	return values
+}
+
+func environmentKind(value, realm, domain string) (Kind, error) {
+	switch normalized := strings.ToLower(strings.TrimSpace(value)); normalized {
+	case string(KindSamba):
+		return KindSamba, nil
+	case "", string(KindWindows):
+		if normalized == "" && (strings.Contains(strings.ToLower(realm), "samba") || strings.Contains(strings.ToLower(domain), "samba")) {
+			return KindSamba, nil
+		}
+		return KindWindows, nil
+	default:
+		return "", fmt.Errorf("%s must be %q or %q, got %q", KindEnvVar, KindSamba, KindWindows, value)
+	}
 }
 
 // ServicePrincipal returns the keytab principal used as the test service,
@@ -162,11 +224,29 @@ func scoreOf(p keytab.Principal, e *Env) int {
 
 // ServiceSPN returns the service principal as "service/host".
 func (e *Env) ServiceSPN() (string, error) {
+	if e.serviceSPN != "" {
+		return e.serviceSPN, nil
+	}
 	p, err := e.ServicePrincipal()
 	if err != nil {
 		return "", err
 	}
 	return strings.Join(p.Components, "/"), nil
+}
+
+// DelegationTargetSPN returns the configured positive S4U2proxy target.
+func (e *Env) DelegationTargetSPN() (string, bool) {
+	return e.targetSPN, e.targetSPN != ""
+}
+
+// DeniedTargetSPN returns a target for which S4U2proxy must be denied.
+func (e *Env) DeniedTargetSPN() (string, bool) {
+	return e.deniedSPN, e.deniedSPN != ""
+}
+
+// DisabledAccount returns credentials for the account-policy error test.
+func (e *Env) DisabledAccount() (user, password string, ok bool) {
+	return e.disabledUser, e.disabledPassword, e.disabledUser != "" && e.disabledPassword != ""
 }
 
 // MachineAccountPrincipal returns the computer account (sAMAccountName ending
@@ -226,6 +306,9 @@ func resolvConfDomain() string {
 				search = strings.TrimSuffix(fields[1], ".")
 			}
 		}
+	}
+	if scanner.Err() != nil {
+		return ""
 	}
 	return search
 }

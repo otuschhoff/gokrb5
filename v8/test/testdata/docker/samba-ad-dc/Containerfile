@@ -1,0 +1,11 @@
+FROM quay.io/samba.org/samba-ad-server@sha256:81110901f7e7e6af2e80581611729fb99a54522bd500065002550f2f5e1b38f9
+
+COPY provision.sh /usr/local/sbin/gokrb5-samba-ad
+RUN chmod 0755 /usr/local/sbin/gokrb5-samba-ad
+
+EXPOSE 53/tcp 53/udp 88/tcp 88/udp 389/tcp 389/udp 464/tcp 464/udp
+
+HEALTHCHECK --interval=5s --timeout=5s --start-period=30s --retries=24 \
+    CMD samba-tool domain info 127.0.0.1 >/dev/null && bash -c 'exec 3<>/dev/tcp/127.0.0.1/88' || exit 1
+
+ENTRYPOINT ["/usr/local/sbin/gokrb5-samba-ad"]

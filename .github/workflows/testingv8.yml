@@ -96,8 +96,39 @@ jobs:
         id: test32
 
   fuzz:
-    name: Fuzz parsers
+    name: Fuzz ${{ matrix.target }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: ./keytab
+            target: FuzzUnmarshal
+          - package: ./credentials
+            target: FuzzCCacheUnmarshal
+          - package: ./pac
+            target: FuzzPACUnmarshal
+          - package: ./gssapi
+            target: FuzzSecurityContextUnwrap
+          - package: ./gssapi
+            target: FuzzSecurityContextVerifyMIC
+          - package: ./negoex
+            target: FuzzNegoExUnmarshal
+          - package: ./pkinit
+            target: FuzzPKASRep
+          - package: ./pkinit
+            target: FuzzCMS
+          - package: ./pku2u
+            target: FuzzTrustedCertifiersUnmarshal
+          - package: ./spnego
+            target: FuzzUnmarshalNegToken
+          - package: ./types
+            target: FuzzKDCProxyMessage
+          - package: ./types
+            target: FuzzMSKILEUnmarshal
+          - package: ./types
+            target: FuzzFASTUnmarshal
     steps:
       - name: Set up Go
         uses: actions/setup-go@v1
@@ -107,12 +138,70 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
 
-      - name: Fuzz keytab parser
+      - name: Run fuzz target
         run: |
           cd v8
-          go test ./keytab -run '^$' -fuzz '^FuzzUnmarshal$' -fuzztime 60s
+          go test ${{ matrix.package }} -run '^$' -fuzz '^${{ matrix.target }}$' -fuzztime 60s
 
-      - name: Fuzz ccache parser
+  samba-ad:
+    name: Samba AD integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v1
+        with:
+          go-version: '1.20.x'
+
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Build Samba AD image
         run: |
+          docker build \
+            --platform linux/amd64 \
+            -f v8/test/testdata/docker/samba-ad-dc/Containerfile \
+            -t gokrb5-samba-ad \
+            v8/test/testdata/docker/samba-ad-dc
+
+      - name: Start Samba AD domain controller
+        run: |
+          mkdir -p "${RUNNER_TEMP}/gokrb5-ad"
+          chmod 0777 "${RUNNER_TEMP}/gokrb5-ad"
+          docker run -d --privileged \
+            --platform linux/amd64 \
+            --name gokrb5-samba-ad \
+            --hostname dc.samba.gokrb5.test \
+            -v "${RUNNER_TEMP}/gokrb5-ad:/artifacts" \
+            -p 88:88/tcp -p 88:88/udp \
+            -p 464:464/tcp -p 464:464/udp \
+            gokrb5-samba-ad
+          for attempt in $(seq 1 120); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' gokrb5-samba-ad)
+            if [[ "${status}" == "healthy" ]]; then
+              exit 0
+            fi
+            if [[ "${status}" == "unhealthy" ]]; then
+              docker logs gokrb5-samba-ad
+              exit 1
+            fi
+            sleep 1
+          done
+          docker logs gokrb5-samba-ad
+          exit 1
+
+      - name: Run Samba AD tests
+        run: |
+          test -s "${RUNNER_TEMP}/gokrb5-ad/environment"
+          test -s "${RUNNER_TEMP}/gokrb5-ad/krb5.keytab"
+          test -s "${RUNNER_TEMP}/gokrb5-ad/user"
+          test -s "${RUNNER_TEMP}/gokrb5-ad/pw"
+          set -a
+          source "${RUNNER_TEMP}/gokrb5-ad/environment"
+          set +a
           cd v8
-          go test ./credentials -run '^$' -fuzz '^FuzzCCacheUnmarshal$' -fuzztime 60s
+          TESTAD_DIR="${RUNNER_TEMP}/gokrb5-ad" go test -race -tags adintegration ./...
+
+      - name: Show Samba logs on failure
+        if: failure()
+        run: docker logs gokrb5-samba-ad

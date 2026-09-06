@@ -685,6 +685,17 @@ HttpOnly, two-minute exchange cookies rather than client network addresses.
 
 ### Phase 12 — Samba AD DC CI, Windows manual suite, fuzz jobs, documentation (all EC items)
 
+Status: implemented for locally testable and automated surfaces. CI provisions
+a digest-pinned Samba AD DC and exercises password and machine logon, PAC
+validation, disabled-account NTSTATUS, S4U2self, classic/RBCD S4U2proxy,
+negative delegation, S4U delegation PAC data, SPNEGO, and required FAST. All
+13 parser/security-context fuzz targets run for 60 seconds in a matrix. The
+container could not be built in the implementation environment because no
+container engine was installed; its first CI run remains the runtime
+validation gate. Windows IIS/RPC/CA, bidirectional PKU2U, fixture 14, claims,
+PKINIT, KKDCP, and policy-controlled FAST scenarios remain external release
+gates and must not be represented as completed by synthetic tests.
+
 Files: new `v8/test/testdata/docker/samba-ad-dc/` (Dockerfile, provisioning script creating the accounts in §4.1 and exporting `krb5.keytab`, `user`, `pw` for `test/ad`), `.github/workflows/testingv8.yml` (new jobs `ad-samba` with `TESTAD=1 TESTAD_REALM=… TESTAD_DIR=… INTEGRATION=1`, `negoex-mit`, and 60 s fuzz jobs for all fuzz targets), `v8/test/ad/ad.go` (add `Kind()` reporting `samba|windows` from the discovered KDC so tests can skip Windows-only or Samba-only cases), new `v8/test/adintegration/*_test.go` (build tag `adintegration`) implementing §4.4 items 1–14, `v8/USAGE.md`, `v8/README.md`, `v8/CHANGELOG.md`, this document (§7 resolutions, status → Implemented).
 
 Steps:
@@ -696,6 +707,13 @@ Steps:
 5. Re-audit: rerun the survey in §2 against the final code; every finding must map to a passing test or a §7 resolution.
 
 Check: all §5 checkboxes ticked; CI green; Windows checklist executed once and recorded.
+
+Implementation note: no `negoex-mit` job was added. MIT Kerberos does not
+publish a standardized Kerberos NEGOEX auth-scheme GUID or the NEGOEX metadata
+and key inquiry SPIs needed by such a harness. Kerberos remains directly
+interoperable through SPNEGO; NEGOEX is automated through PKU2U's registered
+scheme. Naming ordinary NEGOEX unit tests "MIT interoperability" would not add
+an independent peer and would overstate coverage.
 
 ---
 

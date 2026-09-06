@@ -17,6 +17,23 @@
   UPN/DNS SAM and SID extensions, and options-aware checksum verification.
 - Ticket-bound PAC identity validation and expanded Active Directory
   credentials for claims, device, delegation, requestor, and SID metadata.
+- MS-SFU S4U2self, S4U2proxy, resource-based constrained delegation, referral
+  handling, user-specific ticket caching, and typed policy errors.
+- FAST armor settings `FASTArmor`, `FASTArmorWithIdentity`,
+  `FASTArmorFromKeytab`, and `RequireFAST`, including encrypted challenge,
+  armored errors, cookies, and reply-key strengthening.
+- MS-KKDCP HTTPS transport and the `KKDCPClient` setting.
+- PKINIT DH and RSA authentication with certificate policy, KDF negotiation,
+  freshness, OCSP, and the `PKINITIdentity`, `PKINITAnchors`,
+  `PKINITKDCCertificatePolicy`, `PKINITMode`, `PKINITMinimumDHBits`,
+  `PKINITRequireFreshness`, and `PKINITOCSPResponse` settings.
+- GSS channel bindings, extended-protection policy, service-principal binding,
+  delegation, mutual authentication, DCE style, and RFC 4121 security contexts.
+- Generic multi-round SPNEGO, NEGOEX, and AES-only PKU2U certificate
+  authentication for initiators and acceptors.
+- A pinned Samba AD integration environment, `adintegration` test suite,
+  `TESTAD_KIND` environment classification, deterministic KDC/SPN overrides,
+  and 60-second CI jobs for every fuzz target.
 
 ### Changed
 
