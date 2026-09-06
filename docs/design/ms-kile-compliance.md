@@ -552,17 +552,17 @@ when rebuilding or re-signing a PAC, and provides typed marshalers for the
 simple PAC buffers changed in this phase. This avoids emitting partial or
 non-conformant NDR while retaining lossless PAC re-signing.
 
-### Phase 5 — Legacy RC4 GSS tokens and SPNEGO mechListMIC (KC-12, KA-6, KA-9)
+### Phase 5 — SPNEGO mechListMIC and negotiation extensions (KA-6, KA-9)
 
-Files: new `v8/gssapi/rc4Tokens.go`, new `v8/gssapi/context.go` (token-family selection, sequence window), `v8/gssapi/MICToken.go`, `v8/gssapi/wrapToken.go`, `v8/spnego/negotiationToken.go`, `v8/spnego/spnego.go`, `v8/spnego/http.go`, `v8/crypto/rfc4757/*.go` (export `HMAC` helpers if needed), tests alongside.
+Files: `v8/spnego/negotiationToken.go`, `v8/spnego/spnego.go`, `v8/spnego/krb5Token.go`, tests alongside, `v8/USAGE.md`.
 
 Steps:
-1. Implement RFC 4757 §7 token formats with RFC 2743 framing; key derivations per §7.3 (`Ksign`, `Kseq`, `Klocal`, `Kcrypt`) using existing `rfc4757` primitives.
-2. Implement `gssapi.Context` (`Wrap/Unwrap/GetMIC/VerifyMIC`, initiator/acceptor direction bits, 64-entry sequence window) choosing legacy tokens when the key etype is `RC4_HMAC`.
-3. SPNEGO: compute `mechListMIC` (MIC over DER `MechTypeList`) when MS-SPNG requires; verify incoming MICs; parse NegTokenInit2 `negHints`; make the legacy-OID-first preference configurable.
-4. Tests: RFC 4757 vectors, Windows captures (fixture 7, 8), `TestContextSelectsLegacyTokensForRC4`, replay-window tests, `FuzzRC4Tokens`.
+1. Compute and verify `mechListMIC` over the DER-encoded `MechTypeList` using the established Kerberos context and RFC 4121 direction, subkey, key-usage, and sequence semantics.
+2. Implement the RFC 4178 `request-mic` continuation in both directions, including fail-closed handling for missing, altered, or unexpected mechanism-list MICs.
+3. Parse and marshal NegTokenInit2 `negHints`; make standard versus Microsoft legacy Kerberos OID ordering configurable without enabling legacy RC4 encryption.
+4. Tests: mutual and non-mutual MIC exchanges, mechanism downgrade and MIC tampering, NegTokenInit2 round trips, legacy-OID-first negotiation, and negotiation-token fuzzing.
 
-Check: `go test ./gssapi/... ./spnego/...` green; Samba integration item 3 green; fuzz clean.
+Check: `go test ./spnego/...` green; race detector and negotiation-token fuzzing clean; existing Kerberos GSS tests unchanged.
 
 ### Phase 6 — S4U2self, S4U2proxy, RBCD (KC-5, MS-SFU)
 

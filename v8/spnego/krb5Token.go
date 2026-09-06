@@ -50,6 +50,7 @@ type KRB5Token struct {
 type KRB5TokenAPREQOptions struct {
 	GSSAPIFlags         []int
 	APOptions           []int
+	MechTypes           []asn1.ObjectIdentifier
 	ChannelBindings     *gssapi.ChannelBindings
 	DelegatedCredential []byte
 	Delegate            bool
@@ -112,8 +113,8 @@ func (m *KRB5Token) Unmarshal(b []byte) error {
 	if err != nil {
 		return fmt.Errorf("error unmarshalling KRB5Token OID: %v", err)
 	}
-	if !oid.Equal(gssapi.OIDKRB5.OID()) {
-		return fmt.Errorf("error unmarshalling KRB5Token, OID is %s not %s", oid.String(), gssapi.OIDKRB5.OID().String())
+	if !isKerberosMech(oid) {
+		return fmt.Errorf("error unmarshalling KRB5Token, unsupported mechanism OID %s", oid.String())
 	}
 	m.OID = oid
 	if len(r) < 2 {
@@ -223,6 +224,12 @@ func NewKRB5TokenAPREQWithOptions(cl *client.Client, tkt messages.Ticket, sessio
 	// TODO consider providing the SPN rather than the specific tkt and key and get these from the krb client.
 	var m KRB5Token
 	m.OID = gssapi.OIDKRB5.OID()
+	if len(options.MechTypes) > 0 {
+		if !isKerberosMech(options.MechTypes[0]) {
+			return m, fmt.Errorf("unsupported SPNEGO mechanism %s", options.MechTypes[0].String())
+		}
+		m.OID = append(asn1.ObjectIdentifier(nil), options.MechTypes[0]...)
+	}
 	tb, _ := hex.DecodeString(TOK_ID_KRB_AP_REQ)
 	m.tokID = tb
 

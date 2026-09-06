@@ -5,7 +5,11 @@ import (
 	"testing"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+	"github.com/otuschhoff/gokrb5/v8/gssapi"
+	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
+	"github.com/otuschhoff/gokrb5/v8/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -104,4 +108,99 @@ func TestUnmarshal_negTokenInitWithReqFlags(t *testing.T) {
 	if len(m.MechTokenBytes) != 3 {
 		t.Errorf("unmarshal did not return the correct number of mechToken bytes")
 	}
+}
+
+func TestNegTokenInitMechListMIC(t *testing.T) {
+	t.Parallel()
+	key := types.EncryptionKey{
+		KeyType:  etypeID.AES128_CTS_HMAC_SHA1_96,
+		KeyValue: []byte("0123456789abcdef"),
+	}
+	token := NegTokenInit{MechTypes: []asn1.ObjectIdentifier{
+		gssapi.OIDKRB5.OID(),
+		gssapi.OIDMSLegacyKRB5.OID(),
+	}}
+
+	require.NoError(t, token.SetMechListMIC(key, 7))
+	require.NoError(t, token.VerifyMechListMIC(key))
+
+	tamperedList := token
+	tamperedList.MechTypes = []asn1.ObjectIdentifier{
+		gssapi.OIDMSLegacyKRB5.OID(),
+		gssapi.OIDKRB5.OID(),
+	}
+	require.Error(t, tamperedList.VerifyMechListMIC(key))
+
+	tamperedMIC := token
+	tamperedMIC.MechListMIC = append([]byte(nil), token.MechListMIC...)
+	tamperedMIC.MechListMIC[len(tamperedMIC.MechListMIC)-1] ^= 0xff
+	require.Error(t, tamperedMIC.VerifyMechListMIC(key))
+}
+
+func TestNegTokenRespMechListMIC(t *testing.T) {
+	t.Parallel()
+	key := types.EncryptionKey{
+		KeyType:  etypeID.AES128_CTS_HMAC_SHA1_96,
+		KeyValue: []byte("0123456789abcdef"),
+	}
+	mechTypes := []asn1.ObjectIdentifier{gssapi.OIDKRB5.OID()}
+	var token NegTokenResp
+
+	require.NoError(t, token.SetMechListMIC(mechTypes, key, 11, true))
+	require.NoError(t, token.VerifyMechListMIC(mechTypes, key))
+
+	var mic gssapi.MICToken
+	require.NoError(t, mic.Unmarshal(token.MechListMIC, true))
+	assert.Equal(t, byte(gssapi.MICTokenFlagSentByAcceptor|gssapi.MICTokenFlagAcceptorSubkey), mic.Flags)
+}
+
+func TestNegTokenInit2NegHintsRoundTrip(t *testing.T) {
+	t.Parallel()
+	token := NegTokenInit{
+		MechTypes:   []asn1.ObjectIdentifier{gssapi.OIDKRB5.OID()},
+		NegHints:    &NegHints{HintName: "HTTP/server.example.com", HintAddress: []byte{1, 2, 3}},
+		MechListMIC: []byte{4, 5, 6},
+	}
+
+	encoded, err := token.Marshal()
+	require.NoError(t, err)
+	var decoded NegTokenInit
+	require.NoError(t, decoded.Unmarshal(encoded))
+	require.Equal(t, token.MechTypes, decoded.MechTypes)
+	require.Equal(t, token.NegHints, decoded.NegHints)
+	require.Equal(t, token.MechListMIC, decoded.MechListMIC)
+}
+
+func FuzzUnmarshalNegToken(f *testing.F) {
+	initToken, err := hex.DecodeString(testNegTokenInit)
+	require.NoError(f, err)
+	responseToken, err := hex.DecodeString(testNegTokenResp)
+	require.NoError(f, err)
+	init2 := NegTokenInit{
+		MechTypes: []asn1.ObjectIdentifier{gssapi.OIDKRB5.OID()},
+		NegHints:  &NegHints{HintName: "HTTP/server.example.com"},
+	}
+	init2Token, err := init2.Marshal()
+	require.NoError(f, err)
+	f.Add(initToken)
+	f.Add(responseToken)
+	f.Add(init2Token)
+
+	f.Fuzz(func(t *testing.T, encoded []byte) {
+		_, token, err := UnmarshalNegToken(encoded)
+		if err != nil {
+			return
+		}
+		switch value := token.(type) {
+		case NegTokenInit:
+			_, err = value.Marshal()
+		case NegTokenResp:
+			_, err = value.Marshal()
+		default:
+			t.Fatalf("unexpected token type %T", token)
+		}
+		if err != nil {
+			t.Fatalf("successfully decoded token did not marshal: %v", err)
+		}
+	})
 }

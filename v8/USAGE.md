@@ -132,6 +132,24 @@ spnegoCl := spnego.NewClient(cl, nil, "")
 resp, err := spnegoCl.Do(r)
 ```
 
+The standard Kerberos OID is offered by default. To interoperate with peers that prefer Microsoft's legacy Kerberos
+OID, provide an explicit preference order. This changes only the SPNEGO mechanism identifiers; it does not enable
+legacy RC4 encryption.
+```go
+options := spnego.KRB5TokenAPREQOptions{
+	GSSAPIFlags: []int{gssapi.ContextFlagInteg, gssapi.ContextFlagConf},
+	MechTypes: []asn1.ObjectIdentifier{
+		gssapi.OIDMSLegacyKRB5.OID(),
+		gssapi.OIDKRB5.OID(),
+	},
+}
+spnegoCl := spnego.NewClientWithOptions(cl, nil, "", options)
+```
+
+Low-level callers can marshal and parse NegTokenInit2 by setting or reading `NegTokenInit.NegHints`. The
+`SetMechListMIC` and `VerifyMechListMIC` methods protect the DER-encoded mechanism list when managing negotiation
+tokens directly.
+
 ##### Generic Kerberos Client
 To authenticate to a service a client will need to request a service ticket for a Service Principal Name (SPN) and form 
 into an AP_REQ message along with an authenticator encrypted with the session key that was delivered from the KDC along 

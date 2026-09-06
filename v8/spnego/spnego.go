@@ -15,6 +15,7 @@ import (
 	krbcrypto "github.com/otuschhoff/gokrb5/v8/crypto"
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
 	"github.com/otuschhoff/gokrb5/v8/iana/flags"
+	"github.com/otuschhoff/gokrb5/v8/iana/keyusage"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/service"
@@ -32,6 +33,10 @@ type SPNEGO struct {
 	replyKey         types.EncryptionKey
 	contextKey       types.EncryptionKey
 	sequenceNumber   int64
+	offeredMechTypes []asn1.ObjectIdentifier
+	requireMechMIC   bool
+	preferredMechs   []asn1.ObjectIdentifier
+	pendingMechMIC   bool
 	dcePending       bool
 	context          context.Context
 }
@@ -55,8 +60,15 @@ func SPNEGOClientWithOptions(cl *client.Client, spn string, options KRB5TokenAPR
 
 // SPNEGOService configures the SPNEGO mechanism suitable for service side use.
 func SPNEGOService(kt *keytab.Keytab, options ...func(*service.Settings)) *SPNEGO {
+	return SPNEGOServiceWithMechTypes(kt, nil, options...)
+}
+
+// SPNEGOServiceWithMechTypes configures the acceptor's mechanism preference order.
+// An empty list preserves the initiator's order.
+func SPNEGOServiceWithMechTypes(kt *keytab.Keytab, mechTypes []asn1.ObjectIdentifier, options ...func(*service.Settings)) *SPNEGO {
 	s := new(SPNEGO)
 	s.serviceSettings = service.NewSettings(kt, options...)
+	s.preferredMechs = append([]asn1.ObjectIdentifier(nil), mechTypes...)
 	return s
 }
 
@@ -81,6 +93,8 @@ func (s *SPNEGO) InitSecContext() (gssapi.ContextToken, error) {
 		return &SPNEGOToken{}, fmt.Errorf("could not create NegTokenInit: %v", err)
 	}
 	mechanismToken := negTokenInit.mechToken.(*KRB5Token)
+	s.offeredMechTypes = append([]asn1.ObjectIdentifier(nil), negTokenInit.MechTypes...)
+	s.requireMechMIC = len(negTokenInit.MechListMIC) > 0
 	s.authenticator = mechanismToken.APReq.Authenticator
 	s.replyKey = mechanismToken.APReq.Authenticator.SubKey
 	if len(s.replyKey.KeyValue) == 0 {
@@ -103,6 +117,9 @@ func (s *SPNEGO) AcceptSecContext(ct gssapi.ContextToken) (bool, context.Context
 	if s.dcePending {
 		return s.ContinueSecContext(ct)
 	}
+	if s.pendingMechMIC {
+		return s.acceptMechListMIC(ct)
+	}
 	var ctx context.Context
 	var mechanismToken *KRB5Token
 	var ok bool
@@ -112,12 +129,12 @@ func (s *SPNEGO) AcceptSecContext(ct gssapi.ContextToken) (bool, context.Context
 		token.settings = s.serviceSettings
 		var oid asn1.ObjectIdentifier
 		if token.Init && len(token.NegTokenInit.MechTypes) > 0 {
-			oid = token.NegTokenInit.MechTypes[0]
+			oid = s.selectMech(token.NegTokenInit.MechTypes)
 		}
 		if token.Resp {
 			oid = token.NegTokenResp.SupportedMech
 		}
-		if !(oid.Equal(gssapi.OIDKRB5.OID()) || oid.Equal(gssapi.OIDMSLegacyKRB5.OID())) {
+		if !isKerberosMech(oid) {
 			return false, ctx, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: "SPNEGO OID of MechToken is not of type KRB5"}
 		}
 		ok, status = token.Verify()
@@ -143,11 +160,43 @@ func (s *SPNEGO) AcceptSecContext(ct gssapi.ContextToken) (bool, context.Context
 	if !ok {
 		return ok, ctx, status
 	}
+	var offeredMechTypes []asn1.ObjectIdentifier
+	var selectedMech = gssapi.OIDKRB5.OID()
+	var includeMechMIC bool
+	if token, isSPNEGO := ct.(*SPNEGOToken); isSPNEGO && token.Init {
+		offeredMechTypes = token.NegTokenInit.MechTypes
+		selectedMech = s.selectMech(offeredMechTypes)
+		micRequired := len(offeredMechTypes) > 0 && !selectedMech.Equal(offeredMechTypes[0])
+		includeMechMIC = len(token.NegTokenInit.MechListMIC) > 0 || micRequired
+		if len(token.NegTokenInit.MechListMIC) > 0 {
+			if err := token.NegTokenInit.VerifyMechListMIC(mechanismToken.replyKey); err != nil {
+				return false, ctx, gssapi.Status{Code: gssapi.StatusBadMIC, Message: err.Error()}
+			}
+		}
+	}
 	s.context = ctx
 	mutual := mechanismToken.checksum.Flags&(gssapi.ContextFlagMutual|gssapi.ContextFlagDCEStyle) != 0 ||
 		types.IsFlagSet(&mechanismToken.APReq.APOptions, flags.APOptionMutualRequired)
 	if !mutual {
-		s.responseToken = nil
+		if includeMechMIC {
+			state := NegStateAcceptCompleted
+			if micRequiredWithoutInitiatorMIC(ct, selectedMech) {
+				state = NegStateRequestMIC
+				s.pendingMechMIC = true
+				s.offeredMechTypes = append([]asn1.ObjectIdentifier(nil), offeredMechTypes...)
+				s.contextKey = mechanismToken.replyKey
+			}
+			response := NegTokenResp{NegState: asn1.Enumerated(state), SupportedMech: selectedMech}
+			if err := response.SetMechListMIC(offeredMechTypes, mechanismToken.replyKey, 0, false); err != nil {
+				return false, ctx, gssapi.Status{Code: gssapi.StatusFailure, Message: err.Error()}
+			}
+			s.responseToken = &SPNEGOToken{Resp: true, NegTokenResp: response}
+			if state == NegStateRequestMIC {
+				return false, ctx, gssapi.Status{Code: gssapi.StatusContinueNeeded}
+			}
+		} else {
+			s.responseToken = nil
+		}
 		return true, ctx, status
 	}
 	if len(mechanismToken.replyKey.KeyValue) == 0 {
@@ -190,10 +239,64 @@ func (s *SPNEGO) AcceptSecContext(ct gssapi.ContextToken) (bool, context.Context
 	if err != nil {
 		return false, ctx, gssapi.Status{Code: gssapi.StatusFailure, Message: err.Error()}
 	}
-	s.responseToken = &SPNEGOToken{Resp: true, NegTokenResp: NegTokenResp{
-		NegState: asn1.Enumerated(NegStateAcceptCompleted), SupportedMech: gssapi.OIDKRB5.OID(), ResponseToken: replyBytes,
-	}}
+	response := NegTokenResp{
+		NegState: asn1.Enumerated(NegStateAcceptCompleted), SupportedMech: selectedMech, ResponseToken: replyBytes,
+	}
+	if micRequiredWithoutInitiatorMIC(ct, selectedMech) {
+		response.NegState = asn1.Enumerated(NegStateRequestMIC)
+		s.pendingMechMIC = true
+		s.offeredMechTypes = append([]asn1.ObjectIdentifier(nil), offeredMechTypes...)
+	}
+	if includeMechMIC {
+		if err := response.SetMechListMIC(offeredMechTypes, s.contextKey, uint64(sequenceNumber), true); err != nil {
+			return false, ctx, gssapi.Status{Code: gssapi.StatusFailure, Message: err.Error()}
+		}
+	}
+	s.responseToken = &SPNEGOToken{Resp: true, NegTokenResp: response}
+	if s.pendingMechMIC {
+		return false, ctx, gssapi.Status{Code: gssapi.StatusContinueNeeded}
+	}
 	return ok, ctx, status
+}
+
+func (s *SPNEGO) selectMech(offered []asn1.ObjectIdentifier) asn1.ObjectIdentifier {
+	if len(s.preferredMechs) > 0 {
+		for _, preferred := range s.preferredMechs {
+			if !isKerberosMech(preferred) {
+				continue
+			}
+			for _, candidate := range offered {
+				if preferred.Equal(candidate) {
+					return candidate
+				}
+			}
+		}
+	}
+	for _, candidate := range offered {
+		if isKerberosMech(candidate) {
+			return candidate
+		}
+	}
+	return nil
+}
+
+func micRequiredWithoutInitiatorMIC(ct gssapi.ContextToken, selected asn1.ObjectIdentifier) bool {
+	token, ok := ct.(*SPNEGOToken)
+	return ok && token.Init && len(token.NegTokenInit.MechTypes) > 0 &&
+		!selected.Equal(token.NegTokenInit.MechTypes[0]) && len(token.NegTokenInit.MechListMIC) == 0
+}
+
+func (s *SPNEGO) acceptMechListMIC(ct gssapi.ContextToken) (bool, context.Context, gssapi.Status) {
+	token, ok := ct.(*SPNEGOToken)
+	if !ok || !token.Resp || NegState(token.NegTokenResp.NegState) != NegStateAcceptCompleted {
+		return false, s.context, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: "expected an accept-completed SPNEGO mechListMIC response"}
+	}
+	if err := verifyMechListMIC(s.offeredMechTypes, token.NegTokenResp.MechListMIC, s.contextKey, false, keyusage.GSSAPI_INITIATOR_SIGN); err != nil {
+		return false, s.context, gssapi.Status{Code: gssapi.StatusBadMIC, Message: err.Error()}
+	}
+	s.pendingMechMIC = false
+	s.responseToken = nil
+	return true, s.context, gssapi.Status{Code: gssapi.StatusComplete}
 }
 
 // ResponseToken returns the output token generated by the latest context step.
@@ -203,6 +306,9 @@ func (s *SPNEGO) ResponseToken() gssapi.ContextToken {
 
 // ContinueSecContext processes a mutual-authentication response or DCE final leg.
 func (s *SPNEGO) ContinueSecContext(ct gssapi.ContextToken) (bool, context.Context, gssapi.Status) {
+	if s.client != nil && !contextFlagSet(s.initiatorOptions.GSSAPIFlags, gssapi.ContextFlagDCEStyle) {
+		return s.continueInitiator(ct)
+	}
 	mechanismToken, err := contextKRB5Token(ct, s.serviceSettings)
 	if err != nil || !mechanismToken.IsAPRep() {
 		if err == nil {
@@ -225,6 +331,15 @@ func (s *SPNEGO) ContinueSecContext(ct gssapi.ContextToken) (bool, context.Conte
 			s.contextKey = s.replyKey
 		}
 		s.sequenceNumber = mechanismToken.APRep.DecryptedEncPart.SequenceNumber
+		if spnegoToken, ok := ct.(*SPNEGOToken); ok {
+			if len(spnegoToken.NegTokenResp.MechListMIC) > 0 {
+				if err := spnegoToken.NegTokenResp.VerifyMechListMIC(s.offeredMechTypes, s.contextKey); err != nil {
+					return false, s.context, gssapi.Status{Code: gssapi.StatusBadMIC, Message: err.Error()}
+				}
+			} else if s.requireMechMIC {
+				return false, s.context, gssapi.Status{Code: gssapi.StatusBadMIC, Message: "acceptor did not return a required mechListMIC"}
+			}
+		}
 		if !dceStyle {
 			s.responseToken = nil
 			return true, s.context, gssapi.Status{Code: gssapi.StatusComplete}
@@ -249,6 +364,83 @@ func (s *SPNEGO) ContinueSecContext(ct gssapi.ContextToken) (bool, context.Conte
 	s.dcePending = false
 	s.responseToken = nil
 	return true, s.context, gssapi.Status{Code: gssapi.StatusComplete}
+}
+
+func (s *SPNEGO) continueInitiator(ct gssapi.ContextToken) (bool, context.Context, gssapi.Status) {
+	token, ok := ct.(*SPNEGOToken)
+	if !ok || !token.Resp {
+		return false, s.context, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: "continuation token is not a NegTokenResp"}
+	}
+	state := NegState(token.NegTokenResp.NegState)
+	if state == NegStateReject {
+		return false, s.context, gssapi.Status{Code: gssapi.StatusBadMech, Message: "SPNEGO negotiation was rejected"}
+	}
+	if len(token.NegTokenResp.SupportedMech) > 0 && !containsMech(s.offeredMechTypes, token.NegTokenResp.SupportedMech) {
+		return false, s.context, gssapi.Status{Code: gssapi.StatusBadMech, Message: "acceptor selected a mechanism that was not offered"}
+	}
+
+	usesAcceptorSubkey := false
+	if len(token.NegTokenResp.ResponseToken) > 0 {
+		mechanismToken, err := contextKRB5Token(token, s.serviceSettings)
+		if err != nil || !mechanismToken.IsAPRep() {
+			if err == nil {
+				err = errors.New("continuation token is not an AP_REP")
+			}
+			return false, s.context, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: err.Error()}
+		}
+		if err := mechanismToken.APRep.Verify(s.authenticator, s.replyKey); err != nil {
+			return false, s.context, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: err.Error()}
+		}
+		s.contextKey = mechanismToken.APRep.DecryptedEncPart.Subkey
+		usesAcceptorSubkey = len(s.contextKey.KeyValue) > 0
+		if !usesAcceptorSubkey {
+			s.contextKey = s.replyKey
+		}
+		s.sequenceNumber = mechanismToken.APRep.DecryptedEncPart.SequenceNumber
+	} else {
+		if contextFlagSet(s.initiatorOptions.GSSAPIFlags, gssapi.ContextFlagMutual) {
+			return false, s.context, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: "acceptor did not return the required AP_REP"}
+		}
+		s.contextKey = s.replyKey
+	}
+
+	if len(token.NegTokenResp.MechListMIC) > 0 {
+		if err := token.NegTokenResp.VerifyMechListMIC(s.offeredMechTypes, s.contextKey); err != nil {
+			return false, s.context, gssapi.Status{Code: gssapi.StatusBadMIC, Message: err.Error()}
+		}
+	} else if state == NegStateRequestMIC || s.requireMechMIC {
+		return false, s.context, gssapi.Status{Code: gssapi.StatusBadMIC, Message: "acceptor did not return a required mechListMIC"}
+	}
+
+	if state == NegStateRequestMIC {
+		mic, err := makeMechListMIC(s.offeredMechTypes, s.contextKey, initiatorMICFlags(usesAcceptorSubkey), uint64(s.authenticator.SeqNumber), keyusage.GSSAPI_INITIATOR_SIGN)
+		if err != nil {
+			return false, s.context, gssapi.Status{Code: gssapi.StatusFailure, Message: err.Error()}
+		}
+		s.responseToken = &SPNEGOToken{Resp: true, NegTokenResp: NegTokenResp{
+			NegState: asn1.Enumerated(NegStateAcceptCompleted), MechListMIC: mic,
+		}}
+		return false, s.context, gssapi.Status{Code: gssapi.StatusContinueNeeded}
+	}
+
+	s.responseToken = nil
+	return true, s.context, gssapi.Status{Code: gssapi.StatusComplete}
+}
+
+func containsMech(mechTypes []asn1.ObjectIdentifier, candidate asn1.ObjectIdentifier) bool {
+	for _, mechType := range mechTypes {
+		if mechType.Equal(candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func initiatorMICFlags(acceptorSubkey bool) byte {
+	if acceptorSubkey {
+		return gssapi.MICTokenFlagAcceptorSubkey
+	}
+	return 0
 }
 
 func negotiationKRB5Token(token *SPNEGOToken) (*KRB5Token, error) {
