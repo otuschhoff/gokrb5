@@ -4,7 +4,7 @@
 
 **Scope:** `v8` module (`github.com/otuschhoff/gokrb5/v8`)
 
-**Baseline:** 67.1% cross-package statement coverage on 2026-09-07, measured with:
+**Baseline:** 68.5% cross-package statement coverage on 2026-09-07, measured with:
 
 ```sh
 go test -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
@@ -17,7 +17,7 @@ Coverage work must reduce protocol, security, interoperability, and portability 
 
 Completion requires:
 
-1. At least 80% repository-wide cross-package statement coverage.
+1. 100% combined repository-wide statement coverage across unit, integration, subprocess, version-specific, and supported-platform test jobs.
 2. At least 90% statement coverage for security-critical parsers, cryptographic message operations, network framing, and authentication state transitions.
 3. No untested rejection branch for attacker-controlled lengths, tags, checksums, signatures, or message ordering.
 4. Native Linux, Windows, and macOS tests; compile checks for supported mobile targets; and documented platform-specific exclusions.
@@ -31,7 +31,7 @@ Status: implemented.
 
 - Collect coverage with `-coverpkg=./...` so calls through public wrappers count toward internal packages.
 - Publish `coverage.out` from CI for function-level inspection.
-- Fail CI below 66.0%. The floor is intentionally below the 67.1% baseline to tolerate minor instrumentation differences across Go releases.
+- Fail CI below 67.0%. The floor is intentionally below the 68.5% baseline to tolerate minor instrumentation differences across Go releases.
 - Cover hardened TCP and UDP framing, endpoint failover, malformed ciphertext, scanner failures, HTTP body failures, atomic persistence, FAST hint parsing, and PKINIT revocation evidence.
 
 Exit gate: CI cannot merge a material aggregate coverage regression, and every defect fixed by the error-hardening initiative has a regression test where failure can be injected deterministically.
@@ -80,3 +80,15 @@ Exit gate: every claimed runtime platform has native execution coverage. Compile
 - Periodically remove obsolete exclusions and stale fuzz corpus entries.
 
 Exit gate: repository coverage is at least 80%, critical paths remain at least 90%, and CI reports each test category independently.
+
+## Phase 7: Strict 100% Combined Coverage
+
+- Maintain a machine-readable inventory of every uncovered statement, its owning package, and the job expected to execute it. The inventory must fail CI when a new uncovered block has no owner.
+- Refactor command entry points into testable `run` functions that accept arguments, streams, environment access, and exit-code reporting; retain `main` only as a minimal `os.Exit(run(...))` wrapper and cover wrappers with subprocess tests.
+- Inject terminal, clock, randomness, filesystem, DNS, network, and process dependencies where deterministic failure or cancellation cannot otherwise be induced.
+- Collect coverage from Linux unit tests, CLI subprocess tests, MIT and Samba integration suites, Windows AD release tests, supported Go-version jobs, and native Windows and macOS jobs. Merge profiles by source block before enforcing the combined threshold.
+- Exercise each build-tagged implementation on a matching runner. A file absent from one platform's build is not considered excluded when another supported runner can compile it.
+- Remove unreachable error branches only when the underlying operation is provably infallible and the public API remains compatible. Do not use coverage-ignore comments, generated profiles, empty assertions, or reduced `-coverpkg` scope.
+- Raise package and aggregate floors monotonically after each deterministic, integration, subprocess, and platform tranche reaches its target.
+
+Exit gate: every instrumentable production statement is executed by at least one required CI job, the merged profile reports 100.0%, every package reports 100.0%, and all platform-specific implementations meet the same standard on their native runner.
