@@ -40,7 +40,7 @@ gokrb5 must be a fully MS-KILE-compliant **Kerberos client** and **application s
 | DES-CBC-CRC (1), DES-CBC-MD5 (3), RC4-HMAC-EXP (24) | Disabled by default in Windows since Server 2008 R2; cryptographically broken. Clients must gracefully negotiate them away, not implement them. |
 | NTLM | Separate protocol ([MS-NLMP]); NEGOEX and PKU2U are in scope (§3.6, §3.7) but NTLM is never offered or accepted. |
 | NEGOEX auth schemes other than Kerberos and PKU2U | Windows Hello / Azure AD PRT / MSA packages are proprietary; NEGOEX must negotiate past them, not implement them. |
-| Delegated Managed Service Account key package (PA-DMSA-KEY-PACKAGE, 171) | Newest revision, KDC-to-client for dMSA only; decode-only support is provided in Phase 0 and no behaviour is attached. |
+| Delegated Managed Service Account key package (KERB-DMSA-KEY-PACKAGE, PA-DATA 171) | Newest revision, KDC-to-client for dMSA only; decode-only support is provided in Phase 0 and no behaviour is attached. |
 | KCM/KEYRING/DIR credential caches | Unchanged from the MIT compatibility spec. |
 
 ---
@@ -73,9 +73,9 @@ Sources reviewed: `v8/client/*.go`, `v8/messages/*.go`, `v8/types/*.go`, `v8/pac
 
 | ID | Finding | Severity |
 |---|---|---|
-| KS-1 | No ASN.1 types for KERB-PA-PAC-REQUEST (128), PA-PAC-OPTIONS (167), KERB-ERROR-DATA / KERB-EXT-ERROR, KERB-AD-RESTRICTION-ENTRY (141) with LSAP_TOKEN_INFO_INTEGRITY, KERB-LOCAL (142), AD-AUTH-DATA-AP-OPTIONS (143), PA-FOR-USER (129), PA-S4U-X509-USER (130), PA-SUPPORTED-ENCTYPES (165), KERB-KEY-LIST-REQ/REP (161/162), PA-SVR-REFERRAL-INFO (20, RFC 6806 §8), KERB-SUPERSEDED-BY-USER (170), PA-DMSA-KEY-PACKAGE (171). Only the `patype` constants up to 166 exist; 167, 161, 162, 170, 171 are missing. | High |
+| KS-1 | No ASN.1 types for KERB-PA-PAC-REQUEST (128), PA-PAC-OPTIONS (167), KERB-ERROR-DATA / KERB-EXT-ERROR, KERB-AD-RESTRICTION-ENTRY (141) with LSAP_TOKEN_INFO_INTEGRITY, KERB-LOCAL (142), AD-AUTH-DATA-AP-OPTIONS (143), PA-FOR-USER (129), PA-S4U-X509-USER (130), PA-SUPPORTED-ENCTYPES (165), KERB-KEY-LIST-REQ/REP (161/162), PA-SVR-REFERRAL-INFO (20, RFC 6806 Appendix A), KERB-SUPERSEDED-BY-USER (170), KERB-DMSA-KEY-PACKAGE (PA-DATA 171). Only the `patype` constants up to 166 exist; 167, 161, 162, 170, 171 are missing. | High |
 | KS-2 | `iana/adtype` lacks 141, 142, 143; `iana/nametype` lacks `KRB_NT_WELLKNOWN` (11), `KRB_NT_MS_PRINCIPAL` (-128), `KRB_NT_MS_PRINCIPAL_AND_ID` (-129), `KRB_NT_ENT_PRINCIPAL_AND_ID` (-130); no constants for `KERB_AP_OPTIONS_CBT` (0x4000), `KERB_AP_OPTIONS_UNVERIFIED_TARGET_NAME` (0x8000), PA-PAC-OPTIONS flag bits, PA-SUPPORTED-ENCTYPES bit field, `KDC_OPT_CNAME_IN_ADDL_TKT` (bit 14), key usages 26/27 (PA-S4U-X509-USER), NTSTATUS values commonly surfaced in KERB-EXT-ERROR. | Medium |
-| KS-3 | `messages.KRBError.EData` is only parsed as METHOD-DATA in specific retry paths. KERB-ERROR-DATA (data-type 3 `KERB_ERR_TYPE_EXTENDED` carrying an NTSTATUS, data-type 1 `KERB_AP_ERR_TYPE_SKEW_RECOVERY`) and TYPED-DATA are never decoded, so AD-specific failure reasons (e.g. `STATUS_ACCOUNT_DISABLED`, `STATUS_PASSWORD_MUST_CHANGE`) are lost. | Medium |
+| KS-3 | `messages.KRBError.EData` is only parsed as METHOD-DATA in specific retry paths. KERB-ERROR-DATA (data-type 3 `KERB_ERR_TYPE_EXTENDED` carrying an NTSTATUS, data-type 2 `KERB_AP_ERR_TYPE_SKEW_RECOVERY`) and TYPED-DATA are never decoded, so AD-specific failure reasons (e.g. `STATUS_ACCOUNT_DISABLED`, `STATUS_PASSWORD_MUST_CHANGE`) are lost. | Medium |
 | KS-4 | `PACType.ProcessPACInfoBuffers` slices `pac.Data[Offset:Offset+Size]` without bounds checks; a malformed PAC panics the service. `UPNDNSInfo.Unmarshal` slices by untrusted offsets similarly. No PAC fuzz target. | High (security) |
 | KS-5 | PAC buffer types 16 (PAC_TICKET_CHECKSUM), 17 (PAC_ATTRIBUTES_INFO), 18 (PAC_REQUESTOR), 19 (PAC_FULL_CHECKSUM) are not recognised and are silently dropped. | Medium |
 | KS-6 | `UPNDNSInfo` flag handling is wrong: `upnNoUPNAttr = 31` is used as a bit index where MS-PAC defines flag `U` = 0x00000001; flag `S` = 0x00000002 (SamName/Sid extension) is not parsed. | Medium |
@@ -155,7 +155,7 @@ New/extended constant packages:
 - `iana/nametype`: `KRB_NT_WELLKNOWN = 11`, `KRB_NT_MS_PRINCIPAL = -128`, `KRB_NT_MS_PRINCIPAL_AND_ID = -129`, `KRB_NT_ENT_PRINCIPAL_AND_ID = -130`.
 - `iana/flags`: `CNameInAddlTkt = 14` (already `EncTktInSkey = 28`), constants for PA-PAC-OPTIONS bits: `PACOptionClaims = 0`, `PACOptionBranchAware = 1`, `PACOptionForwardToFullDC = 2`, `PACOptionResourceBasedConstrainedDelegation = 3`.
 - `iana/keyusage`: `PA_S4U_X509_USER_REQUEST = 26`, `PA_S4U_X509_USER_REPLY = 27`, `FAST_REQ_CHKSUM = 50`, `FAST_ENC = 51`, `FAST_REP = 52`, `FAST_FINISHED = 53`, `ENC_CHALLENGE_CLIENT = 54`, `ENC_CHALLENGE_KDC = 55`, `KEY_USAGE_PA_PKINIT_KX = 44`.
-- New `iana/msflags` (or extend `iana/flags`): `KERB_AP_OPTIONS_CBT = 0x4000`, `KERB_AP_OPTIONS_UNVERIFIED_TARGET_NAME = 0x8000`; `SupportedEncTypes` bit field: `DES_CBC_CRC = 0x1`, `DES_CBC_MD5 = 0x2`, `RC4_HMAC = 0x4`, `AES128_CTS_HMAC_SHA1_96 = 0x8`, `AES256_CTS_HMAC_SHA1_96 = 0x10`, `AES256_CTS_HMAC_SHA1_96_SK = 0x20`, `FAST_SUPPORTED = 0x10000`, `COMPOUND_IDENTITY_SUPPORTED = 0x20000`, `CLAIMS_SUPPORTED = 0x40000`, `RESOURCE_SID_COMPRESSION_DISABLED = 0x80000`; KERB-ERROR-DATA `data-type` values `KERB_AP_ERR_TYPE_SKEW_RECOVERY = 1`, `KERB_ERR_TYPE_EXTENDED = 3`; LSAP_TOKEN_INFO_INTEGRITY `Flags` (`UAC_RESTRICTED = 0x1`) and `TokenIL` levels (untrusted 0x0, low 0x1000, medium 0x2000, high 0x3000, system 0x4000, protected 0x5000).
+- New `iana/msflags` (or extend `iana/flags`): `KERB_AP_OPTIONS_CBT = 0x4000`, `KERB_AP_OPTIONS_UNVERIFIED_TARGET_NAME = 0x8000`; `SupportedEncTypes` bit field: `DES_CBC_CRC = 0x1`, `DES_CBC_MD5 = 0x2`, `RC4_HMAC = 0x4`, `AES128_CTS_HMAC_SHA1_96 = 0x8`, `AES256_CTS_HMAC_SHA1_96 = 0x10`, `AES256_CTS_HMAC_SHA1_96_SK = 0x20`, `AES128_CTS_HMAC_SHA256_128 = 0x40`, `AES256_CTS_HMAC_SHA384_192 = 0x80`, `FAST_SUPPORTED = 0x10000`, `COMPOUND_IDENTITY_SUPPORTED = 0x20000`, `CLAIMS_SUPPORTED = 0x40000`, `RESOURCE_SID_COMPRESSION_DISABLED = 0x80000`; KERB-ERROR-DATA `data-type` values `KERB_AP_ERR_TYPE_SKEW_RECOVERY = 2`, `KERB_ERR_TYPE_EXTENDED = 3`; LSAP_TOKEN_INFO_INTEGRITY `Flags` (`UAC_RESTRICTED = 0x1`) and `TokenIL` levels (untrusted 0x0, low 0x1000, medium 0x2000, high 0x3000, system 0x4000, protected 0x5000).
 - New `iana/ntstatus`: the NTSTATUS codes AD returns in KERB-EXT-ERROR that a client acts upon (`STATUS_ACCOUNT_DISABLED`, `STATUS_ACCOUNT_LOCKED_OUT`, `STATUS_ACCOUNT_EXPIRED`, `STATUS_PASSWORD_EXPIRED`, `STATUS_PASSWORD_MUST_CHANGE`, `STATUS_INVALID_LOGON_HOURS`, `STATUS_INVALID_WORKSTATION`, `STATUS_LOGON_FAILURE`, `STATUS_NO_LOGON_SERVERS`, `STATUS_NOT_SUPPORTED`, `STATUS_LOGON_TYPE_NOT_GRANTED`, `STATUS_ACCOUNT_RESTRICTION`, `STATUS_UNSUPPORTED_PREAUTH`, `STATUS_TIME_DIFFERENCE_AT_DC`) with `String()`.
 
 New ASN.1 types in `v8/types` (file `mskile.go`), each with `Marshal`/`Unmarshal` and a `PAData`/`AuthorizationDataEntry` constructor:
@@ -166,24 +166,24 @@ type PAPACOptions   struct { Flags asn1.BitString `asn1:"explicit,tag:0"` }     
 type KerbErrorData  struct { DataType int32 `asn1:"explicit,tag:1"`; DataValue []byte `asn1:"explicit,optional,tag:2"` }
 type KerbExtError   struct { Status uint32; Reserved uint32; Flags uint32 }                         // 12 bytes little-endian
 type KerbADRestrictionEntry struct { RestrictionType int32 `asn1:"explicit,tag:0"`; Restriction []byte `asn1:"explicit,tag:1"` }
-type LSAPTokenInfoIntegrity struct { Flags uint32; TokenIL uint32; MachineID [32]byte }             // little-endian
+type LSAPTokenInfoIntegrity struct { Flags uint32; TokenIL uint32; PerBootMachineID [32]byte; CrossBootMachineID [32]byte } // little-endian
 type ADAuthDataAPOptions uint32                                                                      // little-endian, KERB_AP_OPTIONS_*
 type PAForUser struct { UserName PrincipalName `asn1:"explicit,tag:0"`; UserRealm string `asn1:"generalstring,explicit,tag:1"`; Cksum Checksum `asn1:"explicit,tag:2"`; AuthPackage string `asn1:"generalstring,explicit,tag:3"` }
 type S4UUserID struct { Nonce uint32 `asn1:"explicit,tag:0"`; CName PrincipalName `asn1:"explicit,optional,tag:1"`; CRealm string `asn1:"generalstring,explicit,tag:2"`; SubjectCertificate []byte `asn1:"explicit,optional,tag:3"`; Options asn1.BitString `asn1:"explicit,optional,tag:4"` }
-type PAS4UX509User struct { UserID S4UUserID `asn1:"explicit,tag:0"`; Checksum Checksum `asn1:"explicit,tag:1"` }
-type PASupportedEncTypes int32
+type PAS4UX509User struct { UserID asn1.RawValue `asn1:"explicit,tag:0"`; Checksum Checksum `asn1:"explicit,tag:1"` } // RawValue wraps DER S4UUserID
+type PASupportedEncTypes uint32
 type KerbKeyListReq []int32
 type KerbKeyListRep []EncryptionKey
 type PASvrReferralData struct { ReferredName PrincipalName `asn1:"explicit,optional,tag:1"`; ReferredRealm string `asn1:"generalstring,explicit,tag:0"` }
 type KerbSupersededByUser struct { Name PrincipalName `asn1:"explicit,tag:0"`; Realm string `asn1:"generalstring,explicit,tag:1"` }
-type PADMSAKeyPackage struct { CurrentKeys []EncryptionKey `asn1:"explicit,tag:0"`; PreviousKeys []EncryptionKey `asn1:"explicit,optional,tag:1"`; Expiration time.Time `asn1:"generalized,explicit,tag:2"`; CurrentKeysStart time.Time `asn1:"generalized,explicit,optional,tag:3"` }
+type KerbDMSAKeyPackage struct { CurrentKeys []EncryptionKey `asn1:"explicit,tag:0"`; PreviousKeys []EncryptionKey `asn1:"explicit,optional,tag:1"`; ExpirationInterval time.Time `asn1:"generalized,explicit,tag:2"`; FetchInterval time.Time `asn1:"generalized,explicit,tag:4"` }
 ```
 
-Tag numbers above must be re-verified against the MS-KILE ASN.1 module text before implementation; the spec's ASN.1 is normative, this listing is a guide.
+These tags were re-verified against the current MS-KILE pages during Phase 0. The spec's ASN.1 remains normative.
 
 FAST types (RFC 6113 §5.4) go in `v8/types/fast.go`: `PAFXFastRequest` (CHOICE armored-data), `KrbFastArmoredReq`, `KrbFastReq`, `KrbFastArmor`, `KrbFastResponse`, `KrbFastFinished`, `PAFXFastReply`, `PAEncryptedChallenge` (= `EncryptedData`), `PAFXError` (= KRB-ERROR).
 
-`KRBError` gains:
+In Phase 1, `KRBError` gains the behavioral decoding APIs below. They are not part of the Phase 0 structure-only scope:
 
 ```go
 func (k KRBError) MethodData() (types.PADataSequence, error)   // e-data as METHOD-DATA when error code permits
@@ -191,7 +191,7 @@ func (k KRBError) KerbErrorData() ([]types.KerbErrorData, error) // MS-KILE KERB
 func (k KRBError) NTStatus() (ntstatus.Code, bool)             // first KERB_ERR_TYPE_EXTENDED status
 ```
 
-`krberror.Krberror` wraps `KRBError` so callers can `errors.As` into it and read `NTStatus()`.
+Also in Phase 1, `krberror.Krberror` wraps `KRBError` so callers can `errors.As` into it and read `NTStatus()`.
 
 ### 3.2 Authorization-data visitor (`v8/types`, `v8/messages`)
 
@@ -486,7 +486,7 @@ Steps:
 4. Capture or spec-derive fixtures 1–3, 5 (structures only), 6 (PAC 17/18 payloads), 12 from §4.2. Fixtures that cannot be captured now are marked `// SPEC-DERIVED — replace with Windows capture` exactly as the MIT spec does.
 5. Write round-trip tests and fixture-decode tests; add `TestFixturesDecode` entries in `test_vectors_test.go` style.
 
-Check: `go test ./iana/... ./types/... ./test/testdata/...` green; `go vet ./...` clean; no behavioural change (`go test ./...` unchanged).
+Check: `go test ./iana/... ./types/... ./test/testdata` green; `go vet ./...` clean; no behavioural change (`go test ./...` unchanged).
 
 ### Phase 1 — Parser hardening and generic authorization-data access (KS-3, KS-4, KS-8, KA-4)
 
@@ -669,7 +669,7 @@ Check: all §5 checkboxes ticked; CI green; Windows checklist executed once and 
 8. **FAST armor without a device account (Phase 7)** — Windows requires a device TGT for compound identity; a user TGT can armor its own TGS-REQ. Decide whether `FASTArmorFromKeytab` also accepts user keytabs and document that compound identity then does not apply.
 9. **KKDCP `dclocator-hint` (Phase 8)** — Whether to send it (Windows sends DS flags); default omit unless `ad_site` configured.
 10. **PKINIT CMS scope (Phase 9)** — Minimal CMS implementation vs. a dependency; stdlib has none. Decide after measuring the size of the required subset (SignedData with one signer incl. ECDSA/RSASSA-PSS, EnvelopedData RSA-only). Candidates: `github.com/github/smimesign/ietf-cms`, `go.mozilla.org/pkcs7`; both need auditing for the PKINIT content types.
-11. **PA-DMSA-KEY-PACKAGE / KERB-SUPERSEDED-BY-USER (Phase 0)** — Decode-only; confirm ASN.1 tags in the latest MS-KILE revision before adding.
+11. **KERB-DMSA-KEY-PACKAGE / KERB-SUPERSEDED-BY-USER (Phase 0, resolved)** — The current MS-KILE definitions were verified on 2026-09-06. `KERB-SUPERSEDED-BY-USER` uses `name [0]`, `realm [1]`. `KERB-DMSA-KEY-PACKAGE` uses `current-keys [0]`, optional `previous-keys [1]`, `expiration-interval [2]`, and `fetch-interval [4]`. Phase 0 provides strict decode/encode support without attaching client behaviour.
 12. **NEGOEX key derivation (Phase 10)** — Confirm the exact GSS PRF inputs and key-usage numbers used for `GSS_C_INQ_NEGOEX_KEY`/`GSS_C_INQ_NEGOEX_VERIFY_KEY` by reading MS-NEGOEX §2.2.5/§3.1.5 and MIT `src/lib/gssapi/krb5/inq_context.c`; capture a Windows `VERIFY` and recompute it before finalising.
 13. **NEGOEX auth-scheme GUIDs (Phase 10/11)** — Take the Kerberos and PKU2U scheme GUIDs from the current MS-NEGOEX/MS-PKU2U revisions (and MIT `negoex_util.c`), not from memory; add a test that decodes fixture 13 with them.
 14. **PKU2U acceptor certificate rules (Phase 11)** — Determine which EKU/SAN rules MS-PKU2U applies to the acceptor certificate (it is not a KDC certificate under MS-PKCA) and whether Azure-AD-style certificates require additional name mapping; decide the default anchors policy.

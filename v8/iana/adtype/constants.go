@@ -17,7 +17,13 @@ const (
 	ADAuthenticationStrength      int32 = 70
 	ADFXFastArmor                 int32 = 71
 	ADFXFastUsed                  int32 = 72
+	ADCAMMAC                      int32 = 96
+	ADAuthenticationIndicator     int32 = 97
 	ADWin2KPAC                    int32 = 128
 	ADEtypeNegotiation            int32 = 129
+	KerbAdRestrictionEntry        int32 = 141
+	KerbLocal                     int32 = 142
+	ADAuthDataAPOptions           int32 = 143
+	KerbDMSAKeyPackage            int32 = 171
 	//Reserved values                   9-63
 )

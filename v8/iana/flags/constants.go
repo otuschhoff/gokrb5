@@ -20,6 +20,8 @@ const (
 	RequestAnonymous       = 12
 	TransitedPolicyChecked = 12
 	OKAsDelegate           = 13
+	CNameInAddlTkt         = 14
+	KDCOptCNameInAddlTkt   = CNameInAddlTkt
 	EncPARep               = 15
 	Canonicalize           = 15
 	DisableTransitedCheck  = 26
@@ -33,4 +35,10 @@ const (
 	APOptionUseSessionKey  = 1
 	APOptionMutualRequired = 2
 	// 3-31 Reserved for future use.
+
+	// PA-PAC-OPTIONS flag bit positions.
+	PACOptionClaims                             = 0
+	PACOptionBranchAware                        = 1
+	PACOptionForwardToFullDC                    = 2
+	PACOptionResourceBasedConstrainedDelegation = 3
 )
