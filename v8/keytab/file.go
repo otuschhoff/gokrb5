@@ -1,6 +1,7 @@
 package keytab
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -29,7 +30,7 @@ func (kt *Keytab) WriteFile(name string) error {
 		tmp.Close()
 		return err
 	}
-	if _, err := tmp.Write(b); err != nil {
+	if _, err := io.Copy(tmp, bytes.NewReader(b)); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -52,7 +53,7 @@ func (kt *Keytab) WriteFile(name string) error {
 
 // AppendToFile appends entries to a keytab while holding an advisory exclusive lock.
 // A missing or empty file is initialized as a version 2 keytab.
-func AppendToFile(name string, entries ...Entry) error {
+func AppendToFile(name string, entries ...Entry) (err error) {
 	path, _, err := ResolveName(name, nil)
 	if err != nil {
 		return err
@@ -61,7 +62,11 @@ func AppendToFile(name string, entries ...Entry) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 	// Creation may race, but the lock serializes header inspection and each append.
 	if err := lockFile(f); err != nil {
 		return err
@@ -109,7 +114,7 @@ func AppendToFile(name string, entries ...Entry) error {
 	if len(appendData) == 0 {
 		return nil
 	}
-	if _, err := f.Write(appendData); err != nil {
+	if _, err := io.Copy(f, bytes.NewReader(appendData)); err != nil {
 		return err
 	}
 	return f.Sync()

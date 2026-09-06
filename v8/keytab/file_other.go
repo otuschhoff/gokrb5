@@ -16,7 +16,7 @@ func syncDir(_ string) error { return nil }
 
 func currentUIDs() (string, string) {
 	if current, err := user.Current(); err == nil {
-		return current.Uid, current.Uid
+		return current.Uid, current.Gid
 	}
 	return "0", "0"
 }

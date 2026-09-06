@@ -66,3 +66,16 @@ func TestDes3CbcSha1Kd_StringToKey(t *testing.T) {
 		assert.Equal(t, test.key, hex.EncodeToString(key), "StringToKey not as expected")
 	}
 }
+
+func TestDes3CbcSha1KdRejectsMalformedInput(t *testing.T) {
+	t.Parallel()
+	var enctype Des3CbcSha1Kd
+	key := make([]byte, enctype.GetKeyByteSize())
+
+	if _, _, err := enctype.EncryptData(key, nil); err == nil {
+		t.Fatal("empty plaintext was accepted")
+	}
+	if _, err := enctype.DecryptMessage(key, []byte{1}, 1); err == nil {
+		t.Fatal("truncated ciphertext was accepted")
+	}
+}

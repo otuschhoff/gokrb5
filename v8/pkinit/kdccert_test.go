@@ -7,12 +7,21 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"errors"
+	"io"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+type closeErrorReader struct {
+	io.Reader
+}
+
+func (closeErrorReader) Close() error { return errors.New("close failed") }
 
 func TestValidateKDCCertificate(t *testing.T) {
 	root, signer, _ := testKDCChain(t, asn1.ObjectIdentifier(OIDPKINITKDC), "example.com", time.Now().Add(time.Hour))
@@ -34,6 +43,14 @@ func TestValidateKDCCertificateRejectsPolicyViolations(t *testing.T) {
 	require.ErrorContains(t, err, "lacks KDC Authentication")
 	_, err = ValidateKDCCertificate(verified, KDCCertificatePolicy{Roots: anchors, Realm: "EXAMPLE.COM", Hostname: "other.example.com", EKUChecking: KDCEKUServerAuth})
 	require.ErrorContains(t, err, "does not identify")
+}
+
+func TestReadRevocationBodyRejectsOversizeAndCloseErrors(t *testing.T) {
+	_, err := readRevocationBody(io.NopCloser(strings.NewReader("12345")), 4)
+	require.ErrorContains(t, err, "exceeds")
+
+	_, err = readRevocationBody(closeErrorReader{Reader: strings.NewReader("data")}, 4)
+	require.ErrorContains(t, err, "close")
 }
 
 func testKDCChain(t *testing.T, eku asn1.ObjectIdentifier, dnsName string, notAfter time.Time) (*x509.Certificate, *x509.Certificate, *ecdsa.PrivateKey) {

@@ -829,8 +829,7 @@ func readInt8(b []byte, p *int, e *binary.ByteOrder) (i int8, err error) {
 	if (*p + 1) > len(b) {
 		return 0, fmt.Errorf("need 1 byte at offset %d, input length is %d", *p, len(b))
 	}
-	buf := bytes.NewBuffer(b[*p : *p+1])
-	binary.Read(buf, *e, &i)
+	i = int8(b[*p])
 	*p++
 	return
 }
@@ -845,8 +844,7 @@ func readInt16(b []byte, p *int, e *binary.ByteOrder) (i int16, err error) {
 		return 0, fmt.Errorf("need 2 bytes at offset %d, input length is %d", *p, len(b))
 	}
 
-	buf := bytes.NewBuffer(b[*p : *p+2])
-	binary.Read(buf, *e, &i)
+	i = int16((*e).Uint16(b[*p : *p+2]))
 	*p += 2
 	return
 }
@@ -861,8 +859,7 @@ func readInt32(b []byte, p *int, e *binary.ByteOrder) (i int32, err error) {
 		return 0, fmt.Errorf("need 4 bytes at offset %d, input length is %d", *p, len(b))
 	}
 
-	buf := bytes.NewBuffer(b[*p : *p+4])
-	binary.Read(buf, *e, &i)
+	i = int32((*e).Uint32(b[*p : *p+4]))
 	*p += 4
 	return
 }

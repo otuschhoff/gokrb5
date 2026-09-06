@@ -18,7 +18,10 @@ func DES3EncryptData(key, data []byte, e etype.EType) ([]byte, []byte, error) {
 	if len(key) != e.GetKeyByteSize() {
 		return nil, nil, fmt.Errorf("incorrect keysize: expected: %v actual: %v", e.GetKeyByteSize(), len(key))
 	}
-	data, _ = common.ZeroPad(data, e.GetMessageBlockByteSize())
+	data, err := common.ZeroPad(data, e.GetMessageBlockByteSize())
+	if err != nil {
+		return nil, nil, fmt.Errorf("error padding plaintext: %w", err)
+	}
 
 	block, err := des.NewTripleDESCipher(key)
 	if err != nil {
@@ -44,7 +47,10 @@ func DES3EncryptMessage(key, message []byte, usage uint32, e etype.EType) ([]byt
 		return []byte{}, []byte{}, fmt.Errorf("could not generate random confounder: %v", err)
 	}
 	plainBytes := append(c, message...)
-	plainBytes, _ = common.ZeroPad(plainBytes, e.GetMessageBlockByteSize())
+	plainBytes, err = common.ZeroPad(plainBytes, e.GetMessageBlockByteSize())
+	if err != nil {
+		return nil, nil, fmt.Errorf("error padding plaintext: %w", err)
+	}
 
 	// Derive key for encryption from usage
 	var k []byte
@@ -92,13 +98,17 @@ func DES3DecryptData(key, data []byte, e etype.EType) ([]byte, error) {
 // DES3DecryptMessage decrypts the message provided using DES3 and methods specific to the etype provided.
 // The integrity of the message is also verified.
 func DES3DecryptMessage(key, ciphertext []byte, usage uint32, e etype.EType) ([]byte, error) {
+	checksumSize := e.GetHMACBitLength() / 8
+	if checksumSize <= 0 || len(ciphertext) < checksumSize+e.GetConfounderByteSize() {
+		return nil, errors.New("ciphertext is too short")
+	}
 	//Derive the key
 	k, err := e.DeriveKey(key, common.GetUsageKe(usage))
 	if err != nil {
 		return nil, fmt.Errorf("error deriving key: %v", err)
 	}
 	// Strip off the checksum from the end
-	b, err := e.DecryptData(k, ciphertext[:len(ciphertext)-e.GetHMACBitLength()/8])
+	b, err := e.DecryptData(k, ciphertext[:len(ciphertext)-checksumSize])
 	if err != nil {
 		return nil, fmt.Errorf("error decrypting: %v", err)
 	}
@@ -107,13 +117,23 @@ func DES3DecryptMessage(key, ciphertext []byte, usage uint32, e etype.EType) ([]
 		return nil, errors.New("error decrypting: integrity verification failed")
 	}
 	//Remove the confounder bytes
+	if len(b) < e.GetConfounderByteSize() {
+		return nil, errors.New("decrypted plaintext is shorter than the confounder")
+	}
 	return b[e.GetConfounderByteSize():], nil
 }
 
 // VerifyIntegrity verifies the integrity of cipertext bytes ct.
 func VerifyIntegrity(key, ct, pt []byte, usage uint32, etype etype.EType) bool {
-	h := make([]byte, etype.GetHMACBitLength()/8)
-	copy(h, ct[len(ct)-etype.GetHMACBitLength()/8:])
-	expectedMAC, _ := common.GetIntegrityHash(pt, key, usage, etype)
+	checksumSize := etype.GetHMACBitLength() / 8
+	if checksumSize <= 0 || len(ct) < checksumSize {
+		return false
+	}
+	h := make([]byte, checksumSize)
+	copy(h, ct[len(ct)-checksumSize:])
+	expectedMAC, err := common.GetIntegrityHash(pt, key, usage, etype)
+	if err != nil {
+		return false
+	}
 	return hmac.Equal(h, expectedMAC)
 }

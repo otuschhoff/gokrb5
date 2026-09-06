@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,17 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
+}
+
+type errorResponseBody struct{ err error }
+
+func (body errorResponseBody) Read([]byte) (int, error) { return 0, body.err }
+func (errorResponseBody) Close() error                  { return nil }
 
 func TestKKDCPTransport(t *testing.T) {
 	request := []byte{0x6a, 0x03, 0x02, 0x01, 0x05}
@@ -107,6 +119,23 @@ func TestKKDCPRejectsInvalidResponses(t *testing.T) {
 				t.Fatal("invalid KKDCP response was accepted")
 			}
 		})
+	}
+}
+
+func TestKKDCPReportsErrorResponseReadFailure(t *testing.T) {
+	readErr := errors.New("response read failed")
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusBadGateway,
+			Status:     "502 Bad Gateway",
+			Body:       errorResponseBody{err: readErr},
+			Header:     make(http.Header),
+		}, nil
+	})}
+	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", config.New(), KKDCPClient(httpClient))
+	_, err := cl.sendKKDCP("https://proxy.example.org/KdcProxy", "EXAMPLE.ORG", []byte("request"))
+	if !errors.Is(err, readErr) {
+		t.Fatalf("error %v does not wrap response read failure", err)
 	}
 }
 

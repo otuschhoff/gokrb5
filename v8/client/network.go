@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -11,6 +12,8 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/errorcode"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 )
+
+const maxKDCResponseSize = 16 << 20
 
 // SendToKDC performs network actions to send data to the KDC.
 func (cl *Client) sendToKDC(b []byte, realm string) ([]byte, error) {
@@ -91,7 +94,11 @@ func dialSendUDP(kdcs map[int]string, b []byte) ([]byte, error) {
 			continue
 		}
 		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			closeErr := conn.Close()
 			errs = append(errs, fmt.Sprintf("error setting deadline on connection to %s: %v", kdcs[i], err))
+			if closeErr != nil {
+				errs = append(errs, fmt.Sprintf("error closing connection to %s: %v", kdcs[i], closeErr))
+			}
 			continue
 		}
 		// conn is guaranteed to be a UDPConn
@@ -109,12 +116,15 @@ func dialSendUDP(kdcs map[int]string, b []byte) ([]byte, error) {
 func sendUDP(conn *net.UDPConn, b []byte) ([]byte, error) {
 	var r []byte
 	defer conn.Close()
-	_, err := conn.Write(b)
+	n, err := conn.Write(b)
 	if err != nil {
 		return r, fmt.Errorf("error sending to (%s): %v", conn.RemoteAddr().String(), err)
 	}
+	if n != len(b) {
+		return r, fmt.Errorf("error sending to (%s): %w", conn.RemoteAddr().String(), io.ErrShortWrite)
+	}
 	udpbuf := make([]byte, 4096)
-	n, _, err := conn.ReadFrom(udpbuf)
+	n, _, err = conn.ReadFrom(udpbuf)
 	r = udpbuf[:n]
 	if err != nil {
 		return r, fmt.Errorf("sending over UDP failed to %s: %v", conn.RemoteAddr().String(), err)
@@ -149,7 +159,11 @@ func dialSendTCP(kdcs map[int]string, b []byte) ([]byte, error) {
 			continue
 		}
 		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			closeErr := conn.Close()
 			errs = append(errs, fmt.Sprintf("error setting deadline on connection to %s: %v", kdcs[i], err))
+			if closeErr != nil {
+				errs = append(errs, fmt.Sprintf("error closing connection to %s: %v", kdcs[i], closeErr))
+			}
 			continue
 		}
 		// conn is guaranteed to be a TCPConn
@@ -172,25 +186,25 @@ func sendTCP(conn *net.TCPConn, b []byte) ([]byte, error) {
 	binary.BigEndian.PutUint32(hb, uint32(len(b)))
 	b = append(hb, b...)
 
-	_, err := conn.Write(b)
-	if err != nil {
+	if _, err := io.Copy(conn, bytes.NewReader(b)); err != nil {
 		return r, fmt.Errorf("error sending to KDC (%s): %v", conn.RemoteAddr().String(), err)
 	}
 
 	sh := make([]byte, 4)
-	_, err = io.ReadFull(conn, sh)
-	if err != nil {
+	if _, err := io.ReadFull(conn, sh); err != nil {
 		return r, fmt.Errorf("error reading response size header: %v", err)
 	}
 	s := binary.BigEndian.Uint32(sh)
+	if s == 0 {
+		return r, fmt.Errorf("no response data from KDC %s", conn.RemoteAddr().String())
+	}
+	if s > maxKDCResponseSize {
+		return r, fmt.Errorf("KDC response from %s exceeds %d bytes", conn.RemoteAddr().String(), maxKDCResponseSize)
+	}
 
 	rb := make([]byte, s)
-	_, err = io.ReadFull(conn, rb)
-	if err != nil {
+	if _, err := io.ReadFull(conn, rb); err != nil {
 		return r, fmt.Errorf("error reading response: %v", err)
-	}
-	if len(rb) < 1 {
-		return r, fmt.Errorf("no response data from KDC %s", conn.RemoteAddr().String())
 	}
 	return rb, nil
 }

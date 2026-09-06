@@ -20,7 +20,7 @@ It has been reported that gokrb5 also works with the [gollvm](https://go.googles
 
 ## Features
 * **Pure Go** - no dependency on external libraries 
-* No platform specific code
+* Portable core with platform-specific filesystem locking where supported
 * Server Side
   * HTTP handler wrapper implements SPNEGO Kerberos authentication
   * Generic multi-round SPNEGO handler supports NEGOEX with PKU2U certificate authentication
@@ -60,6 +60,16 @@ The following is working/tested:
 * Tested against a KDC that supports PA-FX-FAST.
 * Tested against users that have pre-authentication required using PA-ENC-TIMESTAMP.
 * Microsoft PAC Authorization Data is processed and exposed in the HTTP request context. Available if Microsoft Active Directory is used as the KDC.
+
+## Platform support
+
+Linux, Windows, and macOS are tested in CI. CI also cross-builds the production package graph for Windows amd64, macOS amd64 and arm64, and Android arm64. Android is compile-validated but does not currently run the test suite in CI.
+
+The iOS arm64 package graph is checked on a macOS runner. Building a final iOS binary requires Apple's SDK and external cgo linker, so iOS is compile-configuration validated rather than runtime tested. Applications on Android and iOS must provide platform-appropriate credential storage, configuration paths, DNS behavior, and network permissions.
+
+## Error handling
+
+Public operations return malformed protocol input, cryptographic failures, and network or persistent-storage I/O failures to the caller with operation context. Authentication and integrity checks fail closed. Cleanup that cannot affect the completed operation, such as releasing a best-effort advisory lock, is intentionally non-fatal where the public API cannot report it.
 
 ## Contributing
 If you are interested in contributing to gokrb5, great! Please read the [contribution guidelines](https://github.com/otuschhoff/gokrb5/blob/master/CONTRIBUTING.md).

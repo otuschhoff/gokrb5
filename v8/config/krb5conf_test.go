@@ -2,12 +2,26 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 )
+
+type failingConfigReader struct{ err error }
+
+func (reader failingConfigReader) Read([]byte) (int, error) { return 0, reader.err }
+
+func TestNewFromReaderReturnsReadError(t *testing.T) {
+	readErr := errors.New("configuration read failed")
+	_, err := NewFromReader(io.Reader(failingConfigReader{err: readErr}))
+	if !errors.Is(err, readErr) {
+		t.Fatalf("error %v does not wrap configuration read failure", err)
+	}
+}
 
 const (
 	krb5Conf = `

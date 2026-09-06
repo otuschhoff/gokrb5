@@ -70,13 +70,17 @@ func DecryptData(key, data []byte, e etype.EType) ([]byte, error) {
 // DecryptMessage decrypts the message provided using the methods specific to the etype provided as defined in RFC 3962.
 // The integrity of the message is also verified.
 func DecryptMessage(key, ciphertext []byte, usage uint32, e etype.EType) ([]byte, error) {
+	checksumSize := e.GetHMACBitLength() / 8
+	if checksumSize <= 0 || len(ciphertext) < checksumSize+e.GetConfounderByteSize() {
+		return nil, errors.New("ciphertext is too short")
+	}
 	//Derive the key
 	k, err := e.DeriveKey(key, common.GetUsageKe(usage))
 	if err != nil {
 		return nil, fmt.Errorf("error deriving key: %v", err)
 	}
 	// Strip off the checksum from the end
-	b, err := e.DecryptData(k, ciphertext[:len(ciphertext)-e.GetHMACBitLength()/8])
+	b, err := e.DecryptData(k, ciphertext[:len(ciphertext)-checksumSize])
 	if err != nil {
 		return nil, err
 	}
@@ -85,5 +89,8 @@ func DecryptMessage(key, ciphertext []byte, usage uint32, e etype.EType) ([]byte
 		return nil, errors.New("integrity verification failed")
 	}
 	//Remove the confounder bytes
+	if len(b) < e.GetConfounderByteSize() {
+		return nil, errors.New("decrypted plaintext is shorter than the confounder")
+	}
 	return b[e.GetConfounderByteSize():], nil
 }

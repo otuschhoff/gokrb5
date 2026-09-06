@@ -295,11 +295,12 @@ func (state *fastState) setASPreAuth(cl *Client, hint *messages.KRBError, reques
 	}
 	if hint != nil {
 		methodData, methodErr := hint.MethodData()
-		if methodErr == nil {
-			for _, pa := range methodData {
-				if pa.PADataType == patype.PA_FX_COOKIE {
-					inner = append(inner, types.PAData{PADataType: pa.PADataType, PADataValue: append([]byte(nil), pa.PADataValue...)})
-				}
+		if methodErr != nil {
+			return fmt.Errorf("decode FAST pre-authentication METHOD-DATA: %w", methodErr)
+		}
+		for _, pa := range methodData {
+			if pa.PADataType == patype.PA_FX_COOKIE {
+				inner = append(inner, types.PAData{PADataType: pa.PADataType, PADataValue: append([]byte(nil), pa.PADataValue...)})
 			}
 		}
 	}

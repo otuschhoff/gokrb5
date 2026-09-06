@@ -163,8 +163,9 @@ func (client *NegotiatingClient) Do(request *http.Request) (*http.Response, erro
 			response.Body.Close()
 			return nil, errors.New("SPNEGO mechanism produced no HTTP continuation token")
 		}
-		io.Copy(io.Discard, response.Body)
-		response.Body.Close()
+		if err := discardAndClose(response.Body); err != nil {
+			return nil, fmt.Errorf("discard HTTP 401 response: %w", err)
+		}
 		authorization = HTTPHeaderAuthResponseValueKey + " " + base64.StdEncoding.EncodeToString(output)
 	}
 	return nil, errors.New("HTTP SPNEGO authentication exceeded 10 round trips")
@@ -290,14 +291,30 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 			// Refresh the body reader so the body can be sent again
 			req.Body = io.NopCloser(&body)
 		}
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		if err := discardAndClose(resp.Body); err != nil {
+			return resp, fmt.Errorf("discard HTTP 401 response: %w", err)
+		}
 		return c.Do(req)
 	}
 	if err := c.verifyMutualResponse(req, resp); err != nil {
 		return resp, err
 	}
 	return resp, err
+}
+
+func discardAndClose(body io.ReadCloser) error {
+	_, readErr := io.Copy(io.Discard, body)
+	closeErr := body.Close()
+	if readErr != nil {
+		if closeErr != nil {
+			return fmt.Errorf("read response body: %w (close also failed: %v)", readErr, closeErr)
+		}
+		return fmt.Errorf("read response body: %w", readErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close response body: %w", closeErr)
+	}
+	return nil
 }
 
 func (c *Client) verifyMutualResponse(req *http.Request, resp *http.Response) error {

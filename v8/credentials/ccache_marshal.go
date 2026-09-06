@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -302,7 +303,7 @@ func (c *CCache) WriteFile(path string) error {
 		tmp.Close()
 		return err
 	}
-	if _, err := tmp.Write(b); err != nil {
+	if _, err := io.Copy(tmp, bytes.NewReader(b)); err != nil {
 		tmp.Close()
 		return err
 	}

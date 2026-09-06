@@ -50,7 +50,9 @@ func (cl *Client) sendKKDCP(proxyURL, realm string, message []byte) ([]byte, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		if _, drainErr := io.Copy(io.Discard, io.LimitReader(resp.Body, 4096)); drainErr != nil {
+			return nil, fmt.Errorf("KKDCP server %s returned HTTP status %s; drain response body: %w", proxyURL, resp.Status, drainErr)
+		}
 		return nil, fmt.Errorf("KKDCP server %s returned HTTP status %s", proxyURL, resp.Status)
 	}
 	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))

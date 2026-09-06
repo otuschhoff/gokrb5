@@ -1,6 +1,7 @@
 package client
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -133,6 +134,20 @@ func TestFASTASPreAuthEchoesCookie(t *testing.T) {
 		}
 	}
 	t.Fatal("FAST pre-authentication did not echo PA-FX-COOKIE")
+}
+
+func TestFASTASPreAuthRejectsMalformedMethodData(t *testing.T) {
+	cl, state, request := newFASTTestState(t)
+	if err := state.setASPreAuth(cl, nil, &request); err != nil {
+		t.Fatal(err)
+	}
+	hint := messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED, "")
+	hint.EData = []byte{0x30, 0x01, 0xff}
+
+	err := state.setASPreAuth(cl, &hint, &request)
+	if err == nil || !strings.Contains(err.Error(), "METHOD-DATA") {
+		t.Fatalf("malformed FAST hint error = %v", err)
+	}
 }
 
 func TestFASTUnwrapAuthenticatedError(t *testing.T) {

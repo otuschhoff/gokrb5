@@ -184,8 +184,7 @@ func checkOCSP(client *http.Client, certificate, issuer *x509.Certificate, now t
 		if err != nil {
 			continue
 		}
-		body, readErr := io.ReadAll(io.LimitReader(response.Body, 1024*1024))
-		response.Body.Close()
+		body, readErr := readRevocationBody(response.Body, 1024*1024)
 		if readErr != nil || response.StatusCode != http.StatusOK {
 			continue
 		}
@@ -213,8 +212,7 @@ func checkCRLs(client *http.Client, certificate, issuer *x509.Certificate, now t
 		if err != nil {
 			continue
 		}
-		body, readErr := io.ReadAll(io.LimitReader(response.Body, 16*1024*1024))
-		response.Body.Close()
+		body, readErr := readRevocationBody(response.Body, 16*1024*1024)
 		if readErr != nil || response.StatusCode != http.StatusOK {
 			continue
 		}
@@ -230,6 +228,21 @@ func checkCRLs(client *http.Client, certificate, issuer *x509.Certificate, now t
 		return true, nil
 	}
 	return false, fmt.Errorf("PKINIT CRL status is unavailable for %q", certificate.Subject)
+}
+
+func readRevocationBody(body io.ReadCloser, maximum int64) ([]byte, error) {
+	data, readErr := io.ReadAll(io.LimitReader(body, maximum+1))
+	closeErr := body.Close()
+	if readErr != nil {
+		return nil, fmt.Errorf("read revocation response: %w", readErr)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("close revocation response: %w", closeErr)
+	}
+	if int64(len(data)) > maximum {
+		return nil, fmt.Errorf("revocation response exceeds %d bytes", maximum)
+	}
+	return data, nil
 }
 
 func revocationTimeValid(now, thisUpdate, nextUpdate time.Time) bool {

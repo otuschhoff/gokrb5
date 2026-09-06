@@ -14,6 +14,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -326,6 +327,26 @@ func TestService_SPNEGOKRB_Upload(t *testing.T) {
 		bodyString := string(bodyBytes)
 		httpResp.Body.Close()
 		t.Errorf("unexpected code from http server (%d): %s", httpResp.StatusCode, bodyString)
+	}
+}
+
+type failingResponseBody struct {
+	readErr  error
+	closeErr error
+}
+
+func (body *failingResponseBody) Read([]byte) (int, error) { return 0, body.readErr }
+func (body *failingResponseBody) Close() error             { return body.closeErr }
+
+func TestDiscardAndCloseReportsReadAndCloseErrors(t *testing.T) {
+	readErr := errors.New("read failed")
+	closeErr := errors.New("close failed")
+	err := discardAndClose(&failingResponseBody{readErr: readErr, closeErr: closeErr})
+	if !errors.Is(err, readErr) {
+		t.Fatalf("error %v does not wrap read failure", err)
+	}
+	if !strings.Contains(err.Error(), closeErr.Error()) {
+		t.Fatalf("error %v does not report close failure", err)
 	}
 }
 
