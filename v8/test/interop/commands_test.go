@@ -169,7 +169,7 @@ func TestGokinitToMIT(t *testing.T) {
 			for _, mode := range []string{"password", "keytab"} {
 				t.Run(mode, func(t *testing.T) {
 					cacheName := "FILE:" + filepath.Join(t.TempDir(), "gokinit.ccache")
-					args := []string{"-r", "1h", "-c", cacheName, interopPrincipal}
+					args := []string{"-r", "7d", "-c", cacheName, interopPrincipal}
 					if port == testdata.KDC_PORT_TEST_GOKRB5_OLD {
 						args = append([]string{"--no-request-enc-pa-rep"}, args...)
 					}
@@ -393,7 +393,7 @@ func TestRenewalParity(t *testing.T) {
 }
 
 func TestClockSkewParity(t *testing.T) {
-	env := append(liveEnvironment(t, testdata.KDC_PORT_TEST_GOKRB5), "GOKRB5_TEST_TIME_OFFSET=10m")
+	env := append(liveEnvironment(t, testdata.KDC_PORT_TEST_GOKRB5), "GOKRB5_TEST_TIME_OFFSET=1h")
 	cacheName := "FILE:" + filepath.Join(t.TempDir(), "timesync.ccache")
 	login := runCommand(t, interopPassword+"\n", env, commandPath(t, "gokinit"), "--password-stdin", "-c", cacheName, interopPrincipal)
 	if login.err != nil {
@@ -404,8 +404,8 @@ func TestClockSkewParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	offset, found := cache.KDCTimeOffset()
-	if !found || offset > -9*time.Minute || offset < -11*time.Minute {
-		t.Fatalf("ccache KDC offset = %s, found=%t; want approximately -10m", offset, found)
+	if !found || offset > -59*time.Minute || offset < -61*time.Minute {
+		t.Fatalf("ccache KDC offset = %s, found=%t; want approximately -1h", offset, found)
 	}
 	listed := runCommand(t, "", env, "klist", "-c", cacheName)
 	if listed.err != nil {
@@ -416,7 +416,7 @@ func TestClockSkewParity(t *testing.T) {
 	disabledCache := "FILE:" + filepath.Join(t.TempDir(), "disabled.ccache")
 	disabled := runCommand(t, interopPassword+"\n", disabledEnv, commandPath(t, "gokinit"), "--password-stdin", "-c", disabledCache, interopPrincipal)
 	if disabled.err == nil {
-		t.Fatal("gokinit unexpectedly accepted a ten-minute skew with kdc_timesync disabled")
+		t.Fatal("gokinit unexpectedly accepted a one-hour skew with kdc_timesync disabled")
 	}
 	if text := canonicalKinitError(disabled.stderr); text != "Clock skew too great" {
 		t.Fatalf("disabled kdc_timesync error = %q, want %q; stderr: %s", text, "Clock skew too great", disabled.stderr)

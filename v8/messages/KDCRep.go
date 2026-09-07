@@ -200,6 +200,9 @@ func (e *EncKDCRepPart) Unmarshal(b []byte) error {
 			return krberror.Errorf(err, krberror.EncodingError, "error unmarshaling encrypted part within KDC_REP")
 		}
 	}
+	if e.StartTime.IsZero() {
+		e.StartTime = e.AuthTime
+	}
 	return nil
 }
 

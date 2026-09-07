@@ -167,6 +167,35 @@ func TestRenewRequiresHomeRealmTGT(t *testing.T) {
 	assert.EqualError(t, cl.Renew(), "TGT session not found for realm EXAMPLE.ORG")
 }
 
+func TestAddSessionDefaultsStartTimeToAuthTime(t *testing.T) {
+	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", config.New())
+	authTime := time.Now().UTC().Truncate(time.Second)
+	ticket := messages.Ticket{SName: types.NewPrincipalName(2, "krbtgt/EXAMPLE.ORG")}
+	part := messages.EncKDCRepPart{
+		Key:      types.EncryptionKey{KeyType: etypeID.AES256_CTS_HMAC_SHA1_96, KeyValue: make([]byte, 32)},
+		Flags:    types.NewKrbFlags(),
+		AuthTime: authTime,
+		EndTime:  authTime.Add(time.Hour),
+		SRealm:   "EXAMPLE.ORG",
+		SName:    ticket.SName,
+	}
+	encoded, err := part.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded messages.EncKDCRepPart
+	if err := decoded.Unmarshal(encoded); err != nil {
+		t.Fatal(err)
+	}
+	cl.addSession(ticket, decoded)
+
+	session, ok := cl.sessions.get("EXAMPLE.ORG")
+	if !ok {
+		t.Fatal("TGT session was not added")
+	}
+	assert.Equal(t, authTime, session.startTime)
+}
+
 func TestSessionsUseCaseInsensitiveRealmKeys(t *testing.T) {
 	s := &sessions{Entries: make(map[string]*session)}
 	want := &session{realm: "Example.Org"}
