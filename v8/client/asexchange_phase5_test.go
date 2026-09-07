@@ -369,6 +369,37 @@ func TestClockSkewRetry(t *testing.T) {
 	t.Fatal("retried PA-ENC-TIMESTAMP not found")
 }
 
+func TestPreAuthRequiredLearnsKDCTimeOffset(t *testing.T) {
+	cfg := config.New()
+	cfg.LibDefaults.DNSLookupKDC = true
+	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES128_CTS_HMAC_SHA1_96}
+	cl := NewWithKeytab("user", "EXAMPLE.ORG", phase5Keytab(t, etypeID.AES128_CTS_HMAC_SHA1_96), cfg)
+	serverTime := clientNow().UTC().Add(-time.Hour).Truncate(time.Second)
+	entries := types.ETypeInfo2{{EType: etypeID.AES128_CTS_HMAC_SHA1_96}}
+	info, err := asn1.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	methodData, err := asn1.Marshal(types.PADataSequence{{PADataType: patype.PA_ETYPE_INFO2, PADataValue: info}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cl.sendToKDCFunc = func(_ []byte, _ string) ([]byte, error) {
+		response := messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KDC_ERR_PREAUTH_REQUIRED, "pre-authentication required")
+		response.STime = serverTime
+		response.Susec = 0
+		response.EData = methodData
+		return nil, response
+	}
+	req, err := cl.newASReq()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = cl.ASExchange("EXAMPLE.ORG", req, 0)
+	assert.Error(t, err)
+	assert.InDelta(t, float64(-time.Hour), float64(cl.KDCTimeOffset()), float64(2*time.Second))
+}
+
 func TestClockSkewRetryDisabled(t *testing.T) {
 	cfg := config.New()
 	cfg.LibDefaults.DNSLookupKDC = true

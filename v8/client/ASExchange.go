@@ -61,6 +61,7 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 	preAuthRetried := false
 	var preAuthError *messages.KRBError
 	skewRetried := false
+	timeSynced := false
 	preAuthRounds := 0
 	pkinitRetried := false
 	freshnessRetried := false
@@ -96,6 +97,9 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 			if err := fast.activate(cl, realm); err != nil {
 				return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: could not activate FAST")
 			}
+		}
+		if !timeSynced {
+			timeSynced = cl.syncKDCTime(e)
 		}
 		if e.ErrorCode == errorcode.KDC_ERR_WRONG_REALM {
 			if referral > 5 {
@@ -269,6 +273,14 @@ func (cl *Client) shouldRetryClockSkew(err messages.KRBError) bool {
 		return false
 	}
 	return err.ErrorCode == errorcode.KRB_AP_ERR_SKEW || err.ErrorCode == errorcode.KDC_ERR_PREAUTH_FAILED
+}
+
+func (cl *Client) syncKDCTime(err messages.KRBError) bool {
+	if cl.Config.LibDefaults.KDCTimeSync <= 0 || err.STime.IsZero() || err.Susec < 0 || err.Susec >= 1000000 {
+		return false
+	}
+	cl.setKDCTimeOffset(kdcErrorTime(err).Sub(clientNow().UTC()).Truncate(time.Microsecond))
+	return true
 }
 
 func kdcErrorTime(err messages.KRBError) time.Time {
