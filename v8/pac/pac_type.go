@@ -89,6 +89,9 @@ func (pac *PACType) Unmarshal(b []byte) (err error) {
 	if err != nil {
 		return
 	}
+	if pac.Version != 0 {
+		return fmt.Errorf("%w: unsupported version %d", ErrPACMalformed, pac.Version)
+	}
 	maxBuffers := uint32((len(b) - 8) / 16)
 	if pac.CBuffers > maxBuffers {
 		return fmt.Errorf("%w: buffer count %d exceeds table capacity %d", ErrPACMalformed, pac.CBuffers, maxBuffers)
@@ -216,10 +219,10 @@ func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey ty
 			}
 			var k SignatureData
 			zb, err := k.Unmarshal(p)
-			copy(pac.ZeroSigData[int(buf.Offset):int(buf.Offset)+int(buf.CBBufferSize)], zb)
 			if err != nil {
 				return fmt.Errorf("error processing ServerChecksum: %v", err)
 			}
+			copy(pac.ZeroSigData[int(buf.Offset):int(buf.Offset)+int(buf.CBBufferSize)], zb)
 			pac.ServerChecksum = &k
 		case infoTypePACKDCSignatureData:
 			if pac.KDCChecksum != nil {
@@ -227,10 +230,10 @@ func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey ty
 			}
 			var k SignatureData
 			zb, err := k.Unmarshal(p)
-			copy(pac.ZeroSigData[int(buf.Offset):int(buf.Offset)+int(buf.CBBufferSize)], zb)
 			if err != nil {
 				return fmt.Errorf("error processing KDCChecksum: %v", err)
 			}
+			copy(pac.ZeroSigData[int(buf.Offset):int(buf.Offset)+int(buf.CBBufferSize)], zb)
 			pac.KDCChecksum = &k
 		case infoTypePACClientInfo:
 			if pac.ClientInfo != nil {

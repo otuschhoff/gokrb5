@@ -17,6 +17,15 @@ import (
 )
 
 func TestPACBoundsChecks(t *testing.T) {
+	t.Run("unsupported version", func(t *testing.T) {
+		b := make([]byte, 8)
+		binary.LittleEndian.PutUint32(b[4:], 1)
+		var pac PACType
+		if err := pac.Unmarshal(b); !errors.Is(err, ErrPACMalformed) {
+			t.Fatalf("Unmarshal error = %v, want ErrPACMalformed", err)
+		}
+	})
+
 	t.Run("impossible buffer count", func(t *testing.T) {
 		b := make([]byte, 8)
 		binary.LittleEndian.PutUint32(b, 1)
