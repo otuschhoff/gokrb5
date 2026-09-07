@@ -36,3 +36,12 @@ password-login bytes as captures.
 
 Never use production credentials when generating committed fixtures. The
 script writes key material and tickets to its output directory.
+
+## Live clock-skew test
+
+`TestClockSkewParity` uses `testuser2@TEST.GOKRB5` with the public test password.
+The upstream default KDC's `krb5kdc-init.sh` creates this principal with
+`+requires_preauth`, unlike `testuser1`. A principal that accepts an AS-REQ without
+pre-authentication does not exercise the injected pre-authentication clock,
+regardless of the simulated skew. The test also checks MIT's pre-authentication
+ticket flag before testing enabled and disabled `kdc_timesync` behavior.

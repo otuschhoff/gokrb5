@@ -28,8 +28,10 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/credentials"
+	"github.com/otuschhoff/gokrb5/v8/iana/flags"
 	"github.com/otuschhoff/gokrb5/v8/test"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
+	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
 const interopService = "HTTP/host.test.gokrb5"
@@ -393,9 +395,24 @@ func TestRenewalParity(t *testing.T) {
 }
 
 func TestClockSkewParity(t *testing.T) {
-	env := append(liveEnvironment(t, testdata.KDC_PORT_TEST_GOKRB5), "GOKRB5_TEST_TIME_OFFSET=1h")
+	const principal = "testuser2@TEST.GOKRB5"
+	env := liveEnvironment(t, testdata.KDC_PORT_TEST_GOKRB5)
+	mitCacheName := "FILE:" + filepath.Join(t.TempDir(), "mit.ccache")
+	mitLogin := runCommand(t, interopPassword+"\n", env, "kinit", "-c", mitCacheName, principal)
+	if mitLogin.err != nil {
+		t.Fatalf("MIT login for pre-authentication fixture failed: %v: %s", mitLogin.err, mitLogin.stderr)
+	}
+	mitCache, err := credentials.LoadCCache(mitCacheName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := mitCache.GetEntries()
+	if len(entries) == 0 || !types.IsFlagSet(&entries[0].TicketFlags, flags.PreAuthent) {
+		t.Fatal("clock-skew fixture must require pre-authentication (+requires_preauth)")
+	}
+	env = append(env, "GOKRB5_TEST_TIME_OFFSET=1h")
 	cacheName := "FILE:" + filepath.Join(t.TempDir(), "timesync.ccache")
-	login := runCommand(t, interopPassword+"\n", env, commandPath(t, "gokinit"), "--password-stdin", "-c", cacheName, interopPrincipal)
+	login := runCommand(t, interopPassword+"\n", env, commandPath(t, "gokinit"), "--password-stdin", "-c", cacheName, principal)
 	if login.err != nil {
 		t.Fatalf("clock-skew retry failed: %v: %s", login.err, login.stderr)
 	}
@@ -414,7 +431,7 @@ func TestClockSkewParity(t *testing.T) {
 
 	disabledEnv := withKrb5Setting(t, env, " kdc_timesync = 0\n")
 	disabledCache := "FILE:" + filepath.Join(t.TempDir(), "disabled.ccache")
-	disabled := runCommand(t, interopPassword+"\n", disabledEnv, commandPath(t, "gokinit"), "--password-stdin", "-c", disabledCache, interopPrincipal)
+	disabled := runCommand(t, interopPassword+"\n", disabledEnv, commandPath(t, "gokinit"), "--password-stdin", "-c", disabledCache, principal)
 	if disabled.err == nil {
 		t.Fatal("gokinit unexpectedly accepted a one-hour skew with kdc_timesync disabled")
 	}
