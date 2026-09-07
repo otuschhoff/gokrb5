@@ -1,8 +1,10 @@
 package spnego
 
 import (
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -36,6 +38,72 @@ func TestMutualContextExchange(t *testing.T) {
 	require.NotEmpty(t, initiator.contextKey.KeyValue)
 	require.Equal(t, acceptor.contextKey, initiator.contextKey)
 	require.Equal(t, acceptor.sequenceNumber, initiator.sequenceNumber)
+	require.NotNil(t, initiator.SecurityContext())
+	require.NotNil(t, acceptor.SecurityContext())
+
+	request, err := initiator.SecurityContext().Wrap([]byte("request"), true)
+	require.NoError(t, err)
+	message, confidential, err := acceptor.SecurityContext().Unwrap(request)
+	require.NoError(t, err)
+	require.True(t, confidential)
+	require.Equal(t, []byte("request"), message)
+
+	response, err := acceptor.SecurityContext().Wrap([]byte("response"), true)
+	require.NoError(t, err)
+	message, confidential, err = initiator.SecurityContext().Unwrap(response)
+	require.NoError(t, err)
+	require.True(t, confidential)
+	require.Equal(t, []byte("response"), message)
+}
+
+func TestSecurityContextUnavailableBeforeCompletion(t *testing.T) {
+	initiator, acceptor, initial := newContextExchange(t, []int{gssapi.ContextFlagMutual, gssapi.ContextFlagInteg})
+	require.Nil(t, initiator.SecurityContext())
+	require.Nil(t, acceptor.SecurityContext())
+
+	authenticated, _, status := acceptor.AcceptSecContext(initial)
+	require.True(t, authenticated, status.Error())
+	require.Equal(t, gssapi.StatusComplete, status.Code)
+	require.NotNil(t, acceptor.SecurityContext())
+	require.Nil(t, initiator.SecurityContext())
+}
+
+func TestNonMutualInitiatorContextAvailableAfterInitialToken(t *testing.T) {
+	initiator, acceptor, initial := newContextExchange(t, []int{gssapi.ContextFlagInteg})
+	require.NotNil(t, initiator.SecurityContext())
+	require.Nil(t, acceptor.SecurityContext())
+
+	authenticated, _, status := acceptor.AcceptSecContext(initial)
+	require.True(t, authenticated, status.Error())
+	require.Equal(t, gssapi.StatusComplete, status.Code)
+	requireSecurityContextsExchange(t, initiator, acceptor)
+}
+
+func TestHTTPClientPublishesMutualSecurityContext(t *testing.T) {
+	initiator, acceptor, initial := newContextExchange(t, []int{gssapi.ContextFlagMutual, gssapi.ContextFlagInteg})
+	authenticated, _, status := acceptor.AcceptSecContext(initial)
+	require.True(t, authenticated, status.Error())
+
+	responseBytes, err := acceptor.ResponseToken().Marshal()
+	require.NoError(t, err)
+	request, err := http.NewRequest(http.MethodPost, "http://host.test.gokrb5/wsman", nil)
+	require.NoError(t, err)
+	response := &http.Response{Header: make(http.Header), Body: http.NoBody}
+	response.Header.Set(HTTPHeaderAuthResponse, "Negotiate "+base64.StdEncoding.EncodeToString(responseBytes))
+
+	httpClient := NewClientWithOptions(nil, nil, "HTTP/host.test.gokrb5", KRB5TokenAPREQOptions{
+		GSSAPIFlags: []int{gssapi.ContextFlagMutual, gssapi.ContextFlagInteg},
+	})
+	httpClient.contexts.Store(request, initiator)
+	require.NoError(t, httpClient.verifyMutualResponse(request, response))
+	require.Same(t, initiator.SecurityContext(), httpClient.Context())
+
+	wrapped, err := httpClient.Context().Wrap([]byte("request"), true)
+	require.NoError(t, err)
+	message, confidential, err := acceptor.SecurityContext().Unwrap(wrapped)
+	require.NoError(t, err)
+	require.True(t, confidential)
+	require.Equal(t, []byte("request"), message)
 }
 
 func TestMutualContextExchangeWithMechListMIC(t *testing.T) {
@@ -120,10 +188,13 @@ func TestRequestMICContextExchange(t *testing.T) {
 	require.Equal(t, gssapi.StatusContinueNeeded, status.Code)
 	initiatorMIC := initiator.ResponseToken()
 	require.NotNil(t, initiatorMIC)
+	require.NotNil(t, initiator.SecurityContext())
+	require.Nil(t, acceptor.SecurityContext())
 
 	authenticated, _, status = acceptor.AcceptSecContext(initiatorMIC)
 	require.True(t, authenticated, status.Error())
 	require.Equal(t, gssapi.StatusComplete, status.Code)
+	requireSecurityContextsExchange(t, initiator, acceptor)
 }
 
 func TestRequestMICContextExchangeWithoutMutualAuth(t *testing.T) {
@@ -147,6 +218,7 @@ func TestRequestMICContextExchangeWithoutMutualAuth(t *testing.T) {
 	authenticated, _, status = acceptor.AcceptSecContext(initiator.ResponseToken())
 	require.True(t, authenticated, status.Error())
 	require.Equal(t, gssapi.StatusComplete, status.Code)
+	requireSecurityContextsExchange(t, initiator, acceptor)
 }
 
 func TestRequestMICContextExchangeRejectsTampering(t *testing.T) {
@@ -199,16 +271,42 @@ func TestDCEContextExchange(t *testing.T) {
 	authenticated, _, status := acceptor.AcceptSecContext(initial)
 	require.False(t, authenticated)
 	require.Equal(t, gssapi.StatusContinueNeeded, status.Code)
+	require.Nil(t, initiator.SecurityContext())
+	require.Nil(t, acceptor.SecurityContext())
 	require.NotNil(t, acceptor.ResponseToken())
 
 	authenticated, _, status = initiator.ContinueSecContext(acceptor.ResponseToken())
 	require.True(t, authenticated)
 	require.Equal(t, gssapi.StatusComplete, status.Code)
+	require.NotNil(t, initiator.SecurityContext())
+	require.Nil(t, acceptor.SecurityContext())
 	require.NotNil(t, initiator.ResponseToken())
 
 	authenticated, _, status = acceptor.ContinueSecContext(initiator.ResponseToken())
 	require.True(t, authenticated)
 	require.Equal(t, gssapi.StatusComplete, status.Code)
+	requireSecurityContextsExchange(t, initiator, acceptor)
+}
+
+func requireSecurityContextsExchange(t *testing.T, initiator, acceptor *SPNEGO) {
+	t.Helper()
+	require.NotNil(t, initiator.SecurityContext())
+	require.NotNil(t, acceptor.SecurityContext())
+	require.Equal(t, initiator.contextSend, acceptor.contextReceive)
+	require.Equal(t, acceptor.contextSend, initiator.contextReceive)
+	require.Equal(t, initiator.acceptorSubkey, acceptor.acceptorSubkey)
+	request, err := initiator.SecurityContext().Wrap([]byte("request"), true)
+	require.NoError(t, err)
+	message, confidential, err := acceptor.SecurityContext().Unwrap(request)
+	require.NoError(t, err)
+	require.True(t, confidential)
+	require.Equal(t, []byte("request"), message)
+	response, err := acceptor.SecurityContext().Wrap([]byte("response"), true)
+	require.NoError(t, err)
+	message, confidential, err = initiator.SecurityContext().Unwrap(response)
+	require.NoError(t, err)
+	require.True(t, confidential)
+	require.Equal(t, []byte("response"), message)
 }
 
 func TestDCEContextExchangeRejectsWrongFinalSequence(t *testing.T) {
@@ -318,7 +416,7 @@ func newContextExchangeWithPreferences(t *testing.T, options KRB5TokenAPREQOptio
 	cache.AddCredential(&credentials.Credential{
 		Client: credentials.Principal{Realm: realm, PrincipalName: cname},
 		Server: credentials.Principal{Realm: realm, PrincipalName: sname},
-		Key: sessionKey, AuthTime: now, StartTime: now, EndTime: now.Add(time.Hour),
+		Key:    sessionKey, AuthTime: now, StartTime: now, EndTime: now.Add(time.Hour),
 		RenewTill: now.Add(2 * time.Hour), TicketFlags: ticketFlags, Ticket: ticketBytes,
 	})
 	cl, err := client.NewFromCCache(cache, config.New())

@@ -291,8 +291,10 @@ func TestNegotiatingClientProtocolGuards(t *testing.T) {
 			want:      "does not advertise",
 		},
 		"malformed challenge": {
-			transport: func(*http.Request) (*http.Response, error) { return response(http.StatusUnauthorized, "Negotiate !!!"), nil },
-			want:      "decode HTTP Negotiate",
+			transport: func(*http.Request) (*http.Response, error) {
+				return response(http.StatusUnauthorized, "Negotiate !!!"), nil
+			},
+			want: "decode HTTP Negotiate",
 		},
 		"premature success": {
 			transport: func(current *http.Request) (*http.Response, error) {
@@ -427,7 +429,7 @@ func (closer failingReadCloser) Read([]byte) (int, error) {
 	}
 	return 0, closer.readErr
 }
-func (closer failingReadCloser) Close() error             { return closer.closeErr }
+func (closer failingReadCloser) Close() error { return closer.closeErr }
 
 func TestNegotiatingClientErrors(t *testing.T) {
 	request, _ := http.NewRequest(http.MethodGet, "http://example.test", nil)
@@ -652,6 +654,32 @@ func TestLegacyHTTPClientChallengeAndRedirectGuards(t *testing.T) {
 	}
 	if redirects != 10 {
 		t.Fatalf("redirect requests = %d", redirects)
+	}
+}
+
+func TestLegacyHTTPClientClearsContextBeforeNegotiation(t *testing.T) {
+	initiator, _, _ := newContextExchange(t, []int{gssapi.ContextFlagInteg})
+	httpClient := &http.Client{Transport: negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		header := make(http.Header)
+		header.Set(HTTPHeaderAuthResponse, HTTPHeaderAuthResponseValueKey)
+		return &http.Response{StatusCode: http.StatusUnauthorized, Header: header, Body: http.NoBody}, nil
+	})}
+	legacy := NewClient(client.NewWithPassword("alice", "EXAMPLE.ORG", "password", config.New()), httpClient, "HTTP/server.example.org")
+	legacy.setContext(initiator.SecurityContext())
+	if legacy.Context() == nil {
+		t.Fatal("initial context is nil")
+	}
+
+	request, requestErr := http.NewRequest(http.MethodGet, "http://example.test", nil)
+	if requestErr != nil {
+		t.Fatal(requestErr)
+	}
+	_, err := legacy.Do(request)
+	if err == nil {
+		t.Fatal("negotiation unexpectedly succeeded")
+	}
+	if legacy.Context() != nil {
+		t.Fatal("stale context was not cleared")
 	}
 }
 

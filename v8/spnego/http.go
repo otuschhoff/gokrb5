@@ -38,6 +38,8 @@ type Client struct {
 	reqs       []*http.Request
 	options    KRB5TokenAPREQOptions
 	contexts   sync.Map
+	contextMu  sync.RWMutex
+	context    gssapi.Context
 }
 
 type redirectErr struct {
@@ -249,6 +251,19 @@ func NewClientWithOptions(krb5Cl *client.Client, httpCl *http.Client, spn string
 	}
 }
 
+// Context returns the most recently established mutual Kerberos security context.
+func (c *Client) Context() gssapi.Context {
+	c.contextMu.RLock()
+	defer c.contextMu.RUnlock()
+	return c.context
+}
+
+func (c *Client) setContext(context gssapi.Context) {
+	c.contextMu.Lock()
+	c.context = context
+	c.contextMu.Unlock()
+}
+
 // Do is the SPNEGO enabled HTTP client's equivalent of the http.Client's Do method.
 func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 	var body bytes.Buffer
@@ -281,6 +296,7 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 		return resp, err
 	}
 	if respUnauthorizedNegotiate(resp) {
+		c.setContext(nil)
 		spnegoContext, err := setSPNEGOHeaderWithOptions(c.krb5Client, req, c.spn, c.options)
 		if err != nil {
 			return resp, err
@@ -329,10 +345,16 @@ func (c *Client) verifyMutualResponse(req *http.Request, resp *http.Response) er
 	if responseToken == nil {
 		return errors.New("server did not return a mutual-authentication token")
 	}
-	authenticated, _, status := pending.(*SPNEGO).ContinueSecContext(responseToken)
+	spnegoContext := pending.(*SPNEGO)
+	authenticated, _, status := spnegoContext.ContinueSecContext(responseToken)
 	if !authenticated || status.Code != gssapi.StatusComplete {
 		return fmt.Errorf("server mutual authentication failed: %v", status)
 	}
+	securityContext := spnegoContext.SecurityContext()
+	if securityContext == nil {
+		return errors.New("server mutual authentication completed without a security context")
+	}
+	c.setContext(securityContext)
 	return nil
 }
 
