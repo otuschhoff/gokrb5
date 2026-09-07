@@ -23,7 +23,7 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
-const usageLine = "usage: gokinit [-V] [-l lifetime] [-r renewable_life] [-f | -F] [-p | -P] [-a | -A] [-C] [-E] [-v] [-R] [-k [-i | -t keytab_file]] [-c cache_name] [-S service_name] [-X attribute=value] [--password-stdin] [principal]"
+const usageLine = "usage: gokinit [-V] [-l lifetime] [-r renewable_life] [-f | -F] [-p | -P] [-a | -A] [-C] [-E] [-v] [-R] [-k [-i | -t keytab_file]] [-c cache_name] [-S service_name] [-X attribute=value] [--password-stdin] [--no-request-enc-pa-rep] [principal]"
 
 type stringList []string
 
@@ -52,24 +52,25 @@ func (v choiceValue) Set(string) error {
 func (v choiceValue) IsBoolFlag() bool { return true }
 
 type initOptions struct {
-	verbose       bool
-	lifetime      string
-	renewLifetime string
-	forwardable   boolChoice
-	proxiable     boolChoice
-	addresses     boolChoice
-	canonicalize  bool
-	enterprise    bool
-	validate      bool
-	renew         bool
-	useKeytab     bool
-	clientKeytab  bool
-	keytabName    string
-	cacheName     string
-	service       string
-	passwordStdin bool
-	pkinitOptions stringList
-	principal     string
+	verbose              bool
+	lifetime             string
+	renewLifetime        string
+	forwardable          boolChoice
+	proxiable            boolChoice
+	addresses            boolChoice
+	canonicalize         bool
+	enterprise           bool
+	validate             bool
+	renew                bool
+	useKeytab            bool
+	clientKeytab         bool
+	keytabName           string
+	cacheName            string
+	service              string
+	passwordStdin        bool
+	disablePAReqEncPARep bool
+	pkinitOptions        stringList
+	principal            string
 }
 
 func main() {
@@ -113,6 +114,9 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err, "loading PKINIT identity")
 	}
+	if opts.disablePAReqEncPARep {
+		clientSettings = append(clientSettings, client.DisablePAReqEncPARep(true))
+	}
 	cl := client.NewFromPrincipalName(types.PrincipalName{
 		NameType:   principal.NameType,
 		NameString: append([]string(nil), principal.Components...),
@@ -143,7 +147,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				return writeCache(cl, cacheName, opts.verbose, stdout, stderr)
 			}
 		}
-		return fail(stderr, err, "while getting initial credentials")
+		fmt.Fprintf(stderr, "kinit: %s while getting initial credentials\n", krbcli.InitialCredentialErrorText(err, principal.String(), principal.Realm))
+		return 1
 	}
 	return writeCache(cl, cacheName, opts.verbose, stdout, stderr)
 }
@@ -173,6 +178,7 @@ func parseArgs(args []string, stderr io.Writer) (initOptions, error) {
 	fs.StringVar(&opts.cacheName, "c", "", "credential cache name")
 	fs.StringVar(&opts.service, "S", "", "service principal")
 	fs.BoolVar(&opts.passwordStdin, "password-stdin", false, "read password from standard input")
+	fs.BoolVar(&opts.disablePAReqEncPARep, "no-request-enc-pa-rep", false, "omit PA-REQ-ENC-PA-REP")
 	fs.Var(&opts.pkinitOptions, "X", "PKINIT attribute=value")
 	if err := fs.Parse(args); err != nil {
 		return opts, err

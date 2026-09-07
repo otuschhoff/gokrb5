@@ -57,6 +57,19 @@ func ErrorText(err error) string {
 	return appendNTStatus(text, err)
 }
 
+// InitialCredentialErrorText adds the principal and realm context emitted by
+// MIT kinit when acquiring initial credentials.
+func InitialCredentialErrorText(err error, principal, realm string) string {
+	if kdcErr, ok := KDCError(err); ok && kdcErr.ErrorCode == errorcode.KDC_ERR_C_PRINCIPAL_UNKNOWN {
+		return appendNTStatus(fmt.Sprintf("Client '%s' not found in Kerberos database", principal), err)
+	}
+	text := ErrorText(err)
+	if text == "Cannot contact any KDC for requested realm" {
+		return fmt.Sprintf("Cannot contact any KDC for realm '%s'", realm)
+	}
+	return text
+}
+
 func appendNTStatus(text string, err error) string {
 	var provider interface {
 		NTStatus() (ntstatus.Code, bool)

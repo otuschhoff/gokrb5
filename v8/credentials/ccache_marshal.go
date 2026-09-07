@@ -222,7 +222,10 @@ func marshalCredential(out *bytes.Buffer, cred *Credential, version uint8) error
 		return err
 	}
 	for _, timestamp := range []time.Time{cred.AuthTime, cred.StartTime, cred.EndTime, cred.RenewTill} {
-		seconds := timestamp.Unix()
+		seconds := int64(0)
+		if !timestamp.IsZero() {
+			seconds = timestamp.Unix()
+		}
 		if seconds < math.MinInt32 || seconds > math.MaxInt32 {
 			return errors.New("credential timestamp is outside int32 range")
 		}

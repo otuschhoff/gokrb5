@@ -241,6 +241,30 @@ func TestCCacheV3WritesRepeatedEnctype(t *testing.T) {
 	assert.Error(t, reparsed.Unmarshal(data))
 }
 
+func TestCCacheMarshalWritesZeroTimeAsUnixEpoch(t *testing.T) {
+	cache := NewCCache(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user"), "EXAMPLE.ORG")
+	cache.Credentials = []*Credential{{
+		Client:      clonePrincipal(cache.DefaultPrincipal),
+		Server:      Principal{Realm: "EXAMPLE.ORG", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/EXAMPLE.ORG")},
+		Key:         types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)},
+		EndTime:     time.Unix(3, 0),
+		TicketFlags: types.NewKrbFlags(),
+	}}
+
+	data, err := cache.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reparsed := new(CCache)
+	if err := reparsed.Unmarshal(data); err != nil {
+		t.Fatal(err)
+	}
+	credential := reparsed.Credentials[0]
+	assert.Equal(t, int64(0), credential.AuthTime.Unix())
+	assert.Equal(t, int64(0), credential.StartTime.Unix())
+	assert.Equal(t, int64(0), credential.RenewTill.Unix())
+}
+
 func TestCCacheAddressAndAuthDataRoundTrip(t *testing.T) {
 	cache := NewCCache(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user"), "EXAMPLE.ORG")
 	credential := &Credential{

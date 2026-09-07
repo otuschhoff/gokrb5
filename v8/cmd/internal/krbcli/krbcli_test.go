@@ -136,6 +136,12 @@ func TestErrorTextUsesWrappedKDCCode(t *testing.T) {
 	assert.Equal(t, "plain failure", ErrorText(errors.New("plain failure")))
 }
 
+func TestInitialCredentialErrorTextAddsMITContext(t *testing.T) {
+	unknown := krberror.Errorf(messages.KRBError{ErrorCode: errorcode.KDC_ERR_C_PRINCIPAL_UNKNOWN}, krberror.KDCError, "login failed")
+	assert.Equal(t, "Client 'does-not-exist@TEST.GOKRB5' not found in Kerberos database", InitialCredentialErrorText(unknown, "does-not-exist@TEST.GOKRB5", "TEST.GOKRB5"))
+	assert.Equal(t, "Cannot contact any KDC for realm 'TEST.GOKRB5'", InitialCredentialErrorText(errors.New("failed sending request"), "testuser1@TEST.GOKRB5", "TEST.GOKRB5"))
+}
+
 func TestErrorTextIncludesWrappedNTStatus(t *testing.T) {
 	eData, err := hex.DecodeString(testdata.MSKILEKerbErrorDataAccountDisabled)
 	if err != nil {

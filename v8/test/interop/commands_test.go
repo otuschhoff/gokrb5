@@ -170,6 +170,9 @@ func TestGokinitToMIT(t *testing.T) {
 				t.Run(mode, func(t *testing.T) {
 					cacheName := "FILE:" + filepath.Join(t.TempDir(), "gokinit.ccache")
 					args := []string{"-r", "1h", "-c", cacheName, interopPrincipal}
+					if port == testdata.KDC_PORT_TEST_GOKRB5_OLD {
+						args = append([]string{"--no-request-enc-pa-rep"}, args...)
+					}
 					if mode == "password" {
 						result := runPTYPassword(t, env, commandPath(t, "gokinit"), args...)
 						if result.err != nil {

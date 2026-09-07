@@ -81,6 +81,15 @@ func TestParseArgsAcceptsCombinedKeytabFlags(t *testing.T) {
 	assert.True(t, opts.clientKeytab)
 }
 
+func TestParseArgsDisablesPAReqEncPARep(t *testing.T) {
+	var stderr bytes.Buffer
+	opts, err := parseArgs([]string{"--no-request-enc-pa-rep", "user@REALM"}, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.True(t, opts.disablePAReqEncPARep)
+}
+
 func TestParseArgsAcceptsPKINITOptions(t *testing.T) {
 	var stderr bytes.Buffer
 	opts, err := parseArgs([]string{"-X", "X509_user_identity=PKCS12:user.p12", "-X", "X509_anchors=FILE:ca.pem", "user@REALM"}, &stderr)
