@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"encoding/hex"
 	"testing"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
@@ -29,6 +30,43 @@ func TestGetKeyFromPasswordSelectsMatchingETypeInfo2Entry(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Equal(t, etypeID.AES128_CTS_HMAC_SHA1_96, key.KeyType)
+	assert.Equal(t, expected, key.KeyValue)
+}
+
+func TestGetKeyFromPasswordUsesDefaultForOmittedETypeInfo2Salt(t *testing.T) {
+	cname := types.PrincipalName{NameString: []string{"testuser1"}}
+	entries := types.ETypeInfo2{{EType: etypeID.AES256_CTS_HMAC_SHA1_96}}
+	value, err := asn1.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pas := types.PADataSequence{{PADataType: patype.PA_ETYPE_INFO2, PADataValue: value}}
+	key, selected, err := GetKeyFromPassword("passwordvalue", cname, "TEST.GOKRB5", etypeID.AES256_CTS_HMAC_SHA1_96, pas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := selected.StringToKey("passwordvalue", cname.GetSalt("TEST.GOKRB5"), selected.GetDefaultStringToKeyParams())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, expected, key.KeyValue)
+}
+
+func TestGetKeyFromPasswordPreservesExplicitEmptyETypeInfo2Salt(t *testing.T) {
+	cname := types.PrincipalName{NameString: []string{"testuser1"}}
+	value, err := hex.DecodeString("300b3009a003020112a1021b00")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pas := types.PADataSequence{{PADataType: patype.PA_ETYPE_INFO2, PADataValue: value}}
+	key, selected, err := GetKeyFromPassword("passwordvalue", cname, "TEST.GOKRB5", etypeID.AES256_CTS_HMAC_SHA1_96, pas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := selected.StringToKey("passwordvalue", "", selected.GetDefaultStringToKeyParams())
+	if err != nil {
+		t.Fatal(err)
+	}
 	assert.Equal(t, expected, key.KeyValue)
 }
 

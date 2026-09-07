@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/otuschhoff/gokrb5/v8/crypto/etype"
 	"github.com/otuschhoff/gokrb5/v8/crypto/rfc3961"
 	"github.com/otuschhoff/gokrb5/v8/crypto/rfc8009"
@@ -105,9 +106,13 @@ func GetKeyFromPasswordForETypes(passwd string, cname types.PrincipalName, realm
 			if err := entries.Unmarshal(pa.PADataValue); err != nil {
 				return key, nil, fmt.Errorf("error unmarshalling PA Data to PA-ETYPE-INFO2: %v", err)
 			}
-			for _, entry := range entries {
+			saltPresent, err := etypeInfo2SaltPresence(pa.PADataValue)
+			if err != nil || len(saltPresent) != len(entries) {
+				return key, nil, fmt.Errorf("error determining PA-ETYPE-INFO2 salt presence")
+			}
+			for i, entry := range entries {
 				if _, ok := requested[entry.EType]; ok {
-					info2 = append(info2, passwordKeyParameters{etypeID: entry.EType, salt: entry.Salt, saltSet: true, s2kParams: entry.S2KParams})
+					info2 = append(info2, passwordKeyParameters{etypeID: entry.EType, salt: entry.Salt, saltSet: saltPresent[i], s2kParams: entry.S2KParams})
 				}
 			}
 		case patype.PA_ETYPE_INFO:
@@ -168,6 +173,22 @@ func GetKeyFromPasswordForETypes(passwd string, cname types.PrincipalName, realm
 		KeyValue: k,
 	}
 	return key, et, nil
+}
+
+func etypeInfo2SaltPresence(data []byte) ([]bool, error) {
+	type rawEntry struct {
+		EType int32         `asn1:"explicit,tag:0"`
+		Salt  asn1.RawValue `asn1:"optional"`
+	}
+	var entries []rawEntry
+	if _, err := asn1.Unmarshal(data, &entries); err != nil {
+		return nil, err
+	}
+	present := make([]bool, len(entries))
+	for i, entry := range entries {
+		present[i] = entry.Salt.Class == asn1.ClassContextSpecific && entry.Salt.Tag == 1
+	}
+	return present, nil
 }
 
 func firstSupportedKeyParameters(parameters []passwordKeyParameters) (passwordKeyParameters, etype.EType, bool) {
