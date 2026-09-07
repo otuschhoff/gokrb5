@@ -30,6 +30,7 @@ type SPNEGO struct {
 	initiatorOptions KRB5TokenAPREQOptions
 	responseToken    gssapi.ContextToken
 	authenticator    types.Authenticator
+	ticketKey        types.EncryptionKey
 	replyKey         types.EncryptionKey
 	contextKey       types.EncryptionKey
 	sequenceNumber   int64
@@ -101,6 +102,7 @@ func (s *SPNEGO) InitSecContext() (gssapi.ContextToken, error) {
 	s.offeredMechTypes = append([]asn1.ObjectIdentifier(nil), negTokenInit.MechTypes...)
 	s.requireMechMIC = len(negTokenInit.MechListMIC) > 0
 	s.authenticator = mechanismToken.APReq.Authenticator
+	s.ticketKey = key
 	s.replyKey = mechanismToken.APReq.Authenticator.SubKey
 	if len(s.replyKey.KeyValue) == 0 {
 		s.replyKey = key
@@ -446,13 +448,14 @@ func (s *SPNEGO) continueInitiator(ct gssapi.ContextToken) (bool, context.Contex
 			}
 			return false, s.context, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: err.Error()}
 		}
-		if err := mechanismToken.APRep.Verify(s.authenticator, s.replyKey); err != nil {
+		verifiedKey, err := s.verifyInitiatorAPRep(&mechanismToken.APRep)
+		if err != nil {
 			return false, s.context, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: err.Error()}
 		}
 		s.contextKey = mechanismToken.APRep.DecryptedEncPart.Subkey
 		usesAcceptorSubkey = len(s.contextKey.KeyValue) > 0
 		if !usesAcceptorSubkey {
-			s.contextKey = s.replyKey
+			s.contextKey = verifiedKey
 		}
 		s.sequenceNumber = mechanismToken.APRep.DecryptedEncPart.SequenceNumber
 	} else {
@@ -492,6 +495,21 @@ func (s *SPNEGO) continueInitiator(ct gssapi.ContextToken) (bool, context.Contex
 	}
 	s.responseToken = nil
 	return true, s.context, gssapi.Status{Code: gssapi.StatusComplete}
+}
+
+func (s *SPNEGO) verifyInitiatorAPRep(reply *messages.APRep) (types.EncryptionKey, error) {
+	if err := reply.Verify(s.authenticator, s.replyKey); err == nil {
+		return s.replyKey, nil
+	} else if len(s.ticketKey.KeyValue) == 0 {
+		return types.EncryptionKey{}, err
+	} else {
+		subkeyErr := err
+		if err := reply.Verify(s.authenticator, s.ticketKey); err == nil {
+			return s.ticketKey, nil
+		} else {
+			return types.EncryptionKey{}, fmt.Errorf("verify AP_REP with authenticator subkey: %v; verify with ticket session key: %w", subkeyErr, err)
+		}
+	}
 }
 
 func containsMech(mechTypes []asn1.ObjectIdentifier, candidate asn1.ObjectIdentifier) bool {

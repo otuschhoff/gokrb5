@@ -56,6 +56,47 @@ func TestMutualContextExchange(t *testing.T) {
 	require.Equal(t, []byte("response"), message)
 }
 
+func TestMutualContextExchangeAcceptsTicketKeyAPRep(t *testing.T) {
+	initiator, _, _ := newContextExchange(t, []int{gssapi.ContextFlagMutual, gssapi.ContextFlagInteg, gssapi.ContextFlagConf})
+	acceptorSubkey := types.EncryptionKey{
+		KeyType: 18, KeyValue: []byte("0123456789abcdef0123456789abcdef"),
+	}
+	const acceptorSequence = 42
+	reply, err := messages.NewAPRep(messages.EncAPRepPart{
+		CTime: initiator.authenticator.CTime, Cusec: initiator.authenticator.Cusec,
+		Subkey: acceptorSubkey, SequenceNumber: acceptorSequence,
+	}, initiator.ticketKey)
+	require.NoError(t, err)
+	replyToken := NewKRB5TokenAPREP(reply, false)
+	replyBytes, err := replyToken.Marshal()
+	require.NoError(t, err)
+	response := &SPNEGOToken{Resp: true, NegTokenResp: NegTokenResp{
+		NegState:      asn1.Enumerated(NegStateAcceptCompleted),
+		SupportedMech: initiator.offeredMechTypes[0], ResponseToken: replyBytes,
+	}}
+	authenticated, _, status := initiator.ContinueSecContext(response)
+	require.True(t, authenticated, status.Error())
+	require.Equal(t, gssapi.StatusComplete, status.Code)
+	require.Equal(t, acceptorSubkey, initiator.contextKey)
+
+	acceptorContext, err := gssapi.NewSecurityContext(
+		acceptorSubkey, false, acceptorSequence, uint64(initiator.authenticator.SeqNumber), true,
+	)
+	require.NoError(t, err)
+	request, err := initiator.SecurityContext().Wrap([]byte("request"), true)
+	require.NoError(t, err)
+	message, confidential, err := acceptorContext.Unwrap(request)
+	require.NoError(t, err)
+	require.True(t, confidential)
+	require.Equal(t, []byte("request"), message)
+	responseToken, err := acceptorContext.Wrap([]byte("response"), true)
+	require.NoError(t, err)
+	message, confidential, err = initiator.SecurityContext().Unwrap(responseToken)
+	require.NoError(t, err)
+	require.True(t, confidential)
+	require.Equal(t, []byte("response"), message)
+}
+
 func TestSecurityContextUnavailableBeforeCompletion(t *testing.T) {
 	initiator, acceptor, initial := newContextExchange(t, []int{gssapi.ContextFlagMutual, gssapi.ContextFlagInteg})
 	require.Nil(t, initiator.SecurityContext())
