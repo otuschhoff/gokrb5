@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/jcmturner/goidentity/v6"
+	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
+	"github.com/otuschhoff/gokrb5/v8/keytab"
 	"github.com/otuschhoff/gokrb5/v8/types"
 	"github.com/stretchr/testify/assert"
 )
@@ -43,5 +45,26 @@ func TestCredentials_Marshal(t *testing.T) {
 	err = credum.Unmarshal(b)
 	if err != nil {
 		t.Fatalf("could not unmarshal credetials: %v", err)
+	}
+}
+
+func TestCredentialsPrincipalAndKeySources(t *testing.T) {
+	principal := types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "HTTP/server.example.org")
+	credential := NewFromPrincipalName(principal, "EXAMPLE.ORG")
+	if !credential.CName().Equal(principal) || credential.Domain() != "EXAMPLE.ORG" {
+		t.Fatalf("principal credential = %q@%q", credential.CName().PrincipalNameString(), credential.Domain())
+	}
+
+	kt := keytab.New()
+	kt.Entries = append(kt.Entries, keytab.Entry{})
+	if credential.WithKeytab(kt) != credential || credential.Keytab() != kt || !credential.HasKeytab() || credential.HasPassword() {
+		t.Fatal("keytab credential state was not retained")
+	}
+	if credential.WithPassword("secret") != credential || credential.Password() != "secret" || !credential.HasPassword() || credential.HasKeytab() {
+		t.Fatal("password credential state was not retained")
+	}
+	credential.WithPassword("")
+	if credential.HasPassword() {
+		t.Fatal("empty password reported as configured")
 	}
 }

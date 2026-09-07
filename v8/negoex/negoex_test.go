@@ -5,8 +5,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/iana/ntstatus"
@@ -241,6 +243,35 @@ type testSchemeMechanism struct {
 	context *testContext
 }
 
+type testPKU2UMechanism struct {
+	*testSchemeMechanism
+	metadata []byte
+}
+
+func (*testPKU2UMechanism) OID() asn1.ObjectIdentifier { return gssapi.OIDPKU2U.OID() }
+
+func (m *testPKU2UMechanism) InitSecContext(target string, input []byte, _ ...gssapi.MechanismOption) ([]byte, gssapi.Context, bool, error) {
+	return m.testSchemeMechanism.InitSecContext(target, input)
+}
+
+func (m *testPKU2UMechanism) AcceptSecContext(input []byte, _ ...gssapi.MechanismOption) ([]byte, gssapi.Context, bool, error) {
+	return m.testSchemeMechanism.AcceptSecContext(input)
+}
+
+func (m *testPKU2UMechanism) QueryMetadata(target string, initiator bool) ([]byte, error) {
+	if target != "host/server" || !initiator {
+		return nil, errors.New("unexpected metadata query")
+	}
+	return append([]byte(nil), m.metadata...), nil
+}
+
+func (m *testPKU2UMechanism) ExchangeMetadata(metadata []byte, initiator bool) error {
+	if !reflect.DeepEqual(metadata, m.metadata) || initiator {
+		return errors.New("unexpected metadata exchange")
+	}
+	return nil
+}
+
 func (m *testSchemeMechanism) AuthScheme() AuthScheme { return m.id }
 func (m *testSchemeMechanism) InitSecContext(_ string, input []byte) ([]byte, gssapi.Context, bool, error) {
 	switch string(input) {
@@ -273,6 +304,26 @@ func newTestScheme(id AuthScheme) *testSchemeMechanism {
 	}
 }
 
+func TestPKU2USchemeDelegatesMechanism(t *testing.T) {
+	mechanism := &testPKU2UMechanism{testSchemeMechanism: newTestScheme(PKU2UAuthScheme), metadata: []byte("metadata")}
+	scheme := NewPKU2UScheme(mechanism)
+	if scheme.AuthScheme() != PKU2UAuthScheme {
+		t.Fatalf("auth scheme = %v", scheme.AuthScheme())
+	}
+	if output, _, done, err := scheme.InitSecContext("host/server", nil); err != nil || done || string(output) != "request-1" {
+		t.Fatalf("initiator output = %q, done=%v, err=%v", output, done, err)
+	}
+	if output, _, done, err := scheme.AcceptSecContext([]byte("request-1")); err != nil || done || string(output) != "challenge" {
+		t.Fatalf("acceptor output = %q, done=%v, err=%v", output, done, err)
+	}
+	if metadata, err := scheme.QueryMetadata("host/server", true); err != nil || string(metadata) != "metadata" {
+		t.Fatalf("query metadata = %q, %v", metadata, err)
+	}
+	if err := scheme.ExchangeMetadata([]byte("metadata"), false); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestConversationEndToEnd(t *testing.T) {
 	schemeID := testScheme()
 	initiator, err := NewInitiator("host/server", newTestScheme(schemeID))
@@ -302,6 +353,52 @@ func TestConversationEndToEnd(t *testing.T) {
 	}
 	if initiator.SelectedScheme() != schemeID || acceptor.SelectedScheme() != schemeID {
 		t.Fatal("conversation selected the wrong scheme")
+	}
+}
+
+func TestMechanismEndToEndAndGuards(t *testing.T) {
+	schemeID := testScheme()
+	initiator := New(newTestScheme(schemeID), newTestScheme(schemeID))
+	acceptor := New(newTestScheme(schemeID))
+	if !initiator.OID().Equal(gssapi.OIDNegoEx.OID()) {
+		t.Fatalf("mechanism OID = %v", initiator.OID())
+	}
+
+	initiatorToken, initiatorContext, done, err := initiator.InitSecContext("host/server", nil)
+	if err != nil || done || initiatorContext == nil {
+		t.Fatalf("initial initiator = context %v, done %v, err %v", initiatorContext, done, err)
+	}
+	acceptorToken, acceptorContext, done, err := acceptor.AcceptSecContext(initiatorToken)
+	if err != nil || done || acceptorContext == nil {
+		t.Fatalf("initial acceptor = context %v, done %v, err %v", acceptorContext, done, err)
+	}
+	initiatorToken, initiatorContext, done, err = initiator.InitSecContext("host/server", acceptorToken)
+	if err != nil || !done || initiatorContext == nil {
+		t.Fatalf("final initiator = context %v, done %v, err %v", initiatorContext, done, err)
+	}
+	acceptorToken, acceptorContext, done, err = acceptor.AcceptSecContext(initiatorToken)
+	if err != nil || !done || len(acceptorToken) != 0 || acceptorContext == nil {
+		t.Fatalf("final acceptor = output %x, context %v, done %v, err %v", acceptorToken, acceptorContext, done, err)
+	}
+	if _, _, _, err := initiator.InitSecContext("other/target", nil); err == nil || !strings.Contains(err.Error(), "target changed") {
+		t.Fatalf("target change error = %v", err)
+	}
+	if _, _, _, err := New().InitSecContext("host/server", nil); !errors.Is(err, ErrNoAvailableSchemes) {
+		t.Fatalf("empty initiator error = %v", err)
+	}
+	if _, _, _, err := New().AcceptSecContext([]byte{1}); !errors.Is(err, ErrNoAvailableSchemes) {
+		t.Fatalf("empty acceptor error = %v", err)
+	}
+}
+
+func TestAlertErrorContract(t *testing.T) {
+	err := AlertError{Status: ntstatus.STATUS_ACCOUNT_DISABLED}
+	if !strings.Contains(err.Error(), "NEGOEX alert") {
+		t.Fatalf("alert error = %q", err.Error())
+	}
+	status, ok := err.NTStatus()
+	if !ok || status != ntstatus.STATUS_ACCOUNT_DISABLED {
+		t.Fatalf("alert status = %v, %v", status, ok)
 	}
 }
 

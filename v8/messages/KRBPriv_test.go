@@ -1,6 +1,7 @@
 package messages
 
 import (
+	"bytes"
 	"encoding/hex"
 	"testing"
 	"time"
@@ -129,5 +130,42 @@ func TestKRBPriv_EncryptEncPart(t *testing.T) {
 	err = a.EncryptEncPart(key)
 	if err != nil {
 		t.Fatalf("error encrypting encpart: %v", err)
+	}
+}
+
+func TestKRBPrivEncryptedRoundTrip(t *testing.T) {
+	part := EncKrbPrivPart{
+		UserData:       []byte("private payload"),
+		Timestamp:      time.Now().UTC().Truncate(time.Second),
+		Usec:           123,
+		SequenceNumber: 9,
+		SAddress:       types.HostAddress{AddrType: addrtype.IPv4, Address: []byte{127, 0, 0, 1}},
+	}
+	message := NewKRBPriv(part)
+	if message.PVNO != iana.PVNO || message.MsgType != msgtype.KRB_PRIV {
+		t.Fatalf("new KRB-PRIV = %+v", message)
+	}
+	key := types.EncryptionKey{KeyType: 18, KeyValue: []byte("12345678901234567890123456789012")}
+	if err := message.EncryptEncPart(key); err != nil {
+		t.Fatal(err)
+	}
+	wire, err := message.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded KRBPriv
+	if err := decoded.Unmarshal(wire); err != nil {
+		t.Fatal(err)
+	}
+	if err := decoded.DecryptEncPart(key); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decoded.DecryptedEncPart.UserData, part.UserData) || decoded.DecryptedEncPart.SequenceNumber != part.SequenceNumber {
+		t.Fatalf("decrypted part = %+v", decoded.DecryptedEncPart)
+	}
+	wrongKey := key
+	wrongKey.KeyValue = bytes.Repeat([]byte{0xff}, len(key.KeyValue))
+	if err := decoded.DecryptEncPart(wrongKey); err == nil {
+		t.Fatal("wrong KRB-PRIV key was accepted")
 	}
 }

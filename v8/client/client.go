@@ -253,7 +253,7 @@ func (cl *Client) setKDCTimeOffset(offset time.Duration) {
 	cl.kdcTimeMux.Unlock()
 }
 
-func (cl *Client) sendASRequest(request []byte, realm string) ([]byte, error) {
+func (cl *Client) sendKDCRequest(request []byte, realm string) ([]byte, error) {
 	if cl.sendToKDCFunc != nil {
 		return cl.sendToKDCFunc(request, realm)
 	}

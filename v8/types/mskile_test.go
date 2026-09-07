@@ -27,6 +27,122 @@ func mustHex(t *testing.T, value string) []byte {
 	return b
 }
 
+func TestMSKILEPADataWrappers(t *testing.T) {
+	principal := NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
+	checksum := Checksum{CksumType: 1, Checksum: []byte("checksum")}
+
+	pacOptions, err := NewPAPACOptionsPAData(0, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded, err := pacOptions.GetPAPACOptions(); err != nil || !IsFlagSet(&decoded.Options, 0) || !IsFlagSet(&decoded.Options, 3) {
+		t.Fatalf("PAC options = %+v, %v", decoded, err)
+	}
+	if _, err := NewPAPACOptionsPAData(-1); err == nil {
+		t.Fatal("negative PAC option accepted")
+	}
+
+	forUser := PAForUser{UserName: principal, UserRealm: "EXAMPLE.ORG", Cksum: checksum, AuthPackage: "Kerberos"}
+	forUserPA, err := NewPAForUserPAData(forUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded, err := forUserPA.GetPAForUser(); err != nil || !decoded.UserName.Equal(principal) {
+		t.Fatalf("PA-FOR-USER = %+v, %v", decoded, err)
+	}
+
+	userID := S4UUserID{Nonce: 7, CName: principal, CRealm: "EXAMPLE.ORG", Options: NewKrbFlags()}
+	s4u, err := NewPAS4UX509User(userID, checksum)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s4uPA, err := NewPAS4UX509UserPAData(s4u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodedS4U, err := s4uPA.GetPAS4UX509User()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodedUser, err := decodedS4U.GetUserID()
+	if err != nil || decodedUser.Nonce != 7 {
+		t.Fatalf("PA-S4U-X509-USER = %+v, %v", decodedUser, err)
+	}
+
+	supportedPA, err := NewPASupportedEncTypesPAData(PASupportedEncTypes(3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded, err := supportedPA.GetPASupportedEncTypes(); err != nil || decoded != 3 {
+		t.Fatalf("supported enctypes = %v, %v", decoded, err)
+	}
+
+	keyRequest := KerbKeyListReq{17, 18}
+	keyRequestPA, err := NewKerbKeyListReqPAData(keyRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded, err := keyRequestPA.GetKerbKeyListReq(); err != nil || !reflect.DeepEqual(decoded, keyRequest) {
+		t.Fatalf("key request = %+v, %v", decoded, err)
+	}
+	keyReply := KerbKeyListRep{{KeyType: 17, KeyValue: []byte("key")}}
+	keyReplyPA, err := NewKerbKeyListRepPAData(keyReply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded, err := keyReplyPA.GetKerbKeyListRep(); err != nil || !reflect.DeepEqual(decoded, keyReply) {
+		t.Fatalf("key reply = %+v, %v", decoded, err)
+	}
+
+	referral := PASvrReferralData{ReferredName: principal, ReferredRealm: "CHILD.EXAMPLE.ORG"}
+	referralPA, err := NewPASvrReferralInfoPAData(referral)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded, err := referralPA.GetPASvrReferralInfo(); err != nil || decoded.ReferredRealm != referral.ReferredRealm {
+		t.Fatalf("referral = %+v, %v", decoded, err)
+	}
+	superseded := KerbSupersededByUser{Name: principal, Realm: "EXAMPLE.ORG"}
+	supersededPA, err := NewKerbSupersededByUserPAData(superseded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded, err := supersededPA.GetKerbSupersededByUser(); err != nil || !decoded.Name.Equal(principal) {
+		t.Fatalf("superseded user = %+v, %v", decoded, err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	keyPackage := KerbDMSAKeyPackage{CurrentKeys: keyReply, PreviousKeys: keyReply, ExpirationInterval: now, FetchInterval: now.Add(time.Hour)}
+	keyPackagePA, err := NewKerbDMSAKeyPackagePAData(keyPackage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded, err := keyPackagePA.GetKerbDMSAKeyPackage(); err != nil || len(decoded.CurrentKeys) != 1 {
+		t.Fatalf("dMSA package = %+v, %v", decoded, err)
+	}
+	keyPackageEntry, err := NewKerbDMSAKeyPackageEntry(keyPackage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded, err := keyPackageEntry.GetKerbDMSAKeyPackage(); err != nil || len(decoded.PreviousKeys) != 1 {
+		t.Fatalf("dMSA entry = %+v, %v", decoded, err)
+	}
+
+	wrong := PAData{PADataType: patype.PA_TGS_REQ}
+	getters := []func() error{
+		func() error { _, err := wrong.GetPAPACOptions(); return err }, func() error { _, err := wrong.GetPAForUser(); return err },
+		func() error { _, err := wrong.GetPAS4UX509User(); return err }, func() error { _, err := wrong.GetPASupportedEncTypes(); return err },
+		func() error { _, err := wrong.GetKerbKeyListReq(); return err }, func() error { _, err := wrong.GetKerbKeyListRep(); return err },
+		func() error { _, err := wrong.GetPASvrReferralInfo(); return err }, func() error { _, err := wrong.GetKerbSupersededByUser(); return err },
+		func() error { _, err := wrong.GetKerbDMSAKeyPackage(); return err },
+	}
+	for index, get := range getters {
+		if err := get(); err == nil {
+			t.Fatalf("getter %d accepted wrong PA type", index)
+		}
+	}
+}
+
 func testPrincipal(name string) PrincipalName {
 	return PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: []string{name}}
 }

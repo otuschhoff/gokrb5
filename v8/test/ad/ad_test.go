@@ -125,3 +125,66 @@ func TestDiscoverADEnvironmentMissingFiles(t *testing.T) {
 	_, err := Discover()
 	assert.Error(t, err)
 }
+
+func TestServicePrincipalSelectionAndFallbacks(t *testing.T) {
+	realm := "AD.EXAMPLE.COM"
+	kt := keytab.New()
+	key := types.EncryptionKey{KeyType: etypeID.AES256_CTS_HMAC_SHA1_96, KeyValue: make([]byte, 32)}
+	principals := []keytab.Principal{
+		{Realm: "OTHER.EXAMPLE", Components: []string{"host", "other.example"}},
+		{Realm: realm, Components: []string{"HTTP", "service.ad.example.com"}},
+		{Realm: realm, Components: []string{"host", "ws01.ad.example.com"}},
+		{Realm: realm, Components: []string{"WS01$"}},
+	}
+	for _, principal := range principals {
+		if err := kt.AddKey(principal, 1, key, time0()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := &Env{Realm: realm, HostFQDN: "ws01.ad.example.com", Keytab: kt}
+	principal, err := env.ServicePrincipal()
+	if err != nil || len(principal.Components) != 2 || principal.Components[1] != env.HostFQDN {
+		t.Fatalf("service principal = %+v, %v", principal, err)
+	}
+	spn, err := env.ServiceSPN()
+	if err != nil || spn != "host/ws01.ad.example.com" {
+		t.Fatalf("service SPN = %q, %v", spn, err)
+	}
+	machine, ok := env.DelegationPrincipal()
+	if !ok || machine.Components[0] != "WS01$" {
+		t.Fatalf("delegation fallback = %+v, %v", machine, ok)
+	}
+	env.delegator = "missing"
+	if _, ok := env.DelegationPrincipal(); ok {
+		t.Fatal("missing configured delegator was found")
+	}
+
+	empty := &Env{Keytab: keytab.New()}
+	if _, err := empty.ServicePrincipal(); err == nil {
+		t.Fatal("empty keytab returned a service principal")
+	}
+	if _, err := empty.ServiceSPN(); err == nil {
+		t.Fatal("empty keytab returned a service SPN")
+	}
+}
+
+func TestADLocalDiscoveryHelpers(t *testing.T) {
+	if root, err := findRepoRoot(); err != nil || root == "" {
+		t.Fatalf("repository root = %q, %v", root, err)
+	}
+	t.Setenv("AD_TEST_OVERRIDE", "override")
+	if envOr("AD_TEST_OVERRIDE", "fallback") != "override" || envOr("AD_TEST_MISSING", "fallback") != "fallback" {
+		t.Fatal("environment fallback failed")
+	}
+	path := filepath.Join(t.TempDir(), "value")
+	if err := os.WriteFile(path, []byte("value\r\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if value, err := readTrimmedFile(path); err != nil || value != "value" {
+		t.Fatalf("trimmed file = %q, %v", value, err)
+	}
+	if _, err := readTrimmedFile(path + ".missing"); err == nil {
+		t.Fatal("missing file returned no error")
+	}
+	_ = resolvConfDomain()
+}

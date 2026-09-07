@@ -58,7 +58,8 @@ func (cl *Client) sendToKDC(b []byte, realm string) ([]byte, error) {
 			// Got a KRBError from KDC so returning and not trying UDP.
 			return rb, e
 		}
-		rb, errudp := cl.sendKDCUDP(realm, b)
+		var errudp error
+		rb, errudp = cl.sendKDCUDP(realm, b)
 		if errudp != nil {
 			if e, ok := errudp.(messages.KRBError); ok {
 				// Got a KRBError

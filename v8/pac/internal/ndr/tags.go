@@ -1,7 +1,6 @@
 package ndr
 
 import (
-	"fmt"
 	"reflect"
 	"strings"
 )
@@ -37,7 +36,7 @@ func parseTags(st reflect.StructTag) tags {
 
 func appendTag(t reflect.StructTag, s string) reflect.StructTag {
 	ts := t.Get(ndrNameSpace)
-	ts = fmt.Sprintf(`%s"%s,%s"`, ndrNameSpace, ts, s)
+	ts = ndrNameSpace + ":\"" + ts + "," + s + "\""
 	return reflect.StructTag(ts)
 }
 

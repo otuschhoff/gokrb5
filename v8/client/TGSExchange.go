@@ -39,7 +39,7 @@ func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messa
 	if err != nil {
 		return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: failed to marshal TGS_REQ")
 	}
-	r, err := cl.sendToKDC(b, kdcRealm)
+	r, err := cl.sendKDCRequest(b, kdcRealm)
 	if err != nil {
 		if kdcErr, ok := err.(messages.KRBError); ok {
 			if fast != nil {

@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/msgtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
+	"github.com/otuschhoff/gokrb5/v8/keytab"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
@@ -235,6 +237,44 @@ func TestFASTStateActivatesFromRealmMetadata(t *testing.T) {
 	}
 	if state == nil || !state.active {
 		t.Fatal("cached FAST_SUPPORTED metadata did not activate FAST")
+	}
+}
+
+func TestFASTArmorKeytabAcquisitionFailures(t *testing.T) {
+	cfg := config.New()
+	cfg.LibDefaults.DNSLookupKDC = true
+	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES128_CTS_HMAC_SHA1_96}
+
+	empty := NewWithPassword("user", "EXAMPLE.ORG", "password", cfg, FASTArmorFromKeytab(keytab.New()))
+	if _, err := empty.newFASTState("EXAMPLE.ORG", true); err == nil || !strings.Contains(err.Error(), "no principals") {
+		t.Fatalf("empty armor keytab error = %v", err)
+	}
+
+	client := NewWithPassword("user", "EXAMPLE.ORG", "password", cfg, FASTArmorFromKeytab(phase5Keytab(t, etypeID.AES128_CTS_HMAC_SHA1_96)))
+	client.sendToKDCFunc = func([]byte, string) ([]byte, error) { return nil, errors.New("offline") }
+	if _, err := client.newFASTState("EXAMPLE.ORG", true); err == nil || !strings.Contains(err.Error(), "acquire FAST armor TGT") {
+		t.Fatalf("armor login error = %v", err)
+	}
+	if client.fastArmorCl != nil {
+		t.Fatal("failed armor client was retained")
+	}
+}
+
+func TestFASTExplicitArmorValidation(t *testing.T) {
+	cfg := config.New()
+	client := NewWithPassword("user", "EXAMPLE.ORG", "password", cfg)
+	state := new(fastState)
+	client.settings.fastArmor = &fastArmorCredentials{
+		ticket: s4uTestTicket("EXAMPLE.ORG", "HTTP/not-a-tgt"),
+		key:    types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")},
+	}
+	if err := state.activate(client, "EXAMPLE.ORG"); err == nil || !strings.Contains(err.Error(), "not a TGT") {
+		t.Fatalf("invalid armor ticket error = %v", err)
+	}
+	client.settings.fastArmor.ticket = s4uTestTicket("EXAMPLE.ORG", "krbtgt/EXAMPLE.ORG")
+	client.settings.fastArmor.key = types.EncryptionKey{KeyType: -1}
+	if err := state.activate(client, "EXAMPLE.ORG"); err == nil || !strings.Contains(err.Error(), "session key") {
+		t.Fatalf("invalid armor key error = %v", err)
 	}
 }
 

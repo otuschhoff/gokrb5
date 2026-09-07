@@ -1,12 +1,14 @@
 package messages
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/credentials"
 	"github.com/otuschhoff/gokrb5/v8/crypto"
 	"github.com/otuschhoff/gokrb5/v8/iana"
@@ -84,6 +86,71 @@ func TestVerifyEncPARepUsesExplicitRequestBytes(t *testing.T) {
 	}
 }
 
+func TestASRepPublicVerificationPaths(t *testing.T) {
+	replyBytes, err := hex.DecodeString(testuser1EType18ASREP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keytabBytes, err := hex.DecodeString(testuser1EType18Keytab)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kt := keytab.New()
+	if err := kt.Unmarshal(keytabBytes); err != nil {
+		t.Fatal(err)
+	}
+
+	var inspected ASRep
+	if err := inspected.Unmarshal(replyBytes); err != nil {
+		t.Fatal(err)
+	}
+	key, _, err := kt.GetEncryptionKey(inspected.CName, inspected.CRealm, inspected.EncPart.KVNO, inspected.EncPart.EType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inspected.DecryptEncPartWithKey(key); err != nil {
+		t.Fatal(err)
+	}
+	request := ASReq{KDCReqFields: KDCReqFields{ReqBody: KDCReqBody{
+		CName: inspected.CName, Realm: inspected.CRealm,
+		SName: inspected.DecryptedEncPart.SName, Nonce: inspected.DecryptedEncPart.Nonce,
+		KDCOptions: types.NewKrbFlags(),
+	}}}
+	cfg := config.New()
+	cfg.LibDefaults.Clockskew = 100 * 365 * 24 * time.Hour
+
+	newReply := func() ASRep {
+		var reply ASRep
+		if err := reply.Unmarshal(replyBytes); err != nil {
+			t.Fatal(err)
+		}
+		return reply
+	}
+	passwordReply := newReply()
+	if ok, err := passwordReply.Verify(cfg, credentials.New(testUser, testRealm).WithPassword(testUserPassword), request); !ok || err != nil {
+		t.Fatalf("password verification = %v, %v", ok, err)
+	}
+	keyReply := newReply()
+	if ok, err := keyReply.VerifyWithReplyKey(cfg, credentials.New(testUser, testRealm), request, key); !ok || err != nil {
+		t.Fatalf("explicit-key verification = %v, %v", ok, err)
+	}
+	bytesReply := newReply()
+	if ok, err := bytesReply.VerifyWithReplyKeyAndRequestBytes(cfg, credentials.New(testUser, testRealm), request, key, []byte("unused")); !ok || err != nil {
+		t.Fatalf("explicit request verification = %v, %v", ok, err)
+	}
+
+	missingSecret := newReply()
+	if _, err := missingSecret.DecryptEncPart(credentials.New(testUser, testRealm)); err == nil {
+		t.Fatal("AS reply decrypted without credentials")
+	}
+	wrongKey := key
+	wrongKey.KeyValue = bytes.Repeat([]byte{0xff}, len(key.KeyValue))
+	invalidReply := newReply()
+	if ok, err := invalidReply.VerifyWithReplyKey(cfg, credentials.New(testUser, testRealm), request, wrongKey); ok || err == nil {
+		t.Fatalf("wrong-key verification = %v, %v", ok, err)
+	}
+}
+
 func TestUnmarshalASRep(t *testing.T) {
 	t.Parallel()
 	var a ASRep
@@ -117,6 +184,81 @@ func TestUnmarshalASRep(t *testing.T) {
 	assert.Equal(t, testdata.TEST_ETYPE, a.EncPart.EType, "Etype of encrypted part not as expected")
 	assert.Equal(t, iana.PVNO, a.EncPart.KVNO, "Encrypted part KVNO not as expected")
 	assert.Equal(t, testdata.TEST_CIPHERTEXT, string(a.EncPart.Cipher), "Ticket encrypted part cipher not as expected")
+}
+
+func TestASRepVerifierInvariants(t *testing.T) {
+	now := time.Now().UTC()
+	cname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
+	sname := types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/EXAMPLE.ORG")
+	address := types.HostAddress{AddrType: 2, Address: []byte{192, 0, 2, 1}}
+	request := ASReq{KDCReqFields: KDCReqFields{ReqBody: KDCReqBody{CName: cname, Realm: "EXAMPLE.ORG", SName: sname, Nonce: 42, Addresses: []types.HostAddress{address}, KDCOptions: types.NewKrbFlags()}}}
+	base := ASRep{KDCRepFields: KDCRepFields{CName: cname, CRealm: "EXAMPLE.ORG", DecryptedEncPart: EncKDCRepPart{Nonce: 42, SName: sname, SRealm: "EXAMPLE.ORG", CAddr: []types.HostAddress{address}, AuthTime: now}}}
+	cfg := config.New()
+	creds := credentials.New("original", "ORIGINAL.ORG")
+	if ok, err := base.verifyWithReplyKey(cfg, creds, request, types.EncryptionKey{}, nil); !ok || err != nil || !creds.CName().Equal(cname) || creds.Domain() != "EXAMPLE.ORG" {
+		t.Fatalf("valid AS reply = %v, %v, %v@%s", ok, err, creds.CName(), creds.Domain())
+	}
+
+	tests := map[string]func(*ASRep){
+		"cname": func(reply *ASRep) { reply.CName = types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "bob") },
+		"crealm": func(reply *ASRep) { reply.CRealm = "OTHER.ORG" },
+		"nonce": func(reply *ASRep) { reply.DecryptedEncPart.Nonce++ },
+		"sname": func(reply *ASRep) { reply.DecryptedEncPart.SName = types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/OTHER.ORG") },
+		"srealm": func(reply *ASRep) { reply.DecryptedEncPart.SRealm = "OTHER.ORG" },
+		"address": func(reply *ASRep) { reply.DecryptedEncPart.CAddr = []types.HostAddress{{AddrType: 2, Address: []byte{192, 0, 2, 2}}} },
+		"clock skew": func(reply *ASRep) { reply.DecryptedEncPart.AuthTime = now.Add(-time.Hour) },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			reply := base
+			mutate(&reply)
+			if ok, err := reply.verifyWithReplyKey(cfg, credentials.New("alice", "EXAMPLE.ORG"), request, types.EncryptionKey{}, nil); ok || err == nil {
+				t.Fatalf("invalid AS reply accepted: %v, %v", ok, err)
+			}
+		})
+	}
+	canonicalRequest := request
+	types.SetFlag(&canonicalRequest.ReqBody.KDCOptions, flags.Canonicalize)
+	canonicalReply := base
+	canonicalReply.CName = types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "canonical-alice")
+	if ok, err := canonicalReply.verifyWithReplyKey(cfg, credentials.New("alice", "EXAMPLE.ORG"), canonicalRequest, types.EncryptionKey{}, nil); !ok || err != nil {
+		t.Fatalf("canonical AS reply = %v, %v", ok, err)
+	}
+}
+
+func TestTGSRepVerifierInvariants(t *testing.T) {
+	now := time.Now().UTC()
+	cname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
+	sname := types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "HTTP/server.example.org")
+	address := types.HostAddress{AddrType: 2, Address: []byte{192, 0, 2, 1}}
+	request := TGSReq{KDCReqFields: KDCReqFields{ReqBody: KDCReqBody{CName: cname, Realm: "EXAMPLE.ORG", SName: sname, Nonce: 42, Addresses: []types.HostAddress{address}, KDCOptions: types.NewKrbFlags()}}}
+	base := TGSRep{KDCRepFields: KDCRepFields{CName: cname, Ticket: Ticket{Realm: "EXAMPLE.ORG", SName: sname}, DecryptedEncPart: EncKDCRepPart{Nonce: 42, SRealm: "EXAMPLE.ORG", CAddr: []types.HostAddress{address}, StartTime: now, AuthTime: now}}}
+	cfg := config.New()
+	if ok, err := base.Verify(cfg, request); !ok || err != nil {
+		t.Fatalf("valid TGS reply = %v, %v", ok, err)
+	}
+	tests := map[string]func(*TGSRep){
+		"cname": func(reply *TGSRep) { reply.CName = types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "bob") },
+		"ticket realm": func(reply *TGSRep) { reply.Ticket.Realm = "OTHER.ORG" },
+		"nonce": func(reply *TGSRep) { reply.DecryptedEncPart.Nonce++ },
+		"service realm": func(reply *TGSRep) { reply.DecryptedEncPart.SRealm = "OTHER.ORG" },
+		"address": func(reply *TGSRep) { reply.DecryptedEncPart.CAddr = []types.HostAddress{{AddrType: 2, Address: []byte{192, 0, 2, 2}}} },
+		"clock skew": func(reply *TGSRep) { reply.DecryptedEncPart.StartTime = now.Add(-time.Hour); reply.DecryptedEncPart.AuthTime = now.Add(-time.Hour) },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			reply := base
+			mutate(&reply)
+			if ok, err := reply.Verify(cfg, request); ok || err == nil {
+				t.Fatalf("invalid TGS reply accepted: %v, %v", ok, err)
+			}
+		})
+	}
+	s4u := base
+	s4u.CName = types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "impersonated")
+	if ok, err := s4u.VerifyS4U(cfg, request); !ok || err != nil {
+		t.Fatalf("S4U TGS reply = %v, %v", ok, err)
+	}
 }
 
 func TestUnmarshalASRep_optionalsNULL(t *testing.T) {

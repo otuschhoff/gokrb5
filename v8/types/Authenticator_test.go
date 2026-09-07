@@ -97,3 +97,20 @@ func TestMarshalAuthenticator(t *testing.T) {
 	}
 	assert.Equal(t, b, mb, "Marshal bytes of Authenticator not as expected")
 }
+
+func TestNewAuthenticatorAndGenerateSubKey(t *testing.T) {
+	principal := NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
+	authenticator, err := NewAuthenticator("EXAMPLE.ORG", principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if authenticator.AVNO != iana.PVNO || authenticator.CRealm != "EXAMPLE.ORG" || !authenticator.CName.Equal(principal) || authenticator.CTime.IsZero() || authenticator.Cusec < 0 || authenticator.Cusec >= 1000000 {
+		t.Fatalf("authenticator = %+v", authenticator)
+	}
+	if err := authenticator.GenerateSeqNumberAndSubKey(17, 16); err != nil {
+		t.Fatal(err)
+	}
+	if authenticator.SubKey.KeyType != 17 || len(authenticator.SubKey.KeyValue) != 16 || authenticator.SeqNumber < 0 {
+		t.Fatalf("generated sequence/subkey = %d/%+v", authenticator.SeqNumber, authenticator.SubKey)
+	}
+}

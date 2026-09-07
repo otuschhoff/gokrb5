@@ -112,6 +112,36 @@ func TestNewASReqIncludesPACRequest(t *testing.T) {
 	assert.False(t, pacRequest.IncludePAC)
 }
 
+func TestASRequestConvenienceConstructors(t *testing.T) {
+	cfg := config.New()
+	cfg.LibDefaults.NoAddresses = true
+	cname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
+
+	tgt, err := NewASReqForTGT("EXAMPLE.COM", cfg, cname)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tgt.ReqBody.SName.NameType != nametype.KRB_NT_SRV_INST || !assert.ObjectsAreEqual(tgt.ReqBody.SName.NameString, []string{"krbtgt", "EXAMPLE.COM"}) {
+		t.Fatalf("TGT service principal = %+v", tgt.ReqBody.SName)
+	}
+	lifetime := 30 * time.Minute
+	tgt, err = NewASReqForTGTWithOptions("EXAMPLE.COM", cfg, cname, ASReqOptions{Lifetime: &lifetime})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Until(tgt.ReqBody.Till) > lifetime+time.Second {
+		t.Fatalf("TGT lifetime exceeds requested value: %v", time.Until(tgt.ReqBody.Till))
+	}
+
+	changePassword, err := NewASReqForChgPasswd("EXAMPLE.COM", cfg, cname)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !assert.ObjectsAreEqual(changePassword.ReqBody.SName.NameString, []string{"kadmin", "changepw"}) {
+		t.Fatalf("change-password service principal = %+v", changePassword.ReqBody.SName)
+	}
+}
+
 func TestTGSReqMSKILEOptions(t *testing.T) {
 	cfg := config.New()
 	cfg.LibDefaults.NoAddresses = true
@@ -159,6 +189,92 @@ func TestTGSReqForwardedOptions(t *testing.T) {
 	assert.True(t, types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Forwardable))
 	assert.True(t, types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Forwarded))
 	assert.Empty(t, req.ReqBody.Addresses)
+}
+
+func TestTGSReqFalseOverridesAndHelpers(t *testing.T) {
+	cfg := config.New()
+	cfg.LibDefaults.NoAddresses = true
+	cfg.LibDefaults.Forwardable = true
+	no := false
+	req, err := tgsReq(types.PrincipalName{}, types.PrincipalName{}, "EXAMPLE.ORG", true, cfg, TGSReqOptions{
+		Forwardable: &no,
+		Forwarded:   &no,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Forwardable) || types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Forwarded) {
+		t.Fatal("false flag overrides were not honored")
+	}
+	if !types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Renew) || !types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Renewable) {
+		t.Fatal("renewal flags were not set")
+	}
+
+	for _, keyType := range []int32{etypeID.DES_CBC_CRC, etypeID.DES_CBC_MD4, etypeID.DES_CBC_MD5, etypeID.RC4_HMAC} {
+		if supportsS4UX509(keyType) {
+			t.Fatalf("legacy enctype %d supports S4U X509", keyType)
+		}
+	}
+	if !supportsS4UX509(etypeID.AES128_CTS_HMAC_SHA1_96) {
+		t.Fatal("AES enctype does not support S4U X509")
+	}
+	options := []int{flags.PACOptionClaims}
+	if got := appendPACOption(options, flags.PACOptionClaims); len(got) != 1 {
+		t.Fatalf("duplicate PAC option appended: %v", got)
+	}
+	if got := appendPACOption(options, flags.PACOptionBranchAware); len(got) != 2 {
+		t.Fatalf("new PAC option not appended: %v", got)
+	}
+}
+
+func TestSetPADataWithSubkeyRejectsUnsupportedEType(t *testing.T) {
+	cfg := config.New()
+	cfg.LibDefaults.NoAddresses = true
+	req, err := tgsReq(types.PrincipalName{}, types.PrincipalName{}, "EXAMPLE.ORG", false, cfg, TGSReqOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := req.SetPADataWithSubkey(Ticket{}, types.EncryptionKey{KeyType: -1}); err == nil {
+		t.Fatal("unsupported session-key enctype accepted")
+	}
+}
+
+func TestTGSRequestConvenienceConstructors(t *testing.T) {
+	cfg := s4uTestConfig()
+	cname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
+	sname := types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "HTTP/server.example.org")
+	tgt := s4uTestTicket()
+	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
+
+	request, err := NewTGSReq(cname, "EXAMPLE.COM", cfg, tgt, key, sname, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !request.ReqBody.CName.Equal(cname) || !request.ReqBody.SName.Equal(sname) || len(request.PAData) == 0 {
+		t.Fatalf("TGS request = %+v", request.ReqBody)
+	}
+
+	forwarded := true
+	request, err = NewTGSReqWithOptions(cname, "EXAMPLE.COM", cfg, tgt, key, sname, false, TGSReqOptions{Forwarded: &forwarded})
+	if err != nil || !types.IsFlagSet(&request.ReqBody.KDCOptions, flags.Forwarded) {
+		t.Fatalf("TGS options request = %+v, %v", request.ReqBody, err)
+	}
+
+	verifyingTGT := s4uTestTicket()
+	verifyingTGT.SName = types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/OTHER.COM")
+	request, err = NewUser2UserTGSReq(cname, "EXAMPLE.COM", cfg, tgt, key, sname, false, verifyingTGT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !types.IsFlagSet(&request.ReqBody.KDCOptions, flags.EncTktInSkey) || len(request.ReqBody.AdditionalTickets) != 1 ||
+		!request.ReqBody.AdditionalTickets[0].SName.Equal(verifyingTGT.SName) {
+		t.Fatalf("user-to-user request = %+v", request.ReqBody)
+	}
+
+	request, err = NewUser2UserTGSReqWithOptions(cname, "EXAMPLE.COM", cfg, tgt, key, sname, true, verifyingTGT, TGSReqOptions{Forwarded: &forwarded})
+	if err != nil || !request.Renewal || !types.IsFlagSet(&request.ReqBody.KDCOptions, flags.Forwarded) {
+		t.Fatalf("user-to-user options request = %+v, %v", request.ReqBody, err)
+	}
 }
 
 func boolPointer(value bool) *bool { return &value }

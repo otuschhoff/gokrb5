@@ -5,7 +5,9 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/jcmturner/rpc/v2/mstypes"
 	"github.com/otuschhoff/gokrb5/v8/crypto"
+	"github.com/otuschhoff/gokrb5/v8/iana/chksumtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/iana/keyusage"
 	"github.com/otuschhoff/gokrb5/v8/types"
@@ -33,6 +35,95 @@ func TestPACMarshalAlignmentAndPreservation(t *testing.T) {
 	}
 	if !bytes.Equal(data, again) {
 		t.Fatal("marshal is not deterministic")
+	}
+}
+
+func TestPACMarshalReencodesTypedBuffers(t *testing.T) {
+	signature := &SignatureData{
+		SignatureType: uint32(chksumtype.HMAC_SHA1_96_AES128),
+		Signature:     bytes.Repeat([]byte{0x5a}, 12),
+	}
+	requestor := &Requestor{SID: mstypes.RPCSID{
+		Revision: 1, SubAuthorityCount: 1,
+		IdentifierAuthority: [6]byte{0, 0, 0, 0, 0, 5},
+		SubAuthority:        []uint32{500},
+	}}
+	pac := PACType{
+		AttributesInfo: &AttributesInfo{Flags: PACWasRequested},
+		Requestor:      requestor,
+		ClientInfo:     &ClientInfo{Name: "alice"},
+		UPNDNSInfo:     &UPNDNSInfo{UPN: "alice@example.org", DNSDomain: "EXAMPLE.ORG"},
+		ServerChecksum: signature,
+		KDCChecksum:    signature,
+		TicketChecksum: signature,
+		FullChecksum:   signature,
+	}
+	typeIDs := []uint32{
+		infoTypePACServerSignatureData, infoTypePACKDCSignatureData,
+		infoTypePACTicketChecksum, infoTypePACFullChecksum,
+		infoTypePACAttributesInfo, infoTypePACRequestor,
+		infoTypePACClientInfo, infoTypeUPNDNSInfo, 99,
+	}
+	placeholders := make([]pacBuffer, len(typeIDs))
+	for i, typeID := range typeIDs {
+		placeholders[i] = pacBuffer{typeID: typeID, data: []byte{byte(i)}}
+	}
+	raw, err := marshalPACBuffers(0, placeholders)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pac.Unmarshal(raw); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := pac.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, buffer := range readTestBuffers(t, encoded) {
+		if buffer.typeID == 99 {
+			if !bytes.Equal(buffer.data, []byte{8}) {
+				t.Fatalf("unknown buffer payload = %x", buffer.data)
+			}
+			continue
+		}
+		if len(buffer.data) <= 1 {
+			t.Fatalf("typed buffer %d was not re-encoded: %x", buffer.typeID, buffer.data)
+		}
+	}
+}
+
+func TestPACMarshalRejectsInvalidMetadata(t *testing.T) {
+	tests := map[string]*PACType{
+		"version": {Version: 1, Buffers: []InfoBuffer{{}}},
+		"empty":   {},
+		"duplicate": {
+			Buffers: []InfoBuffer{{ULType: 1, Offset: 40}, {ULType: 1, Offset: 40}},
+			Data:    make([]byte, 40),
+		},
+		"out of bounds": {
+			Buffers: []InfoBuffer{{ULType: 1, CBBufferSize: 2, Offset: 24}},
+			Data:    make([]byte, 24),
+		},
+	}
+	for name, value := range tests {
+		t.Run(name, func(t *testing.T) {
+			if _, err := value.Marshal(); err == nil {
+				t.Fatal("invalid PAC metadata was accepted")
+			}
+		})
+	}
+
+	raw, err := marshalPACBuffers(0, []pacBuffer{{typeID: infoTypePACAttributesInfo, data: []byte{1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value PACType
+	if err := value.Unmarshal(raw); err != nil {
+		t.Fatal(err)
+	}
+	value.AttributesInfo = &AttributesInfo{FlagsLength: 1}
+	if _, err := value.Marshal(); err == nil {
+		t.Fatal("typed buffer marshal failure was ignored")
 	}
 }
 

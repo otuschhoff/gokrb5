@@ -1,13 +1,19 @@
 package kadmin
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"testing"
+	"time"
 
 	"github.com/otuschhoff/gokrb5/v8/iana"
+	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/iana/msgtype"
+	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
+	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
+	"github.com/otuschhoff/gokrb5/v8/types"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -71,6 +77,80 @@ func TestReplyUnmarshalRejectsInvalidLengths(t *testing.T) {
 	assert.Error(t, reply.Unmarshal([]byte{0, 1}))
 	assert.Error(t, reply.Unmarshal([]byte{0, 10, 0, 1, 0, 0}))
 	assert.Error(t, reply.Unmarshal([]byte{0, 6, 0, 1, 0, 1}))
+}
+
+func TestReplyUnmarshalRejectsInvalidContents(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{name: "version", data: []byte{0, 6, 0, 2, 0, 0}},
+		{name: "AP-REP", data: []byte{0, 7, 0, 1, 0, 1, 0}},
+		{name: "KRB-ERROR", data: []byte{0, 7, 0, 1, 0, 0, 0}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var reply Reply
+			if err := reply.Unmarshal(test.data); err == nil {
+				t.Fatal("malformed reply was accepted")
+			}
+		})
+	}
+
+	data, err := hex.DecodeString(testdata.MarshaledKpasswd_Rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const truncatedLength = 6 + 140 + 1
+	data = data[:truncatedLength]
+	binary.BigEndian.PutUint16(data[:2], truncatedLength)
+	var reply Reply
+	if err := reply.Unmarshal(data); err == nil {
+		t.Fatal("malformed KRB-PRIV was accepted")
+	}
+}
+
+func TestChangePasswordRequestAndReply(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	cname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
+	sname := types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "kadmin/changepw")
+	serviceKey := types.EncryptionKey{KeyType: etypeID.AES256_CTS_HMAC_SHA1_96, KeyValue: bytes.Repeat([]byte{1}, 32)}
+	ticket, sessionKey, err := messages.NewTicketWithKey(cname, "EXAMPLE.ORG", sname, "EXAMPLE.ORG", types.NewKrbFlags(), serviceKey, 1, now, now, now.Add(time.Hour), now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, replyKey, err := ChangePasswdMsg(cname, "EXAMPLE.ORG", "new-password", ticket, sessionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := request.Marshal()
+	if err != nil || len(encoded) < 6 || int(binary.BigEndian.Uint16(encoded[:2])) != len(encoded) || binary.BigEndian.Uint16(encoded[2:4]) != 0xff80 {
+		t.Fatalf("marshaled request = %x, %v", encoded, err)
+	}
+
+	part := messages.EncKrbPrivPart{UserData: []byte{0, 0, 'o', 'k'}, Timestamp: now}
+	private := messages.NewKRBPriv(part)
+	if err := private.EncryptEncPart(replyKey); err != nil {
+		t.Fatal(err)
+	}
+	reply := Reply{KRBPriv: private}
+	if err := reply.Decrypt(replyKey); err != nil || reply.ResultCode != 0 || reply.Result != "ok" {
+		t.Fatalf("decrypted reply = %d/%q, %v", reply.ResultCode, reply.Result, err)
+	}
+	reply.KRBPriv.EncPart.Cipher[0] ^= 0xff
+	if err := reply.Decrypt(replyKey); err == nil {
+		t.Fatal("tampered reply decrypted")
+	}
+
+	krbError := messages.NewKRBError(sname, "EXAMPLE.ORG", 1, "denied")
+	errorReply := Reply{IsKRBError: true, KRBError: krbError}
+	if err := errorReply.Decrypt(replyKey); err == nil {
+		t.Fatal("KRB error reply returned no error")
+	}
+	if _, _, err := ChangePasswdMsg(cname, "EXAMPLE.ORG", "password", ticket, types.EncryptionKey{KeyType: -1}); err == nil {
+		t.Fatal("unsupported session key accepted")
+	}
 }
 
 // Request marshal is tested via integration test in the client package due to the dynamic keys and encryption.

@@ -85,6 +85,10 @@ func parseBasicHeaderValue(s string) (domain, username, password string, err err
 	}
 	v := string(b)
 	vc := strings.SplitN(v, ":", 2)
+	if len(vc) != 2 {
+		err = fmt.Errorf("basic authentication value does not contain a password separator")
+		return
+	}
 	password = vc[1]
 	// Domain and username can be specified in 2 formats:
 	// <Username> - no domain specified

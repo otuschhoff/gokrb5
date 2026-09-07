@@ -108,6 +108,30 @@ func TestUnmarshalAllFixtures(t *testing.T) {
 	}
 }
 
+func TestStringJSONAndWrite(t *testing.T) {
+	kt := New()
+	if err := kt.AddEntry("HTTP/server.example.org", "EXAMPLE.ORG", "password", time.Unix(1, 0).UTC(), 2, etypeID.AES256_CTS_HMAC_SHA1_96); err != nil {
+		t.Fatal(err)
+	}
+	text := kt.String()
+	if !strings.Contains(text, "KVNO Timestamp") || !strings.Contains(text, "HTTP/server.example.org@EXAMPLE.ORG") {
+		t.Fatalf("String output = %q", text)
+	}
+	jsonText, err := kt.JSON()
+	if err != nil || !strings.Contains(jsonText, "EXAMPLE.ORG") || !strings.Contains(jsonText, "HTTP") {
+		t.Fatalf("JSON output = %q, %v", jsonText, err)
+	}
+	var output strings.Builder
+	n, err := kt.Write(&output)
+	if err != nil || n != output.Len() || n == 0 {
+		t.Fatalf("Write = %d bytes, %v", n, err)
+	}
+	var decoded Keytab
+	if err := decoded.Unmarshal([]byte(output.String())); err != nil || len(decoded.Entries) != 1 {
+		t.Fatalf("written keytab decode = %d entries, %v", len(decoded.Entries), err)
+	}
+}
+
 func TestUnmarshal(t *testing.T) {
 	t.Parallel()
 	b, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER1_TEST_GOKRB5)

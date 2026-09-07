@@ -26,6 +26,75 @@ func ccacheFixtures() map[string]string {
 	}
 }
 
+func TestCCacheReadHelpersBoundsAndValues(t *testing.T) {
+	data := []byte{0x7f, 0x12, 0x34, 0xff, 0xff, 0xff, 0xfe}
+	position := 0
+	if value, err := readUint8(data, &position); err != nil || value != 0x7f {
+		t.Fatalf("readUint8 = %#x, %v", value, err)
+	}
+	if value, err := readUint16(data, &position, binary.BigEndian); err != nil || value != 0x1234 {
+		t.Fatalf("readUint16 = %#x, %v", value, err)
+	}
+	if value, err := readInt32(data, &position, binary.BigEndian); err != nil || value != -2 {
+		t.Fatalf("readInt32 = %d, %v", value, err)
+	}
+	if _, err := readUint8(data, &position); err == nil {
+		t.Fatal("readUint8 accepted EOF")
+	}
+	for _, invalid := range []int{-1, len(data)} {
+		position = invalid
+		if _, err := readUint16(data, &position, binary.BigEndian); err == nil {
+			t.Fatalf("readUint16 accepted position %d", invalid)
+		}
+		position = invalid
+		if _, err := readInt32(data, &position, binary.BigEndian); err == nil {
+			t.Fatalf("readInt32 accepted position %d", invalid)
+		}
+		position = invalid
+		if _, err := readBytes(data, &position, 1); err == nil {
+			t.Fatalf("readBytes accepted position %d", invalid)
+		}
+	}
+	position = 0
+	if _, err := readBytes(data, &position, -1); err == nil {
+		t.Fatal("readBytes accepted a negative size")
+	}
+	position = 0
+	if _, err := readBytes(data, &position, len(data)+1); err == nil {
+		t.Fatal("readBytes accepted an oversized field")
+	}
+
+	for name, read := range map[string]func([]byte, *int) error{
+		"data header": func(value []byte, offset *int) error {
+			_, err := readData(value, offset, binary.BigEndian)
+			return err
+		},
+		"address type": func(value []byte, offset *int) error {
+			_, err := readAddress(value, offset, binary.BigEndian)
+			return err
+		},
+		"authdata type": func(value []byte, offset *int) error {
+			_, err := readAuthDataEntry(value, offset, binary.BigEndian)
+			return err
+		},
+		"timestamp": func(value []byte, offset *int) error {
+			_, err := readTimestamp(value, offset, binary.BigEndian)
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			offset := 0
+			if err := read([]byte{0}, &offset); err == nil {
+				t.Fatal("truncated value was accepted")
+			}
+		})
+	}
+	position = 0
+	if _, err := readData([]byte{0xff, 0xff, 0xff, 0xff}, &position, binary.BigEndian); err == nil {
+		t.Fatal("negative data length was accepted")
+	}
+}
+
 func TestCCacheMarshalByteExactFixtures(t *testing.T) {
 	for name, encoded := range ccacheFixtures() {
 		t.Run(name, func(t *testing.T) {
@@ -338,6 +407,47 @@ func TestCCacheMarshalRejectsInvalidState(t *testing.T) {
 	cache.Credentials = append(cache.Credentials, nil)
 	_, err = cache.Marshal()
 	assert.Error(t, err)
+
+	invalidHeader := NewCCache(types.PrincipalName{NameString: []string{"user"}}, "EXAMPLE.ORG")
+	invalidHeader.Header.fields[0].value = []byte{1}
+	_, err = invalidHeader.Marshal()
+	assert.ErrorContains(t, err, "KDC offset")
+
+	newCredential := func() *Credential {
+		return &Credential{
+			Client:      Principal{Realm: "EXAMPLE.ORG", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user")},
+			Server:      Principal{Realm: "EXAMPLE.ORG", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/EXAMPLE.ORG")},
+			Key:         types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)},
+			EndTime:     time.Unix(1, 0),
+			TicketFlags: types.NewKrbFlags(),
+		}
+	}
+	tests := map[string]func(*Credential){
+		"negative enctype": func(credential *Credential) { credential.Key.KeyType = -1 },
+		"large enctype":    func(credential *Credential) { credential.Key.KeyType = 1 << 16 },
+		"early timestamp":  func(credential *Credential) { credential.AuthTime = time.Unix(-1<<31-1, 0) },
+		"late timestamp":   func(credential *Credential) { credential.AuthTime = time.Unix(1<<31, 0) },
+		"ticket flags":     func(credential *Credential) { credential.TicketFlags.Bytes = []byte{1} },
+		"negative address": func(credential *Credential) { credential.Addresses = []types.HostAddress{{AddrType: -1}} },
+		"large address":    func(credential *Credential) { credential.Addresses = []types.HostAddress{{AddrType: 1 << 16}} },
+		"negative authdata": func(credential *Credential) {
+			credential.AuthData = []types.AuthorizationDataEntry{{ADType: -1}}
+		},
+		"large authdata": func(credential *Credential) {
+			credential.AuthData = []types.AuthorizationDataEntry{{ADType: 1 << 16}}
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			value := NewCCache(types.PrincipalName{NameString: []string{"user"}}, "EXAMPLE.ORG")
+			credential := newCredential()
+			mutate(credential)
+			value.Credentials = []*Credential{credential}
+			if _, err := value.Marshal(); err == nil {
+				t.Fatal("invalid credential was accepted")
+			}
+		})
+	}
 }
 
 func TestCCacheWriteFileAtomicAndMode0600(t *testing.T) {

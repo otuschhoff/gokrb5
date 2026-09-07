@@ -79,7 +79,7 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 		if err != nil {
 			return messages.ASRep{}, krberror.Errorf(err, krberror.EncodingError, "AS Exchange Error: failed marshaling AS_REQ")
 		}
-		rb, err = cl.sendASRequest(b, realm)
+		rb, err = cl.sendKDCRequest(b, realm)
 		if err == nil {
 			requestBytes = b
 			break

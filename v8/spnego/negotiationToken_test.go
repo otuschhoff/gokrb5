@@ -2,6 +2,7 @@ package spnego
 
 import (
 	"encoding/hex"
+	"strings"
 	"testing"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
@@ -169,6 +170,52 @@ func TestNegTokenInit2NegHintsRoundTrip(t *testing.T) {
 	require.Equal(t, token.MechTypes, decoded.MechTypes)
 	require.Equal(t, token.NegHints, decoded.NegHints)
 	require.Equal(t, token.MechListMIC, decoded.MechListMIC)
+}
+
+func TestNegotiationTokenValidationBranches(t *testing.T) {
+	responseBytes, err := hex.DecodeString(testNegTokenResp)
+	require.NoError(t, err)
+	var response NegTokenResp
+	require.NoError(t, response.Unmarshal(responseBytes))
+	if response.State() != NegStateAcceptCompleted || response.Context() != nil {
+		t.Fatalf("response state/context = %v/%v", response.State(), response.Context())
+	}
+	if ok, status := response.Verify(); ok || status.Code != gssapi.StatusContinueNeeded {
+		t.Fatalf("empty response verification = %v, %+v", ok, status)
+	}
+	response.ResponseToken = []byte("malformed")
+	if ok, status := response.Verify(); ok || status.Code != gssapi.StatusDefectiveToken {
+		t.Fatalf("malformed response verification = %v, %+v", ok, status)
+	}
+	response = NegTokenResp{SupportedMech: asn1.ObjectIdentifier{1, 2, 3}}
+	if ok, status := response.Verify(); ok || status.Code != gssapi.StatusBadMech {
+		t.Fatalf("unsupported response verification = %v, %+v", ok, status)
+	}
+
+	init := NegTokenInit{MechTypes: []asn1.ObjectIdentifier{gssapi.OIDKRB5.OID()}}
+	if ok, status := init.Verify(); ok || status.Code != gssapi.StatusContinueNeeded || init.Context() != nil {
+		t.Fatalf("empty init verification = %v, %+v", ok, status)
+	}
+	init.MechTokenBytes = []byte("malformed")
+	if ok, status := init.Verify(); ok || status.Code != gssapi.StatusDefectiveToken {
+		t.Fatalf("malformed init verification = %v, %+v", ok, status)
+	}
+	init = NegTokenInit{MechTypes: []asn1.ObjectIdentifier{{1, 2, 3}}}
+	if ok, status := init.Verify(); ok || status.Code != gssapi.StatusBadMech {
+		t.Fatalf("unsupported init verification = %v, %+v", ok, status)
+	}
+
+	initBytes, err := hex.DecodeString(testNegTokenInit)
+	require.NoError(t, err)
+	if err := response.Unmarshal(initBytes); err == nil || !strings.Contains(err.Error(), "not that of a NegTokenResp") {
+		t.Fatalf("response accepted init token: %v", err)
+	}
+	if err := init.Unmarshal(responseBytes); err == nil || !strings.Contains(err.Error(), "not that of a NegTokenInit") {
+		t.Fatalf("init accepted response token: %v", err)
+	}
+	if err := response.Unmarshal([]byte("malformed")); err == nil {
+		t.Fatal("response accepted malformed token")
+	}
 }
 
 func FuzzUnmarshalNegToken(f *testing.F) {

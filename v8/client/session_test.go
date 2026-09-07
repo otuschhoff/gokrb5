@@ -12,6 +12,7 @@ import (
 
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
+	"github.com/otuschhoff/gokrb5/v8/iana/flags"
 	"github.com/otuschhoff/gokrb5/v8/iana/msflags"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
 	"github.com/otuschhoff/gokrb5/v8/messages"
@@ -165,6 +166,40 @@ func TestSessions_JSON(t *testing.T) {
 func TestRenewRequiresHomeRealmTGT(t *testing.T) {
 	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", config.New())
 	assert.EqualError(t, cl.Renew(), "TGT session not found for realm EXAMPLE.ORG")
+}
+
+func TestRenewAndRefreshSessionRoundTrip(t *testing.T) {
+	client, _, tgt, oldKey := newCoverageTGSRequest(t)
+	now := time.Now().UTC()
+	session := &session{
+		realm: "EXAMPLE.ORG", authTime: now.Add(-time.Hour), startTime: now.Add(-time.Hour),
+		endTime: now.Add(time.Hour), renewTill: now.Add(2 * time.Hour), tgt: tgt, sessionKey: oldKey,
+	}
+	client.sessions.update(session)
+	newKey := s4uTestKey(10)
+	calls := 0
+	client.sendToKDCFunc = func(requestBytes []byte, realm string) ([]byte, error) {
+		calls++
+		var request messages.TGSReq
+		if err := request.Unmarshal(requestBytes); err != nil {
+			t.Fatal(err)
+		}
+		if realm != "EXAMPLE.ORG" || !types.IsFlagSet(&request.ReqBody.KDCOptions, flags.Renew) {
+			t.Fatalf("renew request = realm %q, options %v", realm, request.ReqBody.KDCOptions)
+		}
+		return marshalS4UTGSReply(t, request, oldKey, newKey, client.Credentials.CName(), client.Credentials.Realm(), request.ReqBody.SName), nil
+	}
+	if err := client.Renew(); err != nil {
+		t.Fatal(err)
+	}
+	if string(session.sessionKey.KeyValue) != string(newKey.KeyValue) {
+		t.Fatalf("renewed key = %x", session.sessionKey.KeyValue)
+	}
+	session.sessionKey = oldKey
+	session.renewTill = now.Add(2 * time.Hour)
+	if renewed, err := client.refreshSession(session); err != nil || !renewed || calls != 2 {
+		t.Fatalf("refresh = renewed %v, calls %d, error %v", renewed, calls, err)
+	}
 }
 
 func TestAddSessionDefaultsStartTimeToAuthTime(t *testing.T) {

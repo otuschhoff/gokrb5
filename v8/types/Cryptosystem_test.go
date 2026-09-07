@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"testing"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/otuschhoff/gokrb5/v8/iana"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/stretchr/testify/assert"
@@ -88,4 +89,18 @@ func TestMarshalEncryptedData(t *testing.T) {
 		t.Fatalf("Marshal of ticket errored: %v", err)
 	}
 	assert.Equal(t, b, mb, "Marshal bytes of Encrypted Data not as expected")
+}
+
+func TestChecksumUnmarshal(t *testing.T) {
+	want := Checksum{CksumType: 7, Checksum: []byte("checksum")}
+	b, err := asn1.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Checksum
+	if err := got.Unmarshal(b); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, want, got)
+	assert.Error(t, got.Unmarshal([]byte{0x30, 0x01}))
 }

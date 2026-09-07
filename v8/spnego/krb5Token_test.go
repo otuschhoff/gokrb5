@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+	"github.com/otuschhoff/gokrb5/v8/asn1tools"
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/credentials"
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
@@ -43,6 +44,67 @@ func TestKRB5Token_Unmarshal(t *testing.T) {
 	assert.Equal(t, msgtype.KRB_AP_REQ, mt.APReq.MsgType, "KRB5Token AP_REQ does not have the right message type.")
 	assert.Equal(t, int32(0), mt.KRBError.ErrorCode, "KRBError in KRB5Token does not indicate no error.")
 	assert.Equal(t, int32(18), mt.APReq.EncryptedAuthenticator.EType, "Authenticator within AP_REQ does not have the etype expected.")
+}
+
+func TestKRB5TokenFramingAndClassificationGuards(t *testing.T) {
+	tokenID := func(value string) []byte {
+		decoded, err := hex.DecodeString(value)
+		require.NoError(t, err)
+		return decoded
+	}
+	wrapped := func(oid asn1.ObjectIdentifier, id []byte, payload []byte) []byte {
+		header, err := asn1.Marshal(oid)
+		require.NoError(t, err)
+		return asn1tools.AddASNAppTag(append(append(header, id...), payload...), 0)
+	}
+
+	apReq := &KRB5Token{tokID: tokenID(TOK_ID_KRB_AP_REQ)}
+	apRep := &KRB5Token{tokID: tokenID(TOK_ID_KRB_AP_REP)}
+	krbError := &KRB5Token{tokID: tokenID(TOK_ID_KRB_ERROR)}
+	unknown := &KRB5Token{tokID: []byte{0xff, 0xff}}
+	assert.True(t, apReq.IsAPReq())
+	assert.True(t, apRep.IsAPRep())
+	assert.True(t, krbError.IsKRBError())
+	assert.False(t, unknown.IsAPReq())
+	assert.False(t, unknown.IsAPRep())
+	assert.False(t, unknown.IsKRBError())
+	assert.Equal(t, []int{gssapi.ContextFlagInteg}, appendContextFlag([]int{gssapi.ContextFlagInteg}, gssapi.ContextFlagInteg))
+	assert.Equal(t, []int{gssapi.ContextFlagInteg, gssapi.ContextFlagConf}, appendContextFlag([]int{gssapi.ContextFlagInteg}, gssapi.ContextFlagConf))
+
+	if _, err := (&KRB5Token{raw: true, tokID: []byte{0xff, 0xff}}).Marshal(); err == nil {
+		t.Fatal("unsupported raw token was marshaled")
+	}
+	if _, err := krbError.Marshal(); err == nil {
+		t.Fatal("KRB_ERROR token was marshaled")
+	}
+	if ok, status := apRep.Verify(); ok || status.Code != gssapi.StatusNoContext {
+		t.Fatalf("stateless AP_REP verification = %v, %v", ok, status)
+	}
+	if ok, status := unknown.Verify(); ok || status.Code != gssapi.StatusDefectiveToken {
+		t.Fatalf("unknown token verification = %v, %v", ok, status)
+	}
+	if ok, status := krbError.Verify(); ok || status.Code != gssapi.StatusDefectiveToken {
+		t.Fatalf("empty KRB_ERROR verification = %v, %v", ok, status)
+	}
+	krbError.KRBError.MsgType = msgtype.KRB_ERROR
+	if ok, status := krbError.Verify(); !ok || status.Code != gssapi.StatusUnavailable {
+		t.Fatalf("KRB_ERROR verification = %v, %v", ok, status)
+	}
+
+	badInputs := [][]byte{
+		{0x60, 0x00},
+		wrapped(asn1.ObjectIdentifier{1, 2, 3}, tokenID(TOK_ID_KRB_AP_REQ), nil),
+		wrapped(gssapi.OIDKRB5.OID(), nil, nil),
+		wrapped(gssapi.OIDKRB5.OID(), tokenID(TOK_ID_KRB_AP_REQ), []byte{1}),
+		wrapped(gssapi.OIDKRB5.OID(), tokenID(TOK_ID_KRB_AP_REP), []byte{1}),
+		wrapped(gssapi.OIDKRB5.OID(), tokenID(TOK_ID_KRB_ERROR), []byte{1}),
+	}
+	for i, input := range badInputs {
+		var token KRB5Token
+		if err := token.Unmarshal(input); err == nil {
+			t.Fatalf("malformed token %d was accepted", i)
+		}
+	}
 }
 
 func TestKRB5Token_newAuthenticatorChksum(t *testing.T) {

@@ -3,6 +3,7 @@ package spnego
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
@@ -141,6 +142,59 @@ func TestNegotiatorRejectsNoCommonMechanism(t *testing.T) {
 	}
 	if _, _, _, err := initiator.InitSecContext("host/server", response); !errors.Is(err, ErrNoCommonMechanism) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestNegotiatorLifecycleGuardsAndHelpers(t *testing.T) {
+	empty := NewNegotiator(nil)
+	if !empty.OID().Equal(gssapi.OIDSPNEGO.OID()) {
+		t.Fatalf("negotiator OID = %v", empty.OID())
+	}
+	if _, _, _, err := empty.InitSecContext("host/server", []byte("unexpected")); !errors.Is(err, ErrUnexpectedSPNEGO) {
+		t.Fatalf("unexpected initial input error = %v", err)
+	}
+	empty = NewNegotiator()
+	if _, _, _, err := empty.InitSecContext("host/server", nil); !errors.Is(err, ErrNoMechanisms) {
+		t.Fatalf("empty mechanism error = %v", err)
+	}
+	if _, _, _, err := empty.AcceptSecContext(nil); !errors.Is(err, ErrUnexpectedSPNEGO) {
+		t.Fatalf("empty acceptor input error = %v", err)
+	}
+
+	mechanism := newTestContextMechanism(1, "first")
+	negotiator := NewNegotiator(nil, mechanism, mechanism)
+	if len(negotiator.mechanisms) != 1 {
+		t.Fatalf("unique mechanisms = %d", len(negotiator.mechanisms))
+	}
+	if _, _, _, err := negotiator.InitSecContext("host/server", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := negotiator.InitSecContext("other/server", nil); err == nil || !strings.Contains(err.Error(), "target changed") {
+		t.Fatalf("target change error = %v", err)
+	}
+
+	initBytes, err := marshalSPNEGOToken(&SPNEGOToken{Init: true, NegTokenInit: NegTokenInit{MechTypes: []asn1.ObjectIdentifier{mechanism.OID()}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseSPNEGOResponse(initBytes); !errors.Is(err, ErrUnexpectedSPNEGO) {
+		t.Fatalf("initiator-as-response error = %v", err)
+	}
+	responseBytes, err := marshalSPNEGOToken(&SPNEGOToken{Resp: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseSPNEGOInitiator(responseBytes); !errors.Is(err, ErrUnexpectedSPNEGO) {
+		t.Fatalf("response-as-initiator error = %v", err)
+	}
+
+	conversation := &mechanismConversation{}
+	if conversation.String() != "SPNEGO(unselected)" {
+		t.Fatalf("unselected string = %q", conversation.String())
+	}
+	conversation.selected = mechanism
+	if !strings.Contains(conversation.String(), mechanism.OID().String()) {
+		t.Fatalf("selected string = %q", conversation.String())
 	}
 }
 

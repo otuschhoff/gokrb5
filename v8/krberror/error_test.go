@@ -45,3 +45,37 @@ func TestKrberrorNTStatus(t *testing.T) {
 		t.Fatalf("NTStatus = %v, %v", status, ok)
 	}
 }
+
+func TestPolicyErrorContracts(t *testing.T) {
+	cause := statusError{}
+	err := NewPolicyError(ErrDelegationNotPermitted, cause)
+	if err.Error() != "delegation not permitted: KDC error" || !errors.Is(err, ErrDelegationNotPermitted) || !errors.Is(err, cause) {
+		t.Fatalf("policy error = %q", err)
+	}
+	var policy PolicyError
+	if !errors.As(err, &policy) || !errors.Is(policy.Unwrap(), cause) {
+		t.Fatalf("policy unwrap = %v", policy.Unwrap())
+	}
+	status, ok := policy.NTStatus()
+	if !ok || status != ntstatus.STATUS_ACCOUNT_DISABLED {
+		t.Fatalf("policy NTStatus = %v, %v", status, ok)
+	}
+	withoutStatus := NewPolicyError(ErrProtocolTransitionNotPermitted, errors.New("denied")).(PolicyError)
+	if status, ok := withoutStatus.NTStatus(); ok || status != 0 {
+		t.Fatalf("missing NTStatus = %v, %v", status, ok)
+	}
+}
+
+func TestKrberrorConstructorsAndMissingStatus(t *testing.T) {
+	err := New(ConfigError, "invalid configuration")
+	if err.Error() != "[Root cause: Configuration_Error] invalid configuration" || err.Unwrap() != nil {
+		t.Fatalf("new error = %q, unwrap %v", err, err.Unwrap())
+	}
+	if status, ok := err.NTStatus(); ok || status != 0 {
+		t.Fatalf("missing NTStatus = %v, %v", status, ok)
+	}
+	formatted := NewErrorf(EncodingError, "bad field %d", 3)
+	if formatted.Error() != "[Root cause: Encoding_Error] Encoding_Error: bad field 3" {
+		t.Fatalf("formatted error = %q", formatted)
+	}
+}

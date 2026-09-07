@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"strings"
 	"testing"
@@ -105,6 +106,41 @@ func TestPACAllowsEmptyClientClaimsInfo(t *testing.T) {
 	}
 	if pac.ClientClaimsInfo != nil {
 		t.Fatal("empty client claims buffer produced claims")
+	}
+}
+
+func TestPACInfoBufferDecoderFailures(t *testing.T) {
+	typesToDecode := []uint32{
+		infoTypeKerbValidationInfo,
+		infoTypeCredentials,
+		infoTypePACServerSignatureData,
+		infoTypePACKDCSignatureData,
+		infoTypePACClientInfo,
+		infoTypeS4UDelegationInfo,
+		infoTypeUPNDNSInfo,
+		infoTypePACClientClaimsInfo,
+		infoTypePACDeviceInfo,
+		infoTypePACDeviceClaimsInfo,
+		infoTypePACTicketChecksum,
+		infoTypePACAttributesInfo,
+		infoTypePACRequestor,
+		infoTypePACFullChecksum,
+	}
+	credentialKey := types.EncryptionKey{KeyType: 17, KeyValue: bytes.Repeat([]byte{1}, 16)}
+	for _, typeID := range typesToDecode {
+		t.Run(fmt.Sprint(typeID), func(t *testing.T) {
+			data, err := marshalPACBuffers(0, []pacBuffer{{typeID: typeID, data: []byte{1}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var value PACType
+			if err := value.Unmarshal(data); err != nil {
+				t.Fatal(err)
+			}
+			if err := value.ProcessPACInfoBuffersWithCredentialKey(types.EncryptionKey{}, credentialKey, log.New(io.Discard, "", 0)); err == nil {
+				t.Fatalf("malformed PAC buffer type %d was accepted", typeID)
+			}
+		})
 	}
 }
 

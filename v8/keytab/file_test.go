@@ -257,3 +257,52 @@ func TestFirstExistingClientKeytabName(t *testing.T) {
 	assert.Equal(t, existing, firstExistingKeytabName([]string{missing, existing}))
 	assert.Equal(t, missing, firstExistingKeytabName([]string{missing, "FILE:" + filepath.Join(dir, "also-missing")}))
 }
+
+func TestKeytabFileAndNameErrors(t *testing.T) {
+	for _, name := range []string{"FILE:", "WRFILE:", "FILE:/tmp/%{unsupported}"} {
+		if _, _, err := ResolveName(name, nil); err == nil {
+			t.Fatalf("ResolveName(%q) returned no error", name)
+		}
+	}
+	if got := firstExistingKeytabName([]string{"DIR:/unsupported", "FILE:/missing"}); got != "DIR:/unsupported" {
+		t.Fatalf("first unresolved keytab name = %q", got)
+	}
+
+	missingParent := filepath.Join(t.TempDir(), "missing", "service.keytab")
+	kt := New()
+	if err := kt.WriteFile(missingParent); err == nil {
+		t.Fatal("WriteFile with missing parent returned no error")
+	}
+	if err := AppendToFile(missingParent, testEntry(1)); err == nil {
+		t.Fatal("AppendToFile with missing parent returned no error")
+	}
+	if err := kt.WriteFile("DIR:/unsupported"); err == nil {
+		t.Fatal("WriteFile accepted unsupported keytab type")
+	}
+	if err := AppendToFile("DIR:/unsupported", testEntry(1)); err == nil {
+		t.Fatal("AppendToFile accepted unsupported keytab type")
+	}
+
+	path := filepath.Join(t.TempDir(), "empty-append.keytab")
+	if err := AppendToFile(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendToFile(path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(data, []byte{5, 2}) {
+		t.Fatalf("empty append data = %x, %v", data, err)
+	}
+}
+
+func TestLoadDefaultSourceErrors(t *testing.T) {
+	setEnv(t, "KRB5_KTNAME", "DIR:/unsupported")
+	if _, err := LoadDefault(nil); err == nil {
+		t.Fatal("unsupported default keytab type returned no error")
+	}
+	setEnv(t, "KRB5_CLIENT_KTNAME", "DIR:/unsupported")
+	if _, err := LoadDefaultClient(nil); err == nil {
+		t.Fatal("unsupported client keytab type returned no error")
+	}
+}

@@ -11,6 +11,8 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana"
 	"github.com/otuschhoff/gokrb5/v8/iana/addrtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/adtype"
+	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
+	"github.com/otuschhoff/gokrb5/v8/iana/flags"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/iana/trtype"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
@@ -120,6 +122,80 @@ func TestMarshalTicket(t *testing.T) {
 		t.Fatalf("Marshal of ticket errored: %v", err)
 	}
 	assert.Equal(t, b, mb, "Marshalled bytes not as expected")
+}
+
+func TestNewTicketWithKeyAndValidity(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	cname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
+	sname := types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "HTTP/server.example.org")
+	serviceKey := types.EncryptionKey{KeyType: etypeID.AES256_CTS_HMAC_SHA1_96, KeyValue: bytes.Repeat([]byte{1}, 32)}
+	ticket, sessionKey, err := NewTicketWithKey(cname, "EXAMPLE.ORG", sname, "EXAMPLE.ORG", types.NewKrbFlags(), serviceKey, 4, now, now, now.Add(time.Hour), now.Add(2*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ticket.Realm != "EXAMPLE.ORG" || !ticket.SName.Equal(sname) || len(sessionKey.KeyValue) != 32 {
+		t.Fatalf("ticket/session key = %+v/%x", ticket, sessionKey.KeyValue)
+	}
+	if err := ticket.Decrypt(serviceKey); err != nil {
+		t.Fatal(err)
+	}
+	if !ticket.DecryptedEncPart.CName.Equal(cname) || ticket.DecryptedEncPart.Key.KeyType != sessionKey.KeyType || !bytes.Equal(ticket.DecryptedEncPart.Key.KeyValue, sessionKey.KeyValue) {
+		t.Fatalf("decrypted ticket = %+v", ticket.DecryptedEncPart)
+	}
+	if valid, err := ticket.ValidAt(now.Add(time.Minute), 0); !valid || err != nil {
+		t.Fatalf("current ticket validity = %v, %v", valid, err)
+	}
+	if valid, err := ticket.Valid(time.Hour); !valid || err != nil {
+		t.Fatalf("ticket validity with skew = %v, %v", valid, err)
+	}
+
+	future := ticket
+	future.DecryptedEncPart.StartTime = now.Add(2 * time.Hour)
+	if valid, err := future.ValidAt(now, time.Minute); valid || err == nil {
+		t.Fatalf("future ticket validity = %v, %v", valid, err)
+	}
+	invalid := ticket
+	types.SetFlag(&invalid.DecryptedEncPart.Flags, flags.Invalid)
+	if valid, err := invalid.ValidAt(now, 0); valid || err == nil {
+		t.Fatalf("invalid ticket validity = %v, %v", valid, err)
+	}
+	expired := ticket
+	expired.DecryptedEncPart.EndTime = now.Add(-2 * time.Hour)
+	if valid, err := expired.ValidAt(now, time.Minute); valid || err == nil {
+		t.Fatalf("expired ticket validity = %v, %v", valid, err)
+	}
+
+	tampered := ticket
+	tampered.EncPart.Cipher[0] ^= 0xff
+	if err := tampered.Decrypt(serviceKey); err == nil {
+		t.Fatal("tampered ticket decrypted")
+	}
+	if _, _, err := NewTicketWithKey(cname, "EXAMPLE.ORG", sname, "EXAMPLE.ORG", types.NewKrbFlags(), types.EncryptionKey{KeyType: -1}, 1, now, now, now, now); err == nil {
+		t.Fatal("unsupported service key etype accepted")
+	}
+}
+
+func TestNewTicketAndKeytabDecryption(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	cname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
+	sname := types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "HTTP/server.example.org")
+	kt := keytab.New()
+	if err := kt.AddEntry("HTTP/server.example.org", "EXAMPLE.ORG", "password", now, 2, etypeID.AES256_CTS_HMAC_SHA1_96); err != nil {
+		t.Fatal(err)
+	}
+	ticket, _, err := NewTicket(cname, "EXAMPLE.ORG", sname, "EXAMPLE.ORG", types.NewKrbFlags(), kt, etypeID.AES256_CTS_HMAC_SHA1_96, 2, now, now, now.Add(time.Hour), now.Add(2*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ticket.DecryptEncPart(kt, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := ticket.DecryptEncPart(keytab.New(), &sname); err == nil {
+		t.Fatal("missing keytab entry returned no error")
+	}
+	if _, _, err := NewTicket(cname, "EXAMPLE.ORG", sname, "EXAMPLE.ORG", types.NewKrbFlags(), keytab.New(), etypeID.AES256_CTS_HMAC_SHA1_96, 2, now, now, now, now); err == nil {
+		t.Fatal("NewTicket accepted an empty keytab")
+	}
 }
 
 func TestAuthorizationData_GetPACType_GOKRB5TestData(t *testing.T) {

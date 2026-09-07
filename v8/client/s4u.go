@@ -210,7 +210,7 @@ func (cl *Client) exchangeS4URequest(request messages.TGSReq, realm string, sess
 	if err != nil {
 		return messages.TGSRep{}, err
 	}
-	replyBytes, err := cl.sendASRequest(requestBytes, realm)
+	replyBytes, err := cl.sendKDCRequest(requestBytes, realm)
 	if err != nil {
 		return messages.TGSRep{}, err
 	}

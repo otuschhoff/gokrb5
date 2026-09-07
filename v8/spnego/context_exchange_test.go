@@ -10,7 +10,9 @@ import (
 	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/config"
+	"github.com/otuschhoff/gokrb5/v8/credentials"
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
+	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/service"
@@ -231,6 +233,60 @@ func TestDCEContextExchangeRejectsWrongFinalSequence(t *testing.T) {
 	require.Equal(t, gssapi.StatusDefectiveToken, status.Code)
 }
 
+func TestSPNEGOInvalidStateTransitions(t *testing.T) {
+	clientMechanism := SPNEGOClient(client.NewWithPassword("alice", "EXAMPLE.ORG", "password", config.New()), "HTTP/server")
+	require.True(t, clientMechanism.OID().Equal(gssapi.OIDSPNEGO.OID()))
+
+	acceptor := SPNEGOService(keytab.New())
+	authenticated, _, status := acceptor.AcceptSecContext(&SPNEGOToken{Init: true})
+	require.False(t, authenticated)
+	require.Equal(t, gssapi.StatusDefectiveToken, status.Code)
+	authenticated, _, status = acceptor.AcceptSecContext(&KRB5Token{})
+	require.False(t, authenticated)
+	require.Equal(t, gssapi.StatusDefectiveToken, status.Code)
+
+	clientMechanism.offeredMechTypes = []asn1.ObjectIdentifier{gssapi.OIDKRB5.OID()}
+	clientMechanism.initiatorOptions.GSSAPIFlags = []int{gssapi.ContextFlagMutual}
+	tests := []struct {
+		name  string
+		token gssapi.ContextToken
+		code  int
+	}{
+		{"not response", &SPNEGOToken{Init: true}, gssapi.StatusDefectiveToken},
+		{"rejected", &SPNEGOToken{Resp: true, NegTokenResp: NegTokenResp{NegState: asn1.Enumerated(NegStateReject)}}, gssapi.StatusBadMech},
+		{"unoffered mechanism", &SPNEGOToken{Resp: true, NegTokenResp: NegTokenResp{NegState: asn1.Enumerated(NegStateAcceptCompleted), SupportedMech: gssapi.OIDNegoEx.OID()}}, gssapi.StatusBadMech},
+		{"missing AP reply", &SPNEGOToken{Resp: true, NegTokenResp: NegTokenResp{NegState: asn1.Enumerated(NegStateAcceptCompleted), SupportedMech: gssapi.OIDKRB5.OID()}}, gssapi.StatusDefectiveToken},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			authenticated, _, status := clientMechanism.ContinueSecContext(test.token)
+			require.False(t, authenticated)
+			require.Equal(t, test.code, status.Code)
+		})
+	}
+
+	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
+	reply, err := messages.NewAPRep(messages.EncAPRepPart{SequenceNumber: 1}, key)
+	require.NoError(t, err)
+	rawReply := NewKRB5TokenAPREP(reply, true)
+	authenticated, _, status = acceptor.ContinueSecContext(&rawReply)
+	require.False(t, authenticated)
+	require.Equal(t, gssapi.StatusNoContext, status.Code)
+}
+
+func TestSPNEGOContinuationRequiresMIC(t *testing.T) {
+	mechanism := SPNEGOClientWithOptions(client.NewWithPassword("alice", "EXAMPLE.ORG", "password", config.New()), "HTTP/server", KRB5TokenAPREQOptions{})
+	mechanism.offeredMechTypes = []asn1.ObjectIdentifier{gssapi.OIDKRB5.OID()}
+	mechanism.requireMechMIC = true
+	mechanism.replyKey = types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
+	token := &SPNEGOToken{Resp: true, NegTokenResp: NegTokenResp{
+		NegState: asn1.Enumerated(NegStateAcceptCompleted), SupportedMech: gssapi.OIDKRB5.OID(),
+	}}
+	authenticated, _, status := mechanism.ContinueSecContext(token)
+	require.False(t, authenticated)
+	require.Equal(t, gssapi.StatusBadMIC, status.Code)
+}
+
 func newContextExchange(t *testing.T, contextFlags []int) (*SPNEGO, *SPNEGO, gssapi.ContextToken) {
 	return newContextExchangeWithOptions(t, KRB5TokenAPREQOptions{GSSAPIFlags: contextFlags})
 }
@@ -247,29 +303,29 @@ func newContextExchangeWithPreferences(t *testing.T, options KRB5TokenAPREQOptio
 	require.NoError(t, kt.Unmarshal(b))
 	const realm = "TEST.GOKRB5"
 	username := fmt.Sprintf("testuser%d", contextExchangeID.Add(1))
-	cl := client.NewWithKeytab(username, realm, kt, config.New())
+	cname := types.NewPrincipalName(1, username)
 	sname := types.NewPrincipalName(1, "HTTP/host.test.gokrb5")
 	now := time.Now().UTC()
+	ticketFlags := types.NewKrbFlags()
 	ticket, sessionKey, err := messages.NewTicket(
-		cl.Credentials.CName(), cl.Credentials.Realm(), sname, realm,
-		types.NewKrbFlags(), kt, 18, 1, now, now, now.Add(time.Hour), now.Add(2*time.Hour),
+		cname, realm, sname, realm, ticketFlags, kt, 18, 1,
+		now, now, now.Add(time.Hour), now.Add(2*time.Hour),
 	)
 	require.NoError(t, err)
-	negTokenInit, err := NewNegTokenInitKRB5WithOptions(cl, ticket, sessionKey, options)
+	ticketBytes, err := ticket.Marshal()
 	require.NoError(t, err)
-	mechanismToken := negTokenInit.mechToken.(*KRB5Token)
+	cache := credentials.NewCCache(cname, realm)
+	cache.AddCredential(&credentials.Credential{
+		Client: credentials.Principal{Realm: realm, PrincipalName: cname},
+		Server: credentials.Principal{Realm: realm, PrincipalName: sname},
+		Key: sessionKey, AuthTime: now, StartTime: now, EndTime: now.Add(time.Hour),
+		RenewTill: now.Add(2 * time.Hour), TicketFlags: ticketFlags, Ticket: ticketBytes,
+	})
+	cl, err := client.NewFromCCache(cache, config.New())
+	require.NoError(t, err)
 	initiator := SPNEGOClientWithOptions(cl, sname.PrincipalNameString(), options)
-	initiator.authenticator = mechanismToken.APReq.Authenticator
-	initiator.replyKey = mechanismToken.APReq.Authenticator.SubKey
-	initiator.offeredMechTypes = append([]asn1.ObjectIdentifier(nil), negTokenInit.MechTypes...)
-	initiator.requireMechMIC = len(negTokenInit.MechListMIC) > 0
-	var initial gssapi.ContextToken
-	if contextFlagSet(options.GSSAPIFlags, gssapi.ContextFlagDCEStyle) {
-		mechanismToken.raw = true
-		initial = mechanismToken
-	} else {
-		initial = &SPNEGOToken{Init: true, NegTokenInit: negTokenInit}
-	}
+	initial, err := initiator.InitSecContext()
+	require.NoError(t, err)
 	acceptor := SPNEGOServiceWithMechTypes(kt, preferredMechs, service.DecodePAC(false))
 	return initiator, acceptor, initial
 }

@@ -176,6 +176,56 @@ func TestS4U2ProxyReferralPreservesOptionsAndUsesReferralEvidence(t *testing.T) 
 	}
 }
 
+func TestPublicS4UServiceTicketRoundTripsAndCaches(t *testing.T) {
+	client, _, tgt, tgtKey := newCoverageTGSRequest(t)
+	now := time.Now().UTC()
+	client.addSession(tgt, messages.EncKDCRepPart{
+		Key: tgtKey, AuthTime: now, StartTime: now, EndTime: now.Add(time.Hour), RenewTill: now.Add(2 * time.Hour),
+	})
+	user := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "bob")
+	selfSPN := "HTTP/self.example.org"
+	targetSPN := "HTTP/target.example.org"
+	selfKey := s4uTestKey(4)
+	proxyKey := s4uTestKey(5)
+	calls := 0
+	client.sendToKDCFunc = func(requestBytes []byte, _ string) ([]byte, error) {
+		calls++
+		var request messages.TGSReq
+		if err := request.Unmarshal(requestBytes); err != nil {
+			t.Fatal(err)
+		}
+		if len(request.ReqBody.AdditionalTickets) == 0 {
+			if request.PAData.Contains(patype.PA_S4U_X509_USER) {
+				return nil, messages.NewKRBError(types.PrincipalName{}, request.ReqBody.Realm, errorcode.KDC_ERR_PADATA_TYPE_NOSUPP, "unsupported")
+			}
+			return marshalS4UTGSReply(t, request, tgtKey, selfKey, user, "EXAMPLE.ORG", types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, selfSPN), flags.Forwardable), nil
+		}
+		return marshalS4UTGSReply(t, request, tgtKey, proxyKey, user, "EXAMPLE.ORG", types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, targetSPN)), nil
+	}
+
+	evidence, gotSelfKey, err := client.GetServiceTicketForUser(user, "", selfSPN, S4UWithForwardable(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotSelfKey.KeyValue) != string(selfKey.KeyValue) {
+		t.Fatalf("S4U2self key = %x", gotSelfKey.KeyValue)
+	}
+	if _, _, err := client.GetServiceTicketForUser(user, "EXAMPLE.ORG", selfSPN); err != nil || calls != 2 {
+		t.Fatalf("cached S4U2self = calls %d, error %v", calls, err)
+	}
+
+	ticket, gotProxyKey, err := client.GetServiceTicketOnBehalfOf(evidence, targetSPN, S4UWithResourceBasedDelegation())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ticket.SName.PrincipalNameString() != targetSPN || string(gotProxyKey.KeyValue) != string(proxyKey.KeyValue) {
+		t.Fatalf("S4U2proxy ticket/key = %s/%x", ticket.SName.PrincipalNameString(), gotProxyKey.KeyValue)
+	}
+	if _, _, err := client.GetServiceTicketOnBehalfOf(evidence, targetSPN); err != nil || calls != 3 {
+		t.Fatalf("cached S4U2proxy = calls %d, error %v", calls, err)
+	}
+}
+
 func TestS4UCacheIsSeparateByUserAndSPN(t *testing.T) {
 	cl := NewWithPassword("service", "EXAMPLE.COM", "unused", config.New())
 	now := time.Now().UTC()

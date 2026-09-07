@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"math"
+	"reflect"
 	"testing"
 )
 
@@ -167,6 +168,34 @@ func TestDecodeRejectsInvalidArrayCounts(t *testing.T) {
 				t.Fatal("Decode() accepted invalid array counts")
 			}
 		})
+	}
+}
+
+func TestCharacterAndTagHelpers(t *testing.T) {
+	decoder := NewDecoder(bytes.NewReader([]byte{'A'}))
+	character, err := decoder.readChar()
+	if err != nil || character != 'A' {
+		t.Fatalf("readChar = %q, %v", character, err)
+	}
+	if _, err := decoder.readChar(); err == nil {
+		t.Fatal("readChar accepted exhausted input")
+	}
+
+	tag := appendTag(reflect.StructTag(`ndr:"conformant"`), "varying")
+	parsed := parseTags(tag)
+	if !parsed.HasValue(TagConformant) || !parsed.HasValue(TagVarying) {
+		t.Fatalf("appended tag = %q", tag)
+	}
+}
+
+func TestDecodeRejectsMalformedConformantStringArray(t *testing.T) {
+	body := littleEndianWords(2, 2, 0, 2, 0, 2)
+	body = append(body, 'A', 0, 0, 0, 'B', 0, 0, 0)
+	var value struct {
+		Strings []string `ndr:"conformant"`
+	}
+	if err := NewDecoder(bytes.NewReader(wrapNDRBody(body))).Decode(&value); err == nil {
+		t.Fatalf("malformed string array was accepted: %#v", value.Strings)
 	}
 }
 

@@ -7,6 +7,8 @@ import (
 	"net"
 	"strings"
 	"testing"
+
+	"github.com/otuschhoff/gokrb5/v8/config"
 )
 
 func startTCPResponseServer(t *testing.T, response []byte) (*net.TCPAddr, <-chan error) {
@@ -75,6 +77,53 @@ func TestSendTCPResponseFraming(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSendToKDCTransportSelection(t *testing.T) {
+	t.Run("forced TCP", func(t *testing.T) {
+		address, serverErr := startTCPResponseServer(t, append([]byte{0, 0, 0, 3}, []byte("KDC")...))
+		cfg := config.New()
+		cfg.LibDefaults.UDPPreferenceLimit = 1
+		cfg.Realms = []config.Realm{{Realm: "EXAMPLE.ORG", KDC: []string{address.String()}}}
+		client := NewWithPassword("user", "EXAMPLE.ORG", "password", cfg)
+		response, err := client.sendToKDC([]byte("request"), "EXAMPLE.ORG")
+		if err != nil || string(response) != "KDC" {
+			t.Fatalf("forced TCP response = %q, %v", response, err)
+		}
+		if err := <-serverErr; err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("TCP failure falls back to UDP", func(t *testing.T) {
+		server, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer server.Close()
+		serverErr := make(chan error, 1)
+		go func() {
+			request := make([]byte, 32)
+			_, clientAddress, readErr := server.ReadFromUDP(request)
+			if readErr != nil {
+				serverErr <- readErr
+				return
+			}
+			_, writeErr := server.WriteToUDP([]byte("KDC"), clientAddress)
+			serverErr <- writeErr
+		}()
+		cfg := config.New()
+		cfg.LibDefaults.UDPPreferenceLimit = 4
+		cfg.Realms = []config.Realm{{Realm: "EXAMPLE.ORG", KDC: []string{server.LocalAddr().String()}}}
+		client := NewWithPassword("user", "EXAMPLE.ORG", "password", cfg)
+		response, err := client.sendToKDC([]byte("request"), "EXAMPLE.ORG")
+		if err != nil || string(response) != "KDC" {
+			t.Fatalf("TCP-to-UDP response = %q, %v", response, err)
+		}
+		if err := <-serverErr; err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func TestSendUDPSuccess(t *testing.T) {
