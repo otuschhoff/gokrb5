@@ -390,7 +390,7 @@ func TestLoginWithOptionsCachesServiceASReply(t *testing.T) {
 		}
 		now := time.Now().UTC()
 		part := messages.EncKDCRepPart{
-			Key: types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("session-key-1234")},
+			Key:   types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("session-key-1234")},
 			Nonce: request.ReqBody.Nonce, Flags: types.NewKrbFlags(), AuthTime: now, StartTime: now,
 			EndTime: now.Add(time.Hour), SRealm: request.ReqBody.Realm, SName: request.ReqBody.SName,
 		}

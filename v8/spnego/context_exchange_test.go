@@ -416,7 +416,7 @@ func newContextExchangeWithPreferences(t *testing.T, options KRB5TokenAPREQOptio
 	cache.AddCredential(&credentials.Credential{
 		Client: credentials.Principal{Realm: realm, PrincipalName: cname},
 		Server: credentials.Principal{Realm: realm, PrincipalName: sname},
-		Key:    sessionKey, AuthTime: now, StartTime: now, EndTime: now.Add(time.Hour),
+		Key:    sessionKey, AuthTime: now, StartTime: now.Add(-time.Minute), EndTime: now.Add(time.Hour),
 		RenewTill: now.Add(2 * time.Hour), TicketFlags: ticketFlags, Ticket: ticketBytes,
 	})
 	cl, err := client.NewFromCCache(cache, config.New())

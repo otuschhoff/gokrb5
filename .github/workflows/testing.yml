@@ -50,8 +50,7 @@ jobs:
         id: gopkg
 
       - name: Get dependencies
-        run: |
-          go get -v -t -d ./...
+        run: go mod download
         id: goGet
 
       - name: Unit tests

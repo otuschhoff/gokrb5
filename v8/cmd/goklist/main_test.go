@@ -125,7 +125,7 @@ func TestListCacheFixtureWithEtypesAndPositionalName(t *testing.T) {
 	if code := run([]string{"-e", path}, &stdout, &stderr); code != 0 {
 		t.Fatalf("fixture listing = %d, %q", code, stderr.String())
 	}
-	if output := stdout.String(); !strings.Contains(output, "Etype (skey, tkt):") || !strings.Contains(output, "Ticket cache: FILE:") {
+	if output := stdout.String(); !strings.Contains(output, "Etype (skey, tkt):") || !strings.Contains(output, "Ticket cache: "+displayCacheName(path)) {
 		t.Fatalf("fixture output = %q", output)
 	}
 }
@@ -174,7 +174,7 @@ func TestListDefaultKeytabAndCache(t *testing.T) {
 	t.Setenv("KRB5CCNAME", "")
 	stdout.Reset()
 	stderr.Reset()
-	if code := run(nil, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "Ticket cache: FILE:") {
+	if code := run(nil, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "Ticket cache: "+displayCacheName(cachePath)) {
 		t.Fatalf("default cache = %d, %q, %q", code, stdout.String(), stderr.String())
 	}
 	if displayCacheName("MEMORY:cache") != "MEMORY:cache" {

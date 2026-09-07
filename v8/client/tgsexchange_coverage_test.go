@@ -67,7 +67,7 @@ func TestServiceTicketCacheAndDelegationGuards(t *testing.T) {
 	ticket := s4uTestTicket("EXAMPLE.ORG", spn)
 	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
 	now := time.Now().UTC()
-	client.cache.addEntryWithDetails(ticket, now, now, now.Add(time.Hour), now.Add(time.Hour), key, types.NewKrbFlags(), nil, nil, false, nil)
+	client.cache.addEntryWithDetails(ticket, now, now.Add(-time.Minute), now.Add(time.Hour), now.Add(time.Hour), key, types.NewKrbFlags(), nil, nil, false, nil)
 	gotTicket, gotKey, err := client.GetServiceTicket(spn)
 	if err != nil || !gotTicket.SName.Equal(ticket.SName) || string(gotKey.KeyValue) != string(key.KeyValue) {
 		t.Fatalf("cached service ticket = %+v/%x, %v", gotTicket, gotKey.KeyValue, err)

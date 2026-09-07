@@ -322,7 +322,7 @@ func TestLoadKeytabAndVerboseCacheOutput(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	cachePath := filepath.Join(t.TempDir(), "ccache")
-	if code := writeCache(cl, cachePath, true, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "Authenticated to Kerberos v5") || !strings.Contains(stdout.String(), "FILE:") {
+	if code := writeCache(cl, cachePath, true, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "Authenticated to Kerberos v5") || !strings.Contains(stdout.String(), "Using default cache: "+displayCacheName(cachePath)) {
 		t.Fatalf("write cache = %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
 	}
 	if code := writeCache(cl, t.TempDir(), false, io.Discard, &stderr); code != 1 {

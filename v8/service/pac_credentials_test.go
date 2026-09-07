@@ -22,11 +22,11 @@ func TestADCredentialsFromPAC(t *testing.T) {
 	validation := &pac.KerbValidationInfo{
 		LogOnTime: mstypes.GetFileTime(time.Unix(10, 0)), LogOffTime: mstypes.GetFileTime(time.Unix(20, 0)),
 		PasswordLastSet: mstypes.GetFileTime(time.Unix(30, 0)), UserID: 500, PrimaryGroupID: 513,
-		GroupIDs: []mstypes.GroupMembership{{RelativeID: 512, Attributes: 7}},
-		ExtraSIDs: []mstypes.KerbSidAndAttributes{{SID: extraSID, Attributes: 8}},
+		GroupIDs:               []mstypes.GroupMembership{{RelativeID: 512, Attributes: 7}},
+		ExtraSIDs:              []mstypes.KerbSidAndAttributes{{SID: extraSID, Attributes: 8}},
 		ResourceGroupDomainSID: resourceSID,
-		ResourceGroupIDs: []mstypes.GroupMembership{{RelativeID: 1001, Attributes: 9}},
-		LogonDomainID: domainSID, UserAccountControl: 0x200,
+		ResourceGroupIDs:       []mstypes.GroupMembership{{RelativeID: 1001, Attributes: 9}},
+		LogonDomainID:          domainSID, UserAccountControl: 0x200,
 	}
 	validation.EffectiveName.Value = "alice"
 	validation.FullName.Value = "Alice Example"
@@ -36,8 +36,8 @@ func TestADCredentialsFromPAC(t *testing.T) {
 	requestorSID := testSID(21, 1, 2, 500)
 	parsed := pac.PACType{
 		KerbValidationInfo: validation,
-		UPNDNSInfo: &pac.UPNDNSInfo{UPN: "alice@example.org", DNSDomain: "example.org", SAMAccountName: "ALICE"},
-		AttributesInfo: &pac.AttributesInfo{Flags: 3}, Requestor: &pac.Requestor{SID: requestorSID},
+		UPNDNSInfo:         &pac.UPNDNSInfo{UPN: "alice@example.org", DNSDomain: "example.org", SAMAccountName: "ALICE"},
+		AttributesInfo:     &pac.AttributesInfo{Flags: 3}, Requestor: &pac.Requestor{SID: requestorSID},
 	}
 	credentials := adCredentialsFromPAC(parsed, authTime)
 	if credentials.EffectiveName != "alice" || credentials.FullName != "Alice Example" || credentials.UserID != 500 ||
@@ -60,8 +60,8 @@ func TestDeviceCredentialsFromPAC(t *testing.T) {
 	device := pac.DeviceInfo{
 		UserID: 100, PrimaryGroupID: 515, AccountDomainID: domainSID,
 		AccountGroupIDs: []mstypes.GroupMembership{{RelativeID: 516, Attributes: 1}},
-		ExtraSIDs: []mstypes.KerbSidAndAttributes{{SID: extraSID, Attributes: 2}},
-		DomainGroup: []mstypes.DomainGroupMembership{{DomainID: foreignSID, GroupIDs: []mstypes.GroupMembership{{RelativeID: 517, Attributes: 3}}}},
+		ExtraSIDs:       []mstypes.KerbSidAndAttributes{{SID: extraSID, Attributes: 2}},
+		DomainGroup:     []mstypes.DomainGroupMembership{{DomainID: foreignSID, GroupIDs: []mstypes.GroupMembership{{RelativeID: 517, Attributes: 3}}}},
 	}
 	credentials := deviceCredentialsFromPAC(device)
 	if credentials.UserSID != "S-1-5-21-1-2-100" || credentials.PrimaryGroupSID != "S-1-5-21-1-2-515" ||

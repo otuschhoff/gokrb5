@@ -14,7 +14,9 @@ import (
 
 type settingsSessionManager struct{}
 
-func (settingsSessionManager) New(http.ResponseWriter, *http.Request, string, []byte) error { return nil }
+func (settingsSessionManager) New(http.ResponseWriter, *http.Request, string, []byte) error {
+	return nil
+}
 func (settingsSessionManager) Get(*http.Request, string) ([]byte, error) { return nil, nil }
 
 func TestSettingsOptionsAndDefaults(t *testing.T) {

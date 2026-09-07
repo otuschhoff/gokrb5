@@ -200,12 +200,16 @@ func TestASRepVerifierInvariants(t *testing.T) {
 	}
 
 	tests := map[string]func(*ASRep){
-		"cname": func(reply *ASRep) { reply.CName = types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "bob") },
+		"cname":  func(reply *ASRep) { reply.CName = types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "bob") },
 		"crealm": func(reply *ASRep) { reply.CRealm = "OTHER.ORG" },
-		"nonce": func(reply *ASRep) { reply.DecryptedEncPart.Nonce++ },
-		"sname": func(reply *ASRep) { reply.DecryptedEncPart.SName = types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/OTHER.ORG") },
+		"nonce":  func(reply *ASRep) { reply.DecryptedEncPart.Nonce++ },
+		"sname": func(reply *ASRep) {
+			reply.DecryptedEncPart.SName = types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/OTHER.ORG")
+		},
 		"srealm": func(reply *ASRep) { reply.DecryptedEncPart.SRealm = "OTHER.ORG" },
-		"address": func(reply *ASRep) { reply.DecryptedEncPart.CAddr = []types.HostAddress{{AddrType: 2, Address: []byte{192, 0, 2, 2}}} },
+		"address": func(reply *ASRep) {
+			reply.DecryptedEncPart.CAddr = []types.HostAddress{{AddrType: 2, Address: []byte{192, 0, 2, 2}}}
+		},
 		"clock skew": func(reply *ASRep) { reply.DecryptedEncPart.AuthTime = now.Add(-time.Hour) },
 	}
 	for name, mutate := range tests {
@@ -238,12 +242,17 @@ func TestTGSRepVerifierInvariants(t *testing.T) {
 		t.Fatalf("valid TGS reply = %v, %v", ok, err)
 	}
 	tests := map[string]func(*TGSRep){
-		"cname": func(reply *TGSRep) { reply.CName = types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "bob") },
-		"ticket realm": func(reply *TGSRep) { reply.Ticket.Realm = "OTHER.ORG" },
-		"nonce": func(reply *TGSRep) { reply.DecryptedEncPart.Nonce++ },
+		"cname":         func(reply *TGSRep) { reply.CName = types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "bob") },
+		"ticket realm":  func(reply *TGSRep) { reply.Ticket.Realm = "OTHER.ORG" },
+		"nonce":         func(reply *TGSRep) { reply.DecryptedEncPart.Nonce++ },
 		"service realm": func(reply *TGSRep) { reply.DecryptedEncPart.SRealm = "OTHER.ORG" },
-		"address": func(reply *TGSRep) { reply.DecryptedEncPart.CAddr = []types.HostAddress{{AddrType: 2, Address: []byte{192, 0, 2, 2}}} },
-		"clock skew": func(reply *TGSRep) { reply.DecryptedEncPart.StartTime = now.Add(-time.Hour); reply.DecryptedEncPart.AuthTime = now.Add(-time.Hour) },
+		"address": func(reply *TGSRep) {
+			reply.DecryptedEncPart.CAddr = []types.HostAddress{{AddrType: 2, Address: []byte{192, 0, 2, 2}}}
+		},
+		"clock skew": func(reply *TGSRep) {
+			reply.DecryptedEncPart.StartTime = now.Add(-time.Hour)
+			reply.DecryptedEncPart.AuthTime = now.Add(-time.Hour)
+		},
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
