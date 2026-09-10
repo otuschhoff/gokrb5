@@ -182,14 +182,27 @@ func NewFromCCache(c *credentials.CCache, krb5conf *config.Config, settings ...f
 		return cl, errors.New("credential cache contains no credentials")
 	}
 	tgtCredential, ok := c.GetEntry(spn)
+	if !ok {
+		// Realm casing in the ccache's default principal can differ from the
+		// realm the KDC embedded in the TGT's service name (e.g. a custom
+		// identity entered with different casing, or a cross-realm referral).
+		// Fall back to a realm-insensitive match so a valid cached TGT is not
+		// missed, which would otherwise leave no session registered and cause
+		// a later Renew() to fail with "TGT session not found".
+		tgtCredential, ok = findTGTCredentialFold(entries, c.DefaultPrincipal.Realm)
+	}
 	configCredential := entries[0]
 	if ok {
 		var tgt messages.Ticket
 		if err := tgt.Unmarshal(tgtCredential.Ticket); err != nil {
 			return cl, fmt.Errorf("TGT bytes in cache are not valid: %v", err)
 		}
-		cl.sessions.Entries[c.DefaultPrincipal.Realm] = &session{
-			realm:        c.DefaultPrincipal.Realm,
+		realm := c.DefaultPrincipal.Realm
+		if len(tgtCredential.Server.PrincipalName.NameString) == 2 {
+			realm = tgtCredential.Server.PrincipalName.NameString[1]
+		}
+		cl.sessions.Entries[strings.ToUpper(realm)] = &session{
+			realm:        realm,
 			authTime:     tgtCredential.AuthTime,
 			startTime:    tgtCredential.StartTime,
 			endTime:      tgtCredential.EndTime,
@@ -238,6 +251,18 @@ func NewFromCCache(c *credentials.CCache, krb5conf *config.Config, settings ...f
 		)
 	}
 	return cl, nil
+}
+
+// findTGTCredentialFold finds the krbtgt credential for realm, comparing the
+// realm case-insensitively rather than requiring an exact string match.
+func findTGTCredentialFold(entries []*credentials.Credential, realm string) (*credentials.Credential, bool) {
+	for _, cred := range entries {
+		name := cred.Server.PrincipalName.NameString
+		if len(name) == 2 && name[0] == "krbtgt" && types.RealmEqual(name[1], realm) {
+			return cred, true
+		}
+	}
+	return nil, false
 }
 
 // KDCTimeOffset returns the time offset learned from the KDC.

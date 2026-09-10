@@ -472,6 +472,41 @@ func TestClientCCacheExportRoundTrip(t *testing.T) {
 	assert.Equal(t, encoded, encodedAgain)
 }
 
+// TestNewFromCCacheMatchesTGTRealmCaseInsensitively guards against a regression where a
+// ccache's DefaultPrincipal.Realm has different casing than the realm embedded in the
+// cached TGT's service name (e.g. a custom identity entered in a different case, or a
+// cross-realm referral). Previously this caused NewFromCCache to silently skip adding a
+// session, so a later Renew() would fail with "TGT session not found for realm ..." even
+// though a valid TGT was present in the cache.
+func TestNewFromCCacheMatchesTGTRealmCaseInsensitively(t *testing.T) {
+	data, err := hex.DecodeString(testdata.CCACHE_TEST)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := new(credentials.CCache)
+	if err := original.Unmarshal(data); err != nil {
+		t.Fatal(err)
+	}
+	// Lower-case the default principal's realm while the TGT credential entry keeps its
+	// original (upper-case) realm, simulating the casing mismatch.
+	realm := original.DefaultPrincipal.Realm
+	original.DefaultPrincipal.Realm = strings.ToLower(realm)
+	original.DefaultPrincipal.PrincipalName.NameString = append([]string(nil), original.DefaultPrincipal.PrincipalName.NameString...)
+
+	cl, err := NewFromCCache(original, config.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cl.sessions.get(realm); !ok {
+		t.Fatalf("expected a TGT session to be registered for realm %s", realm)
+	}
+	// Renew() must get past the session lookup (it will still fail attempting the
+	// network exchange against an unreachable KDC, which is expected in this test).
+	if err := cl.Renew(); err == nil || strings.Contains(err.Error(), "TGT session not found") {
+		t.Fatalf("Renew() = %v, did not expect a session-not-found error", err)
+	}
+}
+
 func TestClientCCacheExportAssociatesPATypeWithInitialService(t *testing.T) {
 	data, err := hex.DecodeString(testdata.CCACHE_TEST)
 	if err != nil {
