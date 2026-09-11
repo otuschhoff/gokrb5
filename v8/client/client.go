@@ -94,15 +94,17 @@ func NewWithPassword(username, realm, password string, krb5conf *config.Config, 
 		realm = krb5conf.LibDefaults.DefaultRealm
 	}
 	creds := credentials.New(username, realm)
+	clientSettings := NewSettings(settings...)
 	return &Client{
 		Credentials: creds.WithPassword(password),
 		Config:      krb5conf,
-		settings:    NewSettings(settings...),
+		settings:    clientSettings,
 		sessions: &sessions{
 			Entries: make(map[string]*session),
 		},
-		cache:    NewCache(),
-		s4uCache: NewCache(),
+		cache:         NewCache(),
+		s4uCache:      NewCache(),
+		kdcTimeOffset: clientSettings.kdcTimeOffset,
 	}
 }
 
@@ -112,15 +114,17 @@ func NewWithKeytab(username, realm string, kt *keytab.Keytab, krb5conf *config.C
 		realm = krb5conf.LibDefaults.DefaultRealm
 	}
 	creds := credentials.New(username, realm)
+	clientSettings := NewSettings(settings...)
 	return &Client{
 		Credentials: creds.WithKeytab(kt),
 		Config:      krb5conf,
-		settings:    NewSettings(settings...),
+		settings:    clientSettings,
 		sessions: &sessions{
 			Entries: make(map[string]*session),
 		},
-		cache:    NewCache(),
-		s4uCache: NewCache(),
+		cache:         NewCache(),
+		s4uCache:      NewCache(),
+		kdcTimeOffset: clientSettings.kdcTimeOffset,
 	}
 }
 
@@ -149,13 +153,15 @@ func NewFromPrincipalName(princ types.PrincipalName, realm string, krb5conf *con
 		realm = krb5conf.LibDefaults.DefaultRealm
 	}
 	creds := credentials.NewFromPrincipalName(princ, realm)
+	clientSettings := NewSettings(settings...)
 	return &Client{
 		Credentials: creds,
 		Config:      krb5conf,
-		settings:    NewSettings(settings...),
+		settings:    clientSettings,
 		sessions:    &sessions{Entries: make(map[string]*session)},
 		cache:       NewCache(),
 		s4uCache:    NewCache(),
+		kdcTimeOffset: clientSettings.kdcTimeOffset,
 	}
 }
 
@@ -163,15 +169,17 @@ func NewFromPrincipalName(princ types.PrincipalName, realm string, krb5conf *con
 //
 // WARNING: A client created from CCache does not automatically renew TGTs and a failure will occur after the TGT expires.
 func NewFromCCache(c *credentials.CCache, krb5conf *config.Config, settings ...func(*Settings)) (*Client, error) {
+	clientSettings := NewSettings(settings...)
 	cl := &Client{
 		Credentials: c.GetClientCredentials(),
 		Config:      krb5conf,
-		settings:    NewSettings(settings...),
+		settings:    clientSettings,
 		sessions: &sessions{
 			Entries: make(map[string]*session),
 		},
-		cache:    NewCache(),
-		s4uCache: NewCache(),
+		cache:         NewCache(),
+		s4uCache:      NewCache(),
+		kdcTimeOffset: clientSettings.kdcTimeOffset,
 	}
 	spn := types.PrincipalName{
 		NameType:   nametype.KRB_NT_SRV_INST,

@@ -2,6 +2,7 @@ package client
 
 import (
 	"testing"
+	"time"
 
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
@@ -17,6 +18,16 @@ func TestAssumePreauthentication(t *testing.T) {
 	}
 	if !cl.settings.AssumePreAuthentication() {
 		t.Fatal("AssumePreAuthentication() should be true")
+	}
+}
+
+func TestKDCTimeOffsetOption(t *testing.T) {
+	t.Parallel()
+
+	offset := 7*time.Minute + 23*time.Second
+	client := NewWithPassword("username", "REALM", "password", config.New(), KDCTimeOffset(offset))
+	if client.kdcTimeOffset != offset {
+		t.Fatalf("KDC time offset = %s, want %s", client.kdcTimeOffset, offset)
 	}
 }
 

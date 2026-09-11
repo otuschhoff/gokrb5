@@ -32,6 +32,7 @@ type Settings struct {
 	requireFAST             bool
 	kkdcpClient             *http.Client
 	pkinitOptions           *pkinit.ExchangeOptions
+	kdcTimeOffset           time.Duration
 	logger                  *log.Logger
 }
 
@@ -119,6 +120,14 @@ func NewSettings(settings ...func(*Settings)) *Settings {
 		set(s)
 	}
 	return s
+}
+
+// KDCTimeOffset initializes the difference between the KDC clock and the
+// local clock. The client may refine this value from later KDC responses.
+func KDCTimeOffset(offset time.Duration) func(*Settings) {
+	return func(s *Settings) {
+		s.kdcTimeOffset = offset
+	}
 }
 
 // DisablePAReqEncPARep configures the client not to request encrypted PA-REP.
