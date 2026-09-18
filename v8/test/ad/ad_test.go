@@ -169,8 +169,25 @@ func TestServicePrincipalSelectionAndFallbacks(t *testing.T) {
 }
 
 func TestADLocalDiscoveryHelpers(t *testing.T) {
-	if root, err := findRepoRoot(); err != nil || root == "" {
-		t.Fatalf("repository root = %q, %v", root, err)
+	repoRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(repoRoot, "v8", "test", "ad")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(wd) }()
+	if err := os.Chdir(nested); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GITHUB_WORKSPACE", "")
+	if root, err := findRepoRoot(); err != nil || root != repoRoot {
+		t.Fatalf("repository root = %q, %v (want %q)", root, err, repoRoot)
 	}
 	t.Setenv("AD_TEST_OVERRIDE", "override")
 	if envOr("AD_TEST_OVERRIDE", "fallback") != "override" || envOr("AD_TEST_MISSING", "fallback") != "fallback" {
