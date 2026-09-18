@@ -189,3 +189,40 @@ func TestNewInitiatorTokenSignatureAndMarshalling(t *testing.T) {
 	assert.Nil(t, tErr, "Unexpected error.")
 	assert.Equal(t, getResponseReference(), token, "Token failed to be marshalled to the expected bytes.")
 }
+
+func TestWrapTokenAdditionalErrorPaths(t *testing.T) {
+	badKey := types.EncryptionKey{KeyType: 999, KeyValue: []byte("bad")}
+	token := WrapToken{}
+	assert.Error(t, token.SetCheckSum(getSessionKey(), initiatorSeal))
+	token.Payload = []byte("payload")
+	token.CheckSum = []byte{1}
+	assert.Error(t, token.SetCheckSum(getSessionKey(), initiatorSeal))
+	token.CheckSum = nil
+	assert.Error(t, token.SetCheckSum(badKey, initiatorSeal))
+
+	withoutPayload := WrapToken{CheckSum: []byte{1}}
+	valid, err := withoutPayload.Verify(getSessionKey(), initiatorSeal)
+	assert.False(t, valid)
+	assert.Error(t, err)
+	token.CheckSum = []byte{1}
+	valid, err = token.Verify(badKey, initiatorSeal)
+	assert.False(t, valid)
+	assert.Error(t, err)
+
+	for name, encoded := range map[string][]byte{
+		"short":      {0x05},
+		"token id":   append([]byte{0, 0}, make([]byte, HdrLen-2)...),
+		"bad filler": append([]byte{0x05, 0x04, 0, 0}, make([]byte, HdrLen-4)...),
+		"bad EC":     append([]byte{0x05, 0x04, 0, 0xff, 0xff, 0xff}, make([]byte, HdrLen-6)...),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var parsed WrapToken
+			assert.Error(t, parsed.Unmarshal(encoded, false))
+		})
+	}
+
+	_, err = NewInitiatorWrapToken([]byte("payload"), badKey)
+	assert.Error(t, err)
+	_, err = NewInitiatorWrapToken([]byte("payload"), types.EncryptionKey{KeyType: sessionKeyType, KeyValue: []byte("short")})
+	assert.Error(t, err)
+}

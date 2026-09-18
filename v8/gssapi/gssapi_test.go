@@ -1,6 +1,7 @@
 package gssapi
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
@@ -27,25 +28,48 @@ func TestOID(t *testing.T) {
 	assert.Empty(t, OIDName("unknown").OID())
 }
 
-func TestStatusErrorDescriptions(t *testing.T) {
-	codes := []int{
-		StatusBadBindings, StatusBadMech, StatusBadName, StatusBadNameType,
-		StatusBadStatus, StatusBadSig, StatusBadMIC, StatusContextExpired,
-		StatusCredentialsExpired, StatusDefectiveCredential, StatusDefectiveToken,
-		StatusFailure, StatusNoContext, StatusNoCred, StatusBadQOP,
-		StatusUnauthorized, StatusUnavailable, StatusDuplicateElement,
-		StatusNameNotMN, StatusComplete, StatusContinueNeeded, StatusDuplicateToken,
-		StatusOldToken, StatusUnseqToken, StatusGapToken,
+func TestStatusError(t *testing.T) {
+	testCases := []struct {
+		code int
+		want string
+	}{
+		{StatusBadBindings, "channel binding mismatch"},
+		{StatusBadMech, "unsupported mechanism requested"},
+		{StatusBadName, "invalid name provided"},
+		{StatusBadNameType, "name of unsupported type provided"},
+		{StatusBadStatus, "invalid input status selector"},
+		{StatusBadSig, "token had invalid integrity check"},
+		{StatusBadMIC, "preferred alias for GSS_S_BAD_SIG"},
+		{StatusContextExpired, "specified security context expired"},
+		{StatusCredentialsExpired, "expired credentials detected"},
+		{StatusDefectiveCredential, "defective credential detected"},
+		{StatusDefectiveToken, "defective token detected"},
+		{StatusFailure, "failure, unspecified at GSS-API level"},
+		{StatusNoContext, "no valid security context specified"},
+		{StatusNoCred, "no valid credentials provided"},
+		{StatusBadQOP, "unsupported QOP valu"},
+		{StatusUnauthorized, "operation unauthorized"},
+		{StatusUnavailable, "operation unavailable"},
+		{StatusDuplicateElement, "duplicate credential element requested"},
+		{StatusNameNotMN, "name contains multi-mechanism elements"},
+		{StatusComplete, "normal completion"},
+		{StatusContinueNeeded, "continuation call to routine required"},
+		{StatusDuplicateToken, "duplicate per-message token detected"},
+		{StatusOldToken, "timed-out per-message token detected"},
+		{StatusUnseqToken, "reordered (early) per-message token detected"},
+		{StatusGapToken, "skipped predecessor token(s) detected"},
+		{-1, "unknown GSS-API error status"},
 	}
-	for _, code := range codes {
-		if got := (Status{Code: code}).Error(); got == "" || got == "unknown GSS-API error status" {
-			t.Fatalf("status %d description = %q", code, got)
-		}
+	for _, testCase := range testCases {
+		t.Run(fmt.Sprintf("code-%d", testCase.code), func(t *testing.T) {
+			assert.Equal(t, testCase.want, (Status{Code: testCase.code}).Error())
+			assert.Equal(t, testCase.want+": detail", (Status{Code: testCase.code, Message: "detail"}).Error())
+		})
 	}
-	if got := (Status{Code: -1}).Error(); got != "unknown GSS-API error status" {
-		t.Fatalf("unknown status = %q", got)
-	}
-	if got := (Status{Code: StatusFailure, Message: "details"}).Error(); got != "failure, unspecified at GSS-API level: details" {
-		t.Fatalf("status with details = %q", got)
-	}
+}
+
+func TestNewContextFlags(t *testing.T) {
+	flags := NewContextFlags()
+	assert.Equal(t, 32, flags.BitLength)
+	assert.Equal(t, []byte{0, 0, 0, 0}, flags.Bytes)
 }

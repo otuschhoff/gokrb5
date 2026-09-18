@@ -2,6 +2,7 @@ package gssapi
 
 import (
 	"crypto/md5"
+	"encoding/binary"
 	"encoding/hex"
 	"testing"
 
@@ -48,4 +49,30 @@ func TestAuthenticatorChecksumRejectsTruncation(t *testing.T) {
 	}
 	assert.Error(t, new(AuthenticatorChecksum).Unmarshal(b[:len(b)-1]))
 	assert.Error(t, new(AuthenticatorChecksum).Unmarshal(make([]byte, 23)))
+}
+
+func TestAuthenticatorChecksumRejectsInvalidValues(t *testing.T) {
+	_, err := (AuthenticatorChecksum{Deleg: make([]byte, 1<<16), Flags: ContextFlagDeleg}).Marshal()
+	assert.Error(t, err)
+	_, err = (AuthenticatorChecksum{Deleg: []byte{1}}).Marshal()
+	assert.Error(t, err)
+
+	badBindingLength := make([]byte, 24)
+	binary.LittleEndian.PutUint32(badBindingLength[:4], 15)
+	assert.Error(t, new(AuthenticatorChecksum).Unmarshal(badBindingLength))
+
+	truncatedDeleg := make([]byte, 28)
+	binary.LittleEndian.PutUint32(truncatedDeleg[:4], authenticatorChecksumBindingLength)
+	binary.LittleEndian.PutUint32(truncatedDeleg[20:24], ContextFlagDeleg)
+	binary.LittleEndian.PutUint16(truncatedDeleg[26:28], 1)
+	assert.Error(t, new(AuthenticatorChecksum).Unmarshal(truncatedDeleg))
+
+	truncatedExtensionHeader := make([]byte, 25)
+	binary.LittleEndian.PutUint32(truncatedExtensionHeader[:4], authenticatorChecksumBindingLength)
+	assert.Error(t, new(AuthenticatorChecksum).Unmarshal(truncatedExtensionHeader))
+
+	truncatedExtensionData := make([]byte, 32)
+	binary.LittleEndian.PutUint32(truncatedExtensionData[:4], authenticatorChecksumBindingLength)
+	binary.LittleEndian.PutUint32(truncatedExtensionData[28:32], 1)
+	assert.Error(t, new(AuthenticatorChecksum).Unmarshal(truncatedExtensionData))
 }

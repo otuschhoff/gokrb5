@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"testing"
 
+	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/iana/keyusage"
 	"github.com/otuschhoff/gokrb5/v8/types"
 	"github.com/stretchr/testify/assert"
@@ -168,4 +169,35 @@ func TestNewInitiatorMICTokenSignatureAndMarshalling(t *testing.T) {
 	token.Payload = nil
 	assert.Nil(t, tErr, "Unexpected error.")
 	assert.Equal(t, getMICResponseReference(), token, "Token failed to be marshalled to the expected bytes.")
+}
+
+func TestMICTokenErrorPaths(t *testing.T) {
+	badKey := types.EncryptionKey{KeyType: 999, KeyValue: []byte("bad")}
+	token := MICToken{}
+	assert.Error(t, token.SetChecksum(getSessionKey(), initiatorSign))
+	token.Payload = []byte("payload")
+	assert.Error(t, token.SetChecksum(badKey, initiatorSign))
+	token.Checksum = []byte{1}
+	assert.Error(t, token.SetChecksum(getSessionKey(), initiatorSign))
+
+	withoutPayload := MICToken{Checksum: []byte{1}}
+	valid, err := withoutPayload.Verify(getSessionKey(), initiatorSign)
+	assert.False(t, valid)
+	assert.Error(t, err)
+
+	for name, encoded := range map[string][]byte{
+		"short":      {0x04},
+		"token id":   append([]byte{0, 0}, make([]byte, micHdrLen-2)...),
+		"bad filler": append([]byte{0x04, 0x04, 0, 0}, make([]byte, micHdrLen-4)...),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var parsed MICToken
+			assert.Error(t, parsed.Unmarshal(encoded, false))
+		})
+	}
+
+	_, err = NewInitiatorMICToken([]byte("payload"), badKey)
+	assert.Error(t, err)
+	_, err = NewInitiatorMICToken([]byte("payload"), types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("short")})
+	assert.Error(t, err)
 }
