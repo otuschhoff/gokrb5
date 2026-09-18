@@ -44,32 +44,36 @@ func getGssWrapTokenId() *[2]byte {
 // Marshal the WrapToken into a byte slice.
 // The payload should have been set and the checksum computed, otherwise an error is returned.
 func (wt *WrapToken) Marshal() ([]byte, error) {
-	if wt.CheckSum == nil {
+	sealed := wt.Flags&MICTokenFlagSealed != 0
+	if !sealed && wt.CheckSum == nil {
 		return nil, errors.New("checksum has not been set")
+	}
+	if !sealed && len(wt.CheckSum) != int(wt.EC) {
+		return nil, errors.New("checksum length does not match EC")
+	}
+	if sealed && wt.CheckSum != nil {
+		return nil, errors.New("sealed tokens do not have a separate checksum")
 	}
 	if wt.Payload == nil {
 		return nil, errors.New("payload has not been set")
 	}
 
-	pldOffset := HdrLen                    // Offset of the payload in the token
-	chkSOffset := HdrLen + len(wt.Payload) // Offset of the checksum in the token
-
-	bytes := make([]byte, chkSOffset+int(wt.EC))
-	copy(bytes[0:], getGssWrapTokenId()[:])
-	bytes[2] = wt.Flags
-	bytes[3] = FillerByte
-	binary.BigEndian.PutUint16(bytes[4:6], wt.EC)
-	binary.BigEndian.PutUint16(bytes[6:8], wt.RRC)
-	binary.BigEndian.PutUint64(bytes[8:16], wt.SndSeqNum)
-	copy(bytes[pldOffset:], wt.Payload)
-	copy(bytes[chkSOffset:], wt.CheckSum)
-	return bytes, nil
+	body := append([]byte(nil), wt.Payload...)
+	if !sealed {
+		body = append(body, wt.CheckSum...)
+	}
+	rotateRight(body, int(wt.RRC))
+	token := append(wrapHeader(wt.Flags, wt.EC, wt.RRC, wt.SndSeqNum), body...)
+	return token, nil
 }
 
 // SetCheckSum uses the passed encryption key and key usage to compute the checksum over the payload and
 // the header, and sets the CheckSum field of this WrapToken.
 // If the payload has not been set or the checksum has already been set, an error is returned.
 func (wt *WrapToken) SetCheckSum(key types.EncryptionKey, keyUsage uint32) error {
+	if wt.Flags&MICTokenFlagSealed != 0 {
+		return errors.New("sealed tokens do not have a separate checksum")
+	}
 	if wt.Payload == nil {
 		return errors.New("payload has not been set")
 	}
@@ -114,6 +118,9 @@ func getChecksumHeader(flags byte, senderSeqNum uint64) []byte {
 // and compares it to the checksum present in the token.
 // In case of any failure, (false, Err) is returned, with Err an explanatory error.
 func (wt *WrapToken) Verify(key types.EncryptionKey, keyUsage uint32) (bool, error) {
+	if wt.Flags&MICTokenFlagSealed != 0 {
+		return false, errors.New("sealed tokens must be unwrapped to verify integrity")
+	}
 	computed, cErr := wt.computeCheckSum(key, keyUsage)
 	if cErr != nil {
 		return false, cErr
@@ -153,18 +160,25 @@ func (wt *WrapToken) Unmarshal(b []byte, expectFromAcceptor bool) error {
 	if b[3] != FillerByte {
 		return fmt.Errorf("unexpected filler byte: expecting 0xFF, was %s ", hex.EncodeToString(b[3:4]))
 	}
-	checksumL := binary.BigEndian.Uint16(b[4:6])
-	// Sanity check on the checksum length
-	if int(checksumL) > len(b)-HdrLen {
-		return fmt.Errorf("inconsistent checksum length: %d bytes to parse, checksum length is %d", len(b), checksumL)
+	ec := binary.BigEndian.Uint16(b[4:6])
+	rrc := binary.BigEndian.Uint16(b[6:8])
+	body := append([]byte(nil), b[HdrLen:]...)
+	rotateLeft(body, int(rrc))
+	if flags&MICTokenFlagSealed == 0 && int(ec) > len(body) {
+		return fmt.Errorf("inconsistent checksum length: %d bytes to parse, checksum length is %d", len(b), ec)
 	}
 
 	wt.Flags = flags
-	wt.EC = checksumL
-	wt.RRC = binary.BigEndian.Uint16(b[6:8])
+	wt.EC = ec
+	wt.RRC = rrc
 	wt.SndSeqNum = binary.BigEndian.Uint64(b[8:16])
-	wt.Payload = b[16 : len(b)-int(checksumL)]
-	wt.CheckSum = b[len(b)-int(checksumL):]
+	if flags&MICTokenFlagSealed != 0 {
+		wt.Payload = body
+		wt.CheckSum = nil
+	} else {
+		wt.Payload = body[:len(body)-int(ec)]
+		wt.CheckSum = body[len(body)-int(ec):]
+	}
 	return nil
 }
 
