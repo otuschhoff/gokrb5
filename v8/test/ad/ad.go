@@ -350,8 +350,19 @@ func credentialPaths() (keytabPath, userPath, passwordPath string, err error) {
 }
 
 // findRepoRoot walks up from the working directory to the first directory
-// holding the keytab file, or to the git top level.
+// holding the keytab file, or to the git top level. GitHub Actions can set
+// GITHUB_WORKSPACE to the repository root even when the process working
+// directory is a nested package directory or a container temp directory.
 func findRepoRoot() (string, error) {
+	if workspace := os.Getenv("GITHUB_WORKSPACE"); workspace != "" {
+		if _, err := os.Stat(filepath.Join(workspace, ".git")); err == nil {
+			return workspace, nil
+		}
+		if _, err := os.Stat(filepath.Join(workspace, KeytabFile)); err == nil {
+			return workspace, nil
+		}
+	}
+
 	dir, err := os.Getwd()
 	if err != nil {
 		return "", err
