@@ -87,6 +87,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Install CA certificates
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates
+          update-ca-certificates
+
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
@@ -145,7 +151,7 @@ jobs:
 
       - name: Upload coverage profile
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: v8-coverage
           path: v8/coverage.out
