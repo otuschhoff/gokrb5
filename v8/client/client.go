@@ -155,12 +155,12 @@ func NewFromPrincipalName(princ types.PrincipalName, realm string, krb5conf *con
 	creds := credentials.NewFromPrincipalName(princ, realm)
 	clientSettings := NewSettings(settings...)
 	return &Client{
-		Credentials: creds,
-		Config:      krb5conf,
-		settings:    clientSettings,
-		sessions:    &sessions{Entries: make(map[string]*session)},
-		cache:       NewCache(),
-		s4uCache:    NewCache(),
+		Credentials:   creds,
+		Config:        krb5conf,
+		settings:      clientSettings,
+		sessions:      &sessions{Entries: make(map[string]*session)},
+		cache:         NewCache(),
+		s4uCache:      NewCache(),
 		kdcTimeOffset: clientSettings.kdcTimeOffset,
 	}
 }

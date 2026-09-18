@@ -219,6 +219,7 @@ jobs:
 
       - name: Start integration test dependencies
         run: |
+          sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq krb5-user
           sudo chmod 666 /etc/krb5.conf
           sudo chmod 666 /var/run/docker.sock
