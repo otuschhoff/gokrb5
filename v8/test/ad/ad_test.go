@@ -190,8 +190,20 @@ func TestADLocalDiscoveryHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if root, err := findRepoRoot(); err != nil || root != expectedRoot {
-		t.Fatalf("repository root = %q, %v (want %q)", root, err, expectedRoot)
+	root, err := findRepoRoot()
+	if err != nil {
+		t.Fatalf("findRepoRoot() error = %v", err)
+	}
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		t.Fatalf("stat discovered repository root %q: %v", root, err)
+	}
+	expectedInfo, err := os.Stat(expectedRoot)
+	if err != nil {
+		t.Fatalf("stat expected repository root %q: %v", expectedRoot, err)
+	}
+	if !os.SameFile(rootInfo, expectedInfo) {
+		t.Fatalf("repository root = %q, want %q", root, expectedRoot)
 	}
 	t.Setenv("AD_TEST_OVERRIDE", "override")
 	if envOr("AD_TEST_OVERRIDE", "fallback") != "override" || envOr("AD_TEST_MISSING", "fallback") != "fallback" {
