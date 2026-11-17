@@ -54,6 +54,9 @@ The following is working/tested:
 ## Contributing
 If you are interested in contributing to gokrb5, great! Please read the [contribution guidelines](https://github.com/otuschhoff/gokrb5/blob/master/CONTRIBUTING.md).
 
+For the current v8 code-quality assessment and executable remediation phases,
+see the [v8 refactoring roadmap](docs/design/refactoring.md).
+
 ---
 
 ## References

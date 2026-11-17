@@ -1,0 +1,1000 @@
+# v8 Code Quality and Refactoring Roadmap
+
+Status: active, authoritative remediation backlog.
+Assessment date: 2026-11-17.
+Scope: `v8` module (`github.com/otuschhoff/gokrb5/v8`) only. Root-module v7
+refactoring is out of scope; whole-project lint automation remains unchanged.
+Source revision: `26e11e9` plus the lint configuration and automation changes
+described below. The checkout was two commits behind its existing `origin/main`
+reference; this assessment does not claim to cover those commits.
+
+Navigation: [current state](#1-high-level-current-state),
+[measurements](#2-assessment-method-and-limits),
+[findings](#3-prioritized-findings),
+[execution phases](#4-phased-remediation-for-llm-execution),
+[automation](#5-automation-policy). Appendices retain historical evidence only.
+
+## 1. High-level current state
+
+This roadmap covers only the active v8 development module:
+
+| Module | Role | Declared minimum Go | Assessment |
+| --- | --- | --- | --- |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit tests pass; 3,265 canonical lint findings |
+
+The active module has substantial implementation and test coverage for keytab
+and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
+NEGOEX, and PKU2U. Existing CI includes native platform tests, race tests,
+coverage, cross-builds, MIT/Samba integration, and fuzz jobs. These are strengths,
+not evidence that every protocol path or Windows deployment is verified.
+
+The main code-quality risks are concentrated in authentication orchestration,
+binary parsing, error propagation, nil invariants, and resource ownership.
+Passing tests coexist with considerable static-analysis debt. Complexity is
+particularly high in the AS exchange, NDR decoding, configuration parsing,
+PAC processing, and keytab decoding. Cosmetic modernization must not precede
+correctness work or change protocol compatibility.
+
+Fresh v8 cross-package statement coverage is **84.4%**, versus the historical
+70.9% baseline from 2026-09-07. The CI floor remains **70.0%**: it no longer
+closely protects the current baseline. This aggregate is not proof of critical
+branch coverage or of the historical 100% combined-coverage goal.
+
+### Consolidation and status rules
+
+This document supersedes the review findings and implementation plans formerly
+embedded in the [MS-KILE specification](ms-kile-compliance.md), the
+[MIT compatibility specification](mit-krb5-keytab-kinit-compatibility.md), and
+the former `test-coverage.md` plan. Protocol design, fixture requirements,
+acceptance criteria, and compatibility decisions remain in those specifications.
+The [Windows execution checklist](ms-kile-windows-checklist.md) remains the
+environment-specific evidence form, not a second refactoring backlog.
+
+Historical findings and plans are preserved below for traceability. **They are
+not a list of defects known to remain open.** In particular, the MIT design
+reports implementation complete, and MS-KILE contains implementation notes
+alongside an old Draft label and original gap tables. Reconcile each historical
+ID (`KT-*`, `KI-*`, `KS-*`, `KC-*`, `KA-*`, `KN-*`, `KP-*`) with current code,
+tests, and external evidence before changing behavior. Never reimplement an
+old phase merely because an old acceptance checkbox is unchecked.
+
+## 2. Assessment method and limits
+
+Tooling:
+
+- golangci-lint **2.15.0**, custom build from
+  [the pinned manifest](../../.custom-gcl.yml), with NilAway
+  `v0.0.0-20261112030514-ccd005690d1e`.
+- Go **1.26.11**, Linux/amd64, readonly module resolution.
+- [Canonical policy](../../.golangci.yml) and
+  [expanded advisory profile](../../.golangci-report.yml).
+- Tests enabled; issue caps disabled and duplicate-line filtering disabled.
+  Existing configuration exclusions are retained.
+- Corrected NilAway's copied unrelated-project scope to
+  `github.com/otuschhoff/gokrb5/v8` in both profiles. Without this correction the canonical v8
+  scan reported 2,970 findings and silently missed 295 NilAway diagnostics.
+- Import grouping uses the exact v8 module prefix; removed a copied domain-layer
+  isolation rule for a directory this project does not have. Canonical and
+  advisory scans explicitly include tests; NilAway includes v8 test files.
+
+Reproduce from the repository root after the setup in
+[CONTRIBUTING](../../CONTRIBUTING.md#code-quality-and-refactoring):
+
+```sh
+export GOTOOLCHAIN=go1.26.11
+LINT_REPORT_DIR=lint-reports bash scripts/lint.sh full
+LINT_REPORT_DIR=lint-reports bash scripts/lint.sh report
+(
+  cd v8
+  go test -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
+  go tool cover -func=coverage.out
+)
+```
+
+Both v8 lint profiles completed with exit **1** (findings), not analysis failure.
+The v8 unit suite passed. Full inventories are JSON/text outputs of the runner
+and CI artifacts; they are not duplicated as thousands of prose tasks here.
+Counts are diagnostics, not unique defects, and profiles overlap.
+
+The shared lint runner also assesses v7 with the other configured analyzers to
+preserve the whole-project quality checks; NilAway is scoped to v8 only.
+The v7 findings are not part of this refactoring backlog.
+
+Scope is every package selected by normal `./...` loading in the v8 module,
+including unit tests. Integration/example/custom build-tag configurations,
+other operating systems, race detection, and live KDC runs were **not** executed
+as part of this local assessment. Existing jobs are not represented as newly
+passing. Analyzer alerts, especially NilAway and gosec, require validation;
+this is a code-quality assessment, not an exploitability or compliance
+certification.
+
+### Measured baseline
+
+| Profile | v8 findings | Interpretation |
+| --- | ---: | --- |
+| Canonical | 3,265 | Policy used by the changed-code gate |
+| Expanded advisory | 4,016 | Additional structural, size, and modernization signals |
+
+Canonical totals comprise 2,471 production / 794 test diagnostics in v8.
+
+| Canonical analyzer | v8 |
+| --- | ---: |
+| bodyclose | 37 |
+| copyloopvar | 2 |
+| depguard | 1 |
+| errcheck | 159 |
+| errorlint | 252 |
+| exhaustive | 3 |
+| forcetypeassert | 49 |
+| gci | 131 |
+| gochecknoglobals | 36 |
+| gocognit | 79 |
+| gocritic | 351 |
+| gofumpt | 90 |
+| gosec | 333 |
+| govet | 165 |
+| interfacebloat | 3 |
+| ireturn | 47 |
+| nakedret | 28 |
+| nestif | 47 |
+| nilaway | 295 |
+| nonamedreturns | 136 |
+| revive | 525 |
+| staticcheck | 79 |
+| unconvert | 10 |
+| unparam | 6 |
+| unused | 5 |
+| wrapcheck | 396 |
+
+Enabled analyzers absent from this table emitted no findings in this scope.
+Expanded-profile v8 noise is dominated by 1,123 `lll` and 956
+`exhaustruct_v5` diagnostics. Its full-struct initialization rule differs
+deliberately from the canonical annotation-only rule. Do not treat it as a
+requirement to initialize every zero-valued field or rewrite fixture strings.
+
+## 3. Prioritized findings
+
+Priority denotes remediation order, not a vulnerability severity.
+
+| ID | Priority | Finding and evidence | Required outcome |
+| --- | --- | --- | --- |
+| Q-01 | P0 | NilAway was scoped to an unrelated project; root-only commands miss v8. Corrected in this change. | Keep v8 included in both profiles and the automatic quality checks. |
+| Q-02 | P1 | 295 NilAway and 49 unchecked type-assertion diagnostics. Example: [v8 ccache export](../../v8/client/ccache_export.go) dereferences session map values under a lock; NilAway does not establish that values cannot be nil. | Establish producer/consumer invariants and test missing/nil states. Confirm reachability before adding guards; do not silently skip invalid credentials. |
+| Q-03 | P1 | 159 unchecked errors, 252 errorlint and 396 wrapcheck reports. Examples include deferred socket closes in [v8 network code](../../v8/client/network.go) and unchecked diagnostic writes in [v8 client code](../../v8/client/client.go). | Distinguish mandatory persistence/protocol failures from best-effort cleanup; preserve typed errors and first failure, and test injected failures. |
+| Q-05 | P1 | 333 gosec diagnostics, including integer narrowing in ASN.1/wire encoding. The library intentionally supports legacy Kerberos algorithms. | Classify validated bounds, required legacy interoperability, and actual defects separately. Add boundary/rejection tests before changing casts or crypto negotiation. No blanket gosec exclusion. |
+| Q-06 | P1 | 37 bodyclose reports need ownership analysis. The two production alerts in [PKINIT revocation](../../v8/pkinit/kdccert.go) delegate closure to `readRevocationBody`, which closes even on read failure. | Do not label every alert a leak. Verify helper ownership, response/error paths, and tests; use only narrowly justified suppressions for demonstrated false positives. |
+| Q-07 | P2 | 79 cognitive-complexity reports. v8 ASExchange scores 185, Decoder.fill 115, LibDefaults.parseLines 105, PAC processing 84, and Keytab.Unmarshal 66 (threshold 15). | Separate parsing, policy, state transitions, and side effects in small compatible steps backed by characterization tests. |
+| Q-08 | P2 | 165 govet reports include shadowing; 79 staticcheck reports mix behavior issues, deprecated APIs, and simplifications. [gokinit](../../v8/cmd/gokinit/main.go) still uses deprecated encrypted-PEM helpers. | Triage correctness before suggestions. Document supported identity formats and compatibility before replacing legacy PEM behavior. |
+| Q-09 | P2 | Coverage is 84.4% but the gate is 70.0%; Windows checklist run record says not executed. Historical MS-KILE notes record a targeted live Windows FAST success, not completion of the full checklist. | Ratchet the measured coverage floor and critical-path tests; retain explicit outstanding Windows/fixture/platform release gates. |
+| Q-10 | P3 | Revive, gocritic, formatters, named returns, and interface rules dominate remaining debt; IANA tables and fixture-heavy tests contribute many diagnostics. | Apply package-sized mechanical changes separately from behavior fixes; retain public interfaces and wire constants unless a compatible migration is agreed. |
+| Q-11 | P3 | 5 unused and 6 unparam reports, plus advisory modernize/prealloc/perfsprint findings. | Confirm build-tag and external API usage before deletion; preserve v8's declared Go minimum. Benchmark performance changes rather than assuming improvement. |
+
+Finding IDs are stable: Q-04 was a v7-only finding and is excluded from this
+v8 roadmap, not renumbered or carried forward as a remediation task.
+
+The largest v8 canonical concentrations are `client` (446), `spnego` (350),
+`types` (275), `pac` (175), `messages` (158), `iana/errorcode` (155), internal NDR
+(154), and `keytab` (143). These totals include tests and style diagnostics:
+package size alone does not determine priority.
+
+## 4. Phased remediation for LLM execution
+
+### Execution contract for every task
+
+1. Select one phase and a package-sized slice inside v8. Record the finding IDs,
+   initial diagnostics, and acceptance tests in the PR description. Do not
+   refactor root-module v7 code as part of this roadmap.
+2. Read current code, callers, historical IDs below, and relevant protocol
+   requirements. Do not treat historical snippets or commands as current APIs.
+   Run v8 commands **inside `v8`**, never `go test ./v8/...` from the root module.
+3. Add a failing deterministic regression or characterization test before a
+   behavioral fix. Preserve exported APIs, wire bytes, error identity,
+   authentication ordering, locking, deadlines, and filesystem guarantees.
+4. Make a focused change. Do not run repository-wide `--fix`, delete rejection
+   branches for coverage, add silent fallback behavior, weaken policies, or
+   increase complexity thresholds. A false positive needs a specific linter
+   name, a reason, and evidence.
+5. Run focused unit tests, then `(cd v8 && go test ./...)`.
+   Run `go test -race` for concurrency/state changes and the appropriate
+   integration/fuzz jobs for protocol/parser changes. External prerequisites
+   must be stated when unavailable, not reported as passing.
+6. Run `bash scripts/lint.sh new BASE_REV` against the real PR base and regenerate
+   both full inventories. Require zero new canonical changed-line diagnostics;
+   verify relevant v8 diagnostics decreased without merely moving.
+7. Update this document's phase status, ID disposition, tests, and measured
+   counts in the same PR. Stop if requirements conflict; do not broaden scope.
+
+### Phase 0 - Reliable assessment and non-regression gate
+
+Status: implemented by this assessment; hosted execution and branch protection
+remain administrator/CI verification steps.
+
+- Q-01: scoped NilAway to v8 in both profiles, set the exact v8 import-grouping
+  prefix, and removed the unrelated domain-layer rule; other policy choices
+  are retained.
+- Added a pinned custom build, two-module runner, whole-project JSON/text
+  inventories, and a canonical added/changed-line gate.
+- PR base SHA covers the entire PR, not only its last commit; pushes use their
+  before SHA. Scheduled/manual scans report existing debt without hiding
+  analyzer/configuration failures.
+- Full scans remain unfiltered. No baseline is baked into the policy file.
+
+Exit: both profiles validate; both modules analyze; an injected changed-code
+diagnostic fails the gate; tooling failures fail CI; artifacts are uploaded.
+Require `golangci-lint` through repository branch protection separately.
+
+Local verification: the custom binary rebuilt successfully from the manifest;
+the shared runner reproduced all four totals; the clean revision gate passed
+both modules; an injected unused function on a changed v8 line failed the actual
+revision gate; a separate added-file patch with an unchecked error also failed.
+Both probes were removed. Invalid revisions and missing binaries returned 2.
+Hosted workflow execution and artifact delivery still require a GitHub run.
+
+### Phase 1 - Reconcile historical claims and validate correctness alerts
+
+Depends on Phase 0. Findings: Q-02, Q-03, Q-05, Q-06, and Q-08.
+
+Start with v8 session/cache nil invariants,
+untrusted parser boundaries, response ownership, and error-loss reports.
+For each historical ID in the appendices, record one of: implemented with named
+test, confirmed open with regression, false positive with reasoning, or external
+evidence pending. Maintain the disposition adjacent to its historical record;
+do not create a second backlog.
+
+Use focused commands such as `(cd v8 && go test ./client ./credentials ./keytab
+./messages ./pac ./pkinit)`.
+Audit custom-tag callers before changing shared code.
+
+Exit: every selected v8 nil/resource/overflow/error
+alert has evidence and disposition; confirmed fixes remove their diagnostics;
+no unsupported claim of complete Windows compliance is introduced.
+
+### Phase 2 - Error contracts and deterministic failure coverage
+
+Depends on Phase 1 for the affected package. Findings: Q-02, Q-03, Q-05, Q-06.
+
+Work in slices: keytab/ccache persistence, TCP/UDP/HTTPS transport, crypto/message
+decoding, then HTTP authentication. Reuse existing bounded reads, write helpers,
+typed errors, and injectable transports. Propagate mandatory errors with context;
+retain errors.Is/As and existing KRB error behavior. Test read/write/close,
+short-write, malformed length, timeout, and cancellation paths. Never replace
+a useful error with a later cleanup error.
+
+Exit: no unexplained correctness diagnostics in each completed slice; boundary
+and injected-failure tests pass, including races for shared state. Parser fuzz
+targets run at least 60 seconds with valid corpus seeds and malformed inputs.
+
+### Phase 3 - Decompose high-complexity state machines and parsers
+
+Depends on Phases 1-2 for the affected surface. Finding: Q-07.
+
+Order: ASExchange; NDR Decoder.fill; configuration parseLines; PAC processing;
+keytab decoding. Treat each as a separate PR series. Extract coherent transitions
+or decoding operations, not arbitrary line-count helpers. Preserve retry budgets,
+FAST downgrade checks, referral handling, lock ownership, wire bounds, and
+metadata. Keep original tests and add branch-level characterization as needed.
+
+Exit: touched functions meet canonical cognitive complexity 15 / nesting 4
+thresholds, or a separately reviewed protocol-specific exception is justified;
+tests, race tests, relevant fuzzing, and MIT/Samba integration pass. No exported
+signature changes are needed solely to satisfy a style analyzer.
+
+### Phase 4 - Coverage and interoperability release evidence
+
+Depends on Phase 0; can proceed independently of Phases 1-3 on untouched areas.
+Finding: Q-09. Historical coverage requirements are preserved in Appendix C.
+
+1. Reproduce the 84.4% result with CI's Go/platform instrumentation and raise the
+   70.0% floor to a justified floor close to the reproducible minimum. Never
+   assume a locally measured percentage is portable or lower a floor to merge.
+2. Prioritize untrusted decoders and cryptographic rejection paths to at least
+   90%; authentication packages to at least 75% overall and security-sensitive
+   transitions to 90%. Verify these numerically per package/function.
+3. Retain all coverage workstreams: deterministic AS/TGS/FAST/PKINIT/S4U/GSS
+   peers, scheduled fuzzing/corpora, MIT/Samba and Windows interoperability,
+   native filesystem/network behavior, and mobile runner coverage.
+4. Complete and attach the Windows checklist, including pending captured
+   fixture 14 and PKU2U directions, claims, PKINIT, IIS/RPC, and KKDCP.
+   Distinguish historical targeted FAST success from full-suite evidence.
+5. Progress toward the historical strict **100% combined production statement
+   coverage** goal using merged source-block profiles from native, integration,
+   subprocess, version, and platform jobs. Track uncovered blocks and their
+   executing job; do not fake profiles, reduce coverpkg, or hide rejection paths.
+
+Exit: monotonically raised measured floors, critical-path targets verified,
+external gaps explicitly recorded with prerequisites/owner/run evidence, and
+eventual 100% combined coverage verified only when all required jobs execute.
+Compile-only mobile checks must never be labeled native runtime coverage.
+
+### Phase 5 - Mechanical quality cleanup and sustainable ratcheting
+
+Depends on Phase 0; defer edits to functions under Phases 1-3 until they settle.
+Findings: Q-08, Q-10, Q-11.
+
+Apply formatter fixes package by package in mechanical-only PRs. Address
+shadowing, naming, return clarity, deprecated APIs, and dead code with
+compatibility checks. Separate protocol tables and long fixtures from ordinary
+logic when judging line-length/constants suggestions. Keep advisory rules
+advisory until intentionally adopted; avoid adding dependencies for style fixes.
+
+Preserve v8's Go 1.26.0 floor. Validate proposed modernizations on the supported
+module toolchain and retain tagged/platform code. Measure optimizations before
+and after with existing benchmarks. Gradually reduce canonical debt to zero;
+then switch the full canonical scan from inventory-only to a blocking gate.
+
+Exit: each completed slice has no unexplained canonical findings; counts fall
+under unchanged scope; no public/wire behavior regressions; full-project zero
+debt eventually enables an unfiltered required lint check.
+
+## 5. Automation policy
+
+[The runner](../../scripts/lint.sh) is shared by local work and the
+[Lint workflow](../../.github/workflows/lint.yml). Use `full` for canonical
+inventory, `report` for advisory inventory, and `new BASE_REV` for a blocking
+canonical changed-line check. Both modules always run. Findings return 1;
+configuration, package-loading, timeout, or tool failures must not be accepted
+as existing debt.
+
+The diff gate intentionally permits pre-existing debt on untouched lines. It
+does not prove an unchanged caller is safe after a callee change, enforce a
+monotonic total count automatically, or assess advisory rules as mandatory.
+Review full artifacts for behavioral changes. Stage new files for local diff
+checks; CI sees committed files. No runtime source was refactored in this
+assessment.
+
+## Appendix A - Historical MS-KILE review and implementation plan
+
+Historical snapshot, not an executable open-issue queue. Original section and
+phase numbers below refer to the MS-KILE specification. Reconcile IDs under
+Phase 1 above before acting; retain its implementation notes and external gates.
+
+### 2. Current Implementation — Findings
+
+Sources reviewed: `v8/client/*.go`, `v8/messages/*.go`, `v8/types/*.go`, `v8/pac/*.go`, `v8/gssapi/*.go`, `v8/spnego/*.go`, `v8/service/*.go`, `v8/crypto/*.go`, `v8/kadmin/*.go`, `v8/config/*.go`, `v8/iana/**`.
+
+#### 2.1 What exists and is compliant
+
+| Capability | Location |
+| --- | --- |
+| AES128/256-SHA1, AES-SHA2, RC4-HMAC, DES3 etypes and checksums | `v8/crypto` |
+| RC4 string-to-key (UTF-16LE NT hash), ETYPE-INFO2 salts and s2kparams | `v8/crypto/rfc4757`, `v8/crypto/crypto.go` |
+| PA-ENC-TIMESTAMP, ETYPE-INFO/INFO2 precedence, PA-REQ-ENC-PA-REP (RFC 6806 §11) | `v8/client/ASExchange.go`, `v8/messages/KDCRep.go` |
+| `KDC_ERR_WRONG_REALM` client referrals, TGS `krbtgt/OTHER` server referrals (RFC 6806) | `v8/client/ASExchange.go`, `v8/client/TGSExchange.go` |
+| `KRB_ERR_RESPONSE_TOO_BIG` UDP→TCP fallback, `udp_preference_limit` | `v8/client/network.go` |
+| Clock-skew recovery from KRB-ERROR `stime` | `v8/client/clock.go`, `ASExchange.go` |
+| `KDC_ERR_KEY_EXPIRED` → password change (RFC 3244, protocol 0xff80, port 464) | `v8/kadmin`, `v8/cmd/gokinit` |
+| Enterprise principals (`KRB_NT_ENTERPRISE`), `canonicalize` KDC option | `v8/credentials`, `v8/messages/KDCReq.go` |
+| User-to-user TGS-REQ (`enc-tkt-in-skey`, `additional-tickets`) | `v8/messages/KDCReq.go` |
+| AD-IF-RELEVANT unwrapping, AD-WIN2K-PAC extraction | `v8/messages/Ticket.go` |
+| PAC buffers 1, 6, 7, 10, 11, 12 (partial), 13, 14, 15; server-checksum verification with HMAC-MD5 and AES checksums | `v8/pac` |
+| RFC 4121 MIC (0x0404) and Wrap (0x0504) tokens | `v8/gssapi` |
+| SPNEGO NegTokenInit/Resp, KRB5 and MS-legacy KRB5 OIDs, HTTP Negotiate middleware | `v8/spnego` |
+| Service AP-REQ verification: keytab decrypt, skew, addresses, replay cache, PAC group SIDs into `credentials.ADCredentials` | `v8/service`, `v8/messages/APReq.go` |
+| DNS SRV KDC discovery, kpasswd discovery | `v8/config/hosts.go` |
+
+#### 2.2 Defects and gaps — protocol structures (`KS-n`)
+
+| ID | Finding | Severity |
+| --- | --- | --- |
+| KS-1 | No ASN.1 types for KERB-PA-PAC-REQUEST (128), PA-PAC-OPTIONS (167), KERB-ERROR-DATA / KERB-EXT-ERROR, KERB-AD-RESTRICTION-ENTRY (141) with LSAP_TOKEN_INFO_INTEGRITY, KERB-LOCAL (142), AD-AUTH-DATA-AP-OPTIONS (143), PA-FOR-USER (129), PA-S4U-X509-USER (130), PA-SUPPORTED-ENCTYPES (165), KERB-KEY-LIST-REQ/REP (161/162), PA-SVR-REFERRAL-INFO (20, RFC 6806 Appendix A), KERB-SUPERSEDED-BY-USER (170), KERB-DMSA-KEY-PACKAGE (PA-DATA 171). Only the `patype` constants up to 166 exist; 167, 161, 162, 170, 171 are missing. | High |
+| KS-2 | `iana/adtype` lacks 141, 142, 143; `iana/nametype` lacks `KRB_NT_WELLKNOWN` (11), `KRB_NT_MS_PRINCIPAL` (-128), `KRB_NT_MS_PRINCIPAL_AND_ID` (-129), `KRB_NT_ENT_PRINCIPAL_AND_ID` (-130); no constants for `KERB_AP_OPTIONS_CBT` (0x4000), `KERB_AP_OPTIONS_UNVERIFIED_TARGET_NAME` (0x8000), PA-PAC-OPTIONS flag bits, PA-SUPPORTED-ENCTYPES bit field, `KDC_OPT_CNAME_IN_ADDL_TKT` (bit 14), key usages 26/27 (PA-S4U-X509-USER), NTSTATUS values commonly surfaced in KERB-EXT-ERROR. | Medium |
+| KS-3 | `messages.KRBError.EData` is only parsed as METHOD-DATA in specific retry paths. KERB-ERROR-DATA (data-type 3 `KERB_ERR_TYPE_EXTENDED` carrying an NTSTATUS, data-type 2 `KERB_AP_ERR_TYPE_SKEW_RECOVERY`) and TYPED-DATA are never decoded, so AD-specific failure reasons (e.g. `STATUS_ACCOUNT_DISABLED`, `STATUS_PASSWORD_MUST_CHANGE`) are lost. | Medium |
+| KS-4 | `PACType.ProcessPACInfoBuffers` slices `pac.Data[Offset:Offset+Size]` without bounds checks; a malformed PAC panics the service. `UPNDNSInfo.Unmarshal` slices by untrusted offsets similarly. No PAC fuzz target. | High (security) |
+| KS-5 | PAC buffer types 16 (PAC_TICKET_CHECKSUM), 17 (PAC_ATTRIBUTES_INFO), 18 (PAC_REQUESTOR), 19 (PAC_FULL_CHECKSUM) are not recognised and are silently dropped. | Medium |
+| KS-6 | `UPNDNSInfo` flag handling is wrong: `upnNoUPNAttr = 31` is used as a bit index where MS-PAC defines flag `U` = 0x00000001; flag `S` = 0x00000002 (SamName/Sid extension) is not parsed. | Medium |
+| KS-7 | No PAC marshalling; fixtures cannot be synthesised and negative tests (tampered checksums, duplicate buffers, misaligned offsets) are impossible to construct programmatically. | Medium |
+| KS-8 | `AuthorizationData` walking is ad hoc (`Ticket.GetPACType` only looks for `AD-IF-RELEVANT[0] == AD-WIN2K-PAC`). There is no generic visitor that returns all entries of a given type from nested AD-IF-RELEVANT containers in either ticket or authenticator authorization data. | Medium |
+
+#### 2.3 Defects and gaps — client behaviour (`KC-n`)
+
+| ID | Finding | Severity |
+| --- | --- | --- |
+| KC-1 | AS-REQ never includes KERB-PA-PAC-REQUEST. AD includes a PAC by default, but MS-KILE §3.2.5 clients send `include-pac` and RODC/branch scenarios depend on it; services that want PAC-less tickets cannot ask. | Medium |
+| KC-2 | `ASRep.Verify`/`TGSRep.Verify` reject any `cname` that differs from the request. When `canonicalize` is set or the request used `KRB_NT_ENTERPRISE`, AD legitimately returns the canonical `cname`; RFC 6806 §11 / MS-KILE require acceptance (protected by PA-REQ-ENC-PA-REP when present). Enterprise logons to AD currently fail. | High |
+| KC-3 | PA-SUPPORTED-ENCTYPES in the reply `encrypted-pa-data` is ignored, so the client cannot learn that the target supports AES-SK, claims, FAST, or compound identity, and cannot restrict TGS etypes accordingly. | Medium |
+| KC-4 | No PA-PAC-OPTIONS in TGS-REQ: Claims, Branch-Aware, Forward-to-Full-DC and RBCD flags cannot be set. | Medium |
+| KC-5 | No S4U2self (PA-FOR-USER, PA-S4U-X509-USER) and no S4U2proxy (`cname-in-addl-tkt` with evidence ticket), so constrained delegation and protocol transition are impossible. | High |
+| KC-6 | No FAST (RFC 6113) armoring: PA-FX-FAST, PA-FX-COOKIE, PA-FX-ERROR, PA-ENCRYPTED-CHALLENGE are absent. `DisablePAFXFAST` actually toggles PA-REQ-ENC-PA-REP. AD policies "Fail unarmored authentication requests" and compound identity cannot be satisfied. | High |
+| KC-7 | Realm comparisons are case-sensitive string equality throughout (`Ticket.Realm`, `CRealm`, cache keys). MS-KILE realm names are case-insensitive; AD emits upper-case, `krb5.conf` and users often supply mixed case. | Medium |
+| KC-8 | Delegation: GSS `ContextFlagDeleg` extends the 0x8003 checksum to 28 bytes but never populates `Dlgth`/`Deleg` with a KRB-CRED; the `ok-as-delegate` ticket flag is not consulted. | High |
+| KC-9 | 0x8003 checksum `Bnd` is always 16 zero bytes; no API to supply GSS channel bindings (tls-server-end-point, tls-unique). No AD-AUTH-DATA-AP-OPTIONS with `KERB_AP_OPTIONS_CBT`, so Windows services with Extended Protection "Required" reject gokrb5 clients. | High |
+| KC-10 | Authenticator does not carry `KERB-LOCAL` or `KERB-AD-RESTRICTION-ENTRY`; Windows clients do, servers must ignore. Client-side emission is optional but the acceptor must tolerate it (see KA-4). | Low |
+| KC-11 | No DCE-style (`GSS_C_DCE_STYLE` 0x1000) three-leg exchange and no `GSS_C_EXTENDED_ERROR_FLAG` (0x4000); required for RPC/SMB-style acceptors and Windows error propagation. | Medium |
+| KC-12 | No legacy RFC 4757 §7 / RFC 1964 per-message tokens (TOK_ID 0x0101 MIC, 0x0201 Wrap, SGN_ALG 0x1100, SEAL_ALG 0x1000). Windows uses them whenever the session key is RC4-HMAC; gokrb5 wraps with 0x0504 regardless of key type, which Windows rejects. | High |
+| KC-13 | No KKDCP (Kerberos over HTTPS) transport; `kdc = https://host/KdcProxy` in `krb5.conf` is not understood. | Medium |
+| KC-14 | No PKINIT: see §2.6 (`KP-n`) for the MS-PKCA breakdown. | Medium |
+| KC-15 | KDC discovery does not use AD-specific SRV names (`_kerberos._tcp.dc._msdcs.<domain>`, site-aware variants) or `_kpasswd`; falls back only to `_kerberos._tcp.<realm>`. | Low |
+| KC-16 | `PA-SVR-REFERRAL-INFO` in `EncKDCRepPart.EncPAData` is ignored; the referral realm is inferred from the `krbtgt/REALM` sname only. | Low |
+| KC-17 | kpasswd result strings from AD carry a 30-byte password-policy blob after the text; it is exposed as raw bytes with no decoder. | Low |
+
+#### 2.4 Defects and gaps — application-server behaviour (`KA-n`)
+
+| ID | Finding | Severity |
+| --- | --- | --- |
+| KA-1 | PAC validation stops at server-checksum verification. MS-PAC/MS-KILE application-server rules not applied: PAC_CLIENT_INFO `Name` must equal the ticket `cname` (case-insensitive) and `ClientId` must equal ticket `authtime`; PAC_REQUESTOR SID (when present) must equal KERB_VALIDATION_INFO `UserId` under `LogonDomainId`; UPN_DNS_INFO `S` extension SAM name/SID (when present) must match; duplicate buffer types must be rejected rather than ignored where MS-PAC says "MUST NOT". | High |
+| KA-2 | Only `GroupMembershipSIDs`, logon times and a few names are exposed in `credentials.ADCredentials`. UPN, DNS domain, SAM account name, user SID, extra SIDs with attributes, resource group SIDs, client/device claims, device info, S4U delegation chain, PAC attributes flags and `UserAccountControl` are parsed but not surfaced. | Medium |
+| KA-3 | Acceptor ignores the 0x8003 checksum entirely: no channel-binding comparison, no reading of `Flags`, no delegation (`Deleg` KRB-CRED) extraction, no DCE-style AP-REP handling, no `KERB_AP_OPTIONS_CBT` detection for Extended Protection policy. | High |
+| KA-4 | Acceptor does not tolerate/ignore authenticator authorization data (`KERB-LOCAL`, `KERB-AD-RESTRICTION-ENTRY`, `AD-AUTH-DATA-AP-OPTIONS`); presence is not fatal today only because the field is never inspected — confirm and lock with tests. | Low |
+| KA-5 | No AP-REP generation with subkey/sequence number when the client requests mutual authentication (`ContextFlagMutual`); SPNEGO acceptor returns `accept-completed` without a `responseToken`. Windows clients with mutual auth fail. | High |
+| KA-6 | Legacy RC4 per-message tokens cannot be verified/unwrapped on the acceptor (mirror of KC-12). | High |
+| KA-7 | User-to-user tickets (`enc-tkt-in-skey`) cannot be accepted; `APReq.Verify` only tries keytab keys. | Low |
+| KA-8 | The acceptor does not validate the ticket `sname` against the service's own principal names when the keytab contains several principals unless `KeytabPrincipal` is set — MS-KILE §3.4.5 requires the ticket be for this service. | Medium |
+| KA-9 | SPNEGO acceptor does not emit or verify `mechListMIC` per MS-SPNG rules (required when the negotiated mech is not the initiator's first preference, or when the client sends one). | Medium |
+
+#### 2.5 Defects and gaps — NEGOEX and PKU2U (`KN-n`)
+
+| ID | Finding | Severity |
+| --- | --- | --- |
+| KN-1 | No NEGOEX mechanism (`1.3.6.1.4.1.311.2.2.30`): no message framing (`MESSAGE_HEADER`, `NEGO_MESSAGE`, `EXCHANGE_MESSAGE`, `VERIFY_MESSAGE`, `ALERT_MESSAGE`), no auth-scheme GUID negotiation, no conversation state machine. | High |
+| KN-2 | SPNEGO acceptor behaviour when the initiator's optimistic `mechToken` is NEGOEX (the Windows default) is unverified: it must answer `accept-incomplete` selecting KRB5 (or NEGOEX once implemented) instead of failing. SPNEGO initiator cannot offer NEGOEX. | Medium |
+| KN-3 | No PKU2U mechanism (`1.3.6.1.5.2.7`): no `WELLKNOWN:PKU2U` realm handling, no acceptor-as-KDC AS exchange, no PKU2U metadata (trusted-certifier) exchange, no certificate-to-principal mapping. | High |
+| KN-4 | No GSS context key export equivalent to `GSS_C_INQ_NEGOEX_KEY` / `GSS_C_INQ_NEGOEX_VERIFY_KEY`, which NEGOEX needs to compute and verify the `VERIFY` checksum over the conversation. | Medium |
+| KN-5 | `gssapi` has no OID constants for NEGOEX or PKU2U and no generic mechanism interface; `spnego` hard-codes KRB5 as the only negotiable mechanism. | Medium |
+
+#### 2.6 Defects and gaps — PKINIT / MS-PKCA (`KP-n`)
+
+| ID | Finding | Severity |
+| --- | --- | --- |
+| KP-1 | No PA-PK-AS-REQ (16) / PA-PK-AS-REP (17) ASN.1 (`AuthPack`, `PKAuthenticator`, `DHRepInfo`, `KDCDHKeyInfo`, `ReplyKeyPack`, `TD-*` typed data) and no CMS `SignedData`/`EnvelopedData` codec; the `patype` constants 14–18 exist but nothing consumes them. The legacy Windows 2000 PA-PK-AS-REQ-OLD (14/15) must be recognised and rejected with a clear error, not treated as unknown PA-DATA. | High |
+| KP-2 | No Diffie-Hellman (MODP 2/14/16) or RSA (`encKeyPack`) reply-key path; `octetstring2key` (RFC 4556 §3.2.3.1) and the RFC 8636 KDF (`id-pkinit-kdf-ah-sha256/384/512`) that Windows Server 2012+ negotiates via `supportedKDFs`/`kdfId` are absent. | High |
+| KP-3 | No client certificate selection/validation per MS-PKCA §3.1.5: EKU `id-kp-clientAuth` or `Smart Card Logon` (`1.3.6.1.4.1.311.20.2.2`), UPN in `otherName` SAN (`1.3.6.1.4.1.311.20.2.3`) or `id-pkinit-san`, the strong-mapping SID extension (`1.3.6.1.4.1.311.25.2`) for diagnostics, `pkinit_identities` sources (PEM, PKCS#12, `crypto.Signer` for PKCS#11/TPM). | High |
+| KP-4 | No KDC certificate validation per MS-PKCA §3.2.5.2: chain to `pkinit_anchors`, `KDC Authentication` EKU (`id-pkinit-KPKdc`, `1.3.6.1.5.2.3.5`) or, for legacy DCs, `Server Authentication` with the DC template, `dNSName` SAN matching the realm's DNS domain or `pkinit_kdc_hostname`, `id-pkinit-san` `krbtgt/REALM` for non-MS KDCs, CRL/OCSP revocation checking (`pkinit_require_crl_checking`), signature verification of `dhSignedData`/`signedAuthPack`, `dhKeyExpiration` handling and DH key reuse. | High |
+| KP-5 | PKINIT KRB-ERROR handling absent: `KDC_ERR_CLIENT_NOT_TRUSTED`, `KDC_ERR_KDC_NOT_TRUSTED`, `KDC_ERR_INVALID_SIG`, `KDC_ERR_DH_KEY_PARAMETERS_NOT_ACCEPTED` (+ `TD-DH-PARAMETERS` retry), `KDC_ERR_CANT_VERIFY_CERTIFICATE`, `KDC_ERR_INVALID_CERTIFICATE`, `KDC_ERR_REVOKED_CERTIFICATE`, `KDC_ERR_REVOCATION_STATUS_UNKNOWN`, `KDC_ERR_CLIENT_NAME_MISMATCH`, `KDC_ERR_KDC_NAME_MISMATCH`, `KDC_ERR_INCONSISTENT_KEY_PURPOSE`, `KDC_ERR_DIGEST_IN_CERT_NOT_ACCEPTED`, `KDC_ERR_PA_CHECKSUM_MUST_BE_INCLUDED`, `KDC_ERR_DIGEST_IN_SIGNED_DATA_NOT_ACCEPTED`, `KDC_ERR_PUBLIC_KEY_ENCRYPTION_NOT_SUPPORTED`, `KDC_ERR_NO_ACCEPTABLE_KDF`, with `TD-TRUSTED-CERTIFIERS`/`TD-INVALID-CERTIFICATES`/`TD-CERTIFICATE-INDEX` decoding and the NTSTATUS from KERB-ERROR-DATA. | Medium |
+| KP-6 | No PKINIT freshness (RFC 8070, PA-AS-FRESHNESS 150) which Windows Server 2016+ KDCs offer and can require ("KDC support for PKInit Freshness Extension"); no PA-PK-OCSP-RESPONSE (18) stapling in either direction. | Medium |
+| KP-7 | `PAC_CREDENTIAL_INFO` (buffer 2) is skipped; with a PKINIT reply key it must be decrypted (usage 16) into `PAC_CREDENTIAL_DATA` → `NTLM_SUPPLEMENTAL_CREDENTIAL` for the client (MS-PAC §2.6, MS-PKCA §3.2.5.2). `credentials_info.go`/`supplemental_cred.go` parse the plaintext but nothing decrypts. | Medium |
+| KP-8 | No support for PKINIT with self-signed keys used by Windows Hello for Business key trust (client certificate without a chain; KDC maps via `msDS-KeyCredentialLink`) — requires an explicit "no chain, KDC-mapped" identity mode. | Low |
+| KP-9 | `gokinit` has no `-X X509_user_identity=`/`-X X509_anchors=` options and `krb5.conf` `pkinit_*` keys are not parsed. | Low |
+
+---
+
+### 6. Phased Implementation Plan (LLM-executable)
+
+Conventions for every phase:
+
+- Read the cited spec sections first; where this document and the spec disagree, the spec wins — record the discrepancy in §7.
+- Each phase is independently mergeable and ends with a check that must pass before the next phase starts.
+- Follow repository conventions: `testify/assert`, fixtures as hex constants in `v8/test/testdata/`, integration tests call `test.Integration(t)`/`test.AD(t)` first, no new third-party dependencies beyond those listed in the phase.
+- Keep changes within the listed files unless compilation forces otherwise; run `gofmt`, `go vet ./...`, `go test ./...` from `v8/` after each step.
+- Never weaken an existing check to make a test pass; add options with safe defaults instead.
+- Do not commit captured material containing real credentials or non-test keys.
+
+#### Phase 0 — Constants, ASN.1 structures, fixtures (KS-1, KS-2, parts of KS-3)
+
+Files: `v8/iana/patype/constants.go`, `v8/iana/adtype/constants.go`, `v8/iana/nametype/constants.go`, `v8/iana/flags/constants.go`, `v8/iana/keyusage/constants.go`, new `v8/iana/msflags/constants.go`, new `v8/iana/ntstatus/constants.go`, new `v8/types/mskile.go`, new `v8/types/fast.go`, new `v8/types/mskile_test.go`, new `v8/test/testdata/mskile_vectors.go`, new `v8/test/testdata/gen/mskile_capture.md`.
+
+Steps:
+
+1. Add every constant listed in §3.1. Keep existing names; add new aliases rather than renaming.
+2. Implement the structures in §3.1 with `Marshal`/`Unmarshal`, mirroring the style of `types/PAData.go` (`gofork/encoding/asn1`, `generalstring` tags). Little-endian binary structures (`KerbExtError`, `LSAPTokenInfoIntegrity`, `ADAuthDataAPOptions`, `PASupportedEncTypes`) use `encoding/binary` with strict length checks.
+3. Add constructors: `NewKerbPAPACRequestPAData(include bool)`, `NewPAPACOptionsPAData(bits ...int)`, `NewADAuthDataAPOptionsEntry(opts uint32)`, `(PAData).GetPAPACOptions()`, etc.
+4. Capture or spec-derive fixtures 1–3, 5 (structures only), 6 (PAC 17/18 payloads), 12 from §4.2. Fixtures that cannot be captured now are marked `// SPEC-DERIVED — replace with Windows capture` exactly as the MIT spec does.
+5. Write round-trip tests and fixture-decode tests; add `TestFixturesDecode` entries in `test_vectors_test.go` style.
+
+Check: `go test ./iana/... ./types/... ./test/testdata` green; `go vet ./...` clean; no behavioural change (`go test ./...` unchanged).
+
+#### Phase 1 — Parser hardening and generic authorization-data access (KS-3, KS-4, KS-8, KA-4)
+
+Files: `v8/pac/pac_type.go`, `v8/pac/upn_dns_info.go`, `v8/pac/*_test.go`, new `v8/pac/fuzz_test.go`, `v8/types/AuthorizationData.go`, `v8/messages/Ticket.go`, `v8/messages/KRBError.go`, `v8/krberror/error.go`, `v8/service/APExchange.go`, tests alongside.
+
+Steps:
+
+1. In `ProcessPACInfoBuffers` validate each `InfoBuffer` (`Offset+Size <= len(Data)`, `Offset % 8 == 0`, no overlap with the header table or other buffers, `CBuffers` sane); return `ErrPACMalformed` wrapping the detail. Copy slices via a checked helper.
+2. Bounds-check `UPNDNSInfo.Unmarshal` (and audit `client_info.go`, `s4u_delegation_info.go`, `credentials_info.go`, `signature_data.go` for unchecked slicing).
+3. Add `FuzzPACUnmarshal` seeded with all `MarshaledPAC_*` fixtures; property: never panics.
+4. Implement `AuthorizationData.Walk`/`EntriesOfType`; refactor `Ticket.GetPACType` to use it; add `TestAuthorizationDataWalkDepthLimit`.
+5. Implement `KRBError.MethodData()`, `KerbErrorData()`, `NTStatus()`; make `krberror.Krberror` expose the underlying `KRBError` (`errors.As`) and print the NTSTATUS name when present.
+6. Add `TestVerifyAPREQIgnoresKerbLocalAndRestrictionEntry` using fixture 5 structures injected into an authenticator built by the existing service tests.
+
+Check: `go test ./pac/... ./types/... ./messages/... ./service/...` green; `go test -run XXX -fuzz FuzzPACUnmarshal -fuzztime 30s ./pac` no crashes.
+
+#### Phase 2 — Client AS/TGS MS-KILE behaviour (KC-1, KC-2, KC-3, KC-4, KC-7, KC-16, KC-15, KC-17)
+
+Files: `v8/messages/KDCReq.go`, `v8/messages/KDCRep.go`, `v8/client/ASExchange.go`, `v8/client/TGSExchange.go`, `v8/client/client.go`, `v8/client/session.go`, `v8/client/cache.go`, `v8/credentials/credentials.go`, `v8/config/krb5conf.go`, `v8/config/hosts.go`, `v8/kadmin/message.go`, `v8/cmd/gokinit/main.go`, `v8/cmd/internal/krbcli/*.go`, tests alongside.
+
+Steps:
+
+1. Add `types.RealmEqual`; replace realm `==`/`!=` comparisons in `messages` verification, `client` session/cache lookups (normalise keys to upper case), and `config` realm lookups.
+2. `ASReqOptions.IncludePAC *bool` and `Config.LibDefaults.RequestPAC` (parse `request_pac`); emit KERB-PA-PAC-REQUEST by default.
+3. `ASRep.Verify`/`TGSRep.Verify`: accept `cname` change when `canonicalize` was set or the request name type was `KRB_NT_ENTERPRISE`; if PA-REQ-ENC-PA-REP was requested, require successful verification before accepting. Update `Credentials` with the canonical name and realm; keep the original for display.
+4. Parse `EncPAData` for PA-SUPPORTED-ENCTYPES → `session.supportedEncTypes`; parse PA-SVR-REFERRAL-INFO and prefer its realm in `TGSExchange` referral handling.
+5. `TGSReqOptions{PACOptions, IncludePAC}`; emit PA-PAC-OPTIONS with Claims when advertised and Branch-Aware always; TGS `etype` list: when the target advertises `AES256_CTS_HMAC_SHA1_96_SK`, keep AES256 first even for RC4 tickets.
+6. `config/hosts.go`: SRV order `_kerberos._tcp.dc._msdcs.<realm>`, then existing; `_kpasswd`; optional `ad_site`.
+7. `kadmin`: decode the 30-byte policy blob (`Version, MinLength, History, Properties, ExpireIn, MinAge`) into `PasswordPolicy` when present.
+8. `gokinit`: print NTSTATUS detail after the MIT-style message.
+
+Check: `go test ./...` green; `INTEGRATION=1` MIT suites green (MIT ignores the new PA-DATA); with the Samba container or a live domain `TESTAD=1 go test ./client -run 'Enterprise|NTStatus|SupportedEncTypes'` green.
+
+#### Phase 3 — GSS initiator/acceptor core: channel bindings, delegation, mutual auth, DCE style (KC-8, KC-9, KC-10, KC-11, KA-3, KA-5, KA-8)
+
+Files: new `v8/gssapi/channelBindings.go`, new `v8/gssapi/authenticatorChecksum.go`, `v8/gssapi/contextFlags.go`, `v8/spnego/krb5Token.go`, `v8/spnego/negotiationToken.go`, `v8/spnego/http.go`, `v8/service/settings.go`, `v8/service/APExchange.go`, `v8/messages/APReq.go`, `v8/messages/APRep.go`, `v8/messages/KRBCred.go`, `v8/client/client.go` (forwarded-TGT request helper), `v8/credentials/credentials.go`, tests alongside.
+
+Steps:
+
+1. Implement `ChannelBindings`, `MD5Hash`, `TLSServerEndPoint`, `TLSUnique`.
+2. Replace `newAuthenticatorChksum` with a typed `AuthenticatorChecksum{Bnd, Flags, Deleg}` marshaller/unmarshaller (RFC 4121 §4.1.1) including `Exts`.
+3. `NewKRB5TokenAPREQ` options: bindings, flags, delegate. Delegation: request a forwarded TGT via TGS-REQ (`forwarded`, `forwardable`, acceptor addresses optional), build KRB-CRED (usage 14, session key), honour `ok-as-delegate` unless forced. Add `AD-IF-RELEVANT[AD-AUTH-DATA-AP-OPTIONS{CBT}]` to the authenticator when bindings are given.
+4. Acceptor: parse the checksum; enforce `Settings.ExtendedProtection` policy; extract delegated KRB-CRED into `Credentials.DelegatedCredentials()`; verify `sname` against `Settings.ServicePrincipals()` (default: all keytab principals) — KA-8.
+5. Mutual auth: build AP-REP (`ctime`, `cusec`, `subkey`, `seq-number`) and return it as SPNEGO `responseToken` with `accept-completed`; client verifies AP-REP and stores subkey/seq for per-message tokens. DCE style: acceptor keeps state for the third leg; client sends it.
+6. Tests: §4.3 gssapi/spnego/service items with fixture 5; policy matrix test.
+
+Check: `go test ./gssapi/... ./spnego/... ./service/... ./client/...` green; Samba integration items 5–7 green.
+
+#### Phase 4 — PAC completeness and application-server validation (KS-5, KS-6, KS-7, KA-1, KA-2)
+
+Files: `v8/pac/pac_type.go`, `v8/pac/upn_dns_info.go`, new `v8/pac/attributes_info.go`, new `v8/pac/requestor.go`, new `v8/pac/marshal.go`, new `v8/pac/verify_options.go`, `v8/pac/*_test.go`, `v8/credentials/credentials.go`, `v8/service/APExchange.go`, `v8/spnego/http.go`, `USAGE.md`.
+
+Steps:
+
+1. Add buffers 16–19 and the `ZeroSigData` handling for 16/19 per MS-PAC §2.8.
+2. Fix `UPNDNSInfo` flags; add `S` extension fields.
+3. Implement `PACType.Marshal`, per-buffer `Marshal`, `Sign(serverKey, kdcKey, ticketKey?)`; if `rpc/v2/ndr` lacks an encoder, add a minimal one under `v8/pac/internal/ndrw` for the types used (document in §7).
+4. Implement `Verify(key, VerifyOptions)` with the KA-1 rules; default options replicate current behaviour plus client-info checks (fail closed on mismatch), `RequestorSID` enforced when present.
+5. Expand `credentials.ADCredentials`; populate in `VerifyAPREQ`; document context access in `USAGE.md`.
+6. Negative tests built with the marshaller: tampered server checksum, duplicate KERB_VALIDATION_INFO, misaligned offset, requestor mismatch, client-info name mismatch, `S`-extension SID mismatch; `FuzzPACUnmarshal` reseeded with marshalled outputs.
+
+Check: `go test ./pac/... ./service/... ./credentials/...` green; fixture 6 PACs verify; `go test -fuzz FuzzPACUnmarshal -fuzztime 30s ./pac` clean.
+
+Implementation note: `rpc/v2` provides an NDR decoder but no general encoder.
+Phase 4 therefore preserves existing complex NDR buffer payloads byte-for-byte
+when rebuilding or re-signing a PAC, and provides typed marshalers for the
+simple PAC buffers changed in this phase. This avoids emitting partial or
+non-conformant NDR while retaining lossless PAC re-signing.
+
+#### Phase 5 — SPNEGO mechListMIC and negotiation extensions (KA-6, KA-9)
+
+Files: `v8/spnego/negotiationToken.go`, `v8/spnego/spnego.go`, `v8/spnego/krb5Token.go`, tests alongside, `v8/USAGE.md`.
+
+Steps:
+
+1. Compute and verify `mechListMIC` over the DER-encoded `MechTypeList` using the established Kerberos context and RFC 4121 direction, subkey, key-usage, and sequence semantics.
+2. Implement the RFC 4178 `request-mic` continuation in both directions, including fail-closed handling for missing, altered, or unexpected mechanism-list MICs.
+3. Parse and marshal NegTokenInit2 `negHints`; make standard versus Microsoft legacy Kerberos OID ordering configurable without enabling legacy RC4 encryption.
+4. Tests: mutual and non-mutual MIC exchanges, mechanism downgrade and MIC tampering, NegTokenInit2 round trips, legacy-OID-first negotiation, and negotiation-token fuzzing.
+
+Check: `go test ./spnego/...` green; race detector and negotiation-token fuzzing clean; existing Kerberos GSS tests unchanged.
+
+#### Phase 6 — S4U2self, S4U2proxy, RBCD (KC-5, MS-SFU)
+
+Files: new `v8/client/s4u.go`, `v8/messages/KDCReq.go` (`NewS4U2SelfTGSReq`, `NewS4U2ProxyTGSReq`), `v8/messages/KDCRep.go` (verify PA-S4U-X509-USER reply checksum), `v8/client/TGSExchange.go` (referral handling for S4U per MS-SFU §3.1.5), `v8/krberror/error.go` (`ErrDelegationNotPermitted`, `ErrProtocolTransitionNotPermitted`), `v8/credentials/credentials.go` (`S4UDelegationInfo` exposure already from Phase 4), tests alongside, `USAGE.md`.
+
+Steps:
+
+1. PA-FOR-USER builder with HMAC-MD5 checksum exactly per MS-SFU §2.2.1 (byte order and concatenation), keyed with the TGT session key, usage 17.
+2. PA-S4U-X509-USER builder (usage 26) and reply verification (usage 27); send both when the KDC advertises support (Windows 2008+); fall back to PA-FOR-USER only on `KDC_ERR_PADATA_TYPE_NOSUPP`.
+3. S4U2self flow including cross-realm user (obtain referral TGT for the user's realm, retry there, then present to own realm per MS-SFU §3.1.5.1.1); expose whether the ticket is `forwardable`.
+4. S4U2proxy flow: `cname-in-addl-tkt`, evidence ticket in `additional-tickets`, RBCD bit in PA-PAC-OPTIONS on request; cross-realm target via referral TGT (MS-SFU §3.1.5.2.2); map KDC errors + NTSTATUS to typed errors.
+5. Cache S4U tickets under `(user, spn)` keys separate from the client's own tickets.
+6. Tests: unit with fixture 4; Samba integration item 4 (classic, RBCD, protocol transition on/off, unauthorised target).
+
+Check: `go test ./client/... ./messages/...` green; `TESTAD=1` S4U suite green against Samba; MIT suite unchanged.
+
+#### Phase 7 — FAST armoring, encrypted challenge, compound identity, claims (KC-6)
+
+Files: new `v8/messages/fast.go`, new `v8/client/fast.go`, `v8/client/ASExchange.go`, `v8/client/TGSExchange.go`, `v8/client/settings.go`, `v8/crypto/crypto.go` (`KRBFXCF2` — check `v8/crypto/common` first), `v8/messages/KDCRep.go`, `v8/messages/KRBError.go`, tests alongside, `USAGE.md`.
+
+Steps:
+
+1. Implement `KRB-FX-CF2` (RFC 6113 §5.1) with test vectors from RFC 6113 appendix / MIT `t_cf2`.
+2. Armor acquisition: explicit `(ticket, key)` option or keytab-based armor AS exchange; armor key derivation; `FX_FAST_ARMOR_AP_REQUEST`.
+3. Wrap AS-REQ/TGS-REQ into PA-FX-FAST; implement PA-ENCRYPTED-CHALLENGE pre-auth; carry PA-FX-COOKIE; unwrap PA-FX-FAST replies (strengthen key, `KrbFastFinished` ticket checksum) and PA-FX-ERROR.
+4. `RequireFAST` fail-closed; auto-FAST when armor is available and the KDC advertised `FAST_SUPPORTED` (from Phase 2 metadata) or returned PA-FX-FAST in the preauth-required error.
+5. Claims: request via PA-PAC-OPTIONS; compound identity verified through PAC_DEVICE_INFO presence in integration tests.
+6. Tests: round-trips with fixture 9; `TestFASTEncryptedChallenge`, `TestFASTErrorUnwrap`, `TestFASTStrengthenKey`; Samba integration items 8–9; MIT `kdc-latest` FAST regression (MIT supports FAST — reuse containers).
+
+Check: `go test ./...` green; MIT FAST test green; Samba FAST/claims tests green.
+
+#### Phase 8 — KKDCP transport (KC-13)
+
+Files: new `v8/client/kkdcp.go`, `v8/client/network.go`, `v8/config/krb5conf.go` (`kdc = https://…`, `kpasswd_server = https://…`), `v8/config/hosts.go`, `v8/kadmin/passwd.go` / `v8/client/passwd.go`, `v8/client/settings.go` (`HTTPClient`), tests with `httptest`, `USAGE.md`.
+
+Steps:
+
+1. `KDC-PROXY-MESSAGE` ASN.1 type in `v8/types` (Phase 0 may pre-add it) with marshal/unmarshal.
+2. When a resolved KDC entry has scheme `https`, send via POST with 4-byte-length-prefixed message, `Content-Type: application/kerberos`, `target-domain` = realm; parse reply; map HTTP errors to `NetworkingError`.
+3. Apply the same path to kpasswd when `kpasswd_server` is `https://`.
+4. Tests: `TestKKDCPTransport` with an `httptest` server that unwraps and forwards to a fake KDC responder; config parsing tests; Samba integration item 10 with a `kdcproxy` sidecar.
+
+Check: `go test ./client/... ./config/...` green; integration item 10 green.
+
+#### Phase 9 — PKINIT compliant with MS-PKCA (KC-14, KP-1 … KP-9)
+
+Files: new package `v8/pkinit/` (`asn1.go`, `cms.go`, `identity.go`, `dh.go`, `kdf.go`, `kdccert.go`, `client.go`, `errors.go`, `pkinit_test.go`, `fuzz_test.go`), `v8/client/ASExchange.go` (PA-PK-AS-REQ path and PKINIT error retries), `v8/client/settings.go` (`PKINITIdentity`, `PKINITAnchors`, `RequireFreshness`, `PKINITOCSPResponse`), `v8/client/client.go` (`PKINITCredentials()`), `v8/config/krb5conf.go` (`pkinit_*` keys), `v8/pac/pac_type.go` + `v8/pac/credentials_info.go` (decrypt buffer 2 with a supplied reply key), `v8/iana/errorcode` (verify all PKINIT codes present), `v8/cmd/gokinit` (`-X` options, PIN prompt), `go.mod` (only if Open Question 10 selects a dependency), `v8/test/testdata/mskile_vectors.go` (fixture 11), tests alongside, `USAGE.md`.
+
+Steps:
+
+1. ASN.1 structures from §3.9 including RFC 8636 `supportedKDFs`/`kdf`, RFC 8070 `freshnessToken`, `TD-*` typed data, `KRB5PrincipalName`, and the PA-PK-AS-REQ-OLD recogniser; round-trip tests against fixture 11 and the RFC 4556 examples.
+2. CMS subset per §3.9 with sign/verify and RSA `EnvelopedData`; `FuzzCMS`.
+3. `Identity` loaders (PEM, PKCS#12, `crypto.Signer`) and MS-PKCA client-certificate selection rules with `pkinit_eku_checking` modes and key-trust mode.
+4. DH (groups 2/14/16, `pkinit_dh_min_bits`) and RSA reply-key paths; `octetstring2key` and RFC 8636 KDF with vectors; `ReplyKeyPack.asChecksum` verification.
+5. KDC certificate validation per §3.9 step 5, including revocation policy and `dhKeyExpiration`; negative tests for wrong EKU, wrong `dNSName`, expired chain, revoked certificate.
+6. Wire the AS exchange: preauth-required detection, freshness token echo, PA-PK-OCSP-RESPONSE, typed error mapping with `TD-*` decoding, single retry on `KDC_ERR_DH_KEY_PARAMETERS_NOT_ACCEPTED` and `KDC_ERR_NO_ACCEPTABLE_KDF`.
+7. Decrypt `PAC_CREDENTIAL_INFO` with the reply key; expose via `client.Client.PKINITCredentials()`; ensure `service` never surfaces it.
+8. `krb5.conf` `pkinit_*` parsing and `gokinit -X` options with PIN prompt; `goklist` unchanged.
+9. Tests: §4.3 `pkinit` list; Samba integration item 11; Windows manual checklist entries for DH, RSA, KDF, freshness, untrusted cert, smart-card signer.
+
+Check: `go test ./pkinit/... ./client/... ./pac/... ./cmd/...` green; `go test -fuzz FuzzPKASRep -fuzztime 30s ./pkinit` and `FuzzCMS` clean; Samba PKINIT test green; MIT `kdc-latest` PKINIT (MIT supports RFC 4556) regression green.
+
+#### Phase 10 — Mechanism abstraction and NEGOEX (KN-1, KN-2, KN-4, KN-5)
+
+Files: new `v8/gssapi/mechanism.go` (`ContextMechanism`, `Context` interfaces), `v8/gssapi/gssapi.go` (OIDs `OIDNegoEx`, `OIDPKU2U`), new package `v8/negoex/` (`message.go`, `vectors.go`, `conversation.go`, `verify.go`, `negoex_test.go`, `fuzz_test.go`), new `v8/spnego/mechanism.go` and tests, `v8/iana/keyusage/constants.go`; fixture and user documentation work completes with the PKU2U integration in Phases 11–12.
+
+Steps:
+
+1. Preserve `gssapi.Mechanism`; define the compatibility-safe byte-oriented `gssapi.ContextMechanism`/`gssapi.Context` boundary. Auth schemes provide their own directional NEGOEX keys; do not add a Kerberos-specific derivation or GUID because neither is standardized or implemented by MIT Kerberos.
+2. Implement NEGOEX structures and vector encoding with strict bounds checks; `FuzzNegoExUnmarshal` seeded with fixture 13.
+3. Implement the conversation state machine for initiator and acceptor (scheme intersection, optimistic `AP_REQUEST`, `CHALLENGE` loop, `VERIFY` computation/validation over the message log, `ALERT` handling, NTSTATUS mapping).
+4. Add `spnego.Negotiator` over ordered `ContextMechanism` values; make the acceptor ignore an optimistic token for an unselected mechanism, continue with its preferred common mechanism, and protect a non-preferred selection with `mechListMIC`.
+5. Tests: §4.3 `negoex` and `spnego` items, including a complete NEGOEX exchange inside SPNEGO and scenarios equivalent to MIT `negoextest`. Real Windows interop follows when PKU2U is registered in Phase 11.
+
+Check: `go test ./gssapi/... ./negoex/... ./spnego/...` green; `go test -fuzz FuzzNegoExUnmarshal -fuzztime 30s ./negoex` clean; existing SPNEGO tests unchanged.
+
+#### Phase 11 — PKU2U (KN-3)
+
+Status: implemented for gokrb5-to-gokrb5 operation. Windows fixture 14 and the
+two directional Windows interoperability runs remain external release gates;
+no synthetic bytes are accepted as substitutes for those captures.
+
+Files: new package `v8/pku2u/` (`names.go`, `metadata.go`, `initiator.go`, `acceptor.go`, `ticket.go`, `pku2u_test.go`, `fuzz_test.go`), `v8/pkinit` (export the AS-REQ/AS-REP PKINIT builders and reply-key derivation for reuse), `v8/negoex/scheme_pku2u.go`, `v8/credentials/credentials.go` (`CertificateIdentity` on the acceptor side), `v8/spnego/http.go` (acceptor option to enable PKU2U), `v8/test/testdata/mskile_vectors.go` (fixture 14), tests alongside, `USAGE.md`.
+
+Steps:
+
+1. Implement `WELLKNOWN:PKU2U` realm handling and certificate-to-principal mapping (UPN SAN, subject fallback) with unit tests.
+2. Implement metadata encoding/decoding (trusted certifiers) and selection of a certificate acceptable to the peer.
+3. Initiator: build the PKINIT AS-REQ for the acceptor name, process AS-REP, send AP-REQ with mutual flag; complete on AP-REP; derive the context key from the AP-REP subkey.
+4. Acceptor: validate the initiator certificate (anchors + metadata), act as KDC — generate the ticket key, issue AS-REP with PA-PK-AS-REP (DH), retain the key for the conversation, verify AP-REQ, return AP-REP.
+5. Register PKU2U as a NEGOEX scheme and as a standalone SPNEGO mechanism; expose `CertificateIdentity` in the HTTP context.
+6. Tests: §4.3 `pku2u` items; gokrb5↔gokrb5 end-to-end over NEGOEX in CI; fixture 14 decode tests; Windows manual checklist entries.
+
+Check: `go test ./pku2u/... ./negoex/... ./spnego/...` green; fuzz clean; end-to-end CI test green.
+
+Implementation audit: PKU2U rejects non-AES AS offers and AP subkeys, requires
+explicit PAC suppression and mutual authentication, validates both certificate
+chains and mapped names, and uses the acceptor-asserted AP-REP subkey for RFC
+4121 and NEGOEX. RFC 4121 coverage includes integrity and confidentiality,
+MICs, replay rejection, arbitrary RRC values, reserved flag tolerance, and
+AES-SHA1/AES-SHA2 enctypes. Generic HTTP continuation state uses random,
+HttpOnly, two-minute exchange cookies rather than client network addresses.
+
+#### Phase 12 — Samba AD DC CI, Windows manual suite, fuzz jobs, documentation (all EC items)
+
+Status: implemented for locally testable and automated surfaces. CI provisions
+a digest-pinned Samba AD DC and exercises password and machine logon, PAC
+validation, disabled-account rejection, S4U2self, classic/RBCD S4U2proxy,
+negative delegation, S4U delegation PAC data, and SPNEGO. All 13
+parser/security-context fuzz targets run for 60 seconds in a matrix. On
+2026-09-06 the pinned image was built locally and the full race-enabled,
+`adintegration`-tagged suite passed against a freshly provisioned domain. The
+pinned Samba image rejects disabled logon without Windows KERB-EXT-ERROR data
+and does not provide interoperable required FAST. Those checks, Windows
+IIS/RPC/CA, bidirectional PKU2U, fixture 14, claims, PKINIT, and KKDCP remain
+external release gates and must not be represented as completed by synthetic
+tests.
+
+Required FAST was validated against live Windows AD with a keytab armor TGT:
+the encrypted-challenge AS exchange and the subsequent armored TGS exchange
+both pass under the race detector. FAST armor AP-REQ authenticators use key
+usage 11, and RFC 6806 PA-REQ-ENC-PA-REP verification covers the exact outer
+AS-REQ bytes sent on the wire with the strengthened reply key and usage 56.
+
+Files: new `v8/test/testdata/docker/samba-ad-dc/` (Containerfile and provisioning script creating the automated accounts and exporting `krb5.keytab`, `user`, `pw`, and `environment` for `test/ad`), `.github/workflows/testingv8.yml` (quality, cross-platform unit, race, MIT integration, Samba AD, and 60-second fuzz jobs for every fuzz target), `v8/test/ad/ad.go` (environment kind and deterministic KDC/SPN/delegator overrides), new `v8/test/adintegration/ad_test.go` (build tag `adintegration`) implementing the automated subset of §4.4, `v8/USAGE.md`, `v8/README.md`, `v8/CHANGELOG.md`, this document (§7 resolutions, status → Implemented).
+
+Steps:
+
+1. Build and pin the Samba container; provision users, service accounts, delegation attributes, and the computer account; export test-only keytabs and credentials as runtime artifacts.
+2. Implement §4.4 tests; each skips without the gate.
+3. Add CI jobs; ensure runtime < 15 min.
+4. Document every new API/setting; update feature tables; write the Windows manual-run checklist (`docs/design/ms-kile-windows-checklist.md`) including NEGOEX and PKU2U scenarios.
+5. Re-audit: rerun the survey in §2 against the final code; every finding must map to a passing test or a §7 resolution.
+
+Check: all §5 checkboxes ticked; CI green; Windows checklist executed once and recorded.
+
+Implementation note: no `negoex-mit` job was added. MIT Kerberos does not
+publish a standardized Kerberos NEGOEX auth-scheme GUID or the NEGOEX metadata
+and key inquiry SPIs needed by such a harness. Kerberos remains directly
+interoperable through SPNEGO; NEGOEX is automated through PKU2U's registered
+scheme. Naming ordinary NEGOEX unit tests "MIT interoperability" would not add
+an independent peer and would overstate coverage.
+
+---
+
+## Appendix B - Historical MIT compatibility review and implementation plan
+
+Historical snapshot from the implemented MIT compatibility design. Original
+section and phase numbers below refer to that specification. Its resolved
+compatibility decisions take precedence over speculative original steps.
+
+### 2. Current Implementation — Findings
+
+Sources reviewed: [v8/keytab/keytab.go](../../v8/keytab/keytab.go), [v8/keytab/keytab_test.go](../../v8/keytab/keytab_test.go), [v8/credentials/ccache.go](../../v8/credentials/ccache.go), [v8/credentials/credentials.go](../../v8/credentials/credentials.go), [v8/client/client.go](../../v8/client/client.go), [v8/client/ASExchange.go](../../v8/client/ASExchange.go), [v8/client/session.go](../../v8/client/session.go), [v8/client/settings.go](../../v8/client/settings.go), [v8/crypto/crypto.go](../../v8/crypto/crypto.go), [v8/messages/KDCReq.go](../../v8/messages/KDCReq.go), [v8/messages/KDCRep.go](../../v8/messages/KDCRep.go), [v8/config/krb5conf.go](../../v8/config/krb5conf.go), [v8/types/PrincipalName.go](../../v8/types/PrincipalName.go).
+
+#### 2.1 Keytab — what exists
+
+| Capability | Status | Location |
+|---|---|---|
+| Read v2 (big-endian) keytab | Works; byte-exact round-trip verified against `ktutil` output for AES128/256-SHA1 and RC4 | `Unmarshal`, `TestKeytabEntriesUser/Service` |
+| Read v1 (native-endian) keytab | Implemented, untested with a real MIT v1 fixture | `Unmarshal`, `parsePrincipal` |
+| Skip deleted "hole" records (negative length) | Implemented | `Unmarshal` |
+| 32-bit KVNO trailer | Read if ≥4 bytes remain; written always | `Unmarshal`, `entry.marshal` |
+| Create empty keytab | `New()` → version 2 | |
+| Add entry from password | `AddEntry(principal, realm, password, ts, kvno uint8, etype)` — default salt only | |
+| Write | `Marshal()`, `Write(io.Writer)` | |
+| Key lookup | `GetEncryptionKey(princ, realm, kvno, etype)` | |
+| Display | `String()` (custom format), `JSON()` | |
+
+#### 2.2 Keytab — defects and gaps to fix
+
+Numbered for traceability (`KT-n`).
+
+| ID | Finding | Severity |
+|---|---|---|
+| KT-1 | `Unmarshal` discards the error returned by `parsePrincipal` (`parsePrincipal(eb, &p, kt, &ke, &endian)` with no assignment). A truncated principal silently yields a garbage entry. | High |
+| KT-2 | `GetEncryptionKey` with `kvno == 0` selects the entry with the **newest timestamp**, not the **highest kvno**. MIT (`krb5_ktfile_get_entry`, `kt_file.c`) selects the highest kvno when kvno is unspecified. Merged keytabs with out-of-order timestamps produce different keys. | High |
+| KT-3 | `GetEncryptionKey` requires an exact `etype` match; no wildcard (`etype == 0` → any) as in MIT. MIT also treats "similar" enctypes (e.g. DES variants) as matching — document as unsupported (DES not implemented). | Medium |
+| KT-4 | `GetEncryptionKey` requires exact realm match. MIT matches any realm when the lookup principal's realm is empty. | Medium |
+| KT-5 | `GetEncryptionKey` has no 8-bit kvno wrap-around handling. After failing to find an exact match, MIT accepts an entry whose parsed kvno is `kvno & 0xff`, regardless of whether the optional 32-bit field was present. | Low |
+| KT-6 | 32-bit kvno trailer handling is not recorded explicitly. MIT reads the optional trailer for both v1 and v2, using native byte order for v1, and ignores a zero trailer value. | Low |
+| KT-7 | v1 round-trip is broken: `parsePrincipal` decrements `NumComponents` on read, `principal.marshal` writes it back unchanged, so v1 → marshal → v1 writes the wrong count. `NumComponents` should be derived from `len(Components)` at marshal time, not stored. | Medium |
+| KT-8 | `AddEntry` accepts `KVNO uint8`. kvnos > 255 are common (AD, long-lived service principals). MIT writes `vno & 0xff` to the 8-bit field and the full value to the 32-bit trailer. | High |
+| KT-9 | `entry.String()` prints `KVNO8`, not `KVNO`. For kvno ≥ 256 the display is wrong (MIT `klist -k` shows the 32-bit value). | Medium |
+| KT-10 | `AddEntry` derives the key with the RFC 4120 default salt only. No way to (a) supply a salt (AD host principals, `ktutil addent -salt`), (b) supply s2kparams/iterations, or (c) add an entry from raw key bytes (what `kadmin ktadd` does — it never has the password). | High |
+| KT-11 | No API to **modify**: remove an entry, remove all entries for a principal, remove entries with kvno < N (`kadmin ktremove princ old`), keep-only-latest-kvno, or merge two keytabs (`ktutil rkt`+`wkt`). `Entries` is exported but its element type `entry` is unexported, so callers cannot construct or filter entries themselves. | High |
+| KT-12 | No file-level write helper. MIT creates keytabs `0600`, uses `krb5_lock_file` while appending, and appends (never rewrites) on `ktadd`. gokrb5 needs `WriteFile(path)` with atomic write (temp + `rename`), `0600`, and an `Append`-safe path, otherwise concurrent `ktadd` from MIT tools can corrupt the file. | Medium |
+| KT-13 | `Unmarshal` on a keytab that already has entries appends to `Entries` (no reset). Calling `Unmarshal` twice duplicates entries. | Low |
+| KT-14 | Error messages format raw bytes with `%s` (`fmt.Errorf("%s's length is less than %d", b, …)`), dumping binary key material into logs. | Medium (security) |
+| KT-15 | Zero-length record (`l == 0`) terminates parsing. MIT and its file-format documentation define a zero-length record as EOF. | Low |
+| KT-16 | No default keytab resolution: `KRB5_KTNAME`, `KRB5_CLIENT_KTNAME`, `[libdefaults] default_keytab_name`, `default_client_keytab_name`, `FILE:`/`WRFILE:` prefix stripping, `%{euid}`/`%{uid}`/`%{username}` parameter expansion. `config.LibDefaults.DefaultKeytabName` is parsed but never used. | Medium |
+| KT-17 | No `klist -kte`-compatible text rendering. Useful for diff-based interoperability tests and for a `gokrb5 klist -k` tool. | Low |
+| KT-18 | No exported accessor for the keytab version, and no way to request writing v1 (MIT can still read v1; writing v1 is not required — read-only support is sufficient). | Low |
+| KT-19 | `JSON()` serialises raw key material. Acceptable but should be documented, and a redacted mode is preferable for logging. | Low |
+
+#### 2.3 `kinit` — what exists
+
+| Capability | Status | Location |
+|---|---|---|
+| AS exchange with password | Works: PA-ENC-TIMESTAMP, `KDC_ERR_PREAUTH_REQUIRED` retry, salt and s2kparams from ETYPE-INFO2 | `Client.Login`, `ASExchange`, `setPAData`, `crypto.GetKeyFromPassword` |
+| AS exchange with keytab | Works when the keytab contains the etype the KDC selects | same, `Client.Key`, `ASRep.DecryptEncPart` |
+| Client referrals (`KDC_ERR_WRONG_REALM`) | Works (max 5) | `ASExchange` |
+| Load client state from a ccache | Works (v1–v4 read) | `credentials.LoadCCache`, `client.NewFromCCache` |
+| TGT renewal | Works (TGS renew), auto-renew goroutine | `renewTGT`, `enableAutoSessionRenewal` |
+| Options from krb5.conf | `forwardable`, `proxiable`, `canonicalize`, `ticket_lifetime`, `renew_lifetime`, `noaddresses`, `default_tkt_enctypes`, `kdc_default_options` | `messages.NewASReq` |
+| Change password | `Client.ChangePasswd` (RFC 3244) | `client/passwd.go` |
+
+#### 2.4 `kinit` — defects and gaps to fix
+
+Numbered `KI-n`.
+
+| ID | Finding | Severity |
+|---|---|---|
+| KI-1 | **No ccache writer.** `credentials.CCache` has `Unmarshal` only. A `kinit` cannot exist without `Marshal`/`WriteFile` producing MIT FILE ccache v4 (header with KDC time-offset tag, default principal, credentials, `X-CACHECONF:` config entries). This is the largest gap. | Blocker |
+| KI-2 | `ccache.Unmarshal` and its `read*` helpers do no bounds checking; truncated or malicious ccache files panic. `parseHeader` compares an absolute offset (`*p`) with a relative length (`h.length`) — correct only by coincidence for the standard 12-byte header. | High |
+| KI-3 | `messages.NewASReq` overwrites `RTime`: `a.ReqBody.RTime = t.Add(c.LibDefaults.RenewLifetime)` is immediately followed by `a.ReqBody.RTime = t.Add(48 * time.Hour)`. `renew_lifetime`/`kinit -r` is ignored. | High |
+| KI-4 | `setPAData` derives the pre-auth etype from `LibDefaults.PreferredPreauthTypes[0]`. In MIT `preferred_preauth_types` is a list of **PA-DATA types** (17=PKINIT…, 16, 15, 14), not enctypes; it only "works" because 17 happens to be `aes128-cts-hmac-sha1-96`. Must use the first `DefaultTktEnctypeIDs` entry that the credential can produce a key for (for a keytab: an etype present in the keytab). | High |
+| KI-5 | `crypto.GetKeyFromPassword` uses `ETYPE-INFO2[0]` / `ETYPE-INFO[0]` unconditionally and, when that etype differs from the requested one, derives the key with the **other** etype but labels the result with the requested `etypeID` (`key.KeyType = etypeID`). Must select the ETYPE-INFO2 entry whose etype equals the one being used, and set `KeyType` from the etype actually used. `client.preAuthEType` has the same `[0]` assumption. | High |
+| KI-6 | With a keytab, the AS-REQ `etype` list is `DefaultTktEnctypeIDs` from config regardless of what keys the keytab holds. MIT (`krb5_get_init_creds_keytab`, `get_in_tkt.c`) restricts the request enctypes to those present in the keytab for the client principal, so the KDC never issues a reply the client cannot decrypt. | High |
+| KI-7 | No interactive password prompt, no CLI. Need a `kinit`-equivalent command (proposed `v8/cmd/gokinit`) using `golang.org/x/term.ReadPassword` on `/dev/tty`, honouring `KRB5CCNAME`, `KRB5_CONFIG`, `KRB5_KTNAME`, `KRB5_CLIENT_KTNAME`. | High |
+| KI-8 | No default ccache name resolution: `KRB5CCNAME` → `[libdefaults] default_ccache_name` (with `%{uid}`, `%{euid}`, `%{username}`, `%{TEMP}` expansion) → `FILE:/tmp/krb5cc_%{uid}`. `FILE:` prefix must be accepted and stripped; other types must be rejected with a clear error. | High |
+| KI-9 | Principal defaulting differs from MIT `kinit`: no principal → default principal of existing ccache, else `$USER@default_realm`; `-k` with no principal → `host/<canonical fqdn>@default_realm`; principal without `@REALM` → `default_realm`. `client.New*` documentation says an empty realm uses the default realm but `IsConfigured` rejects it. | Medium |
+| KI-10 | Clock skew: MIT retries the AS exchange once after `KRB_AP_ERR_SKEW`/`KDC_ERR_PREAUTH_FAILED` using the KDC time from the KRB-ERROR (`kdc_timesync`), and stores the offset in the ccache header (tag 1). gokrb5 has `KDCTimeSync` config but no implementation. | Medium |
+| KI-11 | `KDC_ERR_KEY_EXPIRED`: MIT `kinit` prompts for a new password and retries. gokrb5 returns the error. Implement in the CLI using `Client.ChangePasswd`. | Low |
+| KI-12 | Enterprise principals (`kinit -E`, `KRB_NT_ENTERPRISE`): `credentials.New` splits the username on `/`; `types.ParseSPNString` splits on the last `@`. An enterprise name `user@corp.example@REALM` must become a single component with name type 10. | Low |
+| KI-13 | `Settings.DisablePAFXFAST` actually controls `PA_REQ_ENC_PA_REP` (RFC 6806 §11), not FAST. Rename/document; keep the old name as a deprecated alias. | Low |
+| KI-14 | Ticket-flag handling for `-f/-F`, `-p/-P`, `-a/-A`, `-C` (canonicalize), `-l`, `-r`, `-s` (start time / postdated), `-S service`, `-v` (validate) is only reachable via `config.LibDefaults`. The CLI needs per-invocation overrides that take precedence over krb5.conf. `-s` and `-v` may be deferred. | Medium |
+| KI-15 | ccache `GetEntries` filters `X-CACHECONF:` entries when loading; the writer must preserve MIT metadata semantics for `pa_type`, `fast_avail`, and `start_realm`. `refresh_time` belongs to GSS client-keytab refresh, not ordinary `kinit -k` output. | Medium |
+| KI-16 | Password-keytab preference: `Credentials.WithPassword` clears the keytab and vice versa. MIT `kinit -k` with a password-less principal must still work; `kinit` without `-k` must never read the keytab. Behaviour is compatible; add tests to lock it. | Low |
+
+---
+
+### 6. Phased Implementation Plan (LLM-executable)
+
+Each phase is independently mergeable, lists exact files, and ends with a verifiable check. Do not start a phase before the previous phase's check passes. Keep changes minimal and within the listed files unless a compile error forces otherwise. Follow repository conventions: tests use `testify/assert`, fixtures live in `v8/test/testdata/test_vectors.go` as string constants, integration tests call `test.Integration(t)` first.
+
+#### Phase 0 — Fixture capture (no library code changes)
+
+Files: `v8/test/testdata/test_vectors.go`, `v8/test/testdata/README.md` (new; documents generation commands and MIT version).
+
+Steps:
+1. Write a shell script `v8/test/testdata/gen/mit_fixtures.sh` that, given `ktutil`, `kadmin.local`, `kinit`, `klist`, `kvno` on PATH and the `kdc-centos-default` container, produces every fixture in §4.2 as hex, plus captured `klist -kte` text.
+2. Run it (or, if MIT tools are unavailable in the current environment, hand-assemble fixtures strictly per the keytab/ccache format specifications and mark them `// SPEC-DERIVED — replace with MIT capture`).
+3. Add constants `KEYTAB_*`, `CCACHE_*`, `KLIST_*` to `test_vectors.go`.
+
+Check: `go vet ./v8/...` passes; each constant decodes from hex without error in a trivial test `TestFixturesDecode`.
+
+#### Phase 1 — Keytab read correctness (KT-1, KT-6, KT-7, KT-13, KT-14, KT-15)
+
+Files: `v8/keytab/keytab.go`, `v8/keytab/keytab_test.go`.
+
+Steps:
+1. Capture and return the error from `parsePrincipal` in `Unmarshal`.
+2. Read the optional 32-bit kvno trailer for both versions, in the version's byte order; record on the entry (unexported bool `kvno32Present`) whether it was present.
+3. Stop storing `NumComponents`; compute in `principal.marshal` (`len(Components)`, `+1` if v1). Keep the struct field for one release but ignore it (`json:"-"`), or remove if no external usage — check with `grep -r NumComponents` in the module.
+4. `Unmarshal` sets `kt.Entries = nil` before parsing.
+5. Replace every `%s` of a byte slice in error messages with the length or offset only.
+6. Zero-length record: after verifying MIT behaviour in `kt_file.c`, either continue (skip 4 bytes) or stop; encode the decision in a test with the fixture from §4.2 item 5.
+7. Add tests: `TestUnmarshal_AllFixtures`, `TestUnmarshal_TruncatedPrincipalReturnsError`, `TestUnmarshal_V1RoundTrip`, `TestUnmarshal_ResetsEntries`, `TestUnmarshal_HoleSkipping`, `TestUnmarshal_HoleAtEOF`, `TestErrorsDoNotContainKeyMaterial`, `FuzzUnmarshal`.
+
+Check: `go test ./v8/keytab/...` green; `go test -run XXX -fuzz FuzzUnmarshal -fuzztime 30s ./v8/keytab` no crashes.
+
+#### Phase 2 — Exported model and MIT lookup semantics (KT-2, KT-3, KT-4, KT-5, KT-8, KT-9)
+
+Files: `v8/keytab/keytab.go`, `v8/keytab/keytab_test.go`, callers: `v8/credentials/credentials.go`, `v8/client/client.go`, `v8/messages/KDCRep.go`, `v8/service/*.go` (grep `GetEncryptionKey` and `kt.Entries`).
+
+Steps:
+1. Rename `entry` → `Entry`, `principal` → `Principal`; add `type entry = Entry`, `type principal = Principal` aliases marked deprecated.
+2. Remove `KVNO8` from `Entry`; derive in marshal/unmarshal. Fix `Entry.String()` to print `KVNO`.
+3. Widen `AddEntry`'s `KVNO` parameter to `uint32`. (Breaking for callers passing `uint8` literals? Untyped constants still compile; typed `uint8` variables need a cast — acceptable, document in CHANGELOG.)
+4. Implement `GetEntry` with rules §3.1.5, define `ErrNotFound`, `ErrKVNONotFound`; rewrite `GetEncryptionKey` to delegate.
+5. Add `Version()`, `Principals()`, `ParsePrincipal`, `Principal.String()` with MIT escaping (`\/`, `\@`, `\\`, `\n`, `\t`, `\b`, `\0`).
+6. Tests listed in §4.3 for `GetEntry_*`, `TestMarshal_ByteExactVsKtutil` extended to kvno 300 (fixture 2) and all etypes (fixture 1).
+
+Check: `go build ./v8/... && go test ./v8/...` green (non-integration); `grep -rn "KVNO8" v8/ | grep -v _test.go` returns nothing.
+
+#### Phase 3 — Keytab create/modify/write API (KT-10, KT-11, KT-12, KT-16, KT-17)
+
+Files: `v8/keytab/keytab.go`, new `v8/keytab/file.go` (WriteFile/AppendToFile/locking), new `v8/keytab/file_unix.go` + `file_windows.go` (flock shim), new `v8/keytab/default.go` (name resolution), new `v8/keytab/klist.go`, tests alongside.
+
+Steps:
+1. Implement `AddKey`, `AddEntryWithSalt`, `RemoveEntry`, `RemovePrincipal`, `RemoveOldKVNO`, `Merge`.
+2. Implement `WriteFile` (temp+rename, 0600, fsync) and `AppendToFile` (O_APPEND|O_CREATE 0600, flock on Unix, header written if file size is 0).
+3. Implement `LoadDefault`, `LoadDefaultClient`, `ResolveName(name string, cfg *config.Config) (path string, writable bool, err error)` with prefix handling and `%{euid}`/`%{uid}`/`%{username}` expansion. Add `DefaultClientKeytabName` parsing to `config.LibDefaults` (`default_client_keytab_name`) in `v8/config/krb5conf.go` if absent.
+4. Implement `Klist(showTimestamps, showKeys, showEtypes bool)`; etype names must come from a single table — add `iana/etypeID.ETypeToString`-style map if none exists (check `v8/iana/etypeID`).
+5. Tests: §4.3 keytab items for add/remove/merge/write/append/default/klist.
+
+Check: `go test ./v8/keytab/...` green including `TestAppendToFile_ConcurrentWriters`; `TestKlist_MatchesCapturedOutput` byte-equal against fixture 15.
+
+#### Phase 4 — CCache hardening and writer (KI-1, KI-2, KI-8, KI-15)
+
+Files: `v8/credentials/ccache.go`, new `v8/credentials/ccache_marshal.go`, new `v8/credentials/ccache_default.go`, `v8/credentials/ccache_test.go`, `v8/config/krb5conf.go` (`default_ccache_name` parsing if missing).
+
+Steps:
+1. Make all `read*` helpers return `error`; propagate; fix `parseHeader` offset arithmetic; skip unknown header tags.
+2. Implement `Marshal` (v3 and v4), `WriteFile`, `NewCCache`, `AddCredential`, `SetConfig`/`GetConfig`, `KDCTimeOffset`/`SetKDCTimeOffset`.
+3. Implement `DefaultCCacheName(cfg)`.
+4. Tests: §4.3 credentials items; `FuzzCCacheUnmarshal`.
+
+Check: `go test ./v8/credentials/...` green; round-trip of fixtures 10–14 byte-identical.
+
+#### Phase 5 — AS exchange corrections (KI-3, KI-4, KI-5, KI-6, KI-9, KI-10, KI-13)
+
+Files: `v8/messages/KDCReq.go`, `v8/crypto/crypto.go`, `v8/client/ASExchange.go`, `v8/client/client.go`, `v8/client/settings.go`, new `v8/client/ccache_export.go`, tests in each package.
+
+Steps:
+1. `NewASReq`: delete the 48 h override; add `ASReqOptions` and `NewASReqWithOptions`; keep `NewASReq` signature.
+2. `GetKeyFromPassword`: accept the requested etype list (new variadic or wrapper `GetKeyFromPasswordForETypes`), select the matching ETYPE-INFO2/ETYPE-INFO entry, set `KeyType` from the etype used. Update `preAuthEType` to return the first KDC-offered etype present in the client's list.
+3. `setPAData`: iterate `DefaultTktEnctypeIDs`, use first etype for which `cl.Key` succeeds.
+4. `Login`/`ASExchange`: when a keytab is in use, build the AS-REQ etype list as the ordered intersection described in §3.3(3).
+5. Clock skew retry per §3.3(5); store offset on the client (`cl.kdcTimeOffset`).
+6. Add `client.NewFromPrincipalString` / realm defaulting; make `IsConfigured` accept an empty realm when `Config.LibDefaults.DefaultRealm` is set (resolve at construction).
+7. Add `Client.CCache()` export; mark `DisablePAFXFAST` deprecated in favour of `DisablePAReqEncPARep` (same behaviour).
+8. Tests: §4.3 messages/crypto/client items; §4.5 integration tests.
+
+Check: `go test ./v8/...` green; with the KDC containers running, `INTEGRATION=1 go test ./v8/client/...` green including the three new integration tests.
+
+#### Phase 6 — `gokinit`, `goklist`, `gokdestroy` commands (KI-7, KI-11, KI-12, KI-14)
+
+Files: new `v8/cmd/gokinit/main.go`, `v8/cmd/goklist/main.go`, `v8/cmd/gokdestroy/main.go`, new `v8/cmd/internal/krbcli/` (shared: config loading with `KRB5_CONFIG`, principal defaulting, error-text mapping, tty password prompt), `v8/go.mod` (add `golang.org/x/term`).
+
+Steps:
+1. Implement flag parsing with Go `flag` using MIT short names; `-h` prints MIT-style usage line.
+2. Implement password prompt on `/dev/tty` (fallback `--password-stdin`).
+3. Wire keytab (`-k`, `-t`, `-i`), ccache (`-c`, default), options → `ASReqOptions`, `-S`, `-R`, `-E`.
+4. `KDC_ERR_KEY_EXPIRED` → prompt for new password twice, `ChangePasswd`, retry login (KI-11).
+5. Error mapping table → MIT strings; exit code 1.
+6. `goklist`: `-c`, `-k`, `-t`, `-K`, `-e`, `-s` (silent status) reproducing MIT column layout. `gokdestroy`: `-c`, `-A` (all — FILE only), `-q`.
+7. Unit tests for flag→options mapping and error-text table; pty-based test for the prompt (skips if no pty).
+
+Check: `go build ./v8/cmd/...`; `go test ./v8/cmd/...` green; manual smoke: `gokinit -kt v8/test/testdata/testuser1.testtab testuser1` against a local KDC container, then MIT `klist`.
+
+#### Phase 7 — Interop test suite and CI (all EC items)
+
+Files: new `v8/test/interop/*_test.go` (build tag `interop`), `.github/workflows/testingv8.yml`.
+
+Steps:
+1. Implement interop tests §4.4 items 1–9; each `t.Skip`s when a required binary is missing.
+2. CI: install `krb5-user`/`krb5-workstation` on the runner; add a job step `INTEGRATION=1 go test -tags interop ./v8/test/interop/...`.
+3. Add `-fuzztime 60s` fuzz jobs for the two fuzz targets.
+4. Update `v8/USAGE.md` (keytab management, ccache export, `gokinit`) and `v8/README.md` feature table; add CHANGELOG entry listing deprecated aliases and the `AddEntry` kvno type change.
+
+Check: all §5 checkboxes ticked; CI green on every Go version in the matrix.
+
+---
+
+## Appendix C - Consolidated historical test coverage plan
+
+Historical baseline and workstream detail. The current measured baseline and
+active execution order are Sections 1-4 above; the strict combined coverage
+goal remains a goal, not a claim of completion.
+
+### Test Coverage Plan
+
+**Status:** Active
+
+**Scope:** `v8` module (`github.com/otuschhoff/gokrb5/v8`)
+
+**Baseline:** 70.9% cross-package statement coverage on 2026-09-07, measured with:
+
+```sh
+go test -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+```
+
+#### Goals
+
+Coverage work must reduce protocol, security, interoperability, and portability risk. A higher aggregate percentage is not sufficient if authentication state machines, untrusted decoders, cryptographic failure paths, or persistent writes remain untested.
+
+Completion requires:
+
+1. 100% combined repository-wide statement coverage across unit, integration, subprocess, version-specific, and supported-platform test jobs.
+2. At least 90% statement coverage for security-critical parsers, cryptographic message operations, network framing, and authentication state transitions.
+3. No untested rejection branch for attacker-controlled lengths, tags, checksums, signatures, or message ordering.
+4. Native Linux, Windows, and macOS tests; compile checks for supported mobile targets; and documented platform-specific exclusions.
+5. MIT Kerberos, Samba AD, and Windows AD interoperability coverage for behavior that cannot be represented faithfully by unit fixtures.
+
+Generated constants, platform-inapplicable branches, and wrappers that only delegate may be excluded from local targets, but exclusions must be documented and must not hide protocol behavior.
+
+#### Phase 1: Guard the Current Baseline
+
+Status: implemented.
+
+- Collect coverage with `-coverpkg=./...` so calls through public wrappers count toward internal packages.
+- Publish `coverage.out` from CI for function-level inspection.
+- Fail CI below 70.0%. The floor is intentionally below the 70.9% baseline to tolerate minor instrumentation differences across Go releases.
+- Cover hardened TCP and UDP framing, endpoint failover, malformed ciphertext, scanner failures, HTTP body failures, atomic persistence, FAST hint parsing, and PKINIT revocation evidence.
+
+Exit gate: CI cannot merge a material aggregate coverage regression, and every defect fixed by the error-hardening initiative has a regression test where failure can be injected deterministically.
+
+#### Phase 2: Untrusted Decoders and Cryptography
+
+- Raise `asn1tools`, `messages`, `types`, `pac/internal/ndr`, `keytab`, and `credentials` parser coverage with table-driven truncation, oversized-length, trailing-data, invalid-tag, and integer-boundary cases.
+- Exercise each supported enctype through encrypt/decrypt round trips, known-answer vectors, integrity corruption, wrong key usage, short ciphertext, and injected primitive failures.
+- Seed every parser fuzz target with valid minimal and representative AD/MIT messages, then assert that malformed input never panics or allocates beyond established limits.
+- Add corpus minimization and a scheduled fuzz workflow with retained crash artifacts.
+
+Exit gate: security-critical decoder and crypto operations reach 90%; every wire-format decoder has unit tests and a fuzz target or a documented reason it cannot be fuzzed independently.
+
+#### Phase 3: Authentication State Machines
+
+- Introduce scripted in-process KDC transports for AS, TGS, referrals, FAST, PKINIT, S4U, password expiry, clock skew, UDP-to-TCP fallback, and retry exhaustion.
+- Cover valid and invalid transition ordering, replay, nonce mismatch, downgrade attempts, missing required padata, and typed KRB errors.
+- Exercise SPNEGO, NEGOEX, PKU2U, GSS MIC/wrap, channel bindings, delegation, and mutual-authentication success and rejection paths with deterministic peers.
+- Test cancellation and deadlines at each network and HTTP boundary.
+
+Exit gate: `client`, `service`, and `spnego` each reach 75% overall; security-sensitive state-transition functions reach 90%; all retry loops have success, terminal-error, and exhaustion tests.
+
+#### Phase 4: KDC Interoperability
+
+- Run the existing MIT and Samba AD suites for every protocol-affecting pull request.
+- Add a maintained Windows AD matrix covering AES-SHA1/SHA2, FAST AS/TGS, PKINIT, referrals, S4U2self/S4U2proxy/RBCD, PAC validation, KKDCP, and password-change flows.
+- Capture sanitized protocol fixtures from successful interoperability runs for deterministic offline regression tests.
+- Test mixed-version and policy failures, including disabled enctypes, required FAST, revoked certificates, clock skew, and constrained-delegation denial.
+
+Exit gate: all documented features have at least one automated interoperability path; Windows-only manual cases are tracked with an owner, environment requirements, and last successful date.
+
+#### Phase 5: Platform Behavior
+
+- Keep native unit and race tests on Linux, Windows, and macOS.
+- Add platform-specific filesystem tests for locking, atomic replacement, permissions, path expansion, and credential cache conventions.
+- Add Android emulator tests for DNS, TCP/UDP, HTTPS proxying, and application-provided credential storage.
+- Add iOS simulator/device builds on a macOS runner with Xcode, then test networking and application-container file behavior.
+
+Exit gate: every claimed runtime platform has native execution coverage. Compile-only targets remain explicitly labeled until a suitable runner exists.
+
+#### Phase 6: Ratchet and Maintenance
+
+- Raise the aggregate CI floor in small increments as each phase lands; never lower it to merge a change.
+- Review function-level coverage for every security-sensitive change and require a regression test for every fixed defect.
+- Track unit, integration, fuzz, and interoperability results separately so one category cannot mask regressions in another.
+- Periodically remove obsolete exclusions and stale fuzz corpus entries.
+
+Exit gate: repository coverage is at least 80%, critical paths remain at least 90%, and CI reports each test category independently.
+
+#### Phase 7: Strict 100% Combined Coverage
+
+- Maintain a machine-readable inventory of every uncovered statement, its owning package, and the job expected to execute it. The inventory must fail CI when a new uncovered block has no owner.
+- Refactor command entry points into testable `run` functions that accept arguments, streams, environment access, and exit-code reporting; retain `main` only as a minimal `os.Exit(run(...))` wrapper and cover wrappers with subprocess tests.
+- Inject terminal, clock, randomness, filesystem, DNS, network, and process dependencies where deterministic failure or cancellation cannot otherwise be induced.
+- Collect coverage from Linux unit tests, CLI subprocess tests, MIT and Samba integration suites, Windows AD release tests, supported Go-version jobs, and native Windows and macOS jobs. Merge profiles by source block before enforcing the combined threshold.
+- Exercise each build-tagged implementation on a matching runner. A file absent from one platform's build is not considered excluded when another supported runner can compile it.
+- Remove unreachable error branches only when the underlying operation is provably infallible and the public API remains compatible. Do not use coverage-ignore comments, generated profiles, empty assertions, or reduced `-coverpkg` scope.
+- Raise package and aggregate floors monotonically after each deterministic, integration, subprocess, and platform tranche reaches its target.
+
+Exit gate: every instrumentable production statement is executed by at least one required CI job, the merged profile reports 100.0%, every package reports 100.0%, and all platform-specific implementations meet the same standard on their native runner.

@@ -1,0 +1,57 @@
+version: "2"
+
+run:
+  timeout: 10m
+  allow-serial-runners: true
+  modules-download-mode: readonly
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - exhaustive
+    - gochecksumtype
+    - exhaustruct_v5
+    - nilaway
+    - cyclop
+    - errcheck
+    - funlen
+    - funcorder
+    - exptostd
+    - goconst
+    - gocognit
+    - gosec
+    - lll
+    - mnd
+    - modernize
+    - nilnil
+    - perfsprint
+    - prealloc
+    - unparam
+    - unused
+    - usestdlibvars
+    - sloglint
+    - interfacebloat
+  settings:
+    exhaustive:
+      check: [switch]
+    exhaustruct_v5:
+      allow-empty: false
+    custom:
+      nilaway:
+        type: module
+        description: Interprocedural nil-flow analysis for gokrb5/v8 using the official NilAway adapter.
+        original-url: https://github.com/uber-go/nilaway
+        settings:
+          include-pkgs: github.com/otuschhoff/gokrb5/v8
+          pretty-print: "false"
+          group-error-messages: "false"
+          exclude-test-files: "false"
+  exclusions:
+    generated: disable
+    presets: []
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false

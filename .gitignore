@@ -29,3 +29,7 @@ _testmain.go
 user
 pw
 .DS_Store
+
+# Locally built custom lint binary and assessment reports
+/.bin/
+/lint-reports/

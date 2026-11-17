@@ -1,0 +1,128 @@
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+  tests: true
+
+formatters:
+  enable:
+    - gofumpt # Stricter formatting than gofmt
+    - gci     # Deterministic import grouping (stdlib, 3rd-party, local)
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/otuschhoff/gokrb5/v8)
+
+linters:
+  default: none # Explicit allowlist prevents surprise breakage on upgrades
+  enable:
+    # Correctness, Errors & Type Safety
+    - govet
+    - staticcheck
+    - errcheck
+    - errorlint
+    - wrapcheck
+    - exhaustive
+    - gochecksumtype
+    - exhaustruct_v5
+    - nilerr
+    - nilnesserr
+    - forcetypeassert
+    - bodyclose
+    - rowserrcheck
+    - sqlclosecheck
+    - copyloopvar
+    - durationcheck
+    - nilaway
+
+    # Readability, Simplicity & Local Reasoning
+    - gocognit
+    - nestif
+    - gochecknoglobals
+    - gochecknoinits
+    - nonamedreturns
+    - nakedret
+    - interfacebloat
+    - ireturn
+    - revive
+    - gocritic
+
+    # Architecture, Security & Hygiene
+    - depguard
+    - gomodguard_v2
+    - gomoddirectives
+    - forbidigo
+    - gosec
+    - unused
+    - ineffassign
+    - unparam
+    - unconvert
+    - nolintlint
+
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # Avoid premature struct-layout micro-optimization
+
+    gocognit:
+      min-complexity: 15 # Keeps functions easy to read in a single screen
+
+    nestif:
+      min-complexity: 4  # Encourages early-return guard clauses
+
+    interfacebloat:
+      max: 5 # Enforces small, focused interfaces
+
+    exhaustive:
+      default-signifies-exhaustive: false # Forces every enum case to be listed
+
+    gochecksumtype:
+      default-signifies-exhaustive: false
+
+    exhaustruct_v5:
+      explicit-mode: true # Only enforces structs annotated with //exhaustruct:enforce
+
+    nolintlint:
+      require-explanation: true # Forces a reason on every //nolint comment
+      require-specific: true    # Bans blanket //nolint without a linter name
+
+    forbidigo:
+      forbid:
+        - pattern: '^fmt\.Print.*$'
+          msg: "Use structured logging (log/slog) instead of fmt.Print"
+        - pattern: '^http\.DefaultClient$'
+          msg: "Construct an http.Client with explicit timeouts"
+
+    depguard:
+      rules:
+        main:
+          deny:
+            - pkg: "io/ioutil"
+              desc: "Deprecated; use io and os packages"
+            - pkg: "math/rand$"
+              desc: "Use math/rand/v2 or crypto/rand"
+    custom:
+      nilaway:
+        type: module
+        description: Interprocedural nil-panic analysis for gokrb5/v8
+        original-url: https://github.com/uber-go/nilaway
+        settings:
+          include-pkgs: github.com/otuschhoff/gokrb5/v8
+          pretty-print: "false"
+          group-error-messages: "false"
+          exclude-test-files: "false"
+
+  exclusions:
+    rules:
+      # Relax complexity, global-table, and error-wrapping rules in test files
+      - path: _test\.go
+        linters:
+          - gocognit
+          - gochecknoglobals
+          - wrapcheck
+          - exhaustruct_v5
+          - forbidigo

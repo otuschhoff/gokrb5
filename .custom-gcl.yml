@@ -1,0 +1,6 @@
+version: v2.15.0
+name: golangci-lint-report
+plugins:
+  - module: go.uber.org/nilaway
+    import: go.uber.org/nilaway/cmd/gclplugin
+    version: v0.0.0-20261112030514-ccd005690d1e
