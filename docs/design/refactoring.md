@@ -479,6 +479,13 @@ or decoding operations, not arbitrary line-count helpers. Preserve retry budgets
 FAST downgrade checks, referral handling, lock ownership, wire bounds, and
 metadata. Keep original tests and add branch-level characterization as needed.
 
+Slice 1 progress (2026-11-17): ASExchange now uses private per-exchange
+preparation, transition, and reply methods. Scripted characterization passes
+against both the original and decomposed implementations, including PKINIT
+freshness/fallback budgets, FAST error semantics, referrals, request aliasing,
+and reply-key publication. Relevant unit/race tests, build, vet, and diagnostics
+pass; remaining Phase 3 slices and the interoperability exit gate remain open.
+
 Exit: touched functions meet canonical cognitive complexity 15 / nesting 4
 thresholds, or a separately reviewed protocol-specific exception is justified;
 tests, race tests, relevant fuzzing, and MIT/Samba integration pass. No exported
