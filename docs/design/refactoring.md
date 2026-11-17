@@ -497,6 +497,19 @@ build, vet, and error diagnostics pass; the seeded array-offset fuzz target
 retains its existing non-wrapping behavior. Remaining slices and the complete
 MIT/Samba interoperability exit gate remain open.
 
+Slice 3 progress (2026-11-17): `LibDefaults.parseLines` now delegates to private
+typed boolean, duration, string, collection, and constrained-value parsers.
+Characterization passed before extraction and against the original parser via
+an overlay, preserving comment/equality quirks, append-versus-replace behavior,
+exact errors, partial mutation, numeric limits, and deferred enctype-ID updates.
+The target and all extracted helpers have 100% statement coverage; config/client
+unit and race tests, repeated characterization, relevant build/vet, and error
+diagnostics pass. The canonical new-code gate is clean; full zero-threshold
+measurement gives target cognitive complexity 9, helpers at most 7, and actual
+control-flow nesting at most 2 (limits 15/4). Other configuration parsers remain
+unchanged. PAC/keytab slices remain open; the pinned MIT-KDC/Samba matrix remains
+a CI obligation, separate from the approved supplied-KDC local integration gate.
+
 Exit: touched functions meet canonical cognitive complexity 15 / nesting 4
 thresholds, or a separately reviewed protocol-specific exception is justified;
 tests, race tests, relevant fuzzing, and MIT/Samba integration pass. No exported
