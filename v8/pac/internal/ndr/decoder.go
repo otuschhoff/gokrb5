@@ -73,7 +73,7 @@ func (dec *Decoder) Decode(s interface{}) error {
 	if err != nil {
 		return err
 	}
-	_, err = dec.r.Discard(4) //The next 4 bytes are an RPC unique pointer referent. We just skip these.
+	_, err = dec.r.Discard(4) // The next 4 bytes are an RPC unique pointer referent. We just skip these.
 	if err != nil {
 		return Errorf("unable to process byte stream: %w", err)
 	}
@@ -204,212 +204,24 @@ func (dec *Decoder) fill(s interface{}, tag reflect.StructTag, localDef *[]defer
 	// Populate the value from the byte stream
 	switch v.Kind() {
 	case reflect.Struct:
-		dec.current = append(dec.current, v.Type().Name()) //Track the current field being filled
-		// in case struct is a union, track this and the selected union field for efficiency
-		var unionTag reflect.Value
-		var unionField string // field to fill if struct is a union
-		// Go through each field in the struct and recursively fill
-		for i := 0; i < v.NumField(); i++ {
-			fieldName := v.Type().Field(i).Name
-			if !v.Field(i).CanSet() {
-				return fmt.Errorf("NDR field %s cannot be set", fieldName)
-			}
-			dec.current = append(dec.current, fieldName) //Track the current field being filled
-			//fmt.Fprintf(os.Stderr, "DEBUG Decoding: %s\n", strings.Join(dec.current, "/"))
-			structTag := v.Type().Field(i).Tag
-			ndrTag := parseTags(structTag)
-
-			// Union handling
-			if !unionTag.IsValid() {
-				// Is this field a union tag?
-				unionTag = dec.isUnion(v.Field(i), structTag)
-			} else {
-				// What is the selected field value of the union if we don't already know
-				if unionField == "" {
-					unionField, err = unionSelectedField(v, unionTag)
-					if err != nil {
-						return fmt.Errorf("could not determine selected union value field for %s with discriminat"+
-							" tag %s: %v", v.Type().Name(), unionTag, err)
-					}
-				}
-				if ndrTag.HasValue(TagUnionField) && fieldName != unionField {
-					// is a union and this field has not been selected so will skip it.
-					dec.current = dec.current[:len(dec.current)-1] //This field has been skipped so remove it from the current field tracker
-					continue
-				}
-			}
-
-			// Check if field is a pointer
-			if v.Field(i).Type().Implements(reflect.TypeOf(new(RawBytes)).Elem()) &&
-				v.Field(i).Type().Kind() == reflect.Slice && v.Field(i).Type().Elem().Kind() == reflect.Uint8 {
-				//field is for rawbytes
-				structTag, err = addSizeToTag(v, v.Field(i), structTag)
-				if err != nil {
-					return fmt.Errorf("could not get rawbytes field(%s) size: %w", strings.Join(dec.current, "/"), err)
-				}
-				ptr, err := dec.isPointer(v.Field(i), structTag, localDef)
-				if err != nil {
-					return fmt.Errorf("could not process struct field(%s): %w", strings.Join(dec.current, "/"), err)
-				}
-				if !ptr {
-					err := dec.readRawBytes(v.Field(i), structTag)
-					if err != nil {
-						return fmt.Errorf("could not fill raw bytes struct field(%s): %w", strings.Join(dec.current, "/"), err)
-					}
-				}
-			} else {
-				err := dec.fill(v.Field(i), structTag, localDef)
-				if err != nil {
-					return fmt.Errorf("could not fill struct field(%s): %w", strings.Join(dec.current, "/"), err)
-				}
-			}
-			dec.current = dec.current[:len(dec.current)-1] //This field has been filled so remove it from the current field tracker
-		}
-		dec.current = dec.current[:len(dec.current)-1] //This field has been filled so remove it from the current field tracker
-	case reflect.Bool:
-		i, err := dec.readBool()
-		if err != nil {
-			return fmt.Errorf("could not fill %s: %w", v.Type().Name(), err)
-		}
-		v.Set(reflect.ValueOf(i))
-	case reflect.Uint8:
-		i, err := dec.readUint8()
-		if err != nil {
-			return fmt.Errorf("could not fill %s: %w", v.Type().Name(), err)
-		}
-		v.Set(reflect.ValueOf(i))
-	case reflect.Uint16:
-		i, err := dec.readUint16()
-		if err != nil {
-			return fmt.Errorf("could not fill %s: %w", v.Type().Name(), err)
-		}
-		v.Set(reflect.ValueOf(i))
-	case reflect.Uint32:
-		i, err := dec.readUint32()
-		if err != nil {
-			return fmt.Errorf("could not fill %s: %w", v.Type().Name(), err)
-		}
-		v.Set(reflect.ValueOf(i))
-	case reflect.Uint64:
-		i, err := dec.readUint64()
-		if err != nil {
-			return fmt.Errorf("could not fill %s: %w", v.Type().Name(), err)
-		}
-		v.Set(reflect.ValueOf(i))
-	case reflect.Int8:
-		i, err := dec.readInt8()
-		if err != nil {
-			return fmt.Errorf("could not fill %s: %w", v.Type().Name(), err)
-		}
-		v.Set(reflect.ValueOf(i))
-	case reflect.Int16:
-		i, err := dec.readInt16()
-		if err != nil {
-			return fmt.Errorf("could not fill %s: %w", v.Type().Name(), err)
-		}
-		v.Set(reflect.ValueOf(i))
-	case reflect.Int32:
-		i, err := dec.readInt32()
-		if err != nil {
-			return fmt.Errorf("could not fill %s: %w", v.Type().Name(), err)
-		}
-		v.Set(reflect.ValueOf(i))
-	case reflect.Int64:
-		i, err := dec.readInt64()
-		if err != nil {
-			return fmt.Errorf("could not fill %s: %w", v.Type().Name(), err)
-		}
-		v.Set(reflect.ValueOf(i))
+		return dec.fillStruct(v, localDef)
+	case reflect.Bool, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Float32, reflect.Float64:
+		return dec.fillScalar(v)
 	case reflect.String:
-		ndrTag := parseTags(tag)
-		conformant := ndrTag.HasValue(TagConformant)
-		// strings are always varying so this is assumed without an explicit tag
-		var s string
-		var err error
-		if conformant {
-			s, err = dec.readConformantVaryingString(localDef)
-			if err != nil {
-				return fmt.Errorf("could not fill with conformant varying string: %w", err)
-			}
-		} else {
-			s, err = dec.readVaryingString(localDef)
-			if err != nil {
-				return fmt.Errorf("could not fill with varying string: %w", err)
-			}
-		}
-		v.Set(reflect.ValueOf(s))
-	case reflect.Float32:
-		i, err := dec.readFloat32()
-		if err != nil {
-			return fmt.Errorf("could not fill %v: %w", v.Type().Name(), err)
-		}
-		v.Set(reflect.ValueOf(i))
-	case reflect.Float64:
-		i, err := dec.readFloat64()
-		if err != nil {
-			return fmt.Errorf("could not fill %v: %w", v.Type().Name(), err)
-		}
-		v.Set(reflect.ValueOf(i))
+		return dec.fillString(v, tag, localDef)
 	case reflect.Array:
-		err := dec.fillFixedArray(v, tag, localDef)
-		if err != nil {
-			return err
-		}
+		return dec.fillFixedArray(v, tag, localDef)
 	case reflect.Slice:
-		if v.Type().Implements(reflect.TypeOf(new(RawBytes)).Elem()) && v.Type().Elem().Kind() == reflect.Uint8 {
-			//field is for rawbytes
-			err := dec.readRawBytes(v, tag)
-			if err != nil {
-				return fmt.Errorf("could not fill raw bytes struct field(%s): %w", strings.Join(dec.current, "/"), err)
-			}
-			break
-		}
-		ndrTag := parseTags(tag)
-		conformant := ndrTag.HasValue(TagConformant)
-		varying := ndrTag.HasValue(TagVarying)
-		if ndrTag.HasValue(TagPipe) {
-			err := dec.fillPipe(v, tag)
-			if err != nil {
-				return err
-			}
-			break
-		}
-		_, t := sliceDimensions(v.Type())
-		if t.Kind() == reflect.String && !ndrTag.HasValue(subStringArrayValue) {
-			// String array
-			err := dec.readStringsArray(v, tag, localDef)
-			if err != nil {
-				return err
-			}
-			break
-		}
-		// varying is assumed as fixed arrays use the Go array type rather than slice
-		if conformant && varying {
-			err := dec.fillConformantVaryingArray(v, tag, localDef)
-			if err != nil {
-				return err
-			}
-		} else if !conformant && varying {
-			err := dec.fillVaryingArray(v, tag, localDef)
-			if err != nil {
-				return err
-			}
-		} else {
-			//default to conformant and not varying
-			err := dec.fillConformantArray(v, tag, localDef)
-			if err != nil {
-				return err
-			}
-		}
+		return dec.fillSlice(v, tag, localDef)
 	default:
 		return fmt.Errorf("unsupported type")
 	}
-	return nil
 }
 
 // readBytes returns a number of bytes from the NDR byte stream.
 func (dec *Decoder) readBytes(n int) ([]byte, error) {
-	//TODO make this take an int64 as input to allow for larger values on all systems?
+	// TODO make this take an int64 as input to allow for larger values on all systems?
 	if n < 0 {
 		return nil, fmt.Errorf("cannot read a negative NDR byte count: %d", n)
 	}

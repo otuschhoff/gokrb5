@@ -486,6 +486,17 @@ freshness/fallback budgets, FAST error semantics, referrals, request aliasing,
 and reply-key publication. Relevant unit/race tests, build, vet, and diagnostics
 pass; remaining Phase 3 slices and the interoperability exit gate remain open.
 
+Slice 2 progress (2026-11-17): NDR `Decoder.fill` now delegates struct traversal,
+union selection, parent-sized raw fields, scalars, strings, and slice dispatch to
+private decoding operations. Added characterization passes against the original
+implementation before extraction, including exact error text/chains, tracker
+retention on errors, reflection assignment behavior, dispatch precedence, and
+deferred raw pointers. Existing NDR/PAC/messages tests and their race runs,
+build, vet, and error diagnostics pass; the seeded array-offset fuzz target
+`FuzzDecodeArrays` passes a 65-second run. The selected-union error deliberately
+retains its existing non-wrapping behavior. Remaining slices and the complete
+MIT/Samba interoperability exit gate remain open.
+
 Exit: touched functions meet canonical cognitive complexity 15 / nesting 4
 thresholds, or a separately reviewed protocol-specific exception is justified;
 tests, race tests, relevant fuzzing, and MIT/Samba integration pass. No exported
