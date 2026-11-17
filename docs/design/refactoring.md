@@ -510,6 +510,34 @@ control-flow nesting at most 2 (limits 15/4). Other configuration parsers remain
 unchanged. PAC/keytab slices remain open; the pinned MIT-KDC/Samba matrix remains
 a CI obligation, separate from the approved supplied-KDC local integration gate.
 
+Slice 4 progress (2026-11-17): `PACType.ProcessPACInfoBuffersWithCredentialKey`
+now dispatches each known buffer type to a private per-type processing method,
+with prior decode state reset extracted, preserving buffer order, duplicate
+detection, signature zero-copy timing, skipped credential/claims buffers, exact
+error chains, and partial-state retention on failure. Branch-level
+characterization covers validation-before-reset immutability, per-type decoder
+error chains, duplicate rejection, metadata/logging behavior, and successful
+decodes against the MS test vectors. The target's cognitive complexity dropped
+to 12 with helpers at most 12 and control-flow nesting at most 2 (limits
+15/4). The new seeded `FuzzPACProcessingInfoBuffers` target immediately exposed
+a pre-existing fatal path: PAC client/device claims routed the embedded
+ClaimsSet through the unbounded upstream `github.com/jcmturner/rpc/v2` NDR
+decoder, so a small malformed PAC could terminate the process with a runtime
+out-of-memory error (`fatal error`, exit status 2, not recoverable). ClaimsSet
+decoding now mirrors `mstypes.ClaimsSetMetadata.ClaimsSet` with the bounded
+PAC-internal decoder, preserving compression handling (including Huffman
+deflate), error text, and the metadata mutation contract, and promoting
+`golang.org/x/net` (already in the module graph for exactly this purpose) to a
+direct requirement. Regression tests cover oversized wire counts rejected
+promptly, unsupported-compression and deflate errors, decode equivalence on all
+claims vectors, and device-claims coverage; a 2.6-million-case mutation sweep
+found no further slow or fatal inputs, and the fuzz target passes a 180-second
+run (previously crashing within 35 seconds on every attempt). The legacy v7
+line retains the same upstream decoder calls and is outside this roadmap.
+PAC/client/service/spnego unit and race tests, full v8 unit tests, build, vet,
+and the changed-code lint gate pass. The keytab slice and the pinned
+MIT-KDC/Samba matrix remain open.
+
 Exit: touched functions meet canonical cognitive complexity 15 / nesting 4
 thresholds, or a separately reviewed protocol-specific exception is justified;
 tests, race tests, relevant fuzzing, and MIT/Samba integration pass. No exported

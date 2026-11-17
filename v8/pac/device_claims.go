@@ -16,7 +16,7 @@ type DeviceClaimsInfo struct {
 	ClaimsSet         mstypes.ClaimsSet
 }
 
-// Unmarshal bytes into the ClientClaimsInfo struct
+// Unmarshal bytes into the DeviceClaimsInfo struct
 func (k *DeviceClaimsInfo) Unmarshal(b []byte) (err error) {
 	dec := ndr.NewDecoder(bytes.NewReader(b))
 	m := new(mstypes.ClaimsSetMetadata)
@@ -26,7 +26,7 @@ func (k *DeviceClaimsInfo) Unmarshal(b []byte) (err error) {
 		return
 	}
 	k.ClaimsSetMetadata = *m
-	k.ClaimsSet, err = k.ClaimsSetMetadata.ClaimsSet()
+	k.ClaimsSet, err = decodeClaimsSet(&k.ClaimsSetMetadata)
 	if err != nil {
 		err = fmt.Errorf("error unmarshaling ClientClaimsInfo ClaimsSet: %w", err)
 	}

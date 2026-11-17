@@ -7,6 +7,7 @@ import (
 	"log"
 
 	"github.com/jcmturner/rpc/v2/mstypes"
+
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
@@ -166,6 +167,33 @@ func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey ty
 	if err := pac.validateInfoBuffers(); err != nil {
 		return err
 	}
+	pac.resetInfoBuffers()
+	pac.ZeroSigData = append(pac.ZeroSigData[:0], pac.Data...)
+	seenKnown := make(map[uint32]struct{})
+	for _, buf := range pac.Buffers {
+		if isKnownPACBuffer(buf.ULType) {
+			if _, ok := seenKnown[buf.ULType]; ok {
+				return fmt.Errorf("%w: duplicate buffer type %d", ErrPACMalformed, buf.ULType)
+			}
+			seenKnown[buf.ULType] = struct{}{}
+		}
+		p, err := copyPACRange(pac.Data, buf.Offset, uint64(buf.CBBufferSize))
+		if err != nil {
+			return err
+		}
+		if err := pac.processInfoBuffer(buf, p, credentialKey); err != nil {
+			return err
+		}
+	}
+
+	if ok, err := pac.verify(key); !ok {
+		return err
+	}
+
+	return nil
+}
+
+func (pac *PACType) resetInfoBuffers() {
 	pac.KerbValidationInfo = nil
 	pac.CredentialsInfo = nil
 	pac.ServerChecksum = nil
@@ -180,157 +208,6 @@ func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey ty
 	pac.AttributesInfo = nil
 	pac.Requestor = nil
 	pac.FullChecksum = nil
-	pac.ZeroSigData = append(pac.ZeroSigData[:0], pac.Data...)
-	seenKnown := make(map[uint32]struct{})
-	for _, buf := range pac.Buffers {
-		if isKnownPACBuffer(buf.ULType) {
-			if _, ok := seenKnown[buf.ULType]; ok {
-				return fmt.Errorf("%w: duplicate buffer type %d", ErrPACMalformed, buf.ULType)
-			}
-			seenKnown[buf.ULType] = struct{}{}
-		}
-		p, err := copyPACRange(pac.Data, buf.Offset, uint64(buf.CBBufferSize))
-		if err != nil {
-			return err
-		}
-		switch buf.ULType {
-		case infoTypeKerbValidationInfo:
-			if pac.KerbValidationInfo != nil {
-				return fmt.Errorf("%w: duplicate KerbValidationInfo buffer", ErrPACMalformed)
-			}
-			var k KerbValidationInfo
-			err := k.Unmarshal(p)
-			if err != nil {
-				return fmt.Errorf("error processing KerbValidationInfo: %w", err)
-			}
-			pac.KerbValidationInfo = &k
-		case infoTypeCredentials:
-			if len(credentialKey.KeyValue) == 0 {
-				continue
-			}
-			var credentials CredentialsInfo
-			if err := credentials.Unmarshal(p, credentialKey); err != nil {
-				return fmt.Errorf("error processing CredentialsInfo: %w", err)
-			}
-			pac.CredentialsInfo = &credentials
-		case infoTypePACServerSignatureData:
-			if pac.ServerChecksum != nil {
-				return fmt.Errorf("%w: duplicate ServerChecksum buffer", ErrPACMalformed)
-			}
-			var k SignatureData
-			zb, err := k.Unmarshal(p)
-			if err != nil {
-				return fmt.Errorf("error processing ServerChecksum: %w", err)
-			}
-			copy(pac.ZeroSigData[int(buf.Offset):int(buf.Offset)+int(buf.CBBufferSize)], zb)
-			pac.ServerChecksum = &k
-		case infoTypePACKDCSignatureData:
-			if pac.KDCChecksum != nil {
-				return fmt.Errorf("%w: duplicate KDCChecksum buffer", ErrPACMalformed)
-			}
-			var k SignatureData
-			zb, err := k.Unmarshal(p)
-			if err != nil {
-				return fmt.Errorf("error processing KDCChecksum: %w", err)
-			}
-			copy(pac.ZeroSigData[int(buf.Offset):int(buf.Offset)+int(buf.CBBufferSize)], zb)
-			pac.KDCChecksum = &k
-		case infoTypePACClientInfo:
-			if pac.ClientInfo != nil {
-				return fmt.Errorf("%w: duplicate ClientInfo buffer", ErrPACMalformed)
-			}
-			var k ClientInfo
-			err := k.Unmarshal(p)
-			if err != nil {
-				return fmt.Errorf("error processing ClientInfo: %w", err)
-			}
-			pac.ClientInfo = &k
-		case infoTypeS4UDelegationInfo:
-			var k S4UDelegationInfo
-			err := k.Unmarshal(p)
-			if err != nil {
-				return fmt.Errorf("error processing S4U_DelegationInfo: %w", err)
-			}
-			pac.S4UDelegationInfo = &k
-		case infoTypeUPNDNSInfo:
-			var k UPNDNSInfo
-			err := k.Unmarshal(p)
-			if err != nil {
-				return fmt.Errorf("error processing UPN_DNSInfo: %w", err)
-			}
-			pac.UPNDNSInfo = &k
-		case infoTypePACClientClaimsInfo:
-			if len(p) == 0 {
-				continue
-			}
-			var k ClientClaimsInfo
-			err := k.Unmarshal(p)
-			if err != nil {
-				return fmt.Errorf("error processing ClientClaimsInfo: %w", err)
-			}
-			pac.ClientClaimsInfo = &k
-		case infoTypePACDeviceInfo:
-			var k DeviceInfo
-			err := k.Unmarshal(p)
-			if err != nil {
-				return fmt.Errorf("error processing DeviceInfo: %w", err)
-			}
-			pac.DeviceInfo = &k
-		case infoTypePACDeviceClaimsInfo:
-			var k DeviceClaimsInfo
-			err := k.Unmarshal(p)
-			if err != nil {
-				return fmt.Errorf("error processing DeviceClaimsInfo: %w", err)
-			}
-			pac.DeviceClaimsInfo = &k
-		case infoTypePACTicketChecksum:
-			if pac.TicketChecksum != nil {
-				return fmt.Errorf("%w: duplicate TicketChecksum buffer", ErrPACMalformed)
-			}
-			var k SignatureData
-			zb, err := k.Unmarshal(p)
-			if err != nil {
-				return fmt.Errorf("error processing TicketChecksum: %w", err)
-			}
-			copy(pac.ZeroSigData[int(buf.Offset):int(buf.Offset)+int(buf.CBBufferSize)], zb)
-			pac.TicketChecksum = &k
-		case infoTypePACAttributesInfo:
-			if pac.AttributesInfo != nil {
-				return fmt.Errorf("%w: duplicate AttributesInfo buffer", ErrPACMalformed)
-			}
-			var k AttributesInfo
-			if err := k.Unmarshal(p); err != nil {
-				return fmt.Errorf("error processing AttributesInfo: %w", err)
-			}
-			pac.AttributesInfo = &k
-		case infoTypePACRequestor:
-			if pac.Requestor != nil {
-				return fmt.Errorf("%w: duplicate Requestor buffer", ErrPACMalformed)
-			}
-			var k Requestor
-			if err := k.Unmarshal(p); err != nil {
-				return fmt.Errorf("error processing Requestor: %w", err)
-			}
-			pac.Requestor = &k
-		case infoTypePACFullChecksum:
-			if pac.FullChecksum != nil {
-				return fmt.Errorf("%w: duplicate FullChecksum buffer", ErrPACMalformed)
-			}
-			var k SignatureData
-			zb, err := k.Unmarshal(p)
-			if err != nil {
-				return fmt.Errorf("error processing FullChecksum: %w", err)
-			}
-			copy(pac.ZeroSigData[int(buf.Offset):int(buf.Offset)+int(buf.CBBufferSize)], zb)
-			pac.FullChecksum = &k
-		}
-	}
-
-	if ok, err := pac.verify(key); !ok {
-		return err
-	}
-
-	return nil
 }
 
 func (pac *PACType) verify(key types.EncryptionKey) (bool, error) {
