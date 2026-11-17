@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -20,6 +21,34 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestProcessUnmarshalReplyErrorRetainsClassificationAndCause(t *testing.T) {
+	kdcError := NewKRBError(types.NewPrincipalName(2, "krbtgt/EXAMPLE.COM"), "EXAMPLE.COM", errorcode.KDC_ERR_PREAUTH_REQUIRED, "challenge")
+	wire, err := kdcError.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	structural := fmt.Errorf("outer decode context: %w", asn1.StructuralError{Msg: "unexpected application tag"})
+	got := processUnmarshalReplyError(wire, structural)
+	if typed, ok := errors.AsType[KRBError](got); !ok || typed.ErrorCode != kdcError.ErrorCode {
+		t.Fatalf("wrapped structural KRB error = %v", got)
+	}
+	for _, tt := range []struct {
+		name  string
+		wire  []byte
+		cause error
+	}{
+		{name: "invalid reply retains first decode error", wire: []byte{0}, cause: structural},
+		{name: "non-structural error is not reclassified", wire: wire, cause: errors.New("first failure")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := processUnmarshalReplyError(tt.wire, tt.cause)
+			if !errors.Is(got, tt.cause) {
+				t.Fatalf("first cause lost: %v", got)
+			}
+		})
+	}
+}
 
 func TestKRBErrorMethodData(t *testing.T) {
 	want := types.PADataSequence{{PADataType: patype.PA_FX_COOKIE, PADataValue: []byte("cookie")}}

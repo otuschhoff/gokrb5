@@ -385,7 +385,7 @@ func (kt *Keytab) AddEntryWithSalt(principalName, realm, password, salt, s2kpara
 	}
 	keyValue, err := et.StringToKey(password, salt, s2kparams)
 	if err != nil {
-		return fmt.Errorf("error deriving key from string: %v", err)
+		return fmt.Errorf("error deriving key from string: %w", err)
 	}
 	return kt.AddKey(
 		Principal{Realm: realm, Components: princ.NameString, NameType: princ.NameType},
@@ -566,7 +566,7 @@ func (kt *Keytab) Marshal() ([]byte, error) {
 func (kt *Keytab) Write(w io.Writer) (int, error) {
 	b, err := kt.Marshal()
 	if err != nil {
-		return 0, fmt.Errorf("error marshaling keytab: %v", err)
+		return 0, fmt.Errorf("error marshaling keytab: %w", err)
 	}
 	return w.Write(b)
 }
@@ -632,7 +632,7 @@ func (kt *Keytab) Unmarshal(b []byte) error {
 			// p keeps track as to where we are in the byte stream
 			var p int
 			if err := parsePrincipal(eb, &p, kt, &ke, &endian); err != nil {
-				return fmt.Errorf("invalid principal in keytab record at offset %d: %v", n-int(l)-4, err)
+				return fmt.Errorf("invalid principal in keytab record at offset %d: %w", n-int(l)-4, err)
 			}
 			var err error
 			ke.Timestamp, err = readTimestamp(eb, &p, &endian)

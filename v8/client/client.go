@@ -133,7 +133,7 @@ func NewWithKeytab(username, realm string, kt *keytab.Keytab, krb5conf *config.C
 func NewFromPrincipalString(princ string, krb5conf *config.Config, settings ...func(*Settings)) (*Client, error) {
 	parsed, err := keytab.ParsePrincipal(princ)
 	if err != nil {
-		return nil, fmt.Errorf("invalid client principal: %v", err)
+		return nil, fmt.Errorf("invalid client principal: %w", err)
 	}
 	if parsed.Realm == "" && krb5conf != nil {
 		parsed.Realm = krb5conf.LibDefaults.DefaultRealm
@@ -206,7 +206,7 @@ func NewFromCCache(c *credentials.CCache, krb5conf *config.Config, settings ...f
 	if ok {
 		var tgt messages.Ticket
 		if err := tgt.Unmarshal(tgtCredential.Ticket); err != nil {
-			return cl, fmt.Errorf("TGT bytes in cache are not valid: %v", err)
+			return cl, fmt.Errorf("TGT bytes in cache are not valid: %w", err)
 		}
 		realm := c.DefaultPrincipal.Realm
 		if len(tgtCredential.Server.PrincipalName.NameString) == 2 {
@@ -235,7 +235,7 @@ func NewFromCCache(c *credentials.CCache, krb5conf *config.Config, settings ...f
 	if value, ok := c.GetConfig("pa_type", configPrincipal); ok {
 		paType, err := strconv.ParseInt(value, 10, 32)
 		if err != nil {
-			return cl, fmt.Errorf("invalid pa_type credential cache config value %q: %v", value, err)
+			return cl, fmt.Errorf("invalid pa_type credential cache config value %q: %w", value, err)
 		}
 		cl.settings.preAuthType = int32(paType)
 	}
@@ -245,7 +245,7 @@ func NewFromCCache(c *credentials.CCache, krb5conf *config.Config, settings ...f
 		}
 		var tkt messages.Ticket
 		if err := tkt.Unmarshal(cred.Ticket); err != nil {
-			return cl, fmt.Errorf("cache entry ticket bytes are not valid: %v", err)
+			return cl, fmt.Errorf("cache entry ticket bytes are not valid: %w", err)
 		}
 		cl.cache.addEntryWithDetails(
 			tkt,
@@ -309,7 +309,7 @@ func (cl *Client) Key(etype etype.EType, kvno int, krberr *messages.KRBError) (t
 			var pas types.PADataSequence
 			err := pas.Unmarshal(krberr.EData)
 			if err != nil {
-				return types.EncryptionKey{}, 0, fmt.Errorf("could not get PAData from KRBError to generate key from password: %v", err)
+				return types.EncryptionKey{}, 0, fmt.Errorf("could not get PAData from KRBError to generate key from password: %w", err)
 			}
 			key, _, err := crypto.GetKeyFromPassword(cl.Credentials.Password(), krberr.CName, krberr.CRealm, etype.GetETypeID(), pas)
 			return key, 0, err
@@ -507,7 +507,7 @@ func (cl *Client) AffirmLogin() error {
 	if err != nil || time.Now().UTC().After(endTime) {
 		err := cl.Login()
 		if err != nil {
-			return fmt.Errorf("could not get valid TGT for client's realm: %v", err)
+			return fmt.Errorf("could not get valid TGT for client's realm: %w", err)
 		}
 	}
 	return nil
@@ -522,7 +522,7 @@ func (cl *Client) realmLogin(realm string) error {
 	if err != nil || time.Now().UTC().After(endTime) {
 		err := cl.Login()
 		if err != nil {
-			return fmt.Errorf("could not get valid TGT for client's realm: %v", err)
+			return fmt.Errorf("could not get valid TGT for client's realm: %w", err)
 		}
 	}
 	tgt, skey, err := cl.sessionTGT(cl.Credentials.Domain())
@@ -579,8 +579,10 @@ func (cl *Client) Destroy() {
 
 // Diagnostics runs a set of checks that the client is properly configured and writes details to the io.Writer provided.
 func (cl *Client) Diagnostics(w io.Writer) error {
-	cl.Print(w)
-	var errs []string
+	if err := cl.print(w); err != nil {
+		return err
+	}
+	var errs []error
 	if cl.Credentials.HasKeytab() {
 		var loginRealmEncTypes []int32
 		for _, e := range cl.Credentials.Keytab().Entries {
@@ -597,7 +599,7 @@ func (cl *Client) Diagnostics(w io.Writer) error {
 				}
 			}
 			if !etInKt {
-				errs = append(errs, fmt.Sprintf("default_tkt_enctypes specifies %d but this enctype is not available in the client's keytab", et))
+				errs = append(errs, fmt.Errorf("default_tkt_enctypes specifies %d but this enctype is not available in the client's keytab", et))
 			}
 		}
 		for _, et := range cl.Config.LibDefaults.PreferredPreauthTypes {
@@ -609,55 +611,76 @@ func (cl *Client) Diagnostics(w io.Writer) error {
 				}
 			}
 			if !etInKt {
-				errs = append(errs, fmt.Sprintf("preferred_preauth_types specifies %d but this enctype is not available in the client's keytab", et))
+				errs = append(errs, fmt.Errorf("preferred_preauth_types specifies %d but this enctype is not available in the client's keytab", et))
 			}
 		}
 	}
 	udpCnt, udpKDC, err := cl.Config.GetKDCs(cl.Credentials.Realm(), false)
 	if err != nil {
-		errs = append(errs, fmt.Sprintf("error when resolving KDCs for UDP communication: %v", err))
+		errs = append(errs, fmt.Errorf("error when resolving KDCs for UDP communication: %w", err))
 	}
 	if udpCnt < 1 {
-		errs = append(errs, "no KDCs resolved for communication via UDP.")
+		errs = append(errs, errors.New("no KDCs resolved for communication via UDP"))
 	} else {
 		b, _ := json.MarshalIndent(&udpKDC, "", "  ")
-		fmt.Fprintf(w, "UDP KDCs: %s\n", string(b))
+		if writeErr := writeDiagnosticText(w, fmt.Sprintf("UDP KDCs: %s\n", string(b))); writeErr != nil {
+			return errors.Join(append(errs, fmt.Errorf("write UDP KDC diagnostics: %w", writeErr))...)
+		}
 	}
 	tcpCnt, tcpKDC, err := cl.Config.GetKDCs(cl.Credentials.Realm(), false)
 	if err != nil {
-		errs = append(errs, fmt.Sprintf("error when resolving KDCs for TCP communication: %v", err))
+		errs = append(errs, fmt.Errorf("error when resolving KDCs for TCP communication: %w", err))
 	}
 	if tcpCnt < 1 {
-		errs = append(errs, "no KDCs resolved for communication via TCP.")
+		errs = append(errs, errors.New("no KDCs resolved for communication via TCP"))
 	} else {
 		b, _ := json.MarshalIndent(&tcpKDC, "", "  ")
-		fmt.Fprintf(w, "TCP KDCs: %s\n", string(b))
+		if writeErr := writeDiagnosticText(w, fmt.Sprintf("TCP KDCs: %s\n", string(b))); writeErr != nil {
+			return errors.Join(append(errs, fmt.Errorf("write TCP KDC diagnostics: %w", writeErr))...)
+		}
 	}
 
-	if len(errs) < 1 {
-		return nil
+	return errors.Join(errs...)
+}
+
+func writeDiagnosticText(w io.Writer, text string) error {
+	n, err := io.WriteString(w, text)
+	if err == nil && n != len(text) {
+		err = io.ErrShortWrite
 	}
-	err = errors.New(strings.Join(errs, "\n"))
-	return err
+	if err != nil {
+		return fmt.Errorf("write client diagnostics: %w", err)
+	}
+	return nil
 }
 
 // Print writes the details of the client to the io.Writer provided.
+// It logs encoding/output failures; use Diagnostics to receive these errors.
 func (cl *Client) Print(w io.Writer) {
-	c, _ := cl.Credentials.JSON()
-	fmt.Fprintf(w, "Credentials:\n%s\n", c)
+	if err := cl.print(w); err != nil {
+		cl.Log("could not print client details: %v", err)
+	}
+}
 
-	s, _ := cl.sessions.JSON()
-	fmt.Fprintf(w, "TGT Sessions:\n%s\n", s)
-
-	c, _ = cl.cache.JSON()
-	fmt.Fprintf(w, "Service ticket cache:\n%s\n", c)
-
-	s, _ = cl.settings.JSON()
-	fmt.Fprintf(w, "Settings:\n%s\n", s)
-
-	j, _ := cl.Config.JSON()
-	fmt.Fprintf(w, "Krb5 config:\n%s\n", j)
-
-	k, _ := cl.Credentials.Keytab().JSON()
-	fmt.Fprintf(w, "Keytab:\n%s\n", k)
+func (cl *Client) print(w io.Writer) error {
+	for _, section := range []struct {
+		title  string
+		encode func() (string, error)
+	}{
+		{title: "Credentials", encode: cl.Credentials.JSON},
+		{title: "TGT Sessions", encode: cl.sessions.JSON},
+		{title: "Service ticket cache", encode: cl.cache.JSON},
+		{title: "Settings", encode: cl.settings.JSON},
+		{title: "Krb5 config", encode: cl.Config.JSON},
+		{title: "Keytab", encode: cl.Credentials.Keytab().JSON},
+	} {
+		text, err := section.encode()
+		if err != nil {
+			return fmt.Errorf("encode %s diagnostics: %w", section.title, err)
+		}
+		if err := writeDiagnosticText(w, fmt.Sprintf("%s:\n%s\n", section.title, text)); err != nil {
+			return err
+		}
+	}
+	return nil
 }

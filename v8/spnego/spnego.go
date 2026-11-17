@@ -96,7 +96,7 @@ func (s *SPNEGO) InitSecContext() (gssapi.ContextToken, error) {
 	}
 	negTokenInit, err := NewNegTokenInitKRB5WithOptions(s.client, tkt, key, s.initiatorOptions)
 	if err != nil {
-		return &SPNEGOToken{}, fmt.Errorf("could not create NegTokenInit: %v", err)
+		return &SPNEGOToken{}, fmt.Errorf("could not create NegTokenInit: %w", err)
 	}
 	mechanismToken := negTokenInit.mechToken.(*KRB5Token)
 	s.offeredMechTypes = append([]asn1.ObjectIdentifier(nil), negTokenInit.MechTypes...)
@@ -114,7 +114,7 @@ func (s *SPNEGO) InitSecContext() (gssapi.ContextToken, error) {
 		s.contextReceive = 0
 		s.acceptorSubkey = false
 		if err := s.completeSecurityContext(true); err != nil {
-			return &SPNEGOToken{}, fmt.Errorf("could not create security context: %v", err)
+			return &SPNEGOToken{}, fmt.Errorf("could not create security context: %w", err)
 		}
 	}
 	if contextFlagSet(s.initiatorOptions.GSSAPIFlags, gssapi.ContextFlagDCEStyle) {
@@ -507,7 +507,7 @@ func (s *SPNEGO) verifyInitiatorAPRep(reply *messages.APRep) (types.EncryptionKe
 		if err := reply.Verify(s.authenticator, s.ticketKey); err == nil {
 			return s.ticketKey, nil
 		} else {
-			return types.EncryptionKey{}, fmt.Errorf("verify AP_REP with authenticator subkey: %v; verify with ticket session key: %w", subkeyErr, err)
+			return types.EncryptionKey{}, fmt.Errorf("verify AP_REP with authenticator subkey: %w; verify with ticket session key: %w", subkeyErr, err)
 		}
 	}
 }
@@ -608,7 +608,7 @@ func (s *SPNEGOToken) Marshal() ([]byte, error) {
 		hb, _ := asn1.Marshal(gssapi.OIDSPNEGO.OID())
 		tb, err := s.NegTokenInit.Marshal()
 		if err != nil {
-			return b, fmt.Errorf("could not marshal NegTokenInit: %v", err)
+			return b, fmt.Errorf("could not marshal NegTokenInit: %w", err)
 		}
 		b = append(hb, tb...)
 		return asn1tools.AddASNAppTag(b, 0), nil
@@ -616,7 +616,7 @@ func (s *SPNEGOToken) Marshal() ([]byte, error) {
 	if s.Resp {
 		b, err := s.NegTokenResp.Marshal()
 		if err != nil {
-			return b, fmt.Errorf("could not marshal NegTokenResp: %v", err)
+			return b, fmt.Errorf("could not marshal NegTokenResp: %w", err)
 		}
 		return b, nil
 	}
@@ -636,7 +636,7 @@ func (s *SPNEGOToken) Unmarshal(b []byte) error {
 		var oid asn1.ObjectIdentifier
 		r, err = asn1.UnmarshalWithParams(b, &oid, fmt.Sprintf("application,explicit,tag:%v", 0))
 		if err != nil {
-			return fmt.Errorf("not a valid SPNEGO token: %v", err)
+			return fmt.Errorf("not a valid SPNEGO token: %w", err)
 		}
 		// Check the OID is the SPNEGO OID value
 		SPNEGOOID := gssapi.OIDSPNEGO.OID()

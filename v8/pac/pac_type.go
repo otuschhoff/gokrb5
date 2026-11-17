@@ -201,7 +201,7 @@ func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey ty
 			var k KerbValidationInfo
 			err := k.Unmarshal(p)
 			if err != nil {
-				return fmt.Errorf("error processing KerbValidationInfo: %v", err)
+				return fmt.Errorf("error processing KerbValidationInfo: %w", err)
 			}
 			pac.KerbValidationInfo = &k
 		case infoTypeCredentials:
@@ -210,7 +210,7 @@ func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey ty
 			}
 			var credentials CredentialsInfo
 			if err := credentials.Unmarshal(p, credentialKey); err != nil {
-				return fmt.Errorf("error processing CredentialsInfo: %v", err)
+				return fmt.Errorf("error processing CredentialsInfo: %w", err)
 			}
 			pac.CredentialsInfo = &credentials
 		case infoTypePACServerSignatureData:
@@ -220,7 +220,7 @@ func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey ty
 			var k SignatureData
 			zb, err := k.Unmarshal(p)
 			if err != nil {
-				return fmt.Errorf("error processing ServerChecksum: %v", err)
+				return fmt.Errorf("error processing ServerChecksum: %w", err)
 			}
 			copy(pac.ZeroSigData[int(buf.Offset):int(buf.Offset)+int(buf.CBBufferSize)], zb)
 			pac.ServerChecksum = &k
@@ -231,7 +231,7 @@ func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey ty
 			var k SignatureData
 			zb, err := k.Unmarshal(p)
 			if err != nil {
-				return fmt.Errorf("error processing KDCChecksum: %v", err)
+				return fmt.Errorf("error processing KDCChecksum: %w", err)
 			}
 			copy(pac.ZeroSigData[int(buf.Offset):int(buf.Offset)+int(buf.CBBufferSize)], zb)
 			pac.KDCChecksum = &k
@@ -242,21 +242,21 @@ func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey ty
 			var k ClientInfo
 			err := k.Unmarshal(p)
 			if err != nil {
-				return fmt.Errorf("error processing ClientInfo: %v", err)
+				return fmt.Errorf("error processing ClientInfo: %w", err)
 			}
 			pac.ClientInfo = &k
 		case infoTypeS4UDelegationInfo:
 			var k S4UDelegationInfo
 			err := k.Unmarshal(p)
 			if err != nil {
-				return fmt.Errorf("error processing S4U_DelegationInfo: %v", err)
+				return fmt.Errorf("error processing S4U_DelegationInfo: %w", err)
 			}
 			pac.S4UDelegationInfo = &k
 		case infoTypeUPNDNSInfo:
 			var k UPNDNSInfo
 			err := k.Unmarshal(p)
 			if err != nil {
-				return fmt.Errorf("error processing UPN_DNSInfo: %v", err)
+				return fmt.Errorf("error processing UPN_DNSInfo: %w", err)
 			}
 			pac.UPNDNSInfo = &k
 		case infoTypePACClientClaimsInfo:
@@ -266,21 +266,21 @@ func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey ty
 			var k ClientClaimsInfo
 			err := k.Unmarshal(p)
 			if err != nil {
-				return fmt.Errorf("error processing ClientClaimsInfo: %v", err)
+				return fmt.Errorf("error processing ClientClaimsInfo: %w", err)
 			}
 			pac.ClientClaimsInfo = &k
 		case infoTypePACDeviceInfo:
 			var k DeviceInfo
 			err := k.Unmarshal(p)
 			if err != nil {
-				return fmt.Errorf("error processing DeviceInfo: %v", err)
+				return fmt.Errorf("error processing DeviceInfo: %w", err)
 			}
 			pac.DeviceInfo = &k
 		case infoTypePACDeviceClaimsInfo:
 			var k DeviceClaimsInfo
 			err := k.Unmarshal(p)
 			if err != nil {
-				return fmt.Errorf("error processing DeviceClaimsInfo: %v", err)
+				return fmt.Errorf("error processing DeviceClaimsInfo: %w", err)
 			}
 			pac.DeviceClaimsInfo = &k
 		case infoTypePACTicketChecksum:
@@ -290,7 +290,7 @@ func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey ty
 			var k SignatureData
 			zb, err := k.Unmarshal(p)
 			if err != nil {
-				return fmt.Errorf("error processing TicketChecksum: %v", err)
+				return fmt.Errorf("error processing TicketChecksum: %w", err)
 			}
 			copy(pac.ZeroSigData[int(buf.Offset):int(buf.Offset)+int(buf.CBBufferSize)], zb)
 			pac.TicketChecksum = &k
@@ -300,7 +300,7 @@ func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey ty
 			}
 			var k AttributesInfo
 			if err := k.Unmarshal(p); err != nil {
-				return fmt.Errorf("error processing AttributesInfo: %v", err)
+				return fmt.Errorf("error processing AttributesInfo: %w", err)
 			}
 			pac.AttributesInfo = &k
 		case infoTypePACRequestor:
@@ -309,7 +309,7 @@ func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey ty
 			}
 			var k Requestor
 			if err := k.Unmarshal(p); err != nil {
-				return fmt.Errorf("error processing Requestor: %v", err)
+				return fmt.Errorf("error processing Requestor: %w", err)
 			}
 			pac.Requestor = &k
 		case infoTypePACFullChecksum:
@@ -319,7 +319,7 @@ func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey ty
 			var k SignatureData
 			zb, err := k.Unmarshal(p)
 			if err != nil {
-				return fmt.Errorf("error processing FullChecksum: %v", err)
+				return fmt.Errorf("error processing FullChecksum: %w", err)
 			}
 			copy(pac.ZeroSigData[int(buf.Offset):int(buf.Offset)+int(buf.CBBufferSize)], zb)
 			pac.FullChecksum = &k

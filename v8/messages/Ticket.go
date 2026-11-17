@@ -145,16 +145,15 @@ func unmarshalTicketsSequence(in asn1.RawValue) ([]Ticket, error) {
 	for p < (len(b)) {
 		_, err := asn1.UnmarshalWithParams(b[p:], &raw, fmt.Sprintf("application,tag:%d", asnAppTag.Ticket))
 		if err != nil {
-			return nil, fmt.Errorf("unmarshaling sequence of tickets failed getting length of ticket: %v", err)
+			return nil, fmt.Errorf("unmarshaling sequence of tickets failed getting length of ticket: %w", err)
 		}
 		t, err := unmarshalTicket(b[p:])
 		if err != nil {
-			return nil, fmt.Errorf("unmarshaling sequence of tickets failed: %v", err)
+			return nil, fmt.Errorf("unmarshaling sequence of tickets failed: %w", err)
 		}
 		p += len(raw.FullBytes)
 		tkts = append(tkts, t)
 	}
-	MarshalTicketSequence(tkts)
 	return tkts, nil
 }
 
@@ -209,12 +208,12 @@ func (t *Ticket) DecryptEncPart(keytab *keytab.Keytab, sname *types.PrincipalNam
 func (t *Ticket) Decrypt(key types.EncryptionKey) error {
 	b, err := crypto.DecryptEncPart(t.EncPart, key, keyusage.KDC_REP_TICKET)
 	if err != nil {
-		return fmt.Errorf("error decrypting Ticket EncPart: %v", err)
+		return fmt.Errorf("error decrypting Ticket EncPart: %w", err)
 	}
 	var denc EncTicketPart
 	err = denc.Unmarshal(b)
 	if err != nil {
-		return fmt.Errorf("error unmarshaling encrypted part: %v", err)
+		return fmt.Errorf("error unmarshaling encrypted part: %w", err)
 	}
 	t.DecryptedEncPart = denc
 	return nil

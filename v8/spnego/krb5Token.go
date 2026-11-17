@@ -79,18 +79,18 @@ func (m *KRB5Token) Marshal() ([]byte, error) {
 	case TOK_ID_KRB_AP_REQ:
 		tb, err = m.APReq.Marshal()
 		if err != nil {
-			return []byte{}, fmt.Errorf("error marshalling AP_REQ for MechToken: %v", err)
+			return []byte{}, fmt.Errorf("error marshalling AP_REQ for MechToken: %w", err)
 		}
 	case TOK_ID_KRB_AP_REP:
 		tb, err = m.APRep.Marshal()
 		if err != nil {
-			return nil, fmt.Errorf("error marshalling AP_REP for MechToken: %v", err)
+			return nil, fmt.Errorf("error marshalling AP_REP for MechToken: %w", err)
 		}
 	case TOK_ID_KRB_ERROR:
 		return []byte{}, errors.New("marshal of KRB_ERROR GSSAPI MechToken not supported by gokrb5")
 	}
 	if err != nil {
-		return []byte{}, fmt.Errorf("error mashalling kerberos message within mech token: %v", err)
+		return []byte{}, fmt.Errorf("error mashalling kerberos message within mech token: %w", err)
 	}
 	b = append(b, tb...)
 	return asn1tools.AddASNAppTag(b, 0), nil
@@ -111,7 +111,7 @@ func (m *KRB5Token) Unmarshal(b []byte) error {
 	var oid asn1.ObjectIdentifier
 	r, err := asn1.UnmarshalWithParams(b, &oid, fmt.Sprintf("application,explicit,tag:%v", 0))
 	if err != nil {
-		return fmt.Errorf("error unmarshalling KRB5Token OID: %v", err)
+		return fmt.Errorf("error unmarshalling KRB5Token OID: %w", err)
 	}
 	if !isKerberosMech(oid) {
 		return fmt.Errorf("error unmarshalling KRB5Token, unsupported mechanism OID %s", oid.String())
@@ -126,21 +126,21 @@ func (m *KRB5Token) Unmarshal(b []byte) error {
 		var a messages.APReq
 		err = a.Unmarshal(r[2:])
 		if err != nil {
-			return fmt.Errorf("error unmarshalling KRB5Token AP_REQ: %v", err)
+			return fmt.Errorf("error unmarshalling KRB5Token AP_REQ: %w", err)
 		}
 		m.APReq = a
 	case TOK_ID_KRB_AP_REP:
 		var a messages.APRep
 		err = a.Unmarshal(r[2:])
 		if err != nil {
-			return fmt.Errorf("error unmarshalling KRB5Token AP_REP: %v", err)
+			return fmt.Errorf("error unmarshalling KRB5Token AP_REP: %w", err)
 		}
 		m.APRep = a
 	case TOK_ID_KRB_ERROR:
 		var a messages.KRBError
 		err = a.Unmarshal(r[2:])
 		if err != nil {
-			return fmt.Errorf("error unmarshalling KRB5Token KRBError: %v", err)
+			return fmt.Errorf("error unmarshalling KRB5Token KRBError: %w", err)
 		}
 		m.KRBError = a
 	}

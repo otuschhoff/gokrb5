@@ -22,13 +22,13 @@ func (k *ClientClaimsInfo) Unmarshal(b []byte) (err error) {
 	m := new(mstypes.ClaimsSetMetadata)
 	err = dec.Decode(m)
 	if err != nil {
-		err = fmt.Errorf("error unmarshaling ClientClaimsInfo ClaimsSetMetadata: %v", err)
+		err = fmt.Errorf("error unmarshaling ClientClaimsInfo ClaimsSetMetadata: %w", err)
 		return
 	}
 	k.ClaimsSetMetadata = *m
 	k.ClaimsSet, err = k.ClaimsSetMetadata.ClaimsSet()
 	if err != nil {
-		err = fmt.Errorf("error unmarshaling ClientClaimsInfo ClaimsSet: %v", err)
+		err = fmt.Errorf("error unmarshaling ClientClaimsInfo ClaimsSet: %w", err)
 	}
 	return
 }

@@ -87,11 +87,11 @@ func MarshalMechTypeList(mechTypes []asn1.ObjectIdentifier) ([]byte, error) {
 func makeMechListMIC(mechTypes []asn1.ObjectIdentifier, key types.EncryptionKey, flags byte, sequenceNumber uint64, keyUsage uint32) ([]byte, error) {
 	payload, err := MarshalMechTypeList(mechTypes)
 	if err != nil {
-		return nil, fmt.Errorf("could not marshal MechTypeList: %v", err)
+		return nil, fmt.Errorf("could not marshal MechTypeList: %w", err)
 	}
 	token := gssapi.MICToken{Flags: flags, SndSeqNum: sequenceNumber, Payload: payload}
 	if err := token.SetChecksum(key, keyUsage); err != nil {
-		return nil, fmt.Errorf("could not sign MechTypeList: %v", err)
+		return nil, fmt.Errorf("could not sign MechTypeList: %w", err)
 	}
 	return token.Marshal()
 }
@@ -102,16 +102,16 @@ func verifyMechListMIC(mechTypes []asn1.ObjectIdentifier, mic []byte, key types.
 	}
 	var token gssapi.MICToken
 	if err := token.Unmarshal(mic, expectFromAcceptor); err != nil {
-		return fmt.Errorf("invalid mechListMIC token: %v", err)
+		return fmt.Errorf("invalid mechListMIC token: %w", err)
 	}
 	payload, err := MarshalMechTypeList(mechTypes)
 	if err != nil {
-		return fmt.Errorf("could not marshal MechTypeList: %v", err)
+		return fmt.Errorf("could not marshal MechTypeList: %w", err)
 	}
 	token.Payload = payload
 	verified, err := token.Verify(key, keyUsage)
 	if err != nil {
-		return fmt.Errorf("could not verify mechListMIC: %v", err)
+		return fmt.Errorf("could not verify mechListMIC: %w", err)
 	}
 	if !verified {
 		return errors.New("mechListMIC verification failed")
@@ -356,14 +356,14 @@ func UnmarshalNegToken(b []byte) (bool, interface{}, error) {
 	var a asn1.RawValue
 	_, err := asn1.Unmarshal(b, &a)
 	if err != nil {
-		return false, nil, fmt.Errorf("error unmarshalling NegotiationToken: %v", err)
+		return false, nil, fmt.Errorf("error unmarshalling NegotiationToken: %w", err)
 	}
 	switch a.Tag {
 	case 0:
 		if isNegTokenInit2(a.Bytes) {
 			var n marshalNegTokenInit2
 			if _, err = asn1.Unmarshal(a.Bytes, &n); err != nil {
-				return false, nil, fmt.Errorf("error unmarshalling NegotiationToken type %d (Init2): %v", a.Tag, err)
+				return false, nil, fmt.Errorf("error unmarshalling NegotiationToken type %d (Init2): %w", a.Tag, err)
 			}
 			nt := NegTokenInit{
 				MechTypes: n.MechTypes, ReqFlags: n.ReqFlags, MechTokenBytes: n.MechTokenBytes,
@@ -374,7 +374,7 @@ func UnmarshalNegToken(b []byte) (bool, interface{}, error) {
 		var n marshalNegTokenInit
 		_, err = asn1.Unmarshal(a.Bytes, &n)
 		if err != nil {
-			return false, nil, fmt.Errorf("error unmarshalling NegotiationToken type %d (Init): %v", a.Tag, err)
+			return false, nil, fmt.Errorf("error unmarshalling NegotiationToken type %d (Init): %w", a.Tag, err)
 		}
 		nt := NegTokenInit{
 			MechTypes:      n.MechTypes,
@@ -387,7 +387,7 @@ func UnmarshalNegToken(b []byte) (bool, interface{}, error) {
 		var n marshalNegTokenResp
 		_, err = asn1.Unmarshal(a.Bytes, &n)
 		if err != nil {
-			return false, nil, fmt.Errorf("error unmarshalling NegotiationToken type %d (Resp/Targ): %v", a.Tag, err)
+			return false, nil, fmt.Errorf("error unmarshalling NegotiationToken type %d (Resp/Targ): %w", a.Tag, err)
 		}
 		nt := NegTokenResp{
 			NegState:      n.NegState,
@@ -436,11 +436,11 @@ func NewNegTokenInitKRB5(cl *client.Client, tkt messages.Ticket, sessionKey type
 func NewNegTokenInitKRB5WithOptions(cl *client.Client, tkt messages.Ticket, sessionKey types.EncryptionKey, options KRB5TokenAPREQOptions) (NegTokenInit, error) {
 	mt, err := NewKRB5TokenAPREQWithOptions(cl, tkt, sessionKey, options)
 	if err != nil {
-		return NegTokenInit{}, fmt.Errorf("error getting KRB5 token; %v", err)
+		return NegTokenInit{}, fmt.Errorf("error getting KRB5 token; %w", err)
 	}
 	mtb, err := mt.Marshal()
 	if err != nil {
-		return NegTokenInit{}, fmt.Errorf("error marshalling KRB5 token; %v", err)
+		return NegTokenInit{}, fmt.Errorf("error marshalling KRB5 token; %w", err)
 	}
 	mechTypes := append([]asn1.ObjectIdentifier(nil), options.MechTypes...)
 	if len(mechTypes) == 0 {

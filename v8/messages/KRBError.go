@@ -2,6 +2,7 @@
 package messages
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -128,15 +129,11 @@ func (k KRBError) NTStatus() (ntstatus.Code, bool) {
 }
 
 func processUnmarshalReplyError(b []byte, err error) error {
-	switch err.(type) {
-	case asn1.StructuralError:
+	if _, ok := errors.AsType[asn1.StructuralError](err); ok {
 		var krberr KRBError
-		tmperr := krberr.Unmarshal(b)
-		if tmperr != nil {
-			return krberror.Errorf(err, krberror.EncodingError, "failed to unmarshal KDC's reply")
+		if decodeErr := krberr.Unmarshal(b); decodeErr == nil {
+			return krberr
 		}
-		return krberr
-	default:
-		return krberror.Errorf(err, krberror.EncodingError, "failed to unmarshal KDC's reply")
 	}
+	return krberror.Errorf(err, krberror.EncodingError, "failed to unmarshal KDC's reply")
 }

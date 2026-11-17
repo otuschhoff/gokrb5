@@ -64,7 +64,7 @@ func (dec *Decoder) readStringsArray(v reflect.Value, tag reflect.StructTag, def
 	tag = reflect.StructTag(subStringArrayTag)
 	err := dec.fillVaryingArray(v, tag, def)
 	if err != nil {
-		return fmt.Errorf("could not read string array: %v", err)
+		return fmt.Errorf("could not read string array: %w", err)
 	}
 	return nil
 }

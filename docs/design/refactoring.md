@@ -1,11 +1,12 @@
 # v8 Code Quality and Refactoring Roadmap
 
-Status: active, authoritative remediation backlog; Phases 0-1 complete.
+Status: active, authoritative remediation backlog; Phases 0-2 complete.
 Assessment date: 2026-11-17.
 Scope: `v8` module (`github.com/otuschhoff/gokrb5/v8`) only. Root-module v7
 refactoring is out of scope; whole-project lint automation remains unchanged.
 Original assessment revision: `26e11e9` plus the lint configuration and automation
-changes. Phase 1 follows the committed assessment at `d24235c`.
+changes. Phase 1 follows the committed assessment at `d24235c`; Phase 2 follows
+the completed Phase 1 at `282e1bf`.
 The original checkout was two commits behind its existing `origin/main`
 reference; this assessment does not claim to cover those commits.
 
@@ -21,7 +22,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 3,251 canonical lint findings after Phase 1 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 2,963 canonical lint findings after Phase 2 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -36,10 +37,11 @@ particularly high in the AS exchange, NDR decoding, configuration parsing,
 PAC processing, and keytab decoding. Cosmetic modernization must not precede
 correctness work or change protocol compatibility.
 
-Fresh v8 cross-package statement coverage is **84.4%**, versus the historical
+Assessment-time v8 cross-package statement coverage was **84.4%**, versus the historical
 70.9% baseline from 2026-09-07. The CI floor remains **70.0%**: it no longer
 closely protects the current baseline. This aggregate is not proof of critical
-branch coverage or of the historical 100% combined-coverage goal.
+branch coverage or of the historical 100% combined-coverage goal. Coverage has
+not been remeasured after Phase 2; that remains a Phase 4 gate.
 
 ### Consolidation and status rules
 
@@ -111,7 +113,7 @@ certification.
 
 ### Measured baseline
 
-These are the original assessment counts. The Phase 1 follow-up below records
+These are the original assessment counts. The phase follow-ups below record
 the current counts without overwriting the baseline.
 
 | Profile | v8 findings | Interpretation |
@@ -178,6 +180,32 @@ error/nil findings and method-order changes offset part of that increase.
 Explicitly uninitialized clients are intentional regression inputs, not a reason
 to initialize every field or weaken either profile. Existing high-complexity
 functions still require Phase 3; this phase does not claim lint cleanliness.
+
+### Phase 2 follow-up measurements
+
+The same pinned tools, full v8 scope, test inclusion, and unlimited issue settings
+were used again. The actual `scripts/lint.sh new 282e1bf` gate includes all added
+files and passes both modules with **zero new canonical findings**.
+
+| Profile/analyzer | After Phase 1 | After Phase 2 | Interpretation |
+| --- | ---: | ---: | --- |
+| Canonical total | 3,251 | 2,963 | 2,169 production / 794 test diagnostics; reduction of 288 |
+| Expanded advisory total | 4,038 | 4,077 | 1,925 production / 2,152 test diagnostics; production decreases by 45 while test advisories increase by 84 |
+| errorlint | 252 | 42 | 13 production / 29 test findings remain; none in the implemented production slices |
+| errcheck | 157 | 127 | Mandatory write, sync, unlock, connection/body-close, and diagnostic-output results are retained |
+| NilAway | 293 | 280 | Thirteen findings removed; the remaining invariant/test-fixture alerts are not declared resolved |
+| gosec | 331 | 317 | Fourteen findings removed without changing legacy algorithm policy |
+| govet | 163 | 162 | Shadowing reduction; no new changed-code diagnostics |
+| bodyclose | 35 | 35 | No new bodyclose suppressions |
+| wrapcheck | 396 | 382 | Fourteen fewer context/propagation findings |
+
+The advisory increase includes fixture completeness, test length/complexity,
+method ordering, and repeated-literal diagnostics. It is not a regression-gate
+failure or a claim that structural debt has been eliminated. The remaining
+production errorlint alerts are in configuration (7), command-line tools (2),
+AD test support (3), and NEGOEX (1), outside these implemented boundaries.
+Broader nil invariants, integer-bound classification, and structural work remain
+open under Q-02/Q-05 and Phases 3-4.
 
 ## 3. Prioritized findings
 
@@ -332,6 +360,9 @@ explicit inputs to later phases rather than hidden claims of compliance.
 
 ### Phase 2 - Error contracts and deterministic failure coverage
 
+Status: complete for the persistence, transport, decoding, and HTTP boundaries
+below; this does not close every analyzer alert under Q-02/Q-03/Q-05/Q-06.
+
 Depends on Phase 1 for the affected package. Findings: Q-02, Q-03, Q-05, Q-06.
 
 Work in slices: keytab/ccache persistence, TCP/UDP/HTTPS transport, crypto/message
@@ -352,6 +383,91 @@ with positive/negative protocol vectors before Phase 4 interoperability gates.
 Exit: no unexplained correctness diagnostics in each completed slice; boundary
 and injected-failure tests pass, including races for shared state. Parser fuzz
 targets run at least 60 seconds with valid corpus seeds and malformed inputs.
+
+#### Implemented slices and re-evaluation
+
+- **Persistence:** keytab and ccache atomic replacement share
+  [one internal writer](../../v8/internal/fileio/atomic.go). It enforces private
+  permissions, detects short writes, syncs/closes before rename, retains cleanup
+  failures behind the primary cause, and syncs the directory after replacement.
+  A post-rename directory-sync failure reports an error without deleting the
+  committed target. Object filenames update only on success. Keytab append also
+  retains unlock and close errors in operation order. Existing platform-specific
+  no-op locking/directory-sync policies are unchanged, not newly certified.
+  [Fault-injection tests](../../v8/internal/fileio/atomic_test.go) cover each
+  writer operation, cleanup combinations, exactly-once close, and first typed
+  cause selection.
+- **Transport:** TCP/UDP exchanges own and close their connection; endpoint and
+  protocol failover preserve causes rather than stringify them. TCP bounds and
+  short writes remain enforced; UDP can receive a full datagram rather than
+  truncate at 4 KiB. KKDCP closes intermediate responses exactly once and retains
+  both processing and close errors. The
+  [socket](../../v8/client/network_errors_test.go) and
+  [HTTPS](../../v8/client/kkdcp_errors_test.go) regressions cover short writes,
+  truncated frames, typed timeout/cancellation causes, close failures, and
+  failover order. Traditional TCP/UDP retain their existing five-second
+  deadline; no new caller-context API is implied.
+- **Decoding/error identity:** production crypto, message, PAC, service, and
+  SPNEGO wrappers retain causes with `%w`. AS/TGS and ASN.1 reply classification
+  recognize wrapped typed errors. Re-evaluation found that NDR's custom
+  `Malformed` wrapper still erased causes: it now unwraps, including truncated
+  headers/values, while retaining its classification and existing contextual
+  text. Invalid decode targets/unsettable fields return errors instead of
+  reflection panics. See the
+  [NDR](../../v8/pac/internal/ndr/decoder_errors_test.go),
+  [crypto](../../v8/crypto/common/common_errors_test.go), and
+  [KRB reply](../../v8/messages/KRBError_test.go) regressions.
+  `krberror.Errorf` intentionally flattens only a bare `Krberror`; a narrow
+  errorlint exception and
+  [wrapper-identity test](../../v8/krberror/error_test.go) prevent losing
+  intervening wrappers.
+- **HTTP authentication:** internal response closure preserves negotiation and
+  cleanup errors, while final returned bodies stay caller-owned. Legacy
+  redirects use a per-request budget instead of shared mutable history;
+  authentication stops after ten round trips. Retried bodies require
+  `Request.GetBody`, not partial tee-buffer replay. Real file-body tests prove
+  307 redirects reopen the already-closed target body and 303 redirects do not
+  restore a POST body. Nil headers/requests, absent Kerberos clients, cancellation,
+  failed replay, concurrent independent redirects, and body ownership are
+  covered in [HTTP error-contract tests](../../v8/spnego/http_errors_test.go).
+  The G704 annotation is restricted to the general-purpose client's deliberate
+  caller-selected destination, not a global SSRF exclusion.
+- **Diagnostics:** re-evaluation also found writer failures hidden by the legacy
+  void `Print` method. Shared rendering now retains JSON encoding errors and
+  output/short-write errors. `Diagnostics` returns them alongside prior
+  validation failures; signature-compatible `Print` logs a failure through the
+  configured logger and stops. See
+  [encoding/output regressions](../../v8/client/client_errors_test.go).
+
+Remaining unchecked-error alerts are not silently treated as operational
+success: logger output remains best effort behind existing void APIs, and
+legacy RC4 `RandomToKey` copies an in-memory reader into a hash writer whose
+contract cannot return a write error. Neither requires inventing a panic or
+changing a public crypto signature. Configuration/CLI/test-support cleanup,
+other nil invariants, and parser/state-machine complexity remain separate
+backlog work; this phase does not claim a lint-clean project.
+
+#### Exit verification
+
+- Full v8 unit and race suites pass with Go 1.26.11.
+- Affected persistence, client, crypto, message, PAC/NDR, SPNEGO, and error suites
+  pass on Linux/386; affected-package `go vet` passes.
+- Failure/ownership/concurrency regressions pass 100 race-enabled repetitions;
+  final diagnostic encoding/output regressions also pass 100 repetitions.
+- Persistence cross-builds pass for Windows/amd64, Darwin/arm64, FreeBSD/amd64,
+  AIX/ppc64, Solaris/amd64, illumos/amd64, and Plan 9/amd64. These are compile
+  checks, not native filesystem/interoperability evidence.
+- Seeded keytab, ccache, NDR-array, and SPNEGO-token fuzz targets each complete
+  at least 60 seconds. The first keytab run reported `context deadline exceeded`
+  at shutdown without a failing input; two subsequent 65-second runs pass,
+  each exceeding 1.6 million executions. NDR also passes a second 65-second run.
+- Both complete lint profiles were remeasured, and the actual changed-code gate
+  is clean without weakening analyzer configuration.
+
+No live KDC, Windows fixture-14, hosted-workflow, RC4 GSS, or user-to-user
+acceptor implementation pass is claimed. Their explicit compatibility and
+external-evidence gates remain unchanged. The next implementation phase is
+Phase 3, starting with ASExchange.
 
 ### Phase 3 - Decompose high-complexity state machines and parsers
 

@@ -50,7 +50,7 @@ func (m *Request) Marshal() (b []byte, err error) {
 	b = []byte{255, 128} // protocol version number: contains the hex constant 0xff80 (big-endian integer).
 	ab, e := m.APREQ.Marshal()
 	if e != nil {
-		err = fmt.Errorf("error marshaling AP_REQ: %v", e)
+		err = fmt.Errorf("error marshaling AP_REQ: %w", e)
 		return
 	}
 	if len(ab) > math.MaxUint16 {
@@ -63,7 +63,7 @@ func (m *Request) Marshal() (b []byte, err error) {
 	b = append(b, ab...)
 	pb, e := m.KRBPriv.Marshal()
 	if e != nil {
-		err = fmt.Errorf("error marshaling KRB_Priv: %v", e)
+		err = fmt.Errorf("error marshaling KRB_Priv: %w", e)
 		return
 	}
 	b = append(b, pb...)

@@ -81,7 +81,7 @@ func (c *SECPKGSupplementalCred) Unmarshal(b []byte) (err error) {
 	dec := ndr.NewDecoder(bytes.NewReader(b))
 	err = dec.Decode(c)
 	if err != nil {
-		err = fmt.Errorf("error unmarshaling SECPKGSupplementalCred: %v", err)
+		err = fmt.Errorf("error unmarshaling SECPKGSupplementalCred: %w", err)
 	}
 	return
 }

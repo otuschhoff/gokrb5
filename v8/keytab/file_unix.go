@@ -4,6 +4,8 @@
 package keytab
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"syscall"
@@ -13,8 +15,11 @@ func lockFile(f *os.File) error {
 	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
 }
 
-func unlockFile(f *os.File) {
-	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+func unlockFile(f *os.File) error {
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_UN); err != nil {
+		return fmt.Errorf("unlock keytab: %w", err)
+	}
+	return nil
 }
 
 func syncDir(path string) error {
@@ -22,8 +27,9 @@ func syncDir(path string) error {
 	if err != nil {
 		return err
 	}
-	defer dir.Close()
-	return dir.Sync()
+	syncErr := dir.Sync()
+	closeErr := dir.Close()
+	return errors.Join(syncErr, closeErr)
 }
 
 func currentUIDs() (string, string) {

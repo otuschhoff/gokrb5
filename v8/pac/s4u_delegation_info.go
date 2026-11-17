@@ -20,7 +20,7 @@ func (k *S4UDelegationInfo) Unmarshal(b []byte) (err error) {
 	dec := ndr.NewDecoder(bytes.NewReader(b))
 	err = dec.Decode(k)
 	if err != nil {
-		err = fmt.Errorf("error unmarshaling S4UDelegationInfo: %v", err)
+		err = fmt.Errorf("error unmarshaling S4UDelegationInfo: %w", err)
 	}
 	return
 }

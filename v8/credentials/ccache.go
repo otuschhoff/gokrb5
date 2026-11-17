@@ -117,7 +117,7 @@ func (c *CCache) Unmarshal(b []byte) error {
 	}
 	defaultPrincipal, err := parsePrincipal(b, &p, c, &endian)
 	if err != nil {
-		return fmt.Errorf("invalid default principal: %v", err)
+		return fmt.Errorf("invalid default principal: %w", err)
 	}
 	c.DefaultPrincipal = defaultPrincipal
 	for p < len(b) {

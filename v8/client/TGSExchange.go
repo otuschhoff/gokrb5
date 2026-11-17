@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/otuschhoff/gokrb5/v8/iana/flags"
@@ -41,7 +42,7 @@ func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messa
 	}
 	r, err := cl.sendKDCRequest(b, kdcRealm)
 	if err != nil {
-		if kdcErr, ok := err.(messages.KRBError); ok {
+		if kdcErr, ok := errors.AsType[messages.KRBError](err); ok {
 			if fast != nil {
 				kdcErr, unwrapErr := fast.unwrapError(kdcErr, tgsReq.ReqBody.Nonce)
 				if unwrapErr != nil {
@@ -192,11 +193,11 @@ func (cl *Client) GetDelegatedCredential(serviceTicket messages.Ticket, serviceS
 	sname := types.PrincipalName{NameType: nametype.KRB_NT_SRV_INST, NameString: []string{"krbtgt", realm}}
 	request, err := messages.NewTGSReqWithOptions(cl.Credentials.CName(), realm, cl.Config, tgt, tgtKey, sname, false, options)
 	if err != nil {
-		return nil, fmt.Errorf("could not create forwarded-TGT request: %v", err)
+		return nil, fmt.Errorf("could not create forwarded-TGT request: %w", err)
 	}
 	_, reply, err := cl.TGSExchange(request, realm, tgt, tgtKey, 0)
 	if err != nil {
-		return nil, fmt.Errorf("could not obtain forwarded TGT: %v", err)
+		return nil, fmt.Errorf("could not obtain forwarded TGT: %w", err)
 	}
 	part := reply.DecryptedEncPart
 	credential, err := messages.NewKRBCred([]messages.Ticket{reply.Ticket}, []messages.KrbCredInfo{{
@@ -206,7 +207,7 @@ func (cl *Client) GetDelegatedCredential(serviceTicket messages.Ticket, serviceS
 		CAddr: append(types.HostAddresses(nil), part.CAddr...),
 	}}, serviceSessionKey)
 	if err != nil {
-		return nil, fmt.Errorf("could not build delegated KRB_CRED: %v", err)
+		return nil, fmt.Errorf("could not build delegated KRB_CRED: %w", err)
 	}
 	return credential.Marshal()
 }

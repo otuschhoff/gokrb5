@@ -84,7 +84,7 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 			requestBytes = b
 			break
 		}
-		e, ok := err.(messages.KRBError)
+		e, ok := errors.AsType[messages.KRBError](err)
 		if !ok {
 			return messages.ASRep{}, krberror.Errorf(err, krberror.NetworkingError, "AS Exchange Error: failed sending AS_REQ to KDC")
 		}

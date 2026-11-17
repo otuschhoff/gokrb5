@@ -84,11 +84,11 @@ func (a *APReq) DecryptAuthenticator(sessionKey types.EncryptionKey) error {
 func (a *APReq) DecryptAuthenticatorWithKeyUsage(sessionKey types.EncryptionKey, usage uint32) error {
 	ab, e := crypto.DecryptEncPart(a.EncryptedAuthenticator, sessionKey, usage)
 	if e != nil {
-		return fmt.Errorf("error decrypting authenticator: %v", e)
+		return fmt.Errorf("error decrypting authenticator: %w", e)
 	}
 	err := a.Authenticator.Unmarshal(ab)
 	if err != nil {
-		return fmt.Errorf("error unmarshaling authenticator: %v", err)
+		return fmt.Errorf("error unmarshaling authenticator: %w", err)
 	}
 	return nil
 }

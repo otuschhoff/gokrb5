@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -48,7 +49,14 @@ func (cl *Client) sendKKDCP(proxyURL, realm string, message []byte) ([]byte, err
 	if err != nil {
 		return nil, fmt.Errorf("send KKDCP request to %s: %w", proxyURL, err)
 	}
-	defer resp.Body.Close()
+	reply, responseErr := readKKDCPResponse(resp, proxyURL)
+	if closeErr := resp.Body.Close(); closeErr != nil {
+		return nil, errors.Join(responseErr, fmt.Errorf("close KKDCP response: %w", closeErr))
+	}
+	return reply, responseErr
+}
+
+func readKKDCPResponse(resp *http.Response, proxyURL string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		if _, drainErr := io.Copy(io.Discard, io.LimitReader(resp.Body, 4096)); drainErr != nil {
 			return nil, fmt.Errorf("KKDCP server %s returned HTTP status %s; drain response body: %w", proxyURL, resp.Status, drainErr)
@@ -78,7 +86,7 @@ func (cl *Client) sendKKDCP(proxyURL, realm string, message []byte) ([]byte, err
 }
 
 func (cl *Client) sendToServers(servers map[int]string, realm string, message []byte, tcp bool) ([]byte, error) {
-	var errs []string
+	var errs []error
 	for i := 1; i <= len(servers); i++ {
 		server := servers[i]
 		var (
@@ -95,7 +103,7 @@ func (cl *Client) sendToServers(servers map[int]string, realm string, message []
 		if err == nil {
 			return reply, nil
 		}
-		errs = append(errs, fmt.Sprintf("%s: %v", server, err))
+		errs = append(errs, fmt.Errorf("%s: %w", server, err))
 	}
-	return nil, fmt.Errorf("error sending Kerberos message: %s", strings.Join(errs, "; "))
+	return nil, kdcAttemptsError(errs)
 }

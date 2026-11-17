@@ -22,7 +22,7 @@ func (dec *Decoder) fillPipe(v reflect.Value, tag reflect.StructTag) error {
 		for i := 0; i < int(s); i++ {
 			err := dec.fill(c.Index(i), tag, &[]deferedPtr{})
 			if err != nil {
-				return fmt.Errorf("could not fill element %d of pipe: %v", i, err)
+				return fmt.Errorf("could not fill element %d of pipe: %w", i, err)
 			}
 		}
 		if uint64(c.Len()) > uint64(dec.size)-uint64(a.Len()) {

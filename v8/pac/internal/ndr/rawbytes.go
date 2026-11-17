@@ -50,7 +50,7 @@ func (dec *Decoder) readRawBytes(v reflect.Value, tag reflect.StructTag) error {
 	}
 	size, err := strconv.Atoi(sizeStr)
 	if err != nil {
-		return fmt.Errorf("size not valid: %v", err)
+		return fmt.Errorf("size not valid: %w", err)
 	}
 	b, err := dec.readBytes(size)
 	if err != nil {

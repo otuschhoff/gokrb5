@@ -3,10 +3,12 @@ package keytab
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
+
+	"github.com/otuschhoff/gokrb5/v8/internal/fileio"
 )
 
 // WriteFile atomically writes kt to path with mode 0600.
@@ -17,35 +19,10 @@ func (kt *Keytab) WriteFile(name string) error {
 	}
 	b, err := kt.Marshal()
 	if err != nil {
-		return fmt.Errorf("error marshaling keytab: %v", err)
+		return fmt.Errorf("error marshaling keytab: %w", err)
 	}
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if err := tmp.Chmod(0600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := io.Copy(tmp, bytes.NewReader(b)); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return err
-	}
-	if err := syncDir(dir); err != nil {
-		return err
+	if err := fileio.AtomicWrite(path, b, syncDir); err != nil {
+		return fmt.Errorf("write keytab: %w", err)
 	}
 	kt.name = path
 	return nil
@@ -63,15 +40,19 @@ func AppendToFile(name string, entries ...Entry) (err error) {
 		return err
 	}
 	defer func() {
-		if closeErr := f.Close(); err == nil && closeErr != nil {
-			err = closeErr
+		if closeErr := f.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close keytab: %w", closeErr))
 		}
 	}()
 	// Creation may race, but the lock serializes header inspection and each append.
 	if err := lockFile(f); err != nil {
 		return err
 	}
-	defer unlockFile(f)
+	defer func() {
+		if unlockErr := unlockFile(f); unlockErr != nil {
+			err = errors.Join(err, unlockErr)
+		}
+	}()
 
 	info, err := f.Stat()
 	if err != nil {
@@ -94,7 +75,7 @@ func AppendToFile(name string, entries ...Entry) (err error) {
 		}
 		existing := new(Keytab)
 		if err := existing.Unmarshal(data); err != nil {
-			return fmt.Errorf("cannot append to invalid keytab: %v", err)
+			return fmt.Errorf("cannot append to invalid keytab: %w", err)
 		}
 		version = existing.version
 		endian = existing.byteOrder

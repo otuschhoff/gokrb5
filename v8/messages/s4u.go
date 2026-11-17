@@ -45,15 +45,15 @@ func s4uChecksumData(userName types.PrincipalName, userRealm, authPackage string
 func NewPAS4UX509UserPAData(userID types.S4UUserID, sessionKey types.EncryptionKey) (types.PAData, error) {
 	userIDBytes, err := userID.Marshal()
 	if err != nil {
-		return types.PAData{}, fmt.Errorf("marshal S4UUserID: %v", err)
+		return types.PAData{}, fmt.Errorf("marshal S4UUserID: %w", err)
 	}
 	etype, err := crypto.GetEtype(sessionKey.KeyType)
 	if err != nil {
-		return types.PAData{}, fmt.Errorf("get S4U session key etype: %v", err)
+		return types.PAData{}, fmt.Errorf("get S4U session key etype: %w", err)
 	}
 	checksum, err := etype.GetChecksumHash(sessionKey.KeyValue, userIDBytes, keyusage.PA_S4U_X509_USER_REQUEST)
 	if err != nil {
-		return types.PAData{}, fmt.Errorf("checksum S4UUserID: %v", err)
+		return types.PAData{}, fmt.Errorf("checksum S4UUserID: %w", err)
 	}
 	value, err := types.NewPAS4UX509User(userID, types.Checksum{CksumType: etype.GetHashID(), Checksum: checksum})
 	if err != nil {
@@ -66,33 +66,33 @@ func NewPAS4UX509UserPAData(userID types.S4UUserID, sessionKey types.EncryptionK
 func (k *TGSRep) VerifyS4UX509UserReply(tgsReq TGSReq, sessionKey types.EncryptionKey) (types.S4UUserID, error) {
 	request, err := findS4UX509User(tgsReq.PAData)
 	if err != nil {
-		return types.S4UUserID{}, fmt.Errorf("S4U request: %v", err)
+		return types.S4UUserID{}, fmt.Errorf("S4U request: %w", err)
 	}
 	reply, err := findS4UX509User(k.PAData)
 	if err != nil {
-		return types.S4UUserID{}, fmt.Errorf("S4U reply: %v", err)
+		return types.S4UUserID{}, fmt.Errorf("S4U reply: %w", err)
 	}
 	userID, err := reply.GetUserID()
 	if err != nil {
-		return types.S4UUserID{}, fmt.Errorf("decode S4U reply user ID: %v", err)
+		return types.S4UUserID{}, fmt.Errorf("decode S4U reply user ID: %w", err)
 	}
 	if userID.Nonce != uint32(tgsReq.ReqBody.Nonce) {
 		return types.S4UUserID{}, fmt.Errorf("S4U reply nonce %d does not match request nonce %d", userID.Nonce, tgsReq.ReqBody.Nonce)
 	}
 	userIDBytes, err := userID.Marshal()
 	if err != nil {
-		return types.S4UUserID{}, fmt.Errorf("marshal S4U reply user ID: %v", err)
+		return types.S4UUserID{}, fmt.Errorf("marshal S4U reply user ID: %w", err)
 	}
 	etype, err := crypto.GetEtype(sessionKey.KeyType)
 	if err != nil {
-		return types.S4UUserID{}, fmt.Errorf("get S4U session key etype: %v", err)
+		return types.S4UUserID{}, fmt.Errorf("get S4U session key etype: %w", err)
 	}
 	if reply.Checksum.CksumType != etype.GetHashID() {
 		return types.S4UUserID{}, fmt.Errorf("S4U reply checksum type %d does not match required type %d", reply.Checksum.CksumType, etype.GetHashID())
 	}
 	requestUserID, err := request.GetUserID()
 	if err != nil {
-		return types.S4UUserID{}, fmt.Errorf("decode S4U request user ID: %v", err)
+		return types.S4UUserID{}, fmt.Errorf("decode S4U request user ID: %w", err)
 	}
 	usage := uint32(keyusage.PA_S4U_X509_USER_REQUEST)
 	if s4uOptionSet(requestUserID.Options, flags.S4UOptionUseReplyKeyUsage) {

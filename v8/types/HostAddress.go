@@ -26,7 +26,7 @@ func GetHostAddress(s string) (HostAddress, error) {
 	var h HostAddress
 	cAddr, _, err := net.SplitHostPort(s)
 	if err != nil {
-		return h, fmt.Errorf("invalid format of client address: %v", err)
+		return h, fmt.Errorf("invalid format of client address: %w", err)
 	}
 	ip := net.ParseIP(cAddr)
 	var ht int32

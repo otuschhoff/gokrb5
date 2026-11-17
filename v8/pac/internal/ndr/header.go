@@ -56,7 +56,7 @@ func (dec *Decoder) readCommonHeader() error {
 	// Version
 	vb, err := dec.r.ReadByte()
 	if err != nil {
-		return Malformed{EText: "could not read first byte of common header for version"}
+		return Malformed{EText: "could not read first byte of common header for version", cause: err}
 	}
 	dec.ch.Version = uint8(vb)
 	if dec.ch.Version != protocolVersion {
@@ -65,7 +65,7 @@ func (dec *Decoder) readCommonHeader() error {
 	// Read Endianness & Character Encoding
 	eb, err := dec.r.ReadByte()
 	if err != nil {
-		return Malformed{EText: "could not read second byte of common header for endianness"}
+		return Malformed{EText: "could not read second byte of common header for endianness", cause: err}
 	}
 	endian := int(eb >> 4 & 0xF)
 	if endian != 0 && endian != 1 {
@@ -84,7 +84,7 @@ func (dec *Decoder) readCommonHeader() error {
 	// Common header length
 	lb, err := dec.readBytes(2)
 	if err != nil {
-		return Malformed{EText: fmt.Sprintf("could not read common header length: %v", err)}
+		return Errorf("could not read common header length: %w", err)
 	}
 	dec.ch.HeaderLength = dec.ch.Endianness.Uint16(lb)
 	if dec.ch.HeaderLength != commonHeaderBytes {
@@ -93,7 +93,7 @@ func (dec *Decoder) readCommonHeader() error {
 	// Filler bytes
 	dec.ch.Filler, err = dec.readBytes(4)
 	if err != nil {
-		return Malformed{EText: fmt.Sprintf("could not read common header filler: %v", err)}
+		return Errorf("could not read common header filler: %w", err)
 	}
 	return nil
 }
@@ -102,7 +102,7 @@ func (dec *Decoder) readPrivateHeader() error {
 	// The next 8 bytes after the common header comprise the RPC type marshalling private header for constructed types.
 	err := binary.Read(dec.r, dec.ch.Endianness, &dec.ph.ObjectBufferLength)
 	if err != nil {
-		return Malformed{EText: "could not read private header object buffer length"}
+		return Malformed{EText: "could not read private header object buffer length", cause: err}
 	}
 	if dec.ph.ObjectBufferLength%8 != 0 {
 		return Malformed{EText: "object buffer length not a multiple of 8"}
@@ -110,7 +110,7 @@ func (dec *Decoder) readPrivateHeader() error {
 	// Filler bytes
 	dec.ph.Filler, err = dec.readBytes(4)
 	if err != nil {
-		return Malformed{EText: fmt.Sprintf("could not read private header filler: %v", err)}
+		return Errorf("could not read private header filler: %w", err)
 	}
 	return nil
 }

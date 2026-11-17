@@ -106,7 +106,7 @@ func New(et, s string) Krberror {
 
 // Errorf appends to or creates a new Krberror.
 func Errorf(err error, et, format string, a ...interface{}) Krberror {
-	if e, ok := err.(Krberror); ok {
+	if e, ok := err.(Krberror); ok { //nolint:errorlint // Flatten only a bare Krberror; unwrapping here would discard intervening causes and context.
 		e.Add(et, fmt.Sprintf(format, a...))
 		return e
 	}

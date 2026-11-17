@@ -71,7 +71,7 @@ func PKCS7Unpad(b []byte, m int) ([]byte, error) {
 func GetHash(pt, key []byte, usage []byte, etype etype.EType) ([]byte, error) {
 	k, err := etype.DeriveKey(key, usage)
 	if err != nil {
-		return nil, fmt.Errorf("unable to derive key for checksum: %v", err)
+		return nil, fmt.Errorf("unable to derive key for checksum: %w", err)
 	}
 	mac := hmac.New(etype.GetHashFunc(), k)
 	p := make([]byte, len(pt))
@@ -119,9 +119,10 @@ func GetUsageKi(un uint32) []byte {
 }
 
 func getUsage(un uint32, o byte) []byte {
-	var buf bytes.Buffer
-	binary.Write(&buf, binary.BigEndian, un)
-	return append(buf.Bytes(), o)
+	buf := make([]byte, 5)
+	binary.BigEndian.PutUint32(buf, un)
+	buf[4] = o
+	return buf
 }
 
 // IterationsToS2Kparams converts the number of iterations as an integer to a string representation.

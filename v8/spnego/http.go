@@ -1,7 +1,6 @@
 package spnego
 
 import (
-	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/jcmturner/goidentity/v6"
+
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/credentials"
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
@@ -35,7 +35,6 @@ type Client struct {
 	*http.Client
 	krb5Client *client.Client
 	spn        string
-	reqs       []*http.Request
 	options    KRB5TokenAPREQOptions
 	contexts   sync.Map
 	contextMu  sync.RWMutex
@@ -48,11 +47,6 @@ type redirectErr struct {
 
 func (e redirectErr) Error() string {
 	return fmt.Sprintf("redirect to %v", e.reqTarget.URL)
-}
-
-type teeReadCloser struct {
-	io.Reader
-	io.Closer
 }
 
 // ContextMechanismFactory creates a fresh mechanism for one HTTP
@@ -86,6 +80,9 @@ func (client *NegotiatingClient) Context() gssapi.Context {
 
 // Do performs an HTTP request and follows the Negotiate challenge exchange.
 func (client *NegotiatingClient) Do(request *http.Request) (*http.Response, error) {
+	if request == nil {
+		return nil, errors.New("HTTP request is nil")
+	}
 	if client.factory == nil {
 		return nil, errors.New("SPNEGO mechanism factory is required")
 	}
@@ -121,25 +118,21 @@ func (client *NegotiatingClient) Do(request *http.Request) (*http.Response, erro
 		}
 		challenge, challengePresent, err := decodeNegotiateHeader(response.Header.Get(HTTPHeaderAuthResponse))
 		if err != nil {
-			response.Body.Close()
-			return nil, err
+			return nil, errors.Join(err, response.Body.Close())
 		}
 		if response.StatusCode != http.StatusUnauthorized {
 			if len(challenge) > 0 {
 				output, context, complete, stepErr := negotiator.InitSecContext(client.target, challenge)
 				if stepErr != nil {
-					response.Body.Close()
-					return nil, stepErr
+					return nil, errors.Join(stepErr, response.Body.Close())
 				}
 				if len(output) != 0 || !complete {
-					response.Body.Close()
-					return nil, errors.New("HTTP server sent an incomplete final SPNEGO token")
+					return nil, errors.Join(errors.New("HTTP server sent an incomplete final SPNEGO token"), response.Body.Close())
 				}
 				establishedContext, done = context, complete
 			}
 			if authorization != "" && !done {
-				response.Body.Close()
-				return nil, errors.New("HTTP server completed without mutual SPNEGO authentication")
+				return nil, errors.Join(errors.New("HTTP server completed without mutual SPNEGO authentication"), response.Body.Close())
 			}
 			if done {
 				client.mu.Lock()
@@ -149,21 +142,18 @@ func (client *NegotiatingClient) Do(request *http.Request) (*http.Response, erro
 			return response, nil
 		}
 		if !challengePresent {
-			response.Body.Close()
-			return nil, errors.New("HTTP 401 response does not advertise Negotiate")
+			return nil, errors.Join(errors.New("HTTP 401 response does not advertise Negotiate"), response.Body.Close())
 		}
 		output, context, complete, err := negotiator.InitSecContext(client.target, challenge)
 		if err != nil {
-			response.Body.Close()
-			return nil, err
+			return nil, errors.Join(err, response.Body.Close())
 		}
 		if context != nil {
 			establishedContext = context
 		}
 		done = complete
 		if len(output) == 0 {
-			response.Body.Close()
-			return nil, errors.New("SPNEGO mechanism produced no HTTP continuation token")
+			return nil, errors.Join(errors.New("SPNEGO mechanism produced no HTTP continuation token"), response.Body.Close())
 		}
 		if err := discardAndClose(response.Body); err != nil {
 			return nil, fmt.Errorf("discard HTTP 401 response: %w", err)
@@ -176,7 +166,10 @@ func (client *NegotiatingClient) Do(request *http.Request) (*http.Response, erro
 func cloneNegotiationRequest(request *http.Request, attempt int) (*http.Request, error) {
 	clone := request.Clone(request.Context())
 	clone.Header = request.Header.Clone()
-	if request.Body == nil {
+	if clone.Header == nil {
+		clone.Header = make(http.Header)
+	}
+	if request.Body == nil || request.Body == http.NoBody {
 		return clone, nil
 	}
 	if attempt == 0 {
@@ -266,51 +259,22 @@ func (c *Client) setContext(context gssapi.Context) {
 
 // Do is the SPNEGO enabled HTTP client's equivalent of the http.Client's Do method.
 func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
-	var body bytes.Buffer
-	if req.Body != nil {
-		// Use a tee reader to capture any body sent in case we have to replay it again
-		teeR := io.TeeReader(req.Body, &body)
-		teeRC := teeReadCloser{teeR, req.Body}
-		req.Body = teeRC
+	if req == nil {
+		return nil, errors.New("HTTP request is nil")
 	}
-	resp, err = c.Client.Do(req)
+	return c.do(req, 0, 0)
+}
+
+func (c *Client) do(req *http.Request, redirects, challenges int) (*http.Response, error) {
+	resp, err := c.Client.Do(req) // #nosec G704 -- This general-purpose HTTP client intentionally sends caller-selected requests.
 	if err != nil {
-		if ue, ok := err.(*url.Error); ok {
-			if e, ok := ue.Err.(redirectErr); ok {
-				if verifyErr := c.verifyMutualResponse(req, resp); verifyErr != nil {
-					return resp, verifyErr
-				}
-				// Picked up a redirect
-				e.reqTarget.Header.Del(HTTPHeaderAuthRequest)
-				c.reqs = append(c.reqs, e.reqTarget)
-				if len(c.reqs) >= 10 {
-					return resp, errors.New("stopped after 10 redirects")
-				}
-				if req.Body != nil {
-					// Refresh the body reader so the body can be sent again
-					e.reqTarget.Body = io.NopCloser(&body)
-				}
-				return c.Do(e.reqTarget)
-			}
+		if redirect, ok := errors.AsType[redirectErr](err); ok {
+			return c.followRedirect(req, resp, redirect.reqTarget, redirects)
 		}
 		return resp, err
 	}
 	if respUnauthorizedNegotiate(resp) {
-		c.setContext(nil)
-		spnegoContext, err := setSPNEGOHeaderWithOptions(c.krb5Client, req, c.spn, c.options)
-		if err != nil {
-			return resp, err
-		}
-		c.contexts.Store(req, spnegoContext)
-		defer c.contexts.Delete(req)
-		if req.Body != nil {
-			// Refresh the body reader so the body can be sent again
-			req.Body = io.NopCloser(&body)
-		}
-		if err := discardAndClose(resp.Body); err != nil {
-			return resp, fmt.Errorf("discard HTTP 401 response: %w", err)
-		}
-		return c.Do(req)
+		return c.retryUnauthorized(req, resp, redirects, challenges)
 	}
 	if err := c.verifyMutualResponse(req, resp); err != nil {
 		return resp, err
@@ -318,12 +282,63 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 	return resp, err
 }
 
+func (c *Client) followRedirect(req *http.Request, resp *http.Response, target *http.Request, redirects int) (*http.Response, error) {
+	if err := c.verifyMutualResponse(req, resp); err != nil {
+		return resp, err
+	}
+	target.Header.Del(HTTPHeaderAuthRequest)
+	if redirects >= 9 {
+		return resp, errors.New("stopped after 10 redirects")
+	}
+	if target.Body != nil {
+		if err := replayRequestBody(req, target); err != nil {
+			return resp, err
+		}
+	}
+	return c.do(target, redirects+1, 0)
+}
+
+func (c *Client) retryUnauthorized(req *http.Request, resp *http.Response, redirects, challenges int) (*http.Response, error) {
+	if challenges >= 9 {
+		return resp, errors.New("HTTP SPNEGO authentication exceeded 10 round trips")
+	}
+	c.setContext(nil)
+	spnegoContext, err := setSPNEGOHeaderWithOptions(c.krb5Client, req, c.spn, c.options)
+	if err != nil {
+		return resp, err
+	}
+	c.contexts.Store(req, spnegoContext)
+	defer c.contexts.Delete(req)
+	if err := discardAndClose(resp.Body); err != nil {
+		return nil, fmt.Errorf("discard HTTP 401 response: %w", err)
+	}
+	if err := replayRequestBody(req, req); err != nil {
+		return nil, err
+	}
+	return c.do(req, redirects, challenges+1)
+}
+
+func replayRequestBody(source, target *http.Request) error {
+	if source.Body == nil || source.Body == http.NoBody {
+		return nil
+	}
+	if source.GetBody == nil {
+		return errors.New("HTTP request body cannot be replayed during SPNEGO authentication")
+	}
+	body, err := source.GetBody()
+	if err != nil {
+		return fmt.Errorf("replay HTTP request body: %w", err)
+	}
+	target.Body = body
+	return nil
+}
+
 func discardAndClose(body io.ReadCloser) error {
-	_, readErr := io.Copy(io.Discard, body)
+	_, readErr := io.Copy(io.Discard, io.LimitReader(body, 4096))
 	closeErr := body.Close()
 	if readErr != nil {
 		if closeErr != nil {
-			return fmt.Errorf("read response body: %w (close also failed: %v)", readErr, closeErr)
+			return fmt.Errorf("read response body: %w (close also failed: %w)", readErr, closeErr)
 		}
 		return fmt.Errorf("read response body: %w", readErr)
 	}
@@ -348,7 +363,7 @@ func (c *Client) verifyMutualResponse(req *http.Request, resp *http.Response) er
 	spnegoContext := pending.(*SPNEGO)
 	authenticated, _, status := spnegoContext.ContinueSecContext(responseToken)
 	if !authenticated || status.Code != gssapi.StatusComplete {
-		return fmt.Errorf("server mutual authentication failed: %v", status)
+		return fmt.Errorf("server mutual authentication failed: %w", status)
 	}
 	securityContext := spnegoContext.SecurityContext()
 	if securityContext == nil {
@@ -444,6 +459,9 @@ func SetSPNEGOHeaderWithOptions(cl *client.Client, r *http.Request, spn string, 
 }
 
 func setSPNEGOHeaderWithOptions(cl *client.Client, r *http.Request, spn string, options KRB5TokenAPREQOptions) (*SPNEGO, error) {
+	if cl == nil {
+		return nil, errors.New("kerberos client is nil")
+	}
 	if contextFlagSet(options.GSSAPIFlags, gssapi.ContextFlagDCEStyle) {
 		return nil, errors.New("DCE-style context exchange is not supported over HTTP")
 	}
@@ -458,17 +476,20 @@ func setSPNEGOHeaderWithOptions(cl *client.Client, r *http.Request, spn string, 
 	s := SPNEGOClientWithOptions(cl, spn, options)
 	err := s.AcquireCred()
 	if err != nil {
-		return nil, fmt.Errorf("could not acquire client credential: %v", err)
+		return nil, fmt.Errorf("could not acquire client credential: %w", err)
 	}
 	st, err := s.InitSecContext()
 	if err != nil {
-		return nil, fmt.Errorf("could not initialize context: %v", err)
+		return nil, fmt.Errorf("could not initialize context: %w", err)
 	}
 	nb, err := st.Marshal()
 	if err != nil {
 		return nil, krberror.Errorf(err, krberror.EncodingError, "could not marshal SPNEGO")
 	}
 	hs := "Negotiate " + base64.StdEncoding.EncodeToString(nb)
+	if r.Header == nil {
+		r.Header = make(http.Header)
+	}
 	r.Header.Set(HTTPHeaderAuthRequest, hs)
 	return s, nil
 }
@@ -480,11 +501,11 @@ func responseSPNEGOToken(resp *http.Response) (*SPNEGOToken, error) {
 	}
 	b, err := base64.StdEncoding.DecodeString(parts[1])
 	if err != nil {
-		return nil, fmt.Errorf("invalid SPNEGO response encoding: %v", err)
+		return nil, fmt.Errorf("invalid SPNEGO response encoding: %w", err)
 	}
 	var token SPNEGOToken
 	if err := token.Unmarshal(b); err != nil {
-		return nil, fmt.Errorf("invalid SPNEGO response token: %v", err)
+		return nil, fmt.Errorf("invalid SPNEGO response token: %w", err)
 	}
 	return &token, nil
 }
@@ -680,7 +701,7 @@ func getAuthorizationNegotiationHeaderAsSPNEGOToken(spnego *SPNEGO, r *http.Requ
 	// Decode the header into an SPNEGO context token
 	b, err := base64.StdEncoding.DecodeString(s[1])
 	if err != nil {
-		err = fmt.Errorf("error in base64 decoding negotiation header: %v", err)
+		err = fmt.Errorf("error in base64 decoding negotiation header: %w", err)
 		spnegoNegotiateKRB5MechType(spnego, w, "%s - SPNEGO %v", r.RemoteAddr, err)
 		return nil, err
 	}
@@ -690,7 +711,7 @@ func getAuthorizationNegotiationHeaderAsSPNEGOToken(spnego *SPNEGO, r *http.Requ
 		// Check if this is a raw KRB5 context token - issue #347.
 		var k5t KRB5Token
 		if k5t.Unmarshal(b) != nil {
-			err = fmt.Errorf("error in unmarshaling SPNEGO token: %v", err)
+			err = fmt.Errorf("error in unmarshaling SPNEGO token: %w", err)
 			spnegoNegotiateKRB5MechType(spnego, w, "%s - SPNEGO %v", r.RemoteAddr, err)
 			return nil, err
 		}
@@ -710,11 +731,11 @@ func getSessionCredentials(spnego *SPNEGO, r *http.Request) (credentials.Credent
 	if sm := spnego.serviceSettings.SessionManager(); sm != nil {
 		cb, err := sm.Get(r, sessionCredentials)
 		if err != nil || cb == nil || len(cb) < 1 {
-			return creds, fmt.Errorf("%s - SPNEGO error getting session and credentials for request: %v", r.RemoteAddr, err)
+			return creds, fmt.Errorf("%s - SPNEGO error getting session and credentials for request: %w", r.RemoteAddr, err)
 		}
 		err = creds.Unmarshal(cb)
 		if err != nil {
-			return creds, fmt.Errorf("%s - SPNEGO credentials malformed in session: %v", r.RemoteAddr, err)
+			return creds, fmt.Errorf("%s - SPNEGO credentials malformed in session: %w", r.RemoteAddr, err)
 		}
 		return creds, nil
 	}

@@ -234,14 +234,14 @@ func NewASReqWithOptions(realm string, c *config.Config, cname, sname types.Prin
 	} else if !c.LibDefaults.NoAddresses {
 		ha, err := types.LocalHostAddresses()
 		if err != nil {
-			return a, fmt.Errorf("could not get local addresses: %v", err)
+			return a, fmt.Errorf("could not get local addresses: %w", err)
 		}
 		ha = append(ha, types.HostAddressesFromNetIPs(c.LibDefaults.ExtraAddresses)...)
 		a.ReqBody.Addresses = ha
 	}
 	pacRequest, err := types.NewKerbPAPACRequestPAData(includePAC)
 	if err != nil {
-		return a, fmt.Errorf("could not marshal KERB-PA-PAC-REQUEST: %v", err)
+		return a, fmt.Errorf("could not marshal KERB-PA-PAC-REQUEST: %w", err)
 	}
 	a.PAData = append(a.PAData, pacRequest)
 	return a, nil
@@ -268,7 +268,7 @@ func NewTGSReqWithOptions(cname types.PrincipalName, kdcRealm string, c *config.
 func NewS4U2SelfTGSReq(cname types.PrincipalName, kdcRealm string, c *config.Config, tgt Ticket, sessionKey types.EncryptionKey, sname, user types.PrincipalName, userRealm string, options S4U2SelfReqOptions) (TGSReq, error) {
 	if len(options.SubjectCertificate) > 0 {
 		if _, err := x509.ParseCertificate(options.SubjectCertificate); err != nil {
-			return TGSReq{}, fmt.Errorf("invalid S4U subject certificate: %v", err)
+			return TGSReq{}, fmt.Errorf("invalid S4U subject certificate: %w", err)
 		}
 	}
 	a, err := tgsReq(cname, sname, kdcRealm, false, c, options.TGSReqOptions)
@@ -396,7 +396,7 @@ func tgsReq(cname, sname types.PrincipalName, kdcRealm string, renewal bool, c *
 	} else if !c.LibDefaults.NoAddresses {
 		ha, err := types.LocalHostAddresses()
 		if err != nil {
-			return TGSReq{}, fmt.Errorf("could not get local addresses: %v", err)
+			return TGSReq{}, fmt.Errorf("could not get local addresses: %w", err)
 		}
 		ha = append(ha, types.HostAddressesFromNetIPs(c.LibDefaults.ExtraAddresses)...)
 		k.ReqBody.Addresses = ha
@@ -433,7 +433,7 @@ func (k *TGSReq) addMSKILEPAData(c *config.Config, options TGSReqOptions) error 
 	}
 	pacRequest, err := types.NewKerbPAPACRequestPAData(includePAC)
 	if err != nil {
-		return fmt.Errorf("could not marshal KERB-PA-PAC-REQUEST: %v", err)
+		return fmt.Errorf("could not marshal KERB-PA-PAC-REQUEST: %w", err)
 	}
 	k.PAData = append(k.PAData, pacRequest)
 
@@ -444,7 +444,7 @@ func (k *TGSReq) addMSKILEPAData(c *config.Config, options TGSReqOptions) error 
 	}
 	pa, err := types.NewPAPACOptionsPAData(pacOptions...)
 	if err != nil {
-		return fmt.Errorf("could not marshal PA-PAC-OPTIONS: %v", err)
+		return fmt.Errorf("could not marshal PA-PAC-OPTIONS: %w", err)
 	}
 	k.PAData = append(k.PAData, pa)
 	return nil

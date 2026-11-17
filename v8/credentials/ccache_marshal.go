@@ -5,13 +5,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"math"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
+	"github.com/otuschhoff/gokrb5/v8/internal/fileio"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
@@ -155,14 +153,14 @@ func (c *CCache) Marshal() ([]byte, error) {
 		out.Write(headerBytes)
 	}
 	if err := marshalPrincipal(&out, c.DefaultPrincipal); err != nil {
-		return nil, fmt.Errorf("invalid default principal: %v", err)
+		return nil, fmt.Errorf("invalid default principal: %w", err)
 	}
 	for i, cred := range c.Credentials {
 		if cred == nil {
 			return nil, fmt.Errorf("credential %d is nil", i)
 		}
 		if err := marshalCredential(&out, cred, version); err != nil {
-			return nil, fmt.Errorf("invalid credential %d: %v", i, err)
+			return nil, fmt.Errorf("invalid credential %d: %w", i, err)
 		}
 	}
 	return out.Bytes(), nil
@@ -295,33 +293,8 @@ func (c *CCache) WriteFile(path string) error {
 	if err != nil {
 		return err
 	}
-	dir := filepath.Dir(resolved)
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(resolved)+".tmp-")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if err := tmp.Chmod(0600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := io.Copy(tmp, bytes.NewReader(b)); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, resolved); err != nil {
-		return err
-	}
-	if err := syncCacheDir(dir); err != nil {
-		return err
+	if err := fileio.AtomicWrite(resolved, b, syncCacheDir); err != nil {
+		return fmt.Errorf("write credential cache: %w", err)
 	}
 	c.Path = resolved
 	return nil

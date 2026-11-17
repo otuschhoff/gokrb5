@@ -24,6 +24,17 @@ func TestErrorf(t *testing.T) {
 	assert.Equal(t, "[Root cause: another error] cause: arg1=123 arg2=arg < another error: some text", a.Error())
 }
 
+func TestErrorfPreservesInterveningWrapper(t *testing.T) {
+	cause := errors.New("injected decoding failure")
+	inner := Errorf(cause, EncodingError, "decode")
+	wrapper := fmt.Errorf("outer context: %w", inner)
+	result := Errorf(wrapper, NetworkingError, "exchange")
+	assert.ErrorIs(t, result, cause)
+	assert.ErrorIs(t, result, wrapper)
+	assert.Contains(t, result.Error(), "outer context")
+	assert.Equal(t, NetworkingError, result.RootCause)
+}
+
 func TestErrorfUnwrapsKRBError(t *testing.T) {
 	want := errors.New("KDC error")
 	err := Errorf(want, KDCError, "KDC rejected request")

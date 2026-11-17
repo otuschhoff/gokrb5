@@ -146,7 +146,7 @@ func verifyAuthenticatorChecksumWithCBT(raw types.Checksum, settings *Settings, 
 		return checksum, false, fmt.Errorf("authenticator checksum type is %d, want %d", raw.CksumType, chksumtype.GSSAPI)
 	}
 	if err := checksum.Unmarshal(raw.Checksum); err != nil {
-		return checksum, false, fmt.Errorf("invalid GSSAPI authenticator checksum: %v", err)
+		return checksum, false, fmt.Errorf("invalid GSSAPI authenticator checksum: %w", err)
 	}
 	if checksum.Flags&gssapi.ContextFlagDeleg != 0 && (checksum.DelegationOption != 1 || len(checksum.Deleg) == 0) {
 		return checksum, true, fmt.Errorf("GSSAPI delegation requires option 1 and a KRB_CRED")
@@ -171,12 +171,12 @@ func verifyAuthenticatorChecksumWithCBT(raw types.Checksum, settings *Settings, 
 func authenticatorAdvertisesCBT(authorizationData types.AuthorizationData) (bool, error) {
 	entries, err := authorizationData.EntriesOfType(adtype.ADAuthDataAPOptions)
 	if err != nil {
-		return false, fmt.Errorf("invalid authenticator authorization data: %v", err)
+		return false, fmt.Errorf("invalid authenticator authorization data: %w", err)
 	}
 	for _, entry := range entries {
 		options, err := entry.GetADAuthDataAPOptions()
 		if err != nil {
-			return false, fmt.Errorf("invalid authenticator AP options: %v", err)
+			return false, fmt.Errorf("invalid authenticator AP options: %w", err)
 		}
 		if msflags.APOptions(options)&msflags.KERB_AP_OPTIONS_CBT != 0 {
 			return true, nil
@@ -188,10 +188,10 @@ func authenticatorAdvertisesCBT(authorizationData types.AuthorizationData) (bool
 func extractDelegatedCredentials(checksum gssapi.AuthenticatorChecksum, key types.EncryptionKey) ([]*credentials.Credential, error) {
 	var delegated messages.KRBCred
 	if err := delegated.Unmarshal(checksum.Deleg); err != nil {
-		return nil, fmt.Errorf("invalid delegated KRB_CRED: %v", err)
+		return nil, fmt.Errorf("invalid delegated KRB_CRED: %w", err)
 	}
 	if err := delegated.DecryptEncPart(key); err != nil {
-		return nil, fmt.Errorf("could not decrypt delegated KRB_CRED: %v", err)
+		return nil, fmt.Errorf("could not decrypt delegated KRB_CRED: %w", err)
 	}
 	if len(delegated.Tickets) == 0 || len(delegated.Tickets) != len(delegated.DecryptedEncPart.TicketInfo) {
 		return nil, fmt.Errorf("delegated KRB_CRED ticket count does not match ticket-info count")
@@ -204,7 +204,7 @@ func extractDelegatedCredentials(checksum gssapi.AuthenticatorChecksum, key type
 		}
 		ticketBytes, err := ticket.Marshal()
 		if err != nil {
-			return nil, fmt.Errorf("could not marshal delegated ticket %d: %v", i, err)
+			return nil, fmt.Errorf("could not marshal delegated ticket %d: %w", i, err)
 		}
 		result = append(result, &credentials.Credential{
 			Client: credentials.Principal{Realm: info.PRealm, PrincipalName: info.PName},

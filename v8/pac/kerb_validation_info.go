@@ -69,7 +69,7 @@ func (k *KerbValidationInfo) Unmarshal(b []byte) (err error) {
 	dec := ndr.NewDecoder(bytes.NewReader(b))
 	err = dec.Decode(k)
 	if err != nil {
-		err = fmt.Errorf("error unmarshaling KerbValidationInfo: %v", err)
+		err = fmt.Errorf("error unmarshaling KerbValidationInfo: %w", err)
 	}
 	return
 }

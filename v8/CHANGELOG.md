@@ -37,6 +37,15 @@
 
 ### Changed
 
+- Legacy HTTP authentication now requires `Request.GetBody` to replay a request
+  body, matching the generic negotiating client; unsafe partial tee-buffer
+  replay is no longer attempted. Authentication is limited to ten round trips,
+  with redirect budgets isolated per request.
+- Error chains preserve underlying causes across crypto, protocol decoding,
+  endpoint failover, and cleanup, allowing `errors.Is`/`errors.As` inspection.
+- Client diagnostics return JSON encoding and output failures, including short
+  writes. The signature-compatible `Print` method stops and logs failures
+  through the configured logger.
 - The minimum Go version is now 1.18, matching the supported CI matrix and
   native parser fuzz tests.
 - `keytab.Keytab.AddEntry` now accepts a `uint32` KVNO so values greater than
@@ -44,6 +53,14 @@
 
 ### Fixed
 
+- Preserve primary and cleanup failures during atomic keytab/ccache replacement,
+  keytab append/unlock, KDC connection closure, and HTTPS response closure.
+- Receive UDP KDC replies larger than 4 KiB without silently truncating them.
+- Retain NDR malformed-stream classification and underlying truncation errors,
+  and reject invalid decode targets or unsettable fields without reflection
+  panics.
+- Close intermediate HTTP negotiation responses on failure without taking
+  ownership of final returned bodies; reopen redirected file bodies correctly.
 - Return explicit errors when exporting an incompletely initialized client or
   importing a nil credential cache.
 - Decode empty multidimensional NDR arrays without indexing element zero, bound
