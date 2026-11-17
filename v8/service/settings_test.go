@@ -47,22 +47,21 @@ func TestSettingsOptionsAndDefaults(t *testing.T) {
 }
 
 func TestReplayCacheClearOldEntries(t *testing.T) {
-	client := types.NewPrincipalName(1, "alice")
-	service := types.NewPrincipalName(2, "HTTP/server.example.org")
 	oldTime := time.Now().UTC().Add(-time.Hour)
 	newTime := time.Now().UTC()
-	cache := &Cache{entries: map[string]clientEntries{
-		client.PrincipalNameString(): {replayMap: map[time.Time]replayCacheEntry{
-			oldTime: {presentedTime: oldTime, sName: service, cTime: oldTime},
-			newTime: {presentedTime: newTime, sName: service, cTime: newTime},
+	clientKey := replayCacheClient{name: `["alice"]`}
+	cache := &Cache{entries: map[replayCacheClient]clientEntries{
+		clientKey: {replayMap: map[replayCacheKey]replayCacheEntry{
+			{clientTime: oldTime}: {presentedTime: oldTime},
+			{clientTime: newTime}: {presentedTime: newTime},
 		}},
-		"expired": {replayMap: map[time.Time]replayCacheEntry{oldTime: {presentedTime: oldTime}}},
+		{name: "expired"}: {replayMap: map[replayCacheKey]replayCacheEntry{{clientTime: oldTime}: {presentedTime: oldTime}}},
 	}}
 	cache.ClearOldEntries(10 * time.Minute)
-	if _, ok := cache.entries["expired"]; ok {
+	if _, ok := cache.entries[replayCacheClient{name: "expired"}]; ok {
 		t.Fatal("empty client cache was retained")
 	}
-	entries, ok := cache.entries[client.PrincipalNameString()]
+	entries, ok := cache.entries[clientKey]
 	if !ok || len(entries.replayMap) != 1 {
 		t.Fatalf("remaining replay entries = %+v", cache.entries)
 	}

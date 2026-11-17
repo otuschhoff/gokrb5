@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -95,6 +96,7 @@ func TestDecodeMultidimensionalArrays(t *testing.T) {
 		for index := 0; index < 6; index++ {
 			binary.LittleEndian.PutUint16(body[index*2:], uint16(index+1))
 		}
+
 		var got struct{ Values [2][3]uint16 }
 		if err := NewDecoder(bytes.NewReader(wrapNDRBody(body))).Decode(&got); err != nil {
 			t.Fatal(err)
@@ -140,6 +142,111 @@ func TestDecodeMultidimensionalArrays(t *testing.T) {
 			want := [][]uint32{{1, 2, 3}, {4, 5, 6}}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("array = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestDecodeEmptyMultidimensionalArrays(t *testing.T) {
+	tests := []struct {
+		name  string
+		body  []byte
+		value any
+	}{
+		{name: "fixed outer", value: new(struct{ Values [0][2]uint32 })},
+		{name: "fixed inner", value: new(struct{ Values [2][0]uint32 })},
+		{
+			name: "conformant outer",
+			body: littleEndianWords(0, 2),
+			value: new(struct {
+				Values [][]uint32 `ndr:"conformant"`
+			}),
+		},
+		{
+			name: "conformant inner",
+			body: littleEndianWords(2, 0),
+			value: new(struct {
+				Values [][]uint32 `ndr:"conformant"`
+			}),
+		},
+		{
+			name: "varying outer",
+			body: littleEndianWords(0, 0, 0, 2),
+			value: new(struct {
+				Values [][]uint32 `ndr:"varying"`
+			}),
+		},
+		{
+			name: "varying inner",
+			body: littleEndianWords(0, 2, 0, 0),
+			value: new(struct {
+				Values [][]uint32 `ndr:"varying"`
+			}),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := NewDecoder(bytes.NewReader(wrapNDRBody(tt.body))).Decode(tt.value); err != nil {
+				t.Fatalf("Decode(empty array): %v", err)
+			}
+		})
+	}
+}
+
+func TestDecodeConformantVaryingArrayOffsets(t *testing.T) {
+	t.Run("one dimension", func(t *testing.T) {
+		var got struct {
+			Values []uint32 `ndr:"conformant,varying"`
+		}
+		body := littleEndianWords(4, 1, 2, 10, 20)
+		if err := NewDecoder(bytes.NewReader(wrapNDRBody(body))).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got.Values, []uint32{0, 10, 20}) {
+			t.Fatalf("offset values = %v", got.Values)
+		}
+	})
+	t.Run("two dimensions", func(t *testing.T) {
+		var got struct {
+			Values [][]uint32 `ndr:"conformant,varying"`
+		}
+		body := littleEndianWords(2, 3, 1, 1, 1, 2, 10, 20)
+		if err := NewDecoder(bytes.NewReader(wrapNDRBody(body))).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		want := [][]uint32{{0, 0, 0}, {0, 10, 20}}
+		if !reflect.DeepEqual(got.Values, want) {
+			t.Fatalf("offset values = %v, want %v", got.Values, want)
+		}
+	})
+}
+
+func TestDecodeMultidimensionalArrayResourceLimits(t *testing.T) {
+	tests := []struct {
+		name  string
+		body  []byte
+		value any
+	}{
+		{
+			name: "conformant product",
+			body: littleEndianWords(16, 16),
+			value: new(struct {
+				Values [][]uint32 `ndr:"conformant"`
+			}),
+		},
+		{
+			name: "varying product",
+			body: littleEndianWords(0, 16, 0, 16),
+			value: new(struct {
+				Values [][]uint32 `ndr:"varying"`
+			}),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := NewDecoder(bytes.NewReader(wrapNDRBody(tt.body))).Decode(tt.value)
+			if err == nil || !strings.Contains(err.Error(), "element count") {
+				t.Fatalf("Decode() = %v, want element-count limit", err)
 			}
 		})
 	}

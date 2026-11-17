@@ -1,11 +1,12 @@
 # v8 Code Quality and Refactoring Roadmap
 
-Status: active, authoritative remediation backlog.
+Status: active, authoritative remediation backlog; Phases 0-1 complete.
 Assessment date: 2026-11-17.
 Scope: `v8` module (`github.com/otuschhoff/gokrb5/v8`) only. Root-module v7
 refactoring is out of scope; whole-project lint automation remains unchanged.
-Source revision: `26e11e9` plus the lint configuration and automation changes
-described below. The checkout was two commits behind its existing `origin/main`
+Original assessment revision: `26e11e9` plus the lint configuration and automation
+changes. Phase 1 follows the committed assessment at `d24235c`.
+The original checkout was two commits behind its existing `origin/main`
 reference; this assessment does not claim to cover those commits.
 
 Navigation: [current state](#1-high-level-current-state),
@@ -20,7 +21,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit tests pass; 3,265 canonical lint findings |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 3,251 canonical lint findings after Phase 1 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -110,6 +111,9 @@ certification.
 
 ### Measured baseline
 
+These are the original assessment counts. The Phase 1 follow-up below records
+the current counts without overwriting the baseline.
+
 | Profile | v8 findings | Interpretation |
 | --- | ---: | --- |
 | Canonical | 3,265 | Policy used by the changed-code gate |
@@ -152,9 +156,34 @@ Expanded-profile v8 noise is dominated by 1,123 `lll` and 956
 deliberately from the canonical annotation-only rule. Do not treat it as a
 requirement to initialize every zero-valued field or rewrite fixture strings.
 
+### Phase 1 follow-up measurements
+
+Both profiles were rerun with the same pinned toolchain, analyzer build,
+scope, test inclusion, and unlimited issue settings:
+
+| Profile/analyzer | Original | After Phase 1 | Interpretation |
+| --- | ---: | ---: | --- |
+| Canonical total | 3,265 | 3,251 | 2,457 production / 794 test diagnostics; no new canonical diagnostic fingerprints after normalizing source-line shifts and existing complexity scores |
+| Expanded advisory total | 4,016 | 4,038 | Additional negative-test fixtures increase structural advisories; this is not a reduction in all analyzer debt |
+| NilAway | 295 | 293 | Two nil-cache-input flows removed; private session-value warnings remain explicitly dispositioned |
+| errcheck | 159 | 157 | Both NDR discard results are now checked |
+| gosec | 333 | 331 | Corresponding unhandled-error diagnostics removed; no blanket exclusions |
+| govet | 165 | 163 | Both lost replay-cache metadata writes fixed |
+| bodyclose | 37 | 35 | Exactly two helper-ownership false positives suppressed at their call sites after closure/error tests |
+
+The advisory delta includes 27 additional full-struct fixture diagnostics,
+one additional cyclomatic-complexity warning for the new dimension-product
+guard, and one additional package-level repeated-literal warning. Removed
+error/nil findings and method-order changes offset part of that increase.
+Explicitly uninitialized clients are intentional regression inputs, not a reason
+to initialize every field or weaken either profile. Existing high-complexity
+functions still require Phase 3; this phase does not claim lint cleanliness.
+
 ## 3. Prioritized findings
 
 Priority denotes remediation order, not a vulnerability severity.
+Counts in the original findings below refer to the preserved assessment baseline;
+the follow-up measurements above are current.
 
 | ID | Priority | Finding and evidence | Required outcome |
 | --- | --- | --- | --- |
@@ -232,6 +261,8 @@ Hosted workflow execution and artifact delivery still require a GitHub run.
 
 ### Phase 1 - Reconcile historical claims and validate correctness alerts
 
+Status: **complete**. The next implementation phase is Phase 2.
+
 Depends on Phase 0. Findings: Q-02, Q-03, Q-05, Q-06, and Q-08.
 
 Start with v8 session/cache nil invariants,
@@ -249,6 +280,56 @@ Exit: every selected v8 nil/resource/overflow/error
 alert has evidence and disposition; confirmed fixes remove their diagnostics;
 no unsupported claim of complete Windows compliance is introduced.
 
+#### Completed correctness triage
+
+| Selected alert or boundary | Disposition | Evidence |
+| --- | --- | --- |
+| [Client ccache export](../../v8/client/ccache_export.go): missing private state in an otherwise public `Client` value | Confirmed panic fixed: reject nil/incomplete clients explicitly, without silently dropping credentials | `TestCCacheRejectsUninitializedClient`; existing `TestClientCCacheExportRoundTrip` and PA-type export tests still pass |
+| [CCache import](../../v8/client/client.go): nil input | Confirmed panic fixed before dereferencing the cache; nonnil empty-cache behavior is unchanged | `TestNewFromCCacheRejectsNil`; the two NilAway flows into `GetConfig` disappear |
+| [Private session map values](../../v8/client/session.go) and sorted export lookups | Retained analyzer limitations: production writers construct nonnil sessions, the map is private, and export holds its read lock across collecting/sorting/reading keys. No invalid entry is silently skipped | Constructor/import producer audit, `TestClientCCacheExportRoundTrip`, session lifecycle tests, and the full race suite |
+| [NDR arrays](../../v8/pac/internal/ndr/arrays.go): empty dimensions, product bounds, and varying offsets | Confirmed defects fixed: derive empty dimensions from reflected types, generate no indices for zero-sized dimensions, validate count products before allocation, and read `offset + actual_count` ranges | `TestDecodeEmptyMultidimensionalArrays`, `TestDecodeMultidimensionalArrayResourceLimits`, `TestDecodeConformantVaryingArrayOffsets`, and `FuzzDecodeArrays` |
+| NDR `makeSubSlices` bounds reports | False positives under the private caller contract: the suffix length is derived from the same reflected slice depth, not a wire-supplied dimension-vector length | Fixed/varying/conformant array tests, zero-sized inner/outer cases, `TestDecodeThreeDimensionalConformantArray`; warnings retained rather than broadly suppressed |
+| [NDR alignment](../../v8/pac/internal/ndr/primitives.go) and [union discriminant](../../v8/pac/internal/ndr/union.go) discard errors | Confirmed unchecked reads fixed: retain wrapped failures in decoder error state instead of ignoring them | `TestTruncatedAlignmentRecordsError`, `TestTruncatedUnionDiscriminantRecordsError`; both errcheck and G104 pairs disappear |
+| [PKINIT response ownership](../../v8/pkinit/kdccert.go) | Demonstrated false positives: the response immediately transfers to `readRevocationBody`, which closes it on every read outcome. Only those two bodyclose reports are suppressed | `TestReadRevocationBodyOwnsClose` checks exactly-once closure, oversize rejection, error identity, and read-before-close failure precedence; OCSP/CRL tests pass |
+| [PKINIT SID bounds](../../v8/pkinit/identity.go) | False positives: an eight-byte minimum and exact `8 + 4*subauthority_count` length check precede all four-byte subauthority reads; the byte-sized count cannot overflow the arithmetic | Bounds proof against the loop and the passing identity suite; no suppression or wire-format change |
+| [Replay-cache metadata and locking](../../v8/service/cache.go) | Confirmed lost writes and non-atomic replay acceptance fixed under a single lock; zero-valued caches initialize safely. Re-evaluation also found and fixed cross-service eviction and cross-realm/component identity collisions | `TestReplayCacheUpdatesAuthenticatorMetadata`, `TestReplayCacheConcurrentCheckAndInsert`, `TestReplayCacheConcurrentDistinctUpdates`, `TestReplayCacheSeparatesServicesAndRealms`, `TestReplayCachePrincipalComponentsAndTimeIdentity`, expiry tests, and 100 race-enabled repetitions |
+
+The additional replay-identity defects were reproduced after the first locking
+fix, not declared complete on the first passing test run. Keys now include the
+client realm and exact principal components, service identity, and normalized
+authenticator time while preserving same-client/different-service acceptance.
+
+All **83 historical IDs** now have a disposition beside their original record:
+**79 implemented/documented**, **3 confirmed open with rejection regressions**,
+and **1 external-evidence gate**. The open items are KC-12/KA-6 (legacy RC4 GSS
+MIC/Wrap) and KA-7 (user-to-user acceptor ticket-key support). Existing RC4
+primitive tests do not establish GSS token support. The new
+`TestVerifyAPREQUserToUserRequiresAcceptorKeySupport` passes the explicit
+realm-qualified principal policy, then demonstrates the missing acceptor key
+source rather than an unrelated policy failure. KN-3's local PKU2U exchange does
+not establish fixture-14 or Windows interoperability. KT-19's intentional
+raw-key JSON behavior is now accompanied by an explicit disclosure warning.
+
+#### Exit verification
+
+- Full v8 unit suite and full v8 race suite pass.
+- Affected client, service, NDR, and PKINIT suites pass on Linux/386 as well as
+  amd64; focused `go vet` passes.
+- Replay regressions pass 100 race-enabled repetitions, including concurrent
+  insertion/cleanup and identical-authenticator acceptance.
+- The new NDR array fuzz target passes two runs of at least 60 seconds with valid
+  empty/nonempty and nonzero-offset seeds; the final run executes over 1.4 million
+  cases without a crash.
+- Both complete lint profiles were remeasured; the actual shared
+  `scripts/lint.sh new d24235c` gate passes both modules with zero new canonical
+  findings. Tests added in this phase are included in the diff gate.
+- Semantic checks report only existing NDR simplification suggestions. No
+  live MIT/Samba/Windows or hosted-workflow pass is claimed by these local runs.
+
+Phase 1's selected correctness fixes and reconciliation are complete, not all
+Q-02/Q-03/Q-05/Q-06/Q-08 debt or historical feature gaps. The remaining items are
+explicit inputs to later phases rather than hidden claims of compliance.
+
 ### Phase 2 - Error contracts and deterministic failure coverage
 
 Depends on Phase 1 for the affected package. Findings: Q-02, Q-03, Q-05, Q-06.
@@ -259,6 +340,14 @@ typed errors, and injectable transports. Propagate mandatory errors with context
 retain errors.Is/As and existing KRB error behavior. Test read/write/close,
 short-write, malformed length, timeout, and cancellation paths. Never replace
 a useful error with a later cleanup error.
+
+Compatibility follow-through from Phase 1: retain the existing explicit RC4
+GSS rejection (KC-12/KA-6) and user-to-user acceptor rejection (KA-7) until
+dedicated, policy-reviewed implementation slices supply the legacy token or
+alternate ticket-key contracts. Do not silently enable a legacy algorithm,
+repurpose a service keytab as a TGT key store, or count primitive/U2U request
+tests as acceptor support. Each slice must replace its rejection characterization
+with positive/negative protocol vectors before Phase 4 interoperability gates.
 
 Exit: no unexplained correctness diagnostics in each completed slice; boundary
 and injected-failure tests pass, including races for shared state. Parser fuzz
@@ -374,76 +463,76 @@ Sources reviewed: `v8/client/*.go`, `v8/messages/*.go`, `v8/types/*.go`, `v8/pac
 
 #### 2.2 Defects and gaps — protocol structures (`KS-n`)
 
-| ID | Finding | Severity |
-| --- | --- | --- |
-| KS-1 | No ASN.1 types for KERB-PA-PAC-REQUEST (128), PA-PAC-OPTIONS (167), KERB-ERROR-DATA / KERB-EXT-ERROR, KERB-AD-RESTRICTION-ENTRY (141) with LSAP_TOKEN_INFO_INTEGRITY, KERB-LOCAL (142), AD-AUTH-DATA-AP-OPTIONS (143), PA-FOR-USER (129), PA-S4U-X509-USER (130), PA-SUPPORTED-ENCTYPES (165), KERB-KEY-LIST-REQ/REP (161/162), PA-SVR-REFERRAL-INFO (20, RFC 6806 Appendix A), KERB-SUPERSEDED-BY-USER (170), KERB-DMSA-KEY-PACKAGE (PA-DATA 171). Only the `patype` constants up to 166 exist; 167, 161, 162, 170, 171 are missing. | High |
-| KS-2 | `iana/adtype` lacks 141, 142, 143; `iana/nametype` lacks `KRB_NT_WELLKNOWN` (11), `KRB_NT_MS_PRINCIPAL` (-128), `KRB_NT_MS_PRINCIPAL_AND_ID` (-129), `KRB_NT_ENT_PRINCIPAL_AND_ID` (-130); no constants for `KERB_AP_OPTIONS_CBT` (0x4000), `KERB_AP_OPTIONS_UNVERIFIED_TARGET_NAME` (0x8000), PA-PAC-OPTIONS flag bits, PA-SUPPORTED-ENCTYPES bit field, `KDC_OPT_CNAME_IN_ADDL_TKT` (bit 14), key usages 26/27 (PA-S4U-X509-USER), NTSTATUS values commonly surfaced in KERB-EXT-ERROR. | Medium |
-| KS-3 | `messages.KRBError.EData` is only parsed as METHOD-DATA in specific retry paths. KERB-ERROR-DATA (data-type 3 `KERB_ERR_TYPE_EXTENDED` carrying an NTSTATUS, data-type 2 `KERB_AP_ERR_TYPE_SKEW_RECOVERY`) and TYPED-DATA are never decoded, so AD-specific failure reasons (e.g. `STATUS_ACCOUNT_DISABLED`, `STATUS_PASSWORD_MUST_CHANGE`) are lost. | Medium |
-| KS-4 | `PACType.ProcessPACInfoBuffers` slices `pac.Data[Offset:Offset+Size]` without bounds checks; a malformed PAC panics the service. `UPNDNSInfo.Unmarshal` slices by untrusted offsets similarly. No PAC fuzz target. | High (security) |
-| KS-5 | PAC buffer types 16 (PAC_TICKET_CHECKSUM), 17 (PAC_ATTRIBUTES_INFO), 18 (PAC_REQUESTOR), 19 (PAC_FULL_CHECKSUM) are not recognised and are silently dropped. | Medium |
-| KS-6 | `UPNDNSInfo` flag handling is wrong: `upnNoUPNAttr = 31` is used as a bit index where MS-PAC defines flag `U` = 0x00000001; flag `S` = 0x00000002 (SamName/Sid extension) is not parsed. | Medium |
-| KS-7 | No PAC marshalling; fixtures cannot be synthesised and negative tests (tampered checksums, duplicate buffers, misaligned offsets) are impossible to construct programmatically. | Medium |
-| KS-8 | `AuthorizationData` walking is ad hoc (`Ticket.GetPACType` only looks for `AD-IF-RELEVANT[0] == AD-WIN2K-PAC`). There is no generic visitor that returns all entries of a given type from nested AD-IF-RELEVANT containers in either ticket or authenticator authorization data. | Medium |
+| ID | Historical finding | Historical severity | Phase 1 disposition and local evidence |
+| --- | --- | --- | --- |
+| KS-1 | No ASN.1 types for KERB-PA-PAC-REQUEST (128), PA-PAC-OPTIONS (167), KERB-ERROR-DATA / KERB-EXT-ERROR, KERB-AD-RESTRICTION-ENTRY (141) with LSAP_TOKEN_INFO_INTEGRITY, KERB-LOCAL (142), AD-AUTH-DATA-AP-OPTIONS (143), PA-FOR-USER (129), PA-S4U-X509-USER (130), PA-SUPPORTED-ENCTYPES (165), KERB-KEY-LIST-REQ/REP (161/162), PA-SVR-REFERRAL-INFO (20, RFC 6806 Appendix A), KERB-SUPERSEDED-BY-USER (170), KERB-DMSA-KEY-PACKAGE (PA-DATA 171). Only the `patype` constants up to 166 exist; 167, 161, 162, 170, 171 are missing. | High | Implemented; [`TestMSKILEPADataWrappers`](../../v8/types/mskile_test.go). Local evidence is not a live interoperability claim. |
+| KS-2 | `iana/adtype` lacks 141, 142, 143; `iana/nametype` lacks `KRB_NT_WELLKNOWN` (11), `KRB_NT_MS_PRINCIPAL` (-128), `KRB_NT_MS_PRINCIPAL_AND_ID` (-129), `KRB_NT_ENT_PRINCIPAL_AND_ID` (-130); no constants for `KERB_AP_OPTIONS_CBT` (0x4000), `KERB_AP_OPTIONS_UNVERIFIED_TARGET_NAME` (0x8000), PA-PAC-OPTIONS flag bits, PA-SUPPORTED-ENCTYPES bit field, `KDC_OPT_CNAME_IN_ADDL_TKT` (bit 14), key usages 26/27 (PA-S4U-X509-USER), NTSTATUS values commonly surfaced in KERB-EXT-ERROR. | Medium | Implemented; [`TestMSKILESemanticValidation`](../../v8/types/mskile_test.go). Local evidence is not a live interoperability claim. |
+| KS-3 | `messages.KRBError.EData` is only parsed as METHOD-DATA in specific retry paths. KERB-ERROR-DATA (data-type 3 `KERB_ERR_TYPE_EXTENDED` carrying an NTSTATUS, data-type 2 `KERB_AP_ERR_TYPE_SKEW_RECOVERY`) and TYPED-DATA are never decoded, so AD-specific failure reasons (e.g. `STATUS_ACCOUNT_DISABLED`, `STATUS_PASSWORD_MUST_CHANGE`) are lost. | Medium | Implemented; [`TestKRBErrorMethodData`](../../v8/messages/KRBError_test.go). Local evidence is not a live interoperability claim. |
+| KS-4 | `PACType.ProcessPACInfoBuffers` slices `pac.Data[Offset:Offset+Size]` without bounds checks; a malformed PAC panics the service. `UPNDNSInfo.Unmarshal` slices by untrusted offsets similarly. No PAC fuzz target. | High (security) | Implemented; [`TestPACBoundsChecks`](../../v8/pac/pac_type_test.go). Local evidence is not a live interoperability claim. |
+| KS-5 | PAC buffer types 16 (PAC_TICKET_CHECKSUM), 17 (PAC_ATTRIBUTES_INFO), 18 (PAC_REQUESTOR), 19 (PAC_FULL_CHECKSUM) are not recognised and are silently dropped. | Medium | Implemented; [`TestPACMarshalReencodesTypedBuffers`](../../v8/pac/marshal_test.go). Local evidence is not a live interoperability claim. |
+| KS-6 | `UPNDNSInfo` flag handling is wrong: `upnNoUPNAttr = 31` is used as a bit index where MS-PAC defines flag `U` = 0x00000001; flag `S` = 0x00000002 (SamName/Sid extension) is not parsed. | Medium | Implemented; [`TestUPNDNSInfoExtendedRoundTrip`](../../v8/pac/upn_dns_info_test.go). Local evidence is not a live interoperability claim. |
+| KS-7 | No PAC marshalling; fixtures cannot be synthesised and negative tests (tampered checksums, duplicate buffers, misaligned offsets) are impossible to construct programmatically. | Medium | Implemented; [`TestPACMarshalRejectsInvalidMetadata`](../../v8/pac/marshal_test.go). Local evidence is not a live interoperability claim. |
+| KS-8 | `AuthorizationData` walking is ad hoc (`Ticket.GetPACType` only looks for `AD-IF-RELEVANT[0] == AD-WIN2K-PAC`). There is no generic visitor that returns all entries of a given type from nested AD-IF-RELEVANT containers in either ticket or authenticator authorization data. | Medium | Implemented; [`TestMSKILEExtendedErrorAndAuthorizationDataHelpers`](../../v8/types/mskile_test.go). Local evidence is not a live interoperability claim. |
 
 #### 2.3 Defects and gaps — client behaviour (`KC-n`)
 
-| ID | Finding | Severity |
-| --- | --- | --- |
-| KC-1 | AS-REQ never includes KERB-PA-PAC-REQUEST. AD includes a PAC by default, but MS-KILE §3.2.5 clients send `include-pac` and RODC/branch scenarios depend on it; services that want PAC-less tickets cannot ask. | Medium |
-| KC-2 | `ASRep.Verify`/`TGSRep.Verify` reject any `cname` that differs from the request. When `canonicalize` is set or the request used `KRB_NT_ENTERPRISE`, AD legitimately returns the canonical `cname`; RFC 6806 §11 / MS-KILE require acceptance (protected by PA-REQ-ENC-PA-REP when present). Enterprise logons to AD currently fail. | High |
-| KC-3 | PA-SUPPORTED-ENCTYPES in the reply `encrypted-pa-data` is ignored, so the client cannot learn that the target supports AES-SK, claims, FAST, or compound identity, and cannot restrict TGS etypes accordingly. | Medium |
-| KC-4 | No PA-PAC-OPTIONS in TGS-REQ: Claims, Branch-Aware, Forward-to-Full-DC and RBCD flags cannot be set. | Medium |
-| KC-5 | No S4U2self (PA-FOR-USER, PA-S4U-X509-USER) and no S4U2proxy (`cname-in-addl-tkt` with evidence ticket), so constrained delegation and protocol transition are impossible. | High |
-| KC-6 | No FAST (RFC 6113) armoring: PA-FX-FAST, PA-FX-COOKIE, PA-FX-ERROR, PA-ENCRYPTED-CHALLENGE are absent. `DisablePAFXFAST` actually toggles PA-REQ-ENC-PA-REP. AD policies "Fail unarmored authentication requests" and compound identity cannot be satisfied. | High |
-| KC-7 | Realm comparisons are case-sensitive string equality throughout (`Ticket.Realm`, `CRealm`, cache keys). MS-KILE realm names are case-insensitive; AD emits upper-case, `krb5.conf` and users often supply mixed case. | Medium |
-| KC-8 | Delegation: GSS `ContextFlagDeleg` extends the 0x8003 checksum to 28 bytes but never populates `Dlgth`/`Deleg` with a KRB-CRED; the `ok-as-delegate` ticket flag is not consulted. | High |
-| KC-9 | 0x8003 checksum `Bnd` is always 16 zero bytes; no API to supply GSS channel bindings (tls-server-end-point, tls-unique). No AD-AUTH-DATA-AP-OPTIONS with `KERB_AP_OPTIONS_CBT`, so Windows services with Extended Protection "Required" reject gokrb5 clients. | High |
-| KC-10 | Authenticator does not carry `KERB-LOCAL` or `KERB-AD-RESTRICTION-ENTRY`; Windows clients do, servers must ignore. Client-side emission is optional but the acceptor must tolerate it (see KA-4). | Low |
-| KC-11 | No DCE-style (`GSS_C_DCE_STYLE` 0x1000) three-leg exchange and no `GSS_C_EXTENDED_ERROR_FLAG` (0x4000); required for RPC/SMB-style acceptors and Windows error propagation. | Medium |
-| KC-12 | No legacy RFC 4757 §7 / RFC 1964 per-message tokens (TOK_ID 0x0101 MIC, 0x0201 Wrap, SGN_ALG 0x1100, SEAL_ALG 0x1000). Windows uses them whenever the session key is RC4-HMAC; gokrb5 wraps with 0x0504 regardless of key type, which Windows rejects. | High |
-| KC-13 | No KKDCP (Kerberos over HTTPS) transport; `kdc = https://host/KdcProxy` in `krb5.conf` is not understood. | Medium |
-| KC-14 | No PKINIT: see §2.6 (`KP-n`) for the MS-PKCA breakdown. | Medium |
-| KC-15 | KDC discovery does not use AD-specific SRV names (`_kerberos._tcp.dc._msdcs.<domain>`, site-aware variants) or `_kpasswd`; falls back only to `_kerberos._tcp.<realm>`. | Low |
-| KC-16 | `PA-SVR-REFERRAL-INFO` in `EncKDCRepPart.EncPAData` is ignored; the referral realm is inferred from the `krbtgt/REALM` sname only. | Low |
-| KC-17 | kpasswd result strings from AD carry a 30-byte password-policy blob after the text; it is exposed as raw bytes with no decoder. | Low |
+| ID | Historical finding | Historical severity | Phase 1 disposition and local evidence |
+| --- | --- | --- | --- |
+| KC-1 | AS-REQ never includes KERB-PA-PAC-REQUEST. AD includes a PAC by default, but MS-KILE §3.2.5 clients send `include-pac` and RODC/branch scenarios depend on it; services that want PAC-less tickets cannot ask. | Medium | Implemented; [`TestNewASReqIncludesPACRequest`](../../v8/messages/KDCReq_test.go). Local evidence is not a live interoperability claim. |
+| KC-2 | `ASRep.Verify`/`TGSRep.Verify` reject any `cname` that differs from the request. When `canonicalize` is set or the request used `KRB_NT_ENTERPRISE`, AD legitimately returns the canonical `cname`; RFC 6806 §11 / MS-KILE require acceptance (protected by PA-REQ-ENC-PA-REP when present). Enterprise logons to AD currently fail. | High | Implemented; [`TestRequestAllowsCanonicalName`](../../v8/messages/KDCRep_test.go). Local evidence is not a live interoperability claim. |
+| KC-3 | PA-SUPPORTED-ENCTYPES in the reply `encrypted-pa-data` is ignored, so the client cannot learn that the target supports AES-SK, claims, FAST, or compound identity, and cannot restrict TGS etypes accordingly. | Medium | Implemented; [`TestGetSupportedEncTypes`](../../v8/client/session_test.go). Local evidence is not a live interoperability claim. |
+| KC-4 | No PA-PAC-OPTIONS in TGS-REQ: Claims, Branch-Aware, Forward-to-Full-DC and RBCD flags cannot be set. | Medium | Implemented; [`TestTGSReqMSKILEOptions`](../../v8/messages/KDCReq_test.go). Local evidence is not a live interoperability claim. |
+| KC-5 | No S4U2self (PA-FOR-USER, PA-S4U-X509-USER) and no S4U2proxy (`cname-in-addl-tkt` with evidence ticket), so constrained delegation and protocol transition are impossible. | High | Implemented; [`TestNewPAForUserPAData`](../../v8/messages/s4u_test.go). Local evidence is not a live interoperability claim. |
+| KC-6 | No FAST (RFC 6113) armoring: PA-FX-FAST, PA-FX-COOKIE, PA-FX-ERROR, PA-ENCRYPTED-CHALLENGE are absent. `DisablePAFXFAST` actually toggles PA-REQ-ENC-PA-REP. AD policies "Fail unarmored authentication requests" and compound identity cannot be satisfied. | High | Implemented; [`TestFASTASRequestEncryptsInnerRequest`](../../v8/client/fast_test.go). Local evidence is not a live interoperability claim. |
+| KC-7 | Realm comparisons are case-sensitive string equality throughout (`Ticket.Realm`, `CRealm`, cache keys). MS-KILE realm names are case-insensitive; AD emits upper-case, `krb5.conf` and users often supply mixed case. | Medium | Implemented; [`TestNewFromCCacheMatchesTGTRealmCaseInsensitively`](../../v8/client/asexchange_phase5_test.go). Local evidence is not a live interoperability claim. |
+| KC-8 | Delegation: GSS `ContextFlagDeleg` extends the 0x8003 checksum to 28 bytes but never populates `Dlgth`/`Deleg` with a KRB-CRED; the `ok-as-delegate` ticket flag is not consulted. | High | Implemented; [`TestGetDelegatedCredentialRoundTrip`](../../v8/client/tgsexchange_coverage_test.go). Local evidence is not a live interoperability claim. |
+| KC-9 | 0x8003 checksum `Bnd` is always 16 zero bytes; no API to supply GSS channel bindings (tls-server-end-point, tls-unique). No AD-AUTH-DATA-AP-OPTIONS with `KERB_AP_OPTIONS_CBT`, so Windows services with Extended Protection "Required" reject gokrb5 clients. | High | Implemented; [`TestChannelBindingsMD5Hash`](../../v8/gssapi/authenticatorChecksum_test.go). Local evidence is not a live interoperability claim. |
+| KC-10 | Authenticator does not carry `KERB-LOCAL` or `KERB-AD-RESTRICTION-ENTRY`; Windows clients do, servers must ignore. Client-side emission is optional but the acceptor must tolerate it (see KA-4). | Low | Implemented; [`TestVerifyAPREQIgnoresKerbLocalAndRestrictionEntry`](../../v8/service/APExchange_test.go). Local evidence is not a live interoperability claim. |
+| KC-11 | No DCE-style (`GSS_C_DCE_STYLE` 0x1000) three-leg exchange and no `GSS_C_EXTENDED_ERROR_FLAG` (0x4000); required for RPC/SMB-style acceptors and Windows error propagation. | Medium | Implemented; [`TestDCEContextExchange`](../../v8/spnego/context_exchange_test.go). Local evidence is not a live interoperability claim. |
+| KC-12 | No legacy RFC 4757 §7 / RFC 1964 per-message tokens (TOK_ID 0x0101 MIC, 0x0201 Wrap, SGN_ALG 0x1100, SEAL_ALG 0x1000). Windows uses them whenever the session key is RC4-HMAC; gokrb5 wraps with 0x0504 regardless of key type, which Windows rejects. | High | Confirmed open with regression: legacy RC4 GSS MIC/Wrap unsupported; [`TestNewSecurityContextRejectsUnsupportedKeys`](../../v8/gssapi/security_context_test.go) verifies explicit rejection. Phase 2 compatibility slice; not Windows-verified. |
+| KC-13 | No KKDCP (Kerberos over HTTPS) transport; `kdc = https://host/KdcProxy` in `krb5.conf` is not understood. | Medium | Implemented; [`TestKKDCPTransport`](../../v8/client/kkdcp_test.go). Local evidence is not a live interoperability claim. |
+| KC-14 | No PKINIT: see §2.6 (`KP-n`) for the MS-PKCA breakdown. | Medium | Implemented; [`TestPKINITFreshnessTokenAbsent`](../../v8/client/pkinit_test.go). Local evidence is not a live interoperability claim. |
+| KC-15 | KDC discovery does not use AD-specific SRV names (`_kerberos._tcp.dc._msdcs.<domain>`, site-aware variants) or `_kpasswd`; falls back only to `_kerberos._tcp.<realm>`. | Low | Implemented; [`TestGetKDCsUsesADSiteDiscoveryOrder`](../../v8/config/hosts_test.go). Local evidence is not a live interoperability claim. |
+| KC-16 | `PA-SVR-REFERRAL-INFO` in `EncKDCRepPart.EncPAData` is ignored; the referral realm is inferred from the `krbtgt/REALM` sname only. | Low | Implemented; [`TestReferralRealmUsesReplyMetadata`](../../v8/client/session_test.go). Local evidence is not a live interoperability claim. |
+| KC-17 | kpasswd result strings from AD carry a 30-byte password-policy blob after the text; it is exposed as raw bytes with no decoder. | Low | Implemented; [`TestParseResponsePasswordPolicy`](../../v8/kadmin/message_test.go). Local evidence is not a live interoperability claim. |
 
 #### 2.4 Defects and gaps — application-server behaviour (`KA-n`)
 
-| ID | Finding | Severity |
-| --- | --- | --- |
-| KA-1 | PAC validation stops at server-checksum verification. MS-PAC/MS-KILE application-server rules not applied: PAC_CLIENT_INFO `Name` must equal the ticket `cname` (case-insensitive) and `ClientId` must equal ticket `authtime`; PAC_REQUESTOR SID (when present) must equal KERB_VALIDATION_INFO `UserId` under `LogonDomainId`; UPN_DNS_INFO `S` extension SAM name/SID (when present) must match; duplicate buffer types must be rejected rather than ignored where MS-PAC says "MUST NOT". | High |
-| KA-2 | Only `GroupMembershipSIDs`, logon times and a few names are exposed in `credentials.ADCredentials`. UPN, DNS domain, SAM account name, user SID, extra SIDs with attributes, resource group SIDs, client/device claims, device info, S4U delegation chain, PAC attributes flags and `UserAccountControl` are parsed but not surfaced. | Medium |
-| KA-3 | Acceptor ignores the 0x8003 checksum entirely: no channel-binding comparison, no reading of `Flags`, no delegation (`Deleg` KRB-CRED) extraction, no DCE-style AP-REP handling, no `KERB_AP_OPTIONS_CBT` detection for Extended Protection policy. | High |
-| KA-4 | Acceptor does not tolerate/ignore authenticator authorization data (`KERB-LOCAL`, `KERB-AD-RESTRICTION-ENTRY`, `AD-AUTH-DATA-AP-OPTIONS`); presence is not fatal today only because the field is never inspected — confirm and lock with tests. | Low |
-| KA-5 | No AP-REP generation with subkey/sequence number when the client requests mutual authentication (`ContextFlagMutual`); SPNEGO acceptor returns `accept-completed` without a `responseToken`. Windows clients with mutual auth fail. | High |
-| KA-6 | Legacy RC4 per-message tokens cannot be verified/unwrapped on the acceptor (mirror of KC-12). | High |
-| KA-7 | User-to-user tickets (`enc-tkt-in-skey`) cannot be accepted; `APReq.Verify` only tries keytab keys. | Low |
-| KA-8 | The acceptor does not validate the ticket `sname` against the service's own principal names when the keytab contains several principals unless `KeytabPrincipal` is set — MS-KILE §3.4.5 requires the ticket be for this service. | Medium |
-| KA-9 | SPNEGO acceptor does not emit or verify `mechListMIC` per MS-SPNG rules (required when the negotiated mech is not the initiator's first preference, or when the client sends one). | Medium |
+| ID | Historical finding | Historical severity | Phase 1 disposition and local evidence |
+| --- | --- | --- | --- |
+| KA-1 | PAC validation stops at server-checksum verification. MS-PAC/MS-KILE application-server rules not applied: PAC_CLIENT_INFO `Name` must equal the ticket `cname` (case-insensitive) and `ClientId` must equal ticket `authtime`; PAC_REQUESTOR SID (when present) must equal KERB_VALIDATION_INFO `UserId` under `LogonDomainId`; UPN_DNS_INFO `S` extension SAM name/SID (when present) must match; duplicate buffer types must be rejected rather than ignored where MS-PAC says "MUST NOT". | High | Implemented; [`TestPACTypeVerify`](../../v8/pac/pac_type_test.go). Local evidence is not a live interoperability claim. |
+| KA-2 | Only `GroupMembershipSIDs`, logon times and a few names are exposed in `credentials.ADCredentials`. UPN, DNS domain, SAM account name, user SID, extra SIDs with attributes, resource group SIDs, client/device claims, device info, S4U delegation chain, PAC attributes flags and `UserAccountControl` are parsed but not surfaced. | Medium | Implemented; [`TestADCredentialsFromPAC`](../../v8/service/pac_credentials_test.go). Local evidence is not a live interoperability claim. |
+| KA-3 | Acceptor ignores the 0x8003 checksum entirely: no channel-binding comparison, no reading of `Flags`, no delegation (`Deleg` KRB-CRED) extraction, no DCE-style AP-REP handling, no `KERB_AP_OPTIONS_CBT` detection for Extended Protection policy. | High | Implemented; [`TestExtendedProtectionPolicy`](../../v8/service/APExchange_test.go). Local evidence is not a live interoperability claim. |
+| KA-4 | Acceptor does not tolerate/ignore authenticator authorization data (`KERB-LOCAL`, `KERB-AD-RESTRICTION-ENTRY`, `AD-AUTH-DATA-AP-OPTIONS`); presence is not fatal today only because the field is never inspected — confirm and lock with tests. | Low | Implemented; [`TestVerifyAPREQIgnoresKerbLocalAndRestrictionEntry`](../../v8/service/APExchange_test.go). Local evidence is not a live interoperability claim. |
+| KA-5 | No AP-REP generation with subkey/sequence number when the client requests mutual authentication (`ContextFlagMutual`); SPNEGO acceptor returns `accept-completed` without a `responseToken`. Windows clients with mutual auth fail. | High | Implemented; [`TestAPRepRoundTripAndVerify`](../../v8/messages/APRep_test.go). Local evidence is not a live interoperability claim. |
+| KA-6 | Legacy RC4 per-message tokens cannot be verified/unwrapped on the acceptor (mirror of KC-12). | High | Confirmed open with regression: legacy RC4 GSS MIC/Wrap unsupported; [`TestNewSecurityContextRejectsUnsupportedKeys`](../../v8/gssapi/security_context_test.go) verifies explicit rejection. Phase 2 compatibility slice; not Windows-verified. |
+| KA-7 | User-to-user tickets (`enc-tkt-in-skey`) cannot be accepted; `APReq.Verify` only tries keytab keys. | Low | Confirmed open with regression: no acceptor TGT-session-key input; [`TestVerifyAPREQUserToUserRequiresAcceptorKeySupport`](../../v8/service/u2u_characterization_test.go) verifies keytab-only rejection. Phase 2 compatibility slice. |
+| KA-8 | The acceptor does not validate the ticket `sname` against the service's own principal names when the keytab contains several principals unless `KeytabPrincipal` is set — MS-KILE §3.4.5 requires the ticket be for this service. | Medium | Implemented; [`TestVerifyAPREQWithPrincipalOverride`](../../v8/service/APExchange_test.go). Local evidence is not a live interoperability claim. |
+| KA-9 | SPNEGO acceptor does not emit or verify `mechListMIC` per MS-SPNG rules (required when the negotiated mech is not the initiator's first preference, or when the client sends one). | Medium | Implemented; [`TestNegTokenInitMechListMIC`](../../v8/spnego/negotiationToken_test.go). Local evidence is not a live interoperability claim. |
 
 #### 2.5 Defects and gaps — NEGOEX and PKU2U (`KN-n`)
 
-| ID | Finding | Severity |
-| --- | --- | --- |
-| KN-1 | No NEGOEX mechanism (`1.3.6.1.4.1.311.2.2.30`): no message framing (`MESSAGE_HEADER`, `NEGO_MESSAGE`, `EXCHANGE_MESSAGE`, `VERIFY_MESSAGE`, `ALERT_MESSAGE`), no auth-scheme GUID negotiation, no conversation state machine. | High |
-| KN-2 | SPNEGO acceptor behaviour when the initiator's optimistic `mechToken` is NEGOEX (the Windows default) is unverified: it must answer `accept-incomplete` selecting KRB5 (or NEGOEX once implemented) instead of failing. SPNEGO initiator cannot offer NEGOEX. | Medium |
-| KN-3 | No PKU2U mechanism (`1.3.6.1.5.2.7`): no `WELLKNOWN:PKU2U` realm handling, no acceptor-as-KDC AS exchange, no PKU2U metadata (trusted-certifier) exchange, no certificate-to-principal mapping. | High |
-| KN-4 | No GSS context key export equivalent to `GSS_C_INQ_NEGOEX_KEY` / `GSS_C_INQ_NEGOEX_VERIFY_KEY`, which NEGOEX needs to compute and verify the `VERIFY` checksum over the conversation. | Medium |
-| KN-5 | `gssapi` has no OID constants for NEGOEX or PKU2U and no generic mechanism interface; `spnego` hard-codes KRB5 as the only negotiable mechanism. | Medium |
+| ID | Historical finding | Historical severity | Phase 1 disposition and local evidence |
+| --- | --- | --- | --- |
+| KN-1 | No NEGOEX mechanism (`1.3.6.1.4.1.311.2.2.30`): no message framing (`MESSAGE_HEADER`, `NEGO_MESSAGE`, `EXCHANGE_MESSAGE`, `VERIFY_MESSAGE`, `ALERT_MESSAGE`), no auth-scheme GUID negotiation, no conversation state machine. | High | Implemented; [`TestMessageHeaderRoundTrip`](../../v8/negoex/negoex_test.go). Local evidence is not a live interoperability claim. |
+| KN-2 | SPNEGO acceptor behaviour when the initiator's optimistic `mechToken` is NEGOEX (the Windows default) is unverified: it must answer `accept-incomplete` selecting KRB5 (or NEGOEX once implemented) instead of failing. SPNEGO initiator cannot offer NEGOEX. | Medium | Implemented; [`TestNegotiatorUnsupportedOptimisticFallback`](../../v8/spnego/mechanism_test.go). Local evidence is not a live interoperability claim. |
+| KN-3 | No PKU2U mechanism (`1.3.6.1.5.2.7`): no `WELLKNOWN:PKU2U` realm handling, no acceptor-as-KDC AS exchange, no PKU2U metadata (trusted-certifier) exchange, no certificate-to-principal mapping. | High | External evidence pending: [`TestEndToEndOverSPNEGO`](../../v8/pku2u/pku2u_test.go) verifies local peers only; fixture 14 and bidirectional Windows runs remain Phase 4 gates. |
+| KN-4 | No GSS context key export equivalent to `GSS_C_INQ_NEGOEX_KEY` / `GSS_C_INQ_NEGOEX_VERIFY_KEY`, which NEGOEX needs to compute and verify the `VERIFY` checksum over the conversation. | Medium | Implemented; [`TestSecurityContextNegoExKeysAreCloned`](../../v8/gssapi/security_context_test.go). Local evidence is not a live interoperability claim. |
+| KN-5 | `gssapi` has no OID constants for NEGOEX or PKU2U and no generic mechanism interface; `spnego` hard-codes KRB5 as the only negotiable mechanism. | Medium | Implemented; [`TestOID`](../../v8/gssapi/gssapi_test.go). Local evidence is not a live interoperability claim. |
 
 #### 2.6 Defects and gaps — PKINIT / MS-PKCA (`KP-n`)
 
-| ID | Finding | Severity |
-| --- | --- | --- |
-| KP-1 | No PA-PK-AS-REQ (16) / PA-PK-AS-REP (17) ASN.1 (`AuthPack`, `PKAuthenticator`, `DHRepInfo`, `KDCDHKeyInfo`, `ReplyKeyPack`, `TD-*` typed data) and no CMS `SignedData`/`EnvelopedData` codec; the `patype` constants 14–18 exist but nothing consumes them. The legacy Windows 2000 PA-PK-AS-REQ-OLD (14/15) must be recognised and rejected with a clear error, not treated as unknown PA-DATA. | High |
-| KP-2 | No Diffie-Hellman (MODP 2/14/16) or RSA (`encKeyPack`) reply-key path; `octetstring2key` (RFC 4556 §3.2.3.1) and the RFC 8636 KDF (`id-pkinit-kdf-ah-sha256/384/512`) that Windows Server 2012+ negotiates via `supportedKDFs`/`kdfId` are absent. | High |
-| KP-3 | No client certificate selection/validation per MS-PKCA §3.1.5: EKU `id-kp-clientAuth` or `Smart Card Logon` (`1.3.6.1.4.1.311.20.2.2`), UPN in `otherName` SAN (`1.3.6.1.4.1.311.20.2.3`) or `id-pkinit-san`, the strong-mapping SID extension (`1.3.6.1.4.1.311.25.2`) for diagnostics, `pkinit_identities` sources (PEM, PKCS#12, `crypto.Signer` for PKCS#11/TPM). | High |
-| KP-4 | No KDC certificate validation per MS-PKCA §3.2.5.2: chain to `pkinit_anchors`, `KDC Authentication` EKU (`id-pkinit-KPKdc`, `1.3.6.1.5.2.3.5`) or, for legacy DCs, `Server Authentication` with the DC template, `dNSName` SAN matching the realm's DNS domain or `pkinit_kdc_hostname`, `id-pkinit-san` `krbtgt/REALM` for non-MS KDCs, CRL/OCSP revocation checking (`pkinit_require_crl_checking`), signature verification of `dhSignedData`/`signedAuthPack`, `dhKeyExpiration` handling and DH key reuse. | High |
-| KP-5 | PKINIT KRB-ERROR handling absent: `KDC_ERR_CLIENT_NOT_TRUSTED`, `KDC_ERR_KDC_NOT_TRUSTED`, `KDC_ERR_INVALID_SIG`, `KDC_ERR_DH_KEY_PARAMETERS_NOT_ACCEPTED` (+ `TD-DH-PARAMETERS` retry), `KDC_ERR_CANT_VERIFY_CERTIFICATE`, `KDC_ERR_INVALID_CERTIFICATE`, `KDC_ERR_REVOKED_CERTIFICATE`, `KDC_ERR_REVOCATION_STATUS_UNKNOWN`, `KDC_ERR_CLIENT_NAME_MISMATCH`, `KDC_ERR_KDC_NAME_MISMATCH`, `KDC_ERR_INCONSISTENT_KEY_PURPOSE`, `KDC_ERR_DIGEST_IN_CERT_NOT_ACCEPTED`, `KDC_ERR_PA_CHECKSUM_MUST_BE_INCLUDED`, `KDC_ERR_DIGEST_IN_SIGNED_DATA_NOT_ACCEPTED`, `KDC_ERR_PUBLIC_KEY_ENCRYPTION_NOT_SUPPORTED`, `KDC_ERR_NO_ACCEPTABLE_KDF`, with `TD-TRUSTED-CERTIFIERS`/`TD-INVALID-CERTIFICATES`/`TD-CERTIFICATE-INDEX` decoding and the NTSTATUS from KERB-ERROR-DATA. | Medium |
-| KP-6 | No PKINIT freshness (RFC 8070, PA-AS-FRESHNESS 150) which Windows Server 2016+ KDCs offer and can require ("KDC support for PKInit Freshness Extension"); no PA-PK-OCSP-RESPONSE (18) stapling in either direction. | Medium |
-| KP-7 | `PAC_CREDENTIAL_INFO` (buffer 2) is skipped; with a PKINIT reply key it must be decrypted (usage 16) into `PAC_CREDENTIAL_DATA` → `NTLM_SUPPLEMENTAL_CREDENTIAL` for the client (MS-PAC §2.6, MS-PKCA §3.2.5.2). `credentials_info.go`/`supplemental_cred.go` parse the plaintext but nothing decrypts. | Medium |
-| KP-8 | No support for PKINIT with self-signed keys used by Windows Hello for Business key trust (client certificate without a chain; KDC maps via `msDS-KeyCredentialLink`) — requires an explicit "no chain, KDC-mapped" identity mode. | Low |
-| KP-9 | `gokinit` has no `-X X509_user_identity=`/`-X X509_anchors=` options and `krb5.conf` `pkinit_*` keys are not parsed. | Low |
+| ID | Historical finding | Historical severity | Phase 1 disposition and local evidence |
+| --- | --- | --- | --- |
+| KP-1 | No PA-PK-AS-REQ (16) / PA-PK-AS-REP (17) ASN.1 (`AuthPack`, `PKAuthenticator`, `DHRepInfo`, `KDCDHKeyInfo`, `ReplyKeyPack`, `TD-*` typed data) and no CMS `SignedData`/`EnvelopedData` codec; the `patype` constants 14–18 exist but nothing consumes them. The legacy Windows 2000 PA-PK-AS-REQ-OLD (14/15) must be recognised and rejected with a clear error, not treated as unknown PA-DATA. | High | Implemented; [`TestAuthPackRoundTrip`](../../v8/pkinit/asn1_test.go). Local evidence is not a live interoperability claim. |
+| KP-2 | No Diffie-Hellman (MODP 2/14/16) or RSA (`encKeyPack`) reply-key path; `octetstring2key` (RFC 4556 §3.2.3.1) and the RFC 8636 KDF (`id-pkinit-kdf-ah-sha256/384/512`) that Windows Server 2012+ negotiates via `supportedKDFs`/`kdfId` are absent. | High | Implemented; [`TestProcessDHReply`](../../v8/pkinit/client_test.go). Local evidence is not a live interoperability claim. |
+| KP-3 | No client certificate selection/validation per MS-PKCA §3.1.5: EKU `id-kp-clientAuth` or `Smart Card Logon` (`1.3.6.1.4.1.311.20.2.2`), UPN in `otherName` SAN (`1.3.6.1.4.1.311.20.2.3`) or `id-pkinit-san`, the strong-mapping SID extension (`1.3.6.1.4.1.311.25.2`) for diagnostics, `pkinit_identities` sources (PEM, PKCS#12, `crypto.Signer` for PKCS#11/TPM). | High | Implemented; [`TestBeginExchangeRejectsUntrustedIdentityName`](../../v8/pkinit/client_test.go). Local evidence is not a live interoperability claim. |
+| KP-4 | No KDC certificate validation per MS-PKCA §3.2.5.2: chain to `pkinit_anchors`, `KDC Authentication` EKU (`id-pkinit-KPKdc`, `1.3.6.1.5.2.3.5`) or, for legacy DCs, `Server Authentication` with the DC template, `dNSName` SAN matching the realm's DNS domain or `pkinit_kdc_hostname`, `id-pkinit-san` `krbtgt/REALM` for non-MS KDCs, CRL/OCSP revocation checking (`pkinit_require_crl_checking`), signature verification of `dhSignedData`/`signedAuthPack`, `dhKeyExpiration` handling and DH key reuse. | High | Implemented; [`TestValidateKDCCertificate`](../../v8/pkinit/kdccert_test.go). Local evidence is not a live interoperability claim. |
+| KP-5 | PKINIT KRB-ERROR handling absent: `KDC_ERR_CLIENT_NOT_TRUSTED`, `KDC_ERR_KDC_NOT_TRUSTED`, `KDC_ERR_INVALID_SIG`, `KDC_ERR_DH_KEY_PARAMETERS_NOT_ACCEPTED` (+ `TD-DH-PARAMETERS` retry), `KDC_ERR_CANT_VERIFY_CERTIFICATE`, `KDC_ERR_INVALID_CERTIFICATE`, `KDC_ERR_REVOKED_CERTIFICATE`, `KDC_ERR_REVOCATION_STATUS_UNKNOWN`, `KDC_ERR_CLIENT_NAME_MISMATCH`, `KDC_ERR_KDC_NAME_MISMATCH`, `KDC_ERR_INCONSISTENT_KEY_PURPOSE`, `KDC_ERR_DIGEST_IN_CERT_NOT_ACCEPTED`, `KDC_ERR_PA_CHECKSUM_MUST_BE_INCLUDED`, `KDC_ERR_DIGEST_IN_SIGNED_DATA_NOT_ACCEPTED`, `KDC_ERR_PUBLIC_KEY_ENCRYPTION_NOT_SUPPORTED`, `KDC_ERR_NO_ACCEPTABLE_KDF`, with `TD-TRUSTED-CERTIFIERS`/`TD-INVALID-CERTIFICATES`/`TD-CERTIFICATE-INDEX` decoding and the NTSTATUS from KERB-ERROR-DATA. | Medium | Implemented; [`TestAcceptExchangeRejectsInvalidRequests`](../../v8/pkinit/client_test.go). Local evidence is not a live interoperability claim. |
+| KP-6 | No PKINIT freshness (RFC 8070, PA-AS-FRESHNESS 150) which Windows Server 2016+ KDCs offer and can require ("KDC support for PKInit Freshness Extension"); no PA-PK-OCSP-RESPONSE (18) stapling in either direction. | Medium | Implemented; [`TestPKINITFreshnessTokenAbsent`](../../v8/client/pkinit_test.go). Local evidence is not a live interoperability claim. |
+| KP-7 | `PAC_CREDENTIAL_INFO` (buffer 2) is skipped; with a PKINIT reply key it must be decrypted (usage 16) into `PAC_CREDENTIAL_DATA` → `NTLM_SUPPLEMENTAL_CREDENTIAL` for the client (MS-PAC §2.6, MS-PKCA §3.2.5.2). `credentials_info.go`/`supplemental_cred.go` parse the plaintext but nothing decrypts. | Medium | Implemented; [`TestPKINITCredentialsReturnsDefensiveCopy`](../../v8/client/pkinit_test.go). Local evidence is not a live interoperability claim. |
+| KP-8 | No support for PKINIT with self-signed keys used by Windows Hello for Business key trust (client certificate without a chain; KDC maps via `msDS-KeyCredentialLink`) — requires an explicit "no chain, KDC-mapped" identity mode. | Low | Implemented; [`TestPrivateKeyFormatsAndIdentityPolicies`](../../v8/pkinit/identity_test.go). Local evidence is not a live interoperability claim. |
+| KP-9 | `gokinit` has no `-X X509_user_identity=`/`-X X509_anchors=` options and `krb5.conf` `pkinit_*` keys are not parsed. | Low | Implemented; [`TestParseArgsAcceptsPKINITOptions`](../../v8/cmd/gokinit/main_test.go). Local evidence is not a live interoperability claim. |
 
 ---
 
@@ -725,27 +814,27 @@ Sources reviewed: [v8/keytab/keytab.go](../../v8/keytab/keytab.go), [v8/keytab/k
 
 Numbered for traceability (`KT-n`).
 
-| ID | Finding | Severity |
-|---|---|---|
-| KT-1 | `Unmarshal` discards the error returned by `parsePrincipal` (`parsePrincipal(eb, &p, kt, &ke, &endian)` with no assignment). A truncated principal silently yields a garbage entry. | High |
-| KT-2 | `GetEncryptionKey` with `kvno == 0` selects the entry with the **newest timestamp**, not the **highest kvno**. MIT (`krb5_ktfile_get_entry`, `kt_file.c`) selects the highest kvno when kvno is unspecified. Merged keytabs with out-of-order timestamps produce different keys. | High |
-| KT-3 | `GetEncryptionKey` requires an exact `etype` match; no wildcard (`etype == 0` → any) as in MIT. MIT also treats "similar" enctypes (e.g. DES variants) as matching — document as unsupported (DES not implemented). | Medium |
-| KT-4 | `GetEncryptionKey` requires exact realm match. MIT matches any realm when the lookup principal's realm is empty. | Medium |
-| KT-5 | `GetEncryptionKey` has no 8-bit kvno wrap-around handling. After failing to find an exact match, MIT accepts an entry whose parsed kvno is `kvno & 0xff`, regardless of whether the optional 32-bit field was present. | Low |
-| KT-6 | 32-bit kvno trailer handling is not recorded explicitly. MIT reads the optional trailer for both v1 and v2, using native byte order for v1, and ignores a zero trailer value. | Low |
-| KT-7 | v1 round-trip is broken: `parsePrincipal` decrements `NumComponents` on read, `principal.marshal` writes it back unchanged, so v1 → marshal → v1 writes the wrong count. `NumComponents` should be derived from `len(Components)` at marshal time, not stored. | Medium |
-| KT-8 | `AddEntry` accepts `KVNO uint8`. kvnos > 255 are common (AD, long-lived service principals). MIT writes `vno & 0xff` to the 8-bit field and the full value to the 32-bit trailer. | High |
-| KT-9 | `entry.String()` prints `KVNO8`, not `KVNO`. For kvno ≥ 256 the display is wrong (MIT `klist -k` shows the 32-bit value). | Medium |
-| KT-10 | `AddEntry` derives the key with the RFC 4120 default salt only. No way to (a) supply a salt (AD host principals, `ktutil addent -salt`), (b) supply s2kparams/iterations, or (c) add an entry from raw key bytes (what `kadmin ktadd` does — it never has the password). | High |
-| KT-11 | No API to **modify**: remove an entry, remove all entries for a principal, remove entries with kvno < N (`kadmin ktremove princ old`), keep-only-latest-kvno, or merge two keytabs (`ktutil rkt`+`wkt`). `Entries` is exported but its element type `entry` is unexported, so callers cannot construct or filter entries themselves. | High |
-| KT-12 | No file-level write helper. MIT creates keytabs `0600`, uses `krb5_lock_file` while appending, and appends (never rewrites) on `ktadd`. gokrb5 needs `WriteFile(path)` with atomic write (temp + `rename`), `0600`, and an `Append`-safe path, otherwise concurrent `ktadd` from MIT tools can corrupt the file. | Medium |
-| KT-13 | `Unmarshal` on a keytab that already has entries appends to `Entries` (no reset). Calling `Unmarshal` twice duplicates entries. | Low |
-| KT-14 | Error messages format raw bytes with `%s` (`fmt.Errorf("%s's length is less than %d", b, …)`), dumping binary key material into logs. | Medium (security) |
-| KT-15 | Zero-length record (`l == 0`) terminates parsing. MIT and its file-format documentation define a zero-length record as EOF. | Low |
-| KT-16 | No default keytab resolution: `KRB5_KTNAME`, `KRB5_CLIENT_KTNAME`, `[libdefaults] default_keytab_name`, `default_client_keytab_name`, `FILE:`/`WRFILE:` prefix stripping, `%{euid}`/`%{uid}`/`%{username}` parameter expansion. `config.LibDefaults.DefaultKeytabName` is parsed but never used. | Medium |
-| KT-17 | No `klist -kte`-compatible text rendering. Useful for diff-based interoperability tests and for a `gokrb5 klist -k` tool. | Low |
-| KT-18 | No exported accessor for the keytab version, and no way to request writing v1 (MIT can still read v1; writing v1 is not required — read-only support is sufficient). | Low |
-| KT-19 | `JSON()` serialises raw key material. Acceptable but should be documented, and a redacted mode is preferable for logging. | Low |
+| ID | Historical finding | Historical severity | Phase 1 disposition and local evidence |
+| --- | --- | --- | --- |
+| KT-1 | `Unmarshal` discards the error returned by `parsePrincipal` (`parsePrincipal(eb, &p, kt, &ke, &endian)` with no assignment). A truncated principal silently yields a garbage entry. | High | Implemented; [`TestUnmarshalTruncatedPrincipalReturnsError`](../../v8/keytab/keytab_test.go). Local evidence is not a live interoperability claim. |
+| KT-2 | `GetEncryptionKey` with `kvno == 0` selects the entry with the **newest timestamp**, not the **highest kvno**. MIT (`krb5_ktfile_get_entry`, `kt_file.c`) selects the highest kvno when kvno is unspecified. Merged keytabs with out-of-order timestamps produce different keys. | High | Implemented; [`TestGetEntryMITSemantics`](../../v8/keytab/keytab_test.go). Local evidence is not a live interoperability claim. |
+| KT-3 | `GetEncryptionKey` requires an exact `etype` match; no wildcard (`etype == 0` → any) as in MIT. MIT also treats "similar" enctypes (e.g. DES variants) as matching — document as unsupported (DES not implemented). | Medium | Implemented; [`TestGetEntryMITSemantics`](../../v8/keytab/keytab_test.go). Local evidence is not a live interoperability claim. |
+| KT-4 | `GetEncryptionKey` requires exact realm match. MIT matches any realm when the lookup principal's realm is empty. | Medium | Implemented; [`TestGetEntryMITSemantics`](../../v8/keytab/keytab_test.go). Local evidence is not a live interoperability claim. |
+| KT-5 | `GetEncryptionKey` has no 8-bit kvno wrap-around handling. After failing to find an exact match, MIT accepts an entry whose parsed kvno is `kvno & 0xff`, regardless of whether the optional 32-bit field was present. | Low | Implemented; [`TestGetEntryKVNO8Fallback`](../../v8/keytab/keytab_test.go). Local evidence is not a live interoperability claim. |
+| KT-6 | 32-bit kvno trailer handling is not recorded explicitly. MIT reads the optional trailer for both v1 and v2, using native byte order for v1, and ignores a zero trailer value. | Low | Implemented; [`TestUnmarshalV1KVNO32`](../../v8/keytab/keytab_test.go). Local evidence is not a live interoperability claim. |
+| KT-7 | v1 round-trip is broken: `parsePrincipal` decrements `NumComponents` on read, `principal.marshal` writes it back unchanged, so v1 → marshal → v1 writes the wrong count. `NumComponents` should be derived from `len(Components)` at marshal time, not stored. | Medium | Implemented; [`TestUnmarshalV1RoundTrip`](../../v8/keytab/keytab_test.go). Local evidence is not a live interoperability claim. |
+| KT-8 | `AddEntry` accepts `KVNO uint8`. kvnos > 255 are common (AD, long-lived service principals). MIT writes `vno & 0xff` to the 8-bit field and the full value to the 32-bit trailer. | High | Implemented; [`TestAddEntryHighKVNO`](../../v8/keytab/keytab_test.go). Local evidence is not a live interoperability claim. |
+| KT-9 | `entry.String()` prints `KVNO8`, not `KVNO`. For kvno ≥ 256 the display is wrong (MIT `klist -k` shows the 32-bit value). | Medium | Implemented; [`TestAddEntryHighKVNO`](../../v8/keytab/keytab_test.go). Local evidence is not a live interoperability claim. |
+| KT-10 | `AddEntry` derives the key with the RFC 4120 default salt only. No way to (a) supply a salt (AD host principals, `ktutil addent -salt`), (b) supply s2kparams/iterations, or (c) add an entry from raw key bytes (what `kadmin ktadd` does — it never has the password). | High | Implemented; [`TestAddKeyAndEntryWithSalt`](../../v8/keytab/keytab_test.go). Local evidence is not a live interoperability claim. |
+| KT-11 | No API to **modify**: remove an entry, remove all entries for a principal, remove entries with kvno < N (`kadmin ktremove princ old`), keep-only-latest-kvno, or merge two keytabs (`ktutil rkt`+`wkt`). `Entries` is exported but its element type `entry` is unexported, so callers cannot construct or filter entries themselves. | High | Implemented; [`TestRemoveAndMerge`](../../v8/keytab/keytab_test.go). Local evidence is not a live interoperability claim. |
+| KT-12 | No file-level write helper. MIT creates keytabs `0600`, uses `krb5_lock_file` while appending, and appends (never rewrites) on `ktadd`. gokrb5 needs `WriteFile(path)` with atomic write (temp + `rename`), `0600`, and an `Append`-safe path, otherwise concurrent `ktadd` from MIT tools can corrupt the file. | Medium | Implemented; [`TestWriteFileAtomicAndMode0600`](../../v8/keytab/file_test.go). Local evidence is not a live interoperability claim. |
+| KT-13 | `Unmarshal` on a keytab that already has entries appends to `Entries` (no reset). Calling `Unmarshal` twice duplicates entries. | Low | Implemented; [`TestUnmarshalResetsEntries`](../../v8/keytab/keytab_test.go). Local evidence is not a live interoperability claim. |
+| KT-14 | Error messages format raw bytes with `%s` (`fmt.Errorf("%s's length is less than %d", b, …)`), dumping binary key material into logs. | Medium (security) | Implemented; [`TestErrorsDoNotContainKeyMaterial`](../../v8/keytab/keytab_test.go). Local evidence is not a live interoperability claim. |
+| KT-15 | Zero-length record (`l == 0`) terminates parsing. MIT and its file-format documentation define a zero-length record as EOF. | Low | Implemented; [`TestUnmarshalZeroLengthRecordIsEOF`](../../v8/keytab/keytab_test.go). Local evidence is not a live interoperability claim. |
+| KT-16 | No default keytab resolution: `KRB5_KTNAME`, `KRB5_CLIENT_KTNAME`, `[libdefaults] default_keytab_name`, `default_client_keytab_name`, `FILE:`/`WRFILE:` prefix stripping, `%{euid}`/`%{uid}`/`%{username}` parameter expansion. `config.LibDefaults.DefaultKeytabName` is parsed but never used. | Medium | Implemented; [`TestResolveNameAndLoadDefault`](../../v8/keytab/file_test.go). Local evidence is not a live interoperability claim. |
+| KT-17 | No `klist -kte`-compatible text rendering. Useful for diff-based interoperability tests and for a `gokrb5 klist -k` tool. | Low | Implemented; [`TestKlistMatchesCapturedOutput`](../../v8/keytab/klist_test.go). Local evidence is not a live interoperability claim. |
+| KT-18 | No exported accessor for the keytab version, and no way to request writing v1 (MIT can still read v1; writing v1 is not required — read-only support is sufficient). | Low | Implemented; [`TestVersionAndPrincipals`](../../v8/keytab/keytab_test.go). Local evidence is not a live interoperability claim. |
+| KT-19 | `JSON()` serialises raw key material. Acceptable but should be documented, and a redacted mode is preferable for logging. | Low | Implemented/documented: intentional raw-key JSON remains covered by [`TestStringJSONAndWrite`](../../v8/keytab/keytab_test.go); godoc now explicitly warns against logging or disclosure. |
 
 #### 2.3 `kinit` — what exists
 
@@ -763,24 +852,24 @@ Numbered for traceability (`KT-n`).
 
 Numbered `KI-n`.
 
-| ID | Finding | Severity |
-|---|---|---|
-| KI-1 | **No ccache writer.** `credentials.CCache` has `Unmarshal` only. A `kinit` cannot exist without `Marshal`/`WriteFile` producing MIT FILE ccache v4 (header with KDC time-offset tag, default principal, credentials, `X-CACHECONF:` config entries). This is the largest gap. | Blocker |
-| KI-2 | `ccache.Unmarshal` and its `read*` helpers do no bounds checking; truncated or malicious ccache files panic. `parseHeader` compares an absolute offset (`*p`) with a relative length (`h.length`) — correct only by coincidence for the standard 12-byte header. | High |
-| KI-3 | `messages.NewASReq` overwrites `RTime`: `a.ReqBody.RTime = t.Add(c.LibDefaults.RenewLifetime)` is immediately followed by `a.ReqBody.RTime = t.Add(48 * time.Hour)`. `renew_lifetime`/`kinit -r` is ignored. | High |
-| KI-4 | `setPAData` derives the pre-auth etype from `LibDefaults.PreferredPreauthTypes[0]`. In MIT `preferred_preauth_types` is a list of **PA-DATA types** (17=PKINIT…, 16, 15, 14), not enctypes; it only "works" because 17 happens to be `aes128-cts-hmac-sha1-96`. Must use the first `DefaultTktEnctypeIDs` entry that the credential can produce a key for (for a keytab: an etype present in the keytab). | High |
-| KI-5 | `crypto.GetKeyFromPassword` uses `ETYPE-INFO2[0]` / `ETYPE-INFO[0]` unconditionally and, when that etype differs from the requested one, derives the key with the **other** etype but labels the result with the requested `etypeID` (`key.KeyType = etypeID`). Must select the ETYPE-INFO2 entry whose etype equals the one being used, and set `KeyType` from the etype actually used. `client.preAuthEType` has the same `[0]` assumption. | High |
-| KI-6 | With a keytab, the AS-REQ `etype` list is `DefaultTktEnctypeIDs` from config regardless of what keys the keytab holds. MIT (`krb5_get_init_creds_keytab`, `get_in_tkt.c`) restricts the request enctypes to those present in the keytab for the client principal, so the KDC never issues a reply the client cannot decrypt. | High |
-| KI-7 | No interactive password prompt, no CLI. Need a `kinit`-equivalent command (proposed `v8/cmd/gokinit`) using `golang.org/x/term.ReadPassword` on `/dev/tty`, honouring `KRB5CCNAME`, `KRB5_CONFIG`, `KRB5_KTNAME`, `KRB5_CLIENT_KTNAME`. | High |
-| KI-8 | No default ccache name resolution: `KRB5CCNAME` → `[libdefaults] default_ccache_name` (with `%{uid}`, `%{euid}`, `%{username}`, `%{TEMP}` expansion) → `FILE:/tmp/krb5cc_%{uid}`. `FILE:` prefix must be accepted and stripped; other types must be rejected with a clear error. | High |
-| KI-9 | Principal defaulting differs from MIT `kinit`: no principal → default principal of existing ccache, else `$USER@default_realm`; `-k` with no principal → `host/<canonical fqdn>@default_realm`; principal without `@REALM` → `default_realm`. `client.New*` documentation says an empty realm uses the default realm but `IsConfigured` rejects it. | Medium |
-| KI-10 | Clock skew: MIT retries the AS exchange once after `KRB_AP_ERR_SKEW`/`KDC_ERR_PREAUTH_FAILED` using the KDC time from the KRB-ERROR (`kdc_timesync`), and stores the offset in the ccache header (tag 1). gokrb5 has `KDCTimeSync` config but no implementation. | Medium |
-| KI-11 | `KDC_ERR_KEY_EXPIRED`: MIT `kinit` prompts for a new password and retries. gokrb5 returns the error. Implement in the CLI using `Client.ChangePasswd`. | Low |
-| KI-12 | Enterprise principals (`kinit -E`, `KRB_NT_ENTERPRISE`): `credentials.New` splits the username on `/`; `types.ParseSPNString` splits on the last `@`. An enterprise name `user@corp.example@REALM` must become a single component with name type 10. | Low |
-| KI-13 | `Settings.DisablePAFXFAST` actually controls `PA_REQ_ENC_PA_REP` (RFC 6806 §11), not FAST. Rename/document; keep the old name as a deprecated alias. | Low |
-| KI-14 | Ticket-flag handling for `-f/-F`, `-p/-P`, `-a/-A`, `-C` (canonicalize), `-l`, `-r`, `-s` (start time / postdated), `-S service`, `-v` (validate) is only reachable via `config.LibDefaults`. The CLI needs per-invocation overrides that take precedence over krb5.conf. `-s` and `-v` may be deferred. | Medium |
-| KI-15 | ccache `GetEntries` filters `X-CACHECONF:` entries when loading; the writer must preserve MIT metadata semantics for `pa_type`, `fast_avail`, and `start_realm`. `refresh_time` belongs to GSS client-keytab refresh, not ordinary `kinit -k` output. | Medium |
-| KI-16 | Password-keytab preference: `Credentials.WithPassword` clears the keytab and vice versa. MIT `kinit -k` with a password-less principal must still work; `kinit` without `-k` must never read the keytab. Behaviour is compatible; add tests to lock it. | Low |
+| ID | Historical finding | Historical severity | Phase 1 disposition and local evidence |
+| --- | --- | --- | --- |
+| KI-1 | **No ccache writer.** `credentials.CCache` has `Unmarshal` only. A `kinit` cannot exist without `Marshal`/`WriteFile` producing MIT FILE ccache v4 (header with KDC time-offset tag, default principal, credentials, `X-CACHECONF:` config entries). This is the largest gap. | Blocker | Implemented; [`TestCCacheMarshalByteExactFixtures`](../../v8/credentials/ccache_phase4_test.go). Local evidence is not a live interoperability claim. |
+| KI-2 | `ccache.Unmarshal` and its `read*` helpers do no bounds checking; truncated or malicious ccache files panic. `parseHeader` compares an absolute offset (`*p`) with a relative length (`h.length`) — correct only by coincidence for the standard 12-byte header. | High | Implemented; [`TestCCacheReadHelpersBoundsAndValues`](../../v8/credentials/ccache_phase4_test.go). Local evidence is not a live interoperability claim. |
+| KI-3 | `messages.NewASReq` overwrites `RTime`: `a.ReqBody.RTime = t.Add(c.LibDefaults.RenewLifetime)` is immediately followed by `a.ReqBody.RTime = t.Add(48 * time.Hour)`. `renew_lifetime`/`kinit -r` is ignored. | High | Implemented; [`TestNewASReqRenewLifetimeHonoured`](../../v8/messages/KDCReq_test.go). Local evidence is not a live interoperability claim. |
+| KI-4 | `setPAData` derives the pre-auth etype from `LibDefaults.PreferredPreauthTypes[0]`. In MIT `preferred_preauth_types` is a list of **PA-DATA types** (17=PKINIT…, 16, 15, 14), not enctypes; it only "works" because 17 happens to be `aes128-cts-hmac-sha1-96`. Must use the first `DefaultTktEnctypeIDs` entry that the credential can produce a key for (for a keytab: an etype present in the keytab). | High | Implemented; [`TestFirstAvailablePreAuthKeyFallback`](../../v8/client/asexchange_phase5_test.go). Local evidence is not a live interoperability claim. |
+| KI-5 | `crypto.GetKeyFromPassword` uses `ETYPE-INFO2[0]` / `ETYPE-INFO[0]` unconditionally and, when that etype differs from the requested one, derives the key with the **other** etype but labels the result with the requested `etypeID` (`key.KeyType = etypeID`). Must select the ETYPE-INFO2 entry whose etype equals the one being used, and set `KeyType` from the etype actually used. `client.preAuthEType` has the same `[0]` assumption. | High | Implemented; [`TestPreAuthETypeUsesFirstRequestedKDCOffer`](../../v8/client/asexchange_phase5_test.go). Local evidence is not a live interoperability claim. |
+| KI-6 | With a keytab, the AS-REQ `etype` list is `DefaultTktEnctypeIDs` from config regardless of what keys the keytab holds. MIT (`krb5_get_init_creds_keytab`, `get_in_tkt.c`) restricts the request enctypes to those present in the keytab for the client principal, so the KDC never issues a reply the client cannot decrypt. | High | Implemented; [`TestETypesForPrincipal`](../../v8/keytab/keytab_test.go). Local evidence is not a live interoperability claim. |
+| KI-7 | No interactive password prompt, no CLI. Need a `kinit`-equivalent command (proposed `v8/cmd/gokinit`) using `golang.org/x/term.ReadPassword` on `/dev/tty`, honouring `KRB5CCNAME`, `KRB5_CONFIG`, `KRB5_KTNAME`, `KRB5_CLIENT_KTNAME`. | High | Implemented; [`TestParseArgsMapsMITFlags`](../../v8/cmd/gokinit/main_test.go). Local evidence is not a live interoperability claim. |
+| KI-8 | No default ccache name resolution: `KRB5CCNAME` → `[libdefaults] default_ccache_name` (with `%{uid}`, `%{euid}`, `%{username}`, `%{TEMP}` expansion) → `FILE:/tmp/krb5cc_%{uid}`. `FILE:` prefix must be accepted and stripped; other types must be rejected with a clear error. | High | Implemented; [`TestDefaultCCacheNameResolution`](../../v8/credentials/ccache_phase4_test.go). Local evidence is not a live interoperability claim. |
+| KI-9 | Principal defaulting differs from MIT `kinit`: no principal → default principal of existing ccache, else `$USER@default_realm`; `-k` with no principal → `host/<canonical fqdn>@default_realm`; principal without `@REALM` → `default_realm`. `client.New*` documentation says an empty realm uses the default realm but `IsConfigured` rejects it. | Medium | Implemented; [`TestPrincipalDefaulting`](../../v8/client/client_test.go). Local evidence is not a live interoperability claim. |
+| KI-10 | Clock skew: MIT retries the AS exchange once after `KRB_AP_ERR_SKEW`/`KDC_ERR_PREAUTH_FAILED` using the KDC time from the KRB-ERROR (`kdc_timesync`), and stores the offset in the ccache header (tag 1). gokrb5 has `KDCTimeSync` config but no implementation. | Medium | Implemented; [`TestClockSkewRetry`](../../v8/client/asexchange_phase5_test.go). Local evidence is not a live interoperability claim. |
+| KI-11 | `KDC_ERR_KEY_EXPIRED`: MIT `kinit` prompts for a new password and retries. gokrb5 returns the error. Implement in the CLI using `Client.ChangePasswd`. | Low | Implemented; [`TestRenewAndPasswordChangeFailures`](../../v8/cmd/gokinit/main_test.go). Local evidence is not a live interoperability claim. |
+| KI-12 | Enterprise principals (`kinit -E`, `KRB_NT_ENTERPRISE`): `credentials.New` splits the username on `/`; `types.ParseSPNString` splits on the last `@`. An enterprise name `user@corp.example@REALM` must become a single component with name type 10. | Low | Implemented; [`TestPrincipalDefaulting`](../../v8/client/client_test.go). Local evidence is not a live interoperability claim. |
+| KI-13 | `Settings.DisablePAFXFAST` actually controls `PA_REQ_ENC_PA_REP` (RFC 6806 §11), not FAST. Rename/document; keep the old name as a deprecated alias. | Low | Implemented; [`TestFASTASExchangeRejectsUnarmoredReplyAfterActivation`](../../v8/client/fast_test.go). Local evidence is not a live interoperability claim. |
+| KI-14 | Ticket-flag handling for `-f/-F`, `-p/-P`, `-a/-A`, `-C` (canonicalize), `-l`, `-r`, `-s` (start time / postdated), `-S service`, `-v` (validate) is only reachable via `config.LibDefaults`. The CLI needs per-invocation overrides that take precedence over krb5.conf. `-s` and `-v` may be deferred. | Medium | Implemented; [`TestParseArgsMapsMITFlags`](../../v8/cmd/gokinit/main_test.go). Local evidence is not a live interoperability claim. |
+| KI-15 | ccache `GetEntries` filters `X-CACHECONF:` entries when loading; the writer must preserve MIT metadata semantics for `pa_type`, `fast_avail`, and `start_realm`. `refresh_time` belongs to GSS client-keytab refresh, not ordinary `kinit -k` output. | Medium | Implemented; [`TestCCacheCapturedConfigEntry`](../../v8/credentials/ccache_phase4_test.go). Local evidence is not a live interoperability claim. |
+| KI-16 | Password-keytab preference: `Credentials.WithPassword` clears the keytab and vice versa. MIT `kinit -k` with a password-less principal must still work; `kinit` without `-k` must never read the keytab. Behaviour is compatible; add tests to lock it. | Low | Implemented; [`TestCredentialsPrincipalAndKeySources`](../../v8/credentials/credentials_test.go). Local evidence is not a live interoperability claim. |
 
 ---
 

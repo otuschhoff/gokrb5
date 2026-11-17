@@ -180,7 +180,7 @@ func checkOCSP(client *http.Client, certificate, issuer *x509.Certificate, now t
 			continue
 		}
 		request.Header.Set("Content-Type", "application/ocsp-request")
-		response, err := client.Do(request)
+		response, err := client.Do(request) //nolint:bodyclose // readRevocationBody owns and closes the body on every path.
 		if err != nil {
 			continue
 		}
@@ -208,7 +208,7 @@ func checkCRLs(client *http.Client, certificate, issuer *x509.Certificate, now t
 		return false, nil
 	}
 	for _, endpoint := range certificate.CRLDistributionPoints {
-		response, err := client.Get(endpoint)
+		response, err := client.Get(endpoint) //nolint:bodyclose // readRevocationBody owns and closes the body on every path.
 		if err != nil {
 			continue
 		}

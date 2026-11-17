@@ -37,7 +37,11 @@ func parseDimensions(v reflect.Value) (l []int, tb reflect.Type) {
 	if t.Elem().Kind() == reflect.Array || t.Elem().Kind() == reflect.Slice {
 		// contains array or slice
 		var m []int
-		m, tb = parseDimensions(v.Index(0))
+		element := reflect.Zero(t.Elem())
+		if v.Len() > 0 {
+			element = v.Index(0)
+		}
+		m, tb = parseDimensions(element)
 		l = append(l, m...)
 	} else {
 		tb = t.Elem()
@@ -82,13 +86,18 @@ func makeSubSlices(v reflect.Value, l []int) {
 // multiDimensionalIndexPermutations returns all the permutations of the indexes of a multi-dimensional slice.
 // The input is a slice of integers that indicates the max size/length of each dimension
 func multiDimensionalIndexPermutations(l []int) (ps [][]int) {
+	for _, length := range l {
+		if length <= 0 {
+			return nil
+		}
+	}
 	z := make([]int, len(l), len(l)) // The zeros permutation
 	ps = append(ps, z)
 	// for each dimension, in reverse
 	for i := len(l) - 1; i >= 0; i-- {
 		ws := make([][]int, len(ps))
 		copy(ws, ps)
-		//create a permutation for each of the iterations of the current dimension
+		// create a permutation for each of the iterations of the current dimension
 		for j := 1; j <= l[i]-1; j++ {
 			// For each existing permutation
 			for _, p := range ws {
@@ -216,6 +225,9 @@ func (dec *Decoder) fillMultiDimensionalConformantArray(v reflect.Value, d int, 
 	for i := range l {
 		l[i] = int(dec.precedingMax())
 	}
+	if err := dec.validateDimensions(l); err != nil {
+		return err
+	}
 	// Initialise size of slices
 	//   Initialise the size of the 1st dimension
 	ty := v.Type()
@@ -308,6 +320,9 @@ func (dec *Decoder) fillMultiDimensionalVaryingArray(v reflect.Value, t reflect.
 		}
 		l[i] = int(n)
 	}
+	if err := dec.validateDimensions(l); err != nil {
+		return err
+	}
 	// Initialise size of slices
 	//   Initialise the size of the 1st dimension
 	ty := v.Type()
@@ -372,7 +387,7 @@ func (dec *Decoder) fillUniDimensionalConformantVaryingArray(v reflect.Value, ta
 		return errors.New("max count is less than the offset plus actual count")
 	}
 	t := v.Type()
-	n := int(s)
+	n := int(o) + int(s)
 	a := reflect.MakeSlice(t, n, n)
 	for i := int(o); i < n; i++ {
 		err := dec.fill(a.Index(i), tag, def)
@@ -408,7 +423,7 @@ func (dec *Decoder) fillMultiDimensionalConformantVaryingArray(v reflect.Value, 
 		if uint64(m[i]) < uint64(s)+uint64(off) {
 			return errors.New("max count is less than the offset plus actual count")
 		}
-		l[i] = int(s)
+		l[i] = int(off) + int(s)
 	}
 	if err := dec.validateDimensions(m); err != nil {
 		return err

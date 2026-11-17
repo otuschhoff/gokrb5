@@ -169,6 +169,9 @@ func NewFromPrincipalName(princ types.PrincipalName, realm string, krb5conf *con
 //
 // WARNING: A client created from CCache does not automatically renew TGTs and a failure will occur after the TGT expires.
 func NewFromCCache(c *credentials.CCache, krb5conf *config.Config, settings ...func(*Settings)) (*Client, error) {
+	if c == nil {
+		return nil, errors.New("credential cache is nil")
+	}
 	clientSettings := NewSettings(settings...)
 	cl := &Client{
 		Credentials: c.GetClientCredentials(),

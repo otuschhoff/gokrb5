@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -30,6 +31,51 @@ type readErrorCloser struct{}
 
 func (readErrorCloser) Read([]byte) (int, error) { return 0, errors.New("read failed") }
 func (readErrorCloser) Close() error             { return nil }
+
+type countedRevocationBody struct {
+	io.Reader
+	closeErr error
+	closes   int
+}
+
+func (body *countedRevocationBody) Close() error {
+	body.closes++
+	return body.closeErr
+}
+
+func TestReadRevocationBodyOwnsClose(t *testing.T) {
+	closeErr := errors.New("injected close error")
+	readErr := errors.New("injected read error")
+	for _, tt := range []struct {
+		name     string
+		reader   io.Reader
+		closeErr error
+		wantErr  error
+	}{
+		{name: "success", reader: strings.NewReader("data")},
+		{name: "close failure", reader: strings.NewReader("data"), closeErr: closeErr, wantErr: closeErr},
+		{name: "read before close failure", reader: iotest.ErrReader(readErr), closeErr: closeErr, wantErr: readErr},
+		{name: "oversized", reader: strings.NewReader("12345")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := &countedRevocationBody{Reader: tt.reader, closeErr: tt.closeErr}
+			data, err := readRevocationBody(body, 4)
+			if body.closes != 1 {
+				t.Fatalf("Close called %d times, want 1", body.closes)
+			}
+			switch {
+			case tt.name == "oversized":
+				require.ErrorContains(t, err, "exceeds")
+			case tt.wantErr != nil:
+				require.ErrorIs(t, err, tt.wantErr)
+				require.Nil(t, data)
+			default:
+				require.NoError(t, err)
+				require.Equal(t, []byte("data"), data)
+			}
+		})
+	}
+}
 
 func TestValidateKDCCertificate(t *testing.T) {
 	root, signer, _ := testKDCChain(t, asn1.ObjectIdentifier(OIDPKINITKDC), "example.com", time.Now().Add(time.Hour))

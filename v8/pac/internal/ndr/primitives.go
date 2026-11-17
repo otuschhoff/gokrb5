@@ -3,6 +3,7 @@ package ndr
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"math"
 )
 
@@ -204,8 +205,13 @@ func (dec *Decoder) readFloat64() (f float64, err error) {
 // stream. Where necessary, an alignment gap, consisting of octets of unspecified value, precedes the representation
 // of a primitive. The gap is of the smallest size sufficient to align the primitive.
 func (dec *Decoder) ensureAlignment(n int) {
+	if dec.resourceErr != nil {
+		return
+	}
 	p := dec.size - dec.r.Buffered()
 	if s := p % n; s != 0 {
-		dec.r.Discard(n - s)
+		if _, err := dec.r.Discard(n - s); err != nil {
+			dec.resourceErr = fmt.Errorf("read NDR alignment: %w", err)
+		}
 	}
 }

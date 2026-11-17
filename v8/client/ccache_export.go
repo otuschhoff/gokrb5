@@ -6,14 +6,15 @@ import (
 	"strconv"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/credentials"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
 // CCache exports the client's current TGT sessions and cached service tickets.
 func (cl *Client) CCache() (*credentials.CCache, error) {
-	if cl == nil || cl.Credentials == nil {
-		return nil, errors.New("client has no credentials")
+	if cl == nil || cl.Credentials == nil || cl.sessions == nil || cl.cache == nil || cl.settings == nil {
+		return nil, errors.New("client is not initialized for credential cache export")
 	}
 	cache := credentials.NewCCache(cl.Credentials.CName(), cl.Credentials.Domain())
 	cache.SetKDCTimeOffset(cl.KDCTimeOffset())

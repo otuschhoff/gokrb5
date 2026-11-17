@@ -922,7 +922,8 @@ func validRecordLength(b []byte, endian binary.ByteOrder, remaining int) bool {
 	return int64(l) <= int64(remaining)
 }
 
-// JSON return information about the keys held in the keytab in a JSON format.
+// JSON returns information about the keys held in the keytab in a JSON format.
+// The output contains raw key material and must not be logged or disclosed.
 func (kt *Keytab) JSON() (string, error) {
 	b, err := json.MarshalIndent(kt, "", "  ")
 	if err != nil {

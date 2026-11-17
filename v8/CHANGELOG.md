@@ -42,6 +42,18 @@
 - `keytab.Keytab.AddEntry` now accepts a `uint32` KVNO so values greater than
   255 can be represented. Calls using typed `uint8` values require conversion.
 
+### Fixed
+
+- Return explicit errors when exporting an incompletely initialized client or
+  importing a nil credential cache.
+- Decode empty multidimensional NDR arrays without indexing element zero, bound
+  dimension products before allocation, and honor conformant-varying offsets.
+- Retain NDR alignment and union-discriminant read errors instead of discarding
+  them.
+- Make replay-cache checks and updates atomic, retain updated authenticator
+  metadata, and isolate records by client realm, exact principal components,
+  service, and authenticator time.
+
 ### Deprecated
 
 - The unexported compatibility aliases `keytab.entry` and `keytab.principal`
