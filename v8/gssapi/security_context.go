@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/hmac"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -50,6 +51,9 @@ func NewSecurityContext(key types.EncryptionKey, initiator bool, sendSequence, r
 
 // Wrap protects a message with integrity and optional confidentiality.
 func (context *SecurityContext) Wrap(message []byte, confidential bool) ([]byte, error) {
+	if context == nil {
+		return nil, errors.New("RFC 4121 security context is nil")
+	}
 	context.mu.Lock()
 	defer context.mu.Unlock()
 
@@ -83,6 +87,9 @@ func (context *SecurityContext) Wrap(message []byte, confidential bool) ([]byte,
 
 // Unwrap verifies and optionally decrypts a peer RFC 4121 wrap token.
 func (context *SecurityContext) Unwrap(token []byte) ([]byte, bool, error) {
+	if context == nil {
+		return nil, false, errors.New("RFC 4121 security context is nil")
+	}
 	context.mu.Lock()
 	defer context.mu.Unlock()
 
@@ -150,6 +157,9 @@ func (context *SecurityContext) Unwrap(token []byte) ([]byte, bool, error) {
 
 // GetMIC returns an RFC 4121 MIC token for message.
 func (context *SecurityContext) GetMIC(message []byte) ([]byte, error) {
+	if context == nil {
+		return nil, errors.New("RFC 4121 security context is nil")
+	}
 	context.mu.Lock()
 	defer context.mu.Unlock()
 	token := MICToken{Flags: context.senderFlags(false), SndSeqNum: context.sendSequence, Payload: message}
@@ -165,6 +175,9 @@ func (context *SecurityContext) GetMIC(message []byte) ([]byte, error) {
 
 // VerifyMIC verifies an RFC 4121 MIC token and its sequence number.
 func (context *SecurityContext) VerifyMIC(message, encoded []byte) error {
+	if context == nil {
+		return errors.New("RFC 4121 security context is nil")
+	}
 	context.mu.Lock()
 	defer context.mu.Unlock()
 	var token MICToken
@@ -188,11 +201,17 @@ func (context *SecurityContext) VerifyMIC(message, encoded []byte) error {
 
 // NegoExKey returns the key for locally generated NEGOEX VERIFY messages.
 func (context *SecurityContext) NegoExKey() (types.EncryptionKey, bool) {
+	if context == nil {
+		return types.EncryptionKey{}, false
+	}
 	return cloneContextKey(context.key), true
 }
 
 // NegoExVerifyKey returns the key for peer NEGOEX VERIFY messages.
 func (context *SecurityContext) NegoExVerifyKey() (types.EncryptionKey, bool) {
+	if context == nil {
+		return types.EncryptionKey{}, false
+	}
 	return cloneContextKey(context.key), true
 }
 

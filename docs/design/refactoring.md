@@ -2,7 +2,7 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-13 done (formatter normalization,
+(floor raised to 86.0%), and Phase 5 slices 1-14 done (formatter normalization,
 keytab complexity, dead code, mechanical clarity, shadow elimination,
 errorlint, revive mechanical, exported documentation, the NDR carry-over,
 I/O/body-ownership cleanup, checked type assertions, and named-return clarity).
@@ -34,7 +34,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,549 canonical lint findings after Phase 5 slices 1-13 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,511 canonical lint findings after Phase 5 slices 1-14 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -823,6 +823,19 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 14 (2026-11-18, gssapi nil invariants): the gssapi NilAway slice is
+zero. Every successful `NewSecurityContext` use in unit/fuzz tests now checks
+its constructor error through `mustSecurityContext(testing.TB, ...)`; token
+fixture decoders check fixed-hex failures and constructor error paths before
+slicing/dereferencing results. Production `SecurityContext.Wrap`, `Unwrap`,
+`GetMIC`, and `VerifyMIC` return a typed safety error on a nil receiver;
+`NegoExKey` and `NegoExVerifyKey` return `(zero, false)`. This closes the
+nil-constructor-to-method dereference flows without changing successful
+per-message behavior, key selection, or sequence handling. A regression tests
+all six nil-receiver operations. Full v8 and focused gssapi/spnego/client/negoex
+race suites pass; cross-package coverage remains 87.0%. GSS NilAway findings
+fall from 40 to 0 and the canonical total from 1,549 to 1,511.
 
 Slice 13 (2026-11-18, exhaustive enum handling): cleared all four exhaustive
 diagnostics. TLS signature-algorithm selection now explicitly enumerates every

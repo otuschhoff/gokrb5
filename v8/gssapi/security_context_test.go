@@ -15,6 +15,15 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+func mustSecurityContext(t testing.TB, key types.EncryptionKey, initiator bool, sendSequence, receiveSequence uint64, acceptorSubkey bool) *SecurityContext {
+	t.Helper()
+	context, err := NewSecurityContext(key, initiator, sendSequence, receiveSequence, acceptorSubkey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return context
+}
+
 func TestSecurityContextBidirectionalProtection(t *testing.T) {
 	testCases := []types.EncryptionKey{
 		{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")},
@@ -92,8 +101,8 @@ func TestSecurityContextSignOnlyConnection(t *testing.T) {
 
 func TestSecurityContextIgnoresAuthenticatedUnknownWrapFlags(t *testing.T) {
 	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
-	initiator, _ := NewSecurityContext(key, true, 0, 0, true)
-	acceptor, _ := NewSecurityContext(key, false, 0, 0, true)
+	initiator := mustSecurityContext(t, key, true, 0, 0, true)
+	acceptor := mustSecurityContext(t, key, false, 0, 0, true)
 	token, err := initiator.Wrap([]byte("future flag"), false)
 	require.NoError(t, err)
 	token[2] |= 0x80
@@ -139,8 +148,8 @@ func TestSecurityContextAcceptsConfidentialExtraCount(t *testing.T) {
 
 func TestSecurityContextRejectsTamperingAndReplay(t *testing.T) {
 	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
-	initiator, _ := NewSecurityContext(key, true, 0, 0, true)
-	acceptor, _ := NewSecurityContext(key, false, 0, 0, true)
+	initiator := mustSecurityContext(t, key, true, 0, 0, true)
+	acceptor := mustSecurityContext(t, key, false, 0, 0, true)
 	token, err := initiator.Wrap([]byte("message"), true)
 	require.NoError(t, err)
 
@@ -175,6 +184,28 @@ func TestSecurityContextMICProtection(t *testing.T) {
 	require.NoError(t, initiator.VerifyMIC([]byte("reply"), reply))
 }
 
+func TestNilSecurityContextOperationsReturnErrors(t *testing.T) {
+	var context *SecurityContext
+	if _, err := context.Wrap(nil, false); err == nil {
+		t.Fatal("Wrap accepted a nil context")
+	}
+	if _, _, err := context.Unwrap(nil); err == nil {
+		t.Fatal("Unwrap accepted a nil context")
+	}
+	if _, err := context.GetMIC(nil); err == nil {
+		t.Fatal("GetMIC accepted a nil context")
+	}
+	if err := context.VerifyMIC(nil, nil); err == nil {
+		t.Fatal("VerifyMIC accepted a nil context")
+	}
+	if _, ok := context.NegoExKey(); ok {
+		t.Fatal("NegoExKey accepted a nil context")
+	}
+	if _, ok := context.NegoExVerifyKey(); ok {
+		t.Fatal("NegoExVerifyKey accepted a nil context")
+	}
+}
+
 func TestNewSecurityContextRejectsUnsupportedKeys(t *testing.T) {
 	_, err := NewSecurityContext(types.EncryptionKey{KeyType: etypeID.RC4_HMAC, KeyValue: make([]byte, 16)}, true, 0, 0, false)
 	assert.ErrorContains(t, err, "requires an AES key")
@@ -186,7 +217,7 @@ func TestNewSecurityContextRejectsUnsupportedKeys(t *testing.T) {
 
 func TestSecurityContextRejectsMalformedWrapTokens(t *testing.T) {
 	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
-	initiator, _ := NewSecurityContext(key, true, 0, 0, true)
+	initiator := mustSecurityContext(t, key, true, 0, 0, true)
 	valid, err := initiator.Wrap([]byte("message"), false)
 	require.NoError(t, err)
 
@@ -231,7 +262,7 @@ func TestSecurityContextRejectsAuthenticatedHeaderMismatch(t *testing.T) {
 	require.NoError(t, err)
 	_, body, err := etype.EncryptMessage(key.KeyValue, append([]byte("message"), innerHeader...), keyusage.GSSAPI_INITIATOR_SEAL)
 	require.NoError(t, err)
-	acceptor, _ := NewSecurityContext(key, false, 0, 0, true)
+	acceptor := mustSecurityContext(t, key, false, 0, 0, true)
 	_, _, err = acceptor.Unwrap(append(outerHeader, body...))
 	assert.ErrorContains(t, err, "encrypted header mismatch")
 }
@@ -243,7 +274,7 @@ func TestSecurityContextRejectsInvalidConfidentialExtraCount(t *testing.T) {
 	require.NoError(t, err)
 	_, body, err := etype.EncryptMessage(key.KeyValue, append([]byte("message"), header...), keyusage.GSSAPI_INITIATOR_SEAL)
 	require.NoError(t, err)
-	acceptor, _ := NewSecurityContext(key, false, 0, 0, true)
+	acceptor := mustSecurityContext(t, key, false, 0, 0, true)
 	_, _, err = acceptor.Unwrap(append(header, body...))
 	assert.ErrorContains(t, err, "extra count")
 }
@@ -251,19 +282,19 @@ func TestSecurityContextRejectsInvalidConfidentialExtraCount(t *testing.T) {
 func TestSecurityContextPropagatesCryptoErrors(t *testing.T) {
 	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
 
-	unknownEtype, _ := NewSecurityContext(key, true, 7, 0, true)
+	unknownEtype := mustSecurityContext(t, key, true, 7, 0, true)
 	unknownEtype.key.KeyType = 999
 	_, err := unknownEtype.Wrap([]byte("message"), false)
 	assert.Error(t, err)
 	assert.Equal(t, uint64(7), unknownEtype.sendSequence)
 
-	badSealKey, _ := NewSecurityContext(key, true, 7, 0, true)
+	badSealKey := mustSecurityContext(t, key, true, 7, 0, true)
 	badSealKey.key.KeyValue = []byte("short")
 	_, err = badSealKey.Wrap([]byte("message"), true)
 	assert.Error(t, err)
 	assert.Equal(t, uint64(7), badSealKey.sendSequence)
 
-	badSignKey, _ := NewSecurityContext(key, true, 7, 0, true)
+	badSignKey := mustSecurityContext(t, key, true, 7, 0, true)
 	badSignKey.key.KeyValue = []byte("short")
 	_, err = badSignKey.Wrap([]byte("message"), false)
 	assert.Error(t, err)
@@ -272,19 +303,19 @@ func TestSecurityContextPropagatesCryptoErrors(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, uint64(7), badSignKey.sendSequence)
 
-	initiator, _ := NewSecurityContext(key, true, 0, 0, true)
+	initiator := mustSecurityContext(t, key, true, 0, 0, true)
 	sealed, err := initiator.Wrap([]byte("message"), true)
 	require.NoError(t, err)
-	badDecryptKey, _ := NewSecurityContext(key, false, 0, 0, true)
+	badDecryptKey := mustSecurityContext(t, key, false, 0, 0, true)
 	badDecryptKey.key.KeyValue = []byte("short")
 	_, _, err = badDecryptKey.Unwrap(sealed)
 	assert.Error(t, err)
 	assert.Zero(t, badDecryptKey.receiveSequence)
 
-	plainInitiator, _ := NewSecurityContext(key, true, 0, 0, true)
+	plainInitiator := mustSecurityContext(t, key, true, 0, 0, true)
 	plain, err := plainInitiator.Wrap([]byte("message"), false)
 	require.NoError(t, err)
-	badUnwrapEtype, _ := NewSecurityContext(key, false, 0, 0, true)
+	badUnwrapEtype := mustSecurityContext(t, key, false, 0, 0, true)
 	badUnwrapEtype.key.KeyType = 999
 	_, _, err = badUnwrapEtype.Unwrap(plain)
 	assert.Error(t, err)
@@ -293,10 +324,10 @@ func TestSecurityContextPropagatesCryptoErrors(t *testing.T) {
 
 func TestSecurityContextRejectsMalformedMIC(t *testing.T) {
 	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
-	acceptor, _ := NewSecurityContext(key, false, 0, 0, true)
+	acceptor := mustSecurityContext(t, key, false, 0, 0, true)
 	assert.Error(t, acceptor.VerifyMIC([]byte("message"), []byte{0x04}))
 
-	initiator, _ := NewSecurityContext(key, true, 0, 0, true)
+	initiator := mustSecurityContext(t, key, true, 0, 0, true)
 	token, err := initiator.GetMIC([]byte("message"))
 	require.NoError(t, err)
 	token[2] |= MICTokenFlagSealed

@@ -24,7 +24,10 @@ const (
 )
 
 func getMICChallengeReference() *MICToken {
-	challenge, _ := hex.DecodeString(testMICChallengeFromAcceptor)
+	challenge, decodeErr := hex.DecodeString(testMICChallengeFromAcceptor)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
 	return &MICToken{
 		Flags:     MICTokenFlagSentByAcceptor,
 		SndSeqNum: binary.BigEndian.Uint64(challenge[8:16]),
@@ -34,7 +37,10 @@ func getMICChallengeReference() *MICToken {
 }
 
 func getMICResponseReference() *MICToken {
-	response, _ := hex.DecodeString(testMICChallengeReplyFromInitiator)
+	response, decodeErr := hex.DecodeString(testMICChallengeReplyFromInitiator)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
 	return &MICToken{
 		Flags:     0x00,
 		SndSeqNum: 0,
@@ -51,7 +57,10 @@ func getMICResponseReferenceNoChkSum() *MICToken {
 
 func TestUnmarshal_MICChallenge(t *testing.T) {
 	t.Parallel()
-	challenge, _ := hex.DecodeString(testMICChallengeFromAcceptor)
+	challenge, decodeErr := hex.DecodeString(testMICChallengeFromAcceptor)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
 	var mt MICToken
 	err := mt.Unmarshal(challenge, true)
 	assert.Nil(t, err, "Unexpected error occurred.")
@@ -60,7 +69,10 @@ func TestUnmarshal_MICChallenge(t *testing.T) {
 
 func TestUnmarshalFailure_MICChallenge(t *testing.T) {
 	t.Parallel()
-	challenge, _ := hex.DecodeString(testMICChallengeFromAcceptor)
+	challenge, decodeErr := hex.DecodeString(testMICChallengeFromAcceptor)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
 	var mt MICToken
 	err := mt.Unmarshal(challenge, false)
 	assert.NotNil(t, err, "Expected error did not occur: a message from the acceptor cannot be expected to be sent from the initiator.")
@@ -72,7 +84,10 @@ func TestUnmarshalFailure_MICChallenge(t *testing.T) {
 
 func TestUnmarshal_MICChallengeReply(t *testing.T) {
 	t.Parallel()
-	response, _ := hex.DecodeString(testMICChallengeReplyFromInitiator)
+	response, decodeErr := hex.DecodeString(testMICChallengeReplyFromInitiator)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
 	var mt MICToken
 	err := mt.Unmarshal(response, false)
 	assert.Nil(t, err, "Unexpected error occurred.")
@@ -81,7 +96,10 @@ func TestUnmarshal_MICChallengeReply(t *testing.T) {
 
 func TestUnmarshalFailure_MICChallengeReply(t *testing.T) {
 	t.Parallel()
-	response, _ := hex.DecodeString(testMICChallengeReplyFromInitiator)
+	response, decodeErr := hex.DecodeString(testMICChallengeReplyFromInitiator)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
 	var mt MICToken
 	err := mt.Unmarshal(response, true)
 	assert.NotNil(t, err, "Expected error did not occur: a message from the initiator cannot be expected to be sent from the acceptor.")
@@ -93,7 +111,10 @@ func TestUnmarshalFailure_MICChallengeReply(t *testing.T) {
 
 func TestMICChallengeChecksumVerification(t *testing.T) {
 	t.Parallel()
-	challenge, _ := hex.DecodeString(testMICChallengeFromAcceptor)
+	challenge, decodeErr := hex.DecodeString(testMICChallengeFromAcceptor)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
 	var mt MICToken
 	if err := mt.Unmarshal(challenge, true); err != nil {
 		t.Fatal(err)
@@ -119,7 +140,10 @@ func TestMICResponseChecksumVerification(t *testing.T) {
 
 func TestMICChecksumVerificationFailure(t *testing.T) {
 	t.Parallel()
-	challenge, _ := hex.DecodeString(testMICChallengeFromAcceptor)
+	challenge, decodeErr := hex.DecodeString(testMICChallengeFromAcceptor)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
 	var mt MICToken
 	if err := mt.Unmarshal(challenge, true); err != nil {
 		t.Fatal(err)
@@ -165,10 +189,15 @@ func TestMarshal_MICFailures(t *testing.T) {
 
 func TestNewInitiatorMICTokenSignatureAndMarshalling(t *testing.T) {
 	t.Parallel()
-	bytes, _ := hex.DecodeString(testMICPayload)
-	token, tErr := NewInitiatorMICToken(bytes, getSessionKey())
+	payload, decodeErr := hex.DecodeString(testMICPayload)
+	if decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	token, err := NewInitiatorMICToken(payload, getSessionKey())
+	if err != nil {
+		t.Fatal(err)
+	}
 	token.Payload = nil
-	assert.Nil(t, tErr, "Unexpected error.")
 	assert.Equal(t, getMICResponseReference(), token, "Token failed to be marshalled to the expected bytes.")
 }
 

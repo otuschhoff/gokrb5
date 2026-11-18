@@ -33,7 +33,10 @@ func getSessionKey() types.EncryptionKey {
 }
 
 func getChallengeReference() *WrapToken {
-	challenge, _ := hex.DecodeString(testChallengeFromAcceptor)
+	challenge, decodeErr := hex.DecodeString(testChallengeFromAcceptor)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
 	return &WrapToken{
 		Flags:     0x01,
 		EC:        12,
@@ -45,7 +48,10 @@ func getChallengeReference() *WrapToken {
 }
 
 func getResponseReference() *WrapToken {
-	response, _ := hex.DecodeString(testChallengeReplyFromInitiator)
+	response, decodeErr := hex.DecodeString(testChallengeReplyFromInitiator)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
 	return &WrapToken{
 		Flags:     0x00,
 		EC:        12,
@@ -64,7 +70,10 @@ func getResponseReferenceNoChkSum() *WrapToken {
 
 func TestUnmarshal_Challenge(t *testing.T) {
 	t.Parallel()
-	challenge, _ := hex.DecodeString(testChallengeFromAcceptor)
+	challenge, decodeErr := hex.DecodeString(testChallengeFromAcceptor)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
 	var wt WrapToken
 	err := wt.Unmarshal(challenge, true)
 	assert.Nil(t, err, "Unexpected error occurred.")
@@ -73,7 +82,10 @@ func TestUnmarshal_Challenge(t *testing.T) {
 
 func TestUnmarshalFailure_Challenge(t *testing.T) {
 	t.Parallel()
-	challenge, _ := hex.DecodeString(testChallengeFromAcceptor)
+	challenge, decodeErr := hex.DecodeString(testChallengeFromAcceptor)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
 	var wt WrapToken
 	err := wt.Unmarshal(challenge, false)
 	assert.NotNil(t, err, "Expected error did not occur: a message from the acceptor cannot be expected to be sent from the initiator.")
@@ -87,7 +99,10 @@ func TestUnmarshalFailure_Challenge(t *testing.T) {
 
 func TestUnmarshal_ChallengeReply(t *testing.T) {
 	t.Parallel()
-	response, _ := hex.DecodeString(testChallengeReplyFromInitiator)
+	response, decodeErr := hex.DecodeString(testChallengeReplyFromInitiator)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
 	var wt WrapToken
 	err := wt.Unmarshal(response, false)
 	assert.Nil(t, err, "Unexpected error occurred.")
@@ -96,7 +111,10 @@ func TestUnmarshal_ChallengeReply(t *testing.T) {
 
 func TestUnmarshalFailure_ChallengeReply(t *testing.T) {
 	t.Parallel()
-	response, _ := hex.DecodeString(testChallengeReplyFromInitiator)
+	response, decodeErr := hex.DecodeString(testChallengeReplyFromInitiator)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
 	var wt WrapToken
 	err := wt.Unmarshal(response, true)
 	assert.NotNil(t, err, "Expected error did not occur: a message from the initiator cannot be expected to be sent from the acceptor.")
@@ -110,7 +128,10 @@ func TestUnmarshalFailure_ChallengeReply(t *testing.T) {
 
 func TestChallengeChecksumVerification(t *testing.T) {
 	t.Parallel()
-	challenge, _ := hex.DecodeString(testChallengeFromAcceptor)
+	challenge, decodeErr := hex.DecodeString(testChallengeFromAcceptor)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
 	var wt WrapToken
 	if err := wt.Unmarshal(challenge, true); err != nil {
 		t.Fatal(err)
@@ -134,7 +155,10 @@ func TestResponseChecksumVerification(t *testing.T) {
 
 func TestChecksumVerificationFailure(t *testing.T) {
 	t.Parallel()
-	challenge, _ := hex.DecodeString(testChallengeFromAcceptor)
+	challenge, decodeErr := hex.DecodeString(testChallengeFromAcceptor)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
 	var wt WrapToken
 	if err := wt.Unmarshal(challenge, true); err != nil {
 		t.Fatal(err)
