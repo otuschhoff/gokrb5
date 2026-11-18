@@ -824,6 +824,30 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 46 (2026-11-18, password-change error contracts; Q-03):
+The v8 password-change library now identifies the failed encoding, decoding,
+request construction, or decryption operation while retaining the cause.
+A decoded server KRB-ERROR is still returned as a typed error. Reply decoding
+replaces the receiver only after successful parsing, so reusing a reply cannot
+carry over an earlier error or password policy. Request construction rejects a
+ticket with no service principal instead of panicking. Wire framing, valid
+request payloads, and result and password-policy interpretation are unchanged.
+
+Regression tests cover typed decode failures, protected and error reply reuse,
+AP-REQ construction failures, and password omission from diagnostics.
+Both module test suites and both changed-line lint gates passed, along with
+focused build, vet, and race checks for `kadmin`, `client`, and `gokinit`.
+`FuzzReplyUnmarshal` passed a 60-second run (1,300,081 executions), and v8
+cross-package statement coverage was 86.7%, above the 86.0% floor. An unchanged
+PKINIT clock-skew test missed its wall-clock tolerance during concurrent
+validation, then passed ten isolated repetitions and the full rerun. Live
+password-change interoperability was not run; Docker access was unavailable.
+
+The canonical v8 total fell from 908 to 901 (`wrapcheck`: 330 to 324).
+All six `kadmin` `wrapcheck` reports and its one nesting report were resolved.
+There are no remaining canonical findings in `kadmin`, no new canonical
+findings in v8, and zero v8 gosec findings.
+
 Slice 45 (2026-11-18, PKINIT error contracts; Q-03):
 PKINIT DER encoders and decoders, CMS envelope operations, and signer
 public-key encoding now identify the failed operation and preserve the

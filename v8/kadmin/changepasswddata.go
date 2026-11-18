@@ -1,6 +1,8 @@
 package kadmin
 
 import (
+	"fmt"
+
 	"github.com/jcmturner/gofork/encoding/asn1"
 
 	"github.com/otuschhoff/gokrb5/v8/types"
@@ -13,12 +15,11 @@ type ChangePasswdData struct {
 	TargRealm string              `asn1:"generalstring,optional,explicit,tag:2"`
 }
 
-// Marshal ChangePasswdData into a byte slice.
+// Marshal encodes the password-change payload as DER.
 func (c *ChangePasswdData) Marshal() ([]byte, error) {
 	b, err := asn1.Marshal(*c)
 	if err != nil {
-		return []byte{}, err
+		return []byte{}, fmt.Errorf("marshal kpasswd change data: %w", err)
 	}
-	// b = asn1tools.AddASNAppTag(b, asnAppTag.)
 	return b, nil
 }

@@ -2,19 +2,21 @@
 package kadmin
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/otuschhoff/gokrb5/v8/crypto"
 	"github.com/otuschhoff/gokrb5/v8/krberror"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
-// ChangePasswdMsg generate a change password request and also return the key needed to decrypt the reply.
+// ChangePasswdMsg builds a password-change request and returns its reply decryption key.
 func ChangePasswdMsg(cname types.PrincipalName, realm, password string, tkt messages.Ticket, sessionKey types.EncryptionKey) (Request, types.EncryptionKey, error) {
-	var
-	// Create change password data struct and marshal to bytes
-	r Request
-	var k types.EncryptionKey
-	var err error
+	var (
+		r Request
+		k types.EncryptionKey
+	)
 
 	chgpasswd := ChangePasswdData{
 		NewPasswd: []byte(password),
@@ -45,10 +47,12 @@ func ChangePasswdMsg(cname types.PrincipalName, realm, password string, tkt mess
 	}
 	k = auth.SubKey
 
-	// Generate AP_REQ
+	if len(tkt.SName.NameString) == 0 {
+		return r, k, errors.New("build kpasswd AP-REQ: ticket service principal is missing")
+	}
 	APreq, err := messages.NewAPReq(tkt, sessionKey, auth)
 	if err != nil {
-		return r, k, err
+		return r, k, fmt.Errorf("build kpasswd AP-REQ: %w", err)
 	}
 
 	// Form the KRBPriv encpart data

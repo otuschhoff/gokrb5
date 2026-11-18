@@ -90,42 +90,67 @@ func (m *Request) Marshal() ([]byte, error) {
 	return b, err
 }
 
-// Unmarshal a byte slice into a Reply.
+// Unmarshal decodes a framed kpasswd reply. On error, the receiver is unchanged.
 func (m *Reply) Unmarshal(b []byte) error {
-	if len(b) < 6 {
+	const headerSize = 6
+	if len(b) < headerSize {
 		return errors.New("kadmin reply is shorter than the 6-byte header")
 	}
-	m.MessageLength = int(binary.BigEndian.Uint16(b[0:2]))
-	if m.MessageLength < 6 || m.MessageLength > len(b) {
-		return fmt.Errorf("kadmin reply has invalid message length %d for %d bytes", m.MessageLength, len(b))
+	var reply Reply
+	reply.MessageLength = int(binary.BigEndian.Uint16(b[0:2]))
+	if reply.MessageLength < headerSize || reply.MessageLength > len(b) {
+		return fmt.Errorf("kadmin reply has invalid message length %d for %d bytes", reply.MessageLength, len(b))
 	}
-	m.Version = int(binary.BigEndian.Uint16(b[2:4]))
-	if m.Version != 1 {
-		return fmt.Errorf("kadmin reply has incorrect protocol version number: %d", m.Version)
+	reply.Version = int(binary.BigEndian.Uint16(b[2:4]))
+	if reply.Version != 1 {
+		return fmt.Errorf("kadmin reply has incorrect protocol version number: %d", reply.Version)
 	}
-	m.APREPLength = int(binary.BigEndian.Uint16(b[4:6]))
-	if m.APREPLength > m.MessageLength-6 {
-		return fmt.Errorf("kadmin reply AP_REP length %d exceeds message payload", m.APREPLength)
+	apRepLength := int(binary.BigEndian.Uint16(b[4:6]))
+	reply.APREPLength = apRepLength
+	payload := b[headerSize:reply.MessageLength]
+	if apRepLength > len(payload) {
+		return fmt.Errorf("kadmin reply AP_REP length %d exceeds message payload", apRepLength)
 	}
-	if m.APREPLength != 0 {
-		err := m.APREP.Unmarshal(b[6 : 6+m.APREPLength])
-		if err != nil {
-			return err
-		}
-		err = m.KRBPriv.Unmarshal(b[6+m.APREPLength : m.MessageLength])
-		if err != nil {
-			return err
-		}
-	} else {
+	if err := reply.unmarshalMessages(payload[:apRepLength], payload[apRepLength:]); err != nil {
+		return err
+	}
+	*m = reply
+	return nil
+}
+
+// Decrypt decodes the result in a protected reply or returns the server's KRBError.
+func (m *Reply) Decrypt(key types.EncryptionKey) error {
+	if m.IsKRBError {
+		return m.KRBError
+	}
+	if err := m.KRBPriv.DecryptEncPart(key); err != nil {
+		return fmt.Errorf("decrypt kpasswd KRB-PRIV: %w", err)
+	}
+	return m.decodeResult(m.KRBPriv.DecryptedEncPart.UserData)
+}
+
+func (m *Reply) unmarshalMessages(apRep, payload []byte) error {
+	if len(apRep) == 0 {
 		m.IsKRBError = true
-		if err := m.KRBError.Unmarshal(b[6:m.MessageLength]); err != nil {
-			return err
+		if err := m.KRBError.Unmarshal(payload); err != nil {
+			return fmt.Errorf("decode kpasswd KRB-ERROR: %w", err)
 		}
-		var parseErr error
-		m.ResultCode, m.Result, m.PasswordPolicy, parseErr = parseResponse(m.KRBError.EData)
-		if parseErr != nil {
-			return parseErr
-		}
+		return m.decodeResult(m.KRBError.EData)
+	}
+	if err := m.APREP.Unmarshal(apRep); err != nil {
+		return fmt.Errorf("decode kpasswd AP-REP: %w", err)
+	}
+	if err := m.KRBPriv.Unmarshal(payload); err != nil {
+		return fmt.Errorf("decode kpasswd KRB-PRIV: %w", err)
+	}
+	return nil
+}
+
+func (m *Reply) decodeResult(b []byte) error {
+	var err error
+	m.ResultCode, m.Result, m.PasswordPolicy, err = parseResponse(b)
+	if err != nil {
+		return fmt.Errorf("decode kpasswd result: %w", err)
 	}
 	return nil
 }
@@ -152,17 +177,4 @@ func parseResponse(b []byte) (uint16, string, *PasswordPolicy, error) {
 		}
 	}
 	return resultCode, string(result), nil, nil
-}
-
-// Decrypt the encrypted part of the KRBError within the change password Reply.
-func (m *Reply) Decrypt(key types.EncryptionKey) error {
-	if m.IsKRBError {
-		return m.KRBError
-	}
-	err := m.KRBPriv.DecryptEncPart(key)
-	if err != nil {
-		return err
-	}
-	m.ResultCode, m.Result, m.PasswordPolicy, err = parseResponse(m.KRBPriv.DecryptedEncPart.UserData)
-	return err
 }
