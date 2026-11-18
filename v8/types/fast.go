@@ -145,12 +145,16 @@ func (v *PAFXFastRequest) Marshal() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return asn1.Marshal(asn1.RawValue{
+	wrapped, err := asn1.Marshal(asn1.RawValue{
 		Class:      asn1.ClassContextSpecific,
 		IsCompound: true,
 		Tag:        0,
 		Bytes:      b,
 	})
+	if err != nil {
+		return wrapped, fmt.Errorf("encode PA-FX-FAST-REQUEST wrapper: %w", err)
+	}
+	return wrapped, nil
 }
 
 // Unmarshal unmarshals DER bytes into PAFXFastRequest.
@@ -158,7 +162,7 @@ func (v *PAFXFastRequest) Unmarshal(b []byte) error {
 	var raw asn1.RawValue
 	rest, err := asn1.Unmarshal(b, &raw)
 	if err != nil {
-		return err
+		return fmt.Errorf("decode PA-FX-FAST-REQUEST wrapper: %w", err)
 	}
 	if len(rest) != 0 {
 		return fmt.Errorf("trailing ASN.1 data: %d bytes", len(rest))
@@ -175,12 +179,16 @@ func (v *PAFXFastReply) Marshal() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return asn1.Marshal(asn1.RawValue{
+	wrapped, err := asn1.Marshal(asn1.RawValue{
 		Class:      asn1.ClassContextSpecific,
 		IsCompound: true,
 		Tag:        0,
 		Bytes:      b,
 	})
+	if err != nil {
+		return wrapped, fmt.Errorf("encode PA-FX-FAST-REPLY wrapper: %w", err)
+	}
+	return wrapped, nil
 }
 
 // Unmarshal unmarshals DER bytes into PAFXFastReply.
@@ -188,7 +196,7 @@ func (v *PAFXFastReply) Unmarshal(b []byte) error {
 	var raw asn1.RawValue
 	rest, err := asn1.Unmarshal(b, &raw)
 	if err != nil {
-		return err
+		return fmt.Errorf("decode PA-FX-FAST-REPLY wrapper: %w", err)
 	}
 	if len(rest) != 0 {
 		return fmt.Errorf("trailing ASN.1 data: %d bytes", len(rest))
@@ -259,7 +267,7 @@ func (v *PAFXError) Unmarshal(b []byte) error {
 	var raw asn1.RawValue
 	rest, err := asn1.Unmarshal(b, &raw)
 	if err != nil {
-		return err
+		return fmt.Errorf("decode PA-FX-ERROR wrapper: %w", err)
 	}
 	if len(rest) != 0 {
 		return fmt.Errorf("trailing ASN.1 data: %d bytes", len(rest))

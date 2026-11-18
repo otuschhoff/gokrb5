@@ -824,6 +824,30 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 53 (2026-11-18, Kerberos type error contracts; Q-03):
+The v8 types package now identifies the failed ASN.1 operation while
+preserving syntax and structural causes. Legacy decoders still accept a
+valid ASN.1 prefix, while MS-KILE, FAST, and KKDCP keep their existing
+trailing-data checks. The enctype-info accessors reuse their sequence
+decoders without changing type checks or preauthentication preference.
+Random sequence generation and network interface enumeration retain their
+underlying errors. Wire encodings, key generation, and address selection
+are unchanged.
+
+Regression tests cover typed decode and encode errors, permissive and strict
+trailing-data behavior, and entropy read failures that leave authenticator
+state unchanged. Both module suites and changed-line lint gates passed, as
+did focused race, build, and vet checks and Linux/386 tests for types and
+ASN.1 helpers. Cross-package v8 statement coverage remained 87.0%.
+`FuzzKDCProxyMessage`, `FuzzMSKILEUnmarshal`, and `FuzzFASTUnmarshal` passed
+60-second runs with 1,526,999, 987,573, and 1,127,204 executions, respectively.
+Live interoperability was not run; Docker daemon access was denied.
+
+The canonical v8 total fell from 806 to 772 (`wrapcheck`: 234 to 200),
+clearing all 34 `wrapcheck` reports in types. The supplemental v8 total
+fell from 3,688 to 3,686. Neither inventory had new findings, and v8
+continued to report zero gosec findings.
+
 Slice 52 (2026-11-18, NDR signed primitive reads; Q-03):
 The four signed integer readers share a fixed-width decoder that uses the
 NDR byte order directly on the bounded read. Alignment and truncation

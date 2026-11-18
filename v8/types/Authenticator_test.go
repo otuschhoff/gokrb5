@@ -1,11 +1,18 @@
 package types
 
 import (
+	"bytes"
+	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/otuschhoff/gokrb5/v8/iana"
@@ -13,6 +20,43 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 )
+
+func TestAuthenticatorSequenceReadError(t *testing.T) {
+	// rand.Reader is process-wide; keep this test sequential and restore it before parallel tests run.
+	cause := errors.New("test random reader failure")
+	reader := rand.Reader
+	t.Cleanup(func() { rand.Reader = reader })
+	rand.Reader = iotest.ErrReader(cause)
+
+	var zero Authenticator
+	auth, createErr := NewAuthenticator("EXAMPLE.ORG", NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user"))
+	want := zero
+	want.SeqNumber = 23
+	want.SubKey = EncryptionKey{KeyType: 17, KeyValue: []byte{1}}
+	existing := want
+	existing.SubKey.KeyValue = bytes.Clone(want.SubKey.KeyValue)
+	updateErr := existing.GenerateSeqNumberAndSubKey(18, 32)
+	if !reflect.DeepEqual(auth, zero) || !reflect.DeepEqual(existing, want) {
+		t.Fatal("sequence read failure published authenticator state")
+	}
+	for _, err := range []error{createErr, updateErr} {
+		if !errors.Is(err, cause) || !strings.HasPrefix(err.Error(), "generate authenticator sequence number:") {
+			t.Errorf("error = %v, want sequence generation context and original read cause", err)
+		}
+	}
+}
+
+func TestAuthenticatorMarshalErrorContext(t *testing.T) {
+	t.Parallel()
+
+	var auth Authenticator
+	auth.CTime = time.Date(10000, time.January, 1, 0, 0, 0, 0, time.UTC)
+	b, err := auth.Marshal()
+	if b != nil {
+		t.Fatal("marshal failure returned bytes")
+	}
+	checkASN1ErrorContext[asn1.StructuralError](t, err, "encode authenticator:")
+}
 
 func unmarshalAuthenticatorTest(t *testing.T, v string) Authenticator {
 	var a Authenticator

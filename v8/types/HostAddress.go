@@ -51,17 +51,18 @@ func GetHostAddress(s string) (HostAddress, error) {
 // GetAddress returns a string representation of the HostAddress.
 func (h *HostAddress) GetAddress() (string, error) {
 	var b []byte
-	_, err := asn1.Unmarshal(h.Address, &b)
-	return string(b), err
+	if _, err := asn1.Unmarshal(h.Address, &b); err != nil {
+		return string(b), fmt.Errorf("decode host address: %w", err)
+	}
+	return string(b), nil
 }
 
 // LocalHostAddresses returns a HostAddresses struct for the local machines interface IP addresses.
 func LocalHostAddresses() (HostAddresses, error) {
 	var ha HostAddresses
-	var err error
 	ifs, err := net.Interfaces()
 	if err != nil {
-		return ha, err
+		return ha, fmt.Errorf("list local network interfaces: %w", err)
 	}
 	for _, iface := range ifs {
 		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {

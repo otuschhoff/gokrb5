@@ -2,6 +2,7 @@ package types
 
 import (
 	"crypto/rand"
+	"fmt"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
 
@@ -33,29 +34,26 @@ type Checksum struct {
 
 // Unmarshal bytes into the EncryptedData.
 func (a *EncryptedData) Unmarshal(b []byte) error {
-	_, err := asn1.Unmarshal(b, a)
-	return err
+	return unmarshalASN1Prefix(b, a)
 }
 
 // Marshal the EncryptedData.
 func (a *EncryptedData) Marshal() ([]byte, error) {
 	edb, err := asn1.Marshal(*a)
 	if err != nil {
-		return edb, err
+		return edb, fmt.Errorf("encode encrypted data: %w", err)
 	}
 	return edb, nil
 }
 
 // Unmarshal bytes into the EncryptionKey.
 func (a *EncryptionKey) Unmarshal(b []byte) error {
-	_, err := asn1.Unmarshal(b, a)
-	return err
+	return unmarshalASN1Prefix(b, a)
 }
 
 // Unmarshal bytes into the Checksum.
 func (a *Checksum) Unmarshal(b []byte) error {
-	_, err := asn1.Unmarshal(b, a)
-	return err
+	return unmarshalASN1Prefix(b, a)
 }
 
 // GenerateEncryptionKey creates a new EncryptionKey with a random key value.
@@ -66,7 +64,7 @@ func GenerateEncryptionKey(etype etype.EType) (EncryptionKey, error) {
 	b := make([]byte, etype.GetKeyByteSize())
 	_, err := rand.Read(b)
 	if err != nil {
-		return k, err
+		return k, fmt.Errorf("generate encryption key: %w", err)
 	}
 	k.KeyValue = b
 	return k, nil

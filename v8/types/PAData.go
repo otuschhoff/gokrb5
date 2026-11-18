@@ -91,78 +91,67 @@ type PAReqEncPARep struct {
 
 // Unmarshal bytes into the PAData
 func (pa *PAData) Unmarshal(b []byte) error {
-	_, err := asn1.Unmarshal(b, pa)
-	return err
+	return unmarshalASN1Prefix(b, pa)
 }
 
 // Unmarshal bytes into the PADataSequence
 func (pas *PADataSequence) Unmarshal(b []byte) error {
-	_, err := asn1.Unmarshal(b, pas)
-	return err
+	return unmarshalASN1Prefix(b, pas)
 }
 
 // Unmarshal bytes into the PAReqEncPARep
 func (pa *PAReqEncPARep) Unmarshal(b []byte) error {
-	_, err := asn1.Unmarshal(b, pa)
-	return err
+	return unmarshalASN1Prefix(b, pa)
 }
 
 // Unmarshal bytes into the PAEncTimestamp
 func (pa *PAEncTimestamp) Unmarshal(b []byte) error {
-	_, err := asn1.Unmarshal(b, pa)
-	return err
+	return unmarshalASN1Prefix(b, pa)
 }
 
 // Unmarshal bytes into the PAEncTSEnc
 func (pa *PAEncTSEnc) Unmarshal(b []byte) error {
-	_, err := asn1.Unmarshal(b, pa)
-	return err
+	return unmarshalASN1Prefix(b, pa)
 }
 
 // Unmarshal bytes into the ETypeInfo
 func (a *ETypeInfo) Unmarshal(b []byte) error {
-	_, err := asn1.Unmarshal(b, a)
-	return err
+	return unmarshalASN1Prefix(b, a)
 }
 
 // Unmarshal bytes into the ETypeInfoEntry
 func (a *ETypeInfoEntry) Unmarshal(b []byte) error {
-	_, err := asn1.Unmarshal(b, a)
-	return err
+	return unmarshalASN1Prefix(b, a)
 }
 
 // Unmarshal bytes into the ETypeInfo2
 func (a *ETypeInfo2) Unmarshal(b []byte) error {
-	_, err := asn1.Unmarshal(b, a)
-	return err
+	return unmarshalASN1Prefix(b, a)
 }
 
 // Unmarshal bytes into the ETypeInfo2Entry
 func (a *ETypeInfo2Entry) Unmarshal(b []byte) error {
-	_, err := asn1.Unmarshal(b, a)
-	return err
+	return unmarshalASN1Prefix(b, a)
 }
 
 // GetETypeInfo returns an ETypeInfo from the PAData.
 func (pa *PAData) GetETypeInfo() (ETypeInfo, error) {
 	var d ETypeInfo
-	var err error
 	if pa.PADataType != patype.PA_ETYPE_INFO {
-		err = fmt.Errorf("PAData does not contain PA EType Info data. TypeID Expected: %v; Actual: %v", patype.PA_ETYPE_INFO, pa.PADataType)
-		return d, err
+		return d, fmt.Errorf("PAData does not contain PA EType Info data. TypeID Expected: %v; Actual: %v",
+			patype.PA_ETYPE_INFO, pa.PADataType)
 	}
-	_, err = asn1.Unmarshal(pa.PADataValue, &d)
+	err := d.Unmarshal(pa.PADataValue)
 	return d, err
 }
 
 // GetETypeInfo2 returns an ETypeInfo2 from the PAData.
 func (pa *PAData) GetETypeInfo2() (ETypeInfo2, error) {
 	var d ETypeInfo2
-	var err error
 	if pa.PADataType != patype.PA_ETYPE_INFO2 {
-		err = fmt.Errorf("PAData does not contain PA EType Info 2 data. TypeID Expected: %v; Actual: %v", patype.PA_ETYPE_INFO2, pa.PADataType)
-		return d, err
+		return d, fmt.Errorf("PAData does not contain PA EType Info 2 data. TypeID Expected: %v; Actual: %v",
+			patype.PA_ETYPE_INFO2, pa.PADataType)
 	}
-	_, err = asn1.Unmarshal(pa.PADataValue, &d)
+	err := d.Unmarshal(pa.PADataValue)
 	return d, err
 }

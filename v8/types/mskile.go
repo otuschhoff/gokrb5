@@ -114,13 +114,17 @@ type KerbDMSAKeyPackage struct {
 }
 
 func marshalMSKILE(v interface{}) ([]byte, error) {
-	return asn1.Marshal(v)
+	b, err := asn1.Marshal(v)
+	if err != nil {
+		return b, fmt.Errorf("encode ASN.1 %T: %w", v, err)
+	}
+	return b, nil
 }
 
 func unmarshalMSKILE(b []byte, v interface{}) error {
 	rest, err := asn1.Unmarshal(b, v)
 	if err != nil {
-		return err
+		return fmt.Errorf("decode ASN.1 into %T: %w", v, err)
 	}
 	if len(rest) != 0 {
 		return fmt.Errorf("trailing ASN.1 data: %d bytes", len(rest))

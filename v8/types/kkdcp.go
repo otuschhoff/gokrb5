@@ -46,14 +46,18 @@ func NewKDCProxyMessage(message []byte, targetDomain string, dcLocatorHint int32
 
 // Marshal encodes the KDC-PROXY-MESSAGE using DER.
 func (m KDCProxyMessage) Marshal() ([]byte, error) {
-	return asn1.Marshal(m)
+	b, err := asn1.Marshal(m)
+	if err != nil {
+		return b, fmt.Errorf("encode KDC-PROXY-MESSAGE: %w", err)
+	}
+	return b, nil
 }
 
 // Unmarshal decodes a DER-encoded KDC-PROXY-MESSAGE.
 func (m *KDCProxyMessage) Unmarshal(b []byte) error {
 	rest, err := asn1.Unmarshal(b, m)
 	if err != nil {
-		return err
+		return fmt.Errorf("decode KDC-PROXY-MESSAGE: %w", err)
 	}
 	if len(rest) != 0 {
 		return fmt.Errorf("KDC-PROXY-MESSAGE contains %d trailing bytes", len(rest))

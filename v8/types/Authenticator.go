@@ -34,7 +34,7 @@ type Authenticator struct {
 func NewAuthenticator(realm string, cname PrincipalName) (Authenticator, error) {
 	seq, err := rand.Int(rand.Reader, big.NewInt(math.MaxUint32))
 	if err != nil {
-		return Authenticator{}, err
+		return Authenticator{}, fmt.Errorf("generate authenticator sequence number: %w", err)
 	}
 	t := time.Now().UTC()
 	return Authenticator{
@@ -52,7 +52,7 @@ func NewAuthenticator(realm string, cname PrincipalName) (Authenticator, error) 
 func (a *Authenticator) GenerateSeqNumberAndSubKey(keyType int32, keySize int) error {
 	seq, err := rand.Int(rand.Reader, big.NewInt(math.MaxUint32))
 	if err != nil {
-		return err
+		return fmt.Errorf("generate authenticator sequence number: %w", err)
 	}
 	a.SeqNumber = seq.Int64() & 0x3fffffff
 	// Generate subkey value
@@ -69,15 +69,18 @@ func (a *Authenticator) GenerateSeqNumberAndSubKey(keyType int32, keySize int) e
 
 // Unmarshal bytes into the Authenticator.
 func (a *Authenticator) Unmarshal(b []byte) error {
-	_, err := asn1.UnmarshalWithParams(b, a, fmt.Sprintf("application,explicit,tag:%v", asnAppTag.Authenticator))
-	return err
+	params := fmt.Sprintf("application,explicit,tag:%v", asnAppTag.Authenticator)
+	if _, err := asn1.UnmarshalWithParams(b, a, params); err != nil {
+		return fmt.Errorf("decode authenticator: %w", err)
+	}
+	return nil
 }
 
 // Marshal the Authenticator.
 func (a *Authenticator) Marshal() ([]byte, error) {
 	b, err := asn1.Marshal(*a)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("encode authenticator: %w", err)
 	}
 	b = asn1tools.AddASNAppTag(b, asnAppTag.Authenticator)
 	return b, nil

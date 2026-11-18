@@ -51,8 +51,9 @@ func TestHostAddressGetAddress(t *testing.T) {
 	}
 	assert.Equal(t, "host.example.org", got)
 	host.Address = []byte{0x04, 0x02, 0x01}
-	_, err = host.GetAddress()
-	assert.Error(t, err)
+	got, err = host.GetAddress()
+	assert.Empty(t, got)
+	checkASN1ErrorContext[asn1.SyntaxError](t, err, "decode host address:")
 }
 
 func TestHostAddressesFromNetIPs(t *testing.T) {
