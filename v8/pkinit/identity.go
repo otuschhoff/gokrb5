@@ -50,8 +50,11 @@ func NewIdentity(certificate *x509.Certificate, chain []*x509.Certificate, signe
 	if err != nil {
 		return nil, fmt.Errorf("marshal PKINIT certificate key: %w", err)
 	}
-	signerKey, err := x509.MarshalPKIXPublicKey(signer.Public())
-	if err != nil || !bytes.Equal(certificateKey, signerKey) {
+	signerKey, err := marshalSignerPublicKey(signer)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(certificateKey, signerKey) {
 		return nil, fmt.Errorf("PKINIT signer does not match certificate")
 	}
 	identity := &Identity{Certificate: certificate, Chain: chain, Signer: signer, KeyTrust: keyTrust}
@@ -195,7 +198,7 @@ func parsePrivateKey(der []byte) (crypto.Signer, error) {
 }
 
 func selectSigningCertificate(certificates []*x509.Certificate, signer crypto.Signer) (*x509.Certificate, []*x509.Certificate, error) {
-	want, err := x509.MarshalPKIXPublicKey(signer.Public())
+	want, err := marshalSignerPublicKey(signer)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -208,6 +211,14 @@ func selectSigningCertificate(certificates []*x509.Certificate, signer crypto.Si
 		}
 	}
 	return nil, nil, fmt.Errorf("PKINIT certificate matching private key was not found")
+}
+
+func marshalSignerPublicKey(signer crypto.Signer) ([]byte, error) {
+	der, err := x509.MarshalPKIXPublicKey(signer.Public())
+	if err != nil {
+		return nil, fmt.Errorf("marshal PKINIT signer public key: %w", err)
+	}
+	return der, nil
 }
 
 func certificateHasEKU(certificate *x509.Certificate, accepted ...asn1.ObjectIdentifier) bool {

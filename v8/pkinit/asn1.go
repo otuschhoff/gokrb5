@@ -144,7 +144,7 @@ type PKINITSuppPubInfo struct {
 func strictUnmarshal(b []byte, value interface{}) error {
 	rest, err := asn1.Unmarshal(b, value)
 	if err != nil {
-		return err
+		return fmt.Errorf("decode PKINIT DER value: %w", err)
 	}
 	if len(rest) != 0 {
 		return fmt.Errorf("PKINIT value contains %d trailing bytes", len(rest))
@@ -152,21 +152,34 @@ func strictUnmarshal(b []byte, value interface{}) error {
 	return nil
 }
 
+func marshalDER(name string, value any) ([]byte, error) {
+	der, err := asn1.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("marshal PKINIT %s: %w", name, err)
+	}
+	return der, nil
+}
+
 // Marshal marshals PAPKAsReq to its DER encoding.
-func (m PAPKAsReq) Marshal() ([]byte, error) { return asn1.Marshal(m) }
+func (m PAPKAsReq) Marshal() ([]byte, error) { return marshalDER("PA-PK-AS-REQ", m) }
 
 // Unmarshal unmarshals DER bytes into PAPKAsReq.
 func (m *PAPKAsReq) Unmarshal(b []byte) error { return strictUnmarshal(b, m) }
+
 func marshalExplicit(tag int, value interface{}) ([]byte, error) {
 	inner, err := asn1.Marshal(value)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("marshal PKINIT field [%d]: %w", tag, err)
 	}
-	return asn1.Marshal(asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: tag, IsCompound: true, Bytes: inner})
+	der, err := asn1.Marshal(asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: tag, IsCompound: true, Bytes: inner})
+	if err != nil {
+		return nil, fmt.Errorf("wrap PKINIT field [%d] in DER: %w", tag, err)
+	}
+	return der, nil
 }
 
 func marshalSequence(fields ...[]byte) ([]byte, error) {
-	return asn1.Marshal(asn1.RawValue{
+	return marshalDER("DER sequence", asn1.RawValue{
 		Class: asn1.ClassUniversal, Tag: asn1.TagSequence, IsCompound: true,
 		Bytes: bytes.Join(fields, nil),
 	})
@@ -188,7 +201,7 @@ func sequenceFields(b []byte) ([]asn1.RawValue, error) {
 		var err error
 		rest, err = asn1.Unmarshal(rest, &field)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decode PKINIT DER sequence field: %w", err)
 		}
 		if field.Class != asn1.ClassContextSpecific {
 			return nil, fmt.Errorf("PKINIT field has class %d, want context-specific", field.Class)
@@ -313,9 +326,13 @@ func (m PAPKAsRep) Marshal() ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		return asn1.Marshal(asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: inner})
+		return marshalDER("PA-PK-AS-REP dhInfo", asn1.RawValue{
+			Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: inner,
+		})
 	}
-	return asn1.Marshal(asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 1, Bytes: m.EncKeyPack})
+	return marshalDER("PA-PK-AS-REP encKeyPack", asn1.RawValue{
+		Class: asn1.ClassContextSpecific, Tag: 1, Bytes: m.EncKeyPack,
+	})
 }
 
 // Unmarshal decodes one supported PA-PK-AS-REP CHOICE arm.
@@ -355,7 +372,9 @@ func (m DHRepInfo) Marshal() ([]byte, error) {
 	if len(m.DHSignedData) == 0 {
 		return nil, fmt.Errorf("PKINIT dhSignedData is required")
 	}
-	field, err := asn1.Marshal(asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, Bytes: m.DHSignedData})
+	field, err := marshalDER("dhSignedData", asn1.RawValue{
+		Class: asn1.ClassContextSpecific, Tag: 0, Bytes: m.DHSignedData,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -416,7 +435,7 @@ func (m KDCDHKeyInfo) Marshal() ([]byte, error) {
 	if m.Nonce < 0 || uint64(m.Nonce) > math.MaxUint32 {
 		return nil, fmt.Errorf("PKINIT nonce %d is outside uint32", m.Nonce)
 	}
-	return asn1.Marshal(m)
+	return marshalDER("KDCDHKeyInfo", m)
 }
 
 // Unmarshal unmarshals DER bytes into KDCDHKeyInfo.
@@ -431,7 +450,7 @@ func (m *KDCDHKeyInfo) Unmarshal(b []byte) error {
 }
 
 // Marshal marshals ReplyKeyPack to its DER encoding.
-func (m ReplyKeyPack) Marshal() ([]byte, error) { return asn1.Marshal(m) }
+func (m ReplyKeyPack) Marshal() ([]byte, error) { return marshalDER("ReplyKeyPack", m) }
 
 // Unmarshal unmarshals DER bytes into ReplyKeyPack.
 func (m *ReplyKeyPack) Unmarshal(b []byte) error { return strictUnmarshal(b, m) }

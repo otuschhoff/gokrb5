@@ -1,6 +1,7 @@
 package pkinit
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -9,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"testing"
 	"time"
@@ -18,6 +20,10 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
+
+type unsupportedPublicKeySigner struct{ crypto.Signer }
+
+func (unsupportedPublicKeySigner) Public() crypto.PublicKey { return struct{}{} }
 
 func mustPKINITTestType[T any](t *testing.T, value any) T {
 	t.Helper()
@@ -83,6 +89,26 @@ func TestIdentityPublicHelpersAndErrors(t *testing.T) {
 	}
 	_, err = FromPKCS12([]byte("invalid"), "password")
 	require.ErrorContains(t, err, "decode PKINIT PKCS#12")
+}
+
+func TestIdentitySignerPublicKeyError(t *testing.T) {
+	t.Parallel()
+
+	certificate, key := testClientCertificate(t, "alice@EXAMPLE.COM", oidClientAuth)
+	signer := unsupportedPublicKeySigner{Signer: key}
+	_, cause := x509.MarshalPKIXPublicKey(signer.Public())
+	require.Error(t, cause)
+
+	identity, err := NewIdentity(certificate, nil, signer, false)
+	require.Nil(t, identity)
+	require.ErrorContains(t, err, "marshal PKINIT signer public key")
+	require.EqualError(t, errors.Unwrap(err), cause.Error())
+
+	leaf, chain, err := selectSigningCertificate([]*x509.Certificate{certificate}, signer)
+	require.Nil(t, leaf)
+	require.Nil(t, chain)
+	require.ErrorContains(t, err, "marshal PKINIT signer public key")
+	require.EqualError(t, errors.Unwrap(err), cause.Error())
 }
 
 func TestPEMIdentityFormatsAndFailures(t *testing.T) {

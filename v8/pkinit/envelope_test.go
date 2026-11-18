@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"fmt"
 	"math/big"
 	"testing"
@@ -36,6 +37,59 @@ func TestEnvelopedDataRejectsWrongRecipientAndTrailingData(t *testing.T) {
 	require.ErrorContains(t, err, "recipient does not match")
 	_, err = DecryptEnvelopedData(append(der, 0), certificate, privateKey)
 	require.ErrorContains(t, err, "trailing bytes")
+}
+
+func TestEnvelopedDataDERDecodeErrors(t *testing.T) {
+	t.Parallel()
+
+	certificate, privateKey := testRSARecipient(t)
+	plaintext, err := DecryptEnvelopedData([]byte{0x30}, certificate, privateKey)
+	require.Nil(t, plaintext)
+	require.ErrorContains(t, err, "decode PKINIT CMS ContentInfo: parse DER")
+	require.ErrorAs(t, err, new(asn1.SyntaxError))
+}
+
+func TestEnvelopedDataInvalidIV(t *testing.T) {
+	t.Parallel()
+
+	certificate, privateKey := testRSARecipient(t)
+	der, err := EncryptEnvelopedData([]byte("reply-key-pack"), certificate, AES128CBC)
+	require.NoError(t, err)
+
+	var info cmsContentInfo
+	require.NoError(t, strictStdUnmarshal(der, &info))
+	var envelope cmsEnvelopedData
+	require.NoError(t, strictStdUnmarshal(info.Content.Bytes, &envelope))
+
+	tests := []struct {
+		name       string
+		parameters asn1.RawValue
+		wantCause  bool
+	}{
+		{name: "not an octet string", parameters: asn1.NullRawValue, wantCause: true},
+		{name: "wrong size", parameters: asn1.RawValue{Tag: asn1.TagOctetString, Bytes: []byte{1}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			envelope.EncryptedContentInfo.ContentEncryptionAlgorithm.Parameters = tt.parameters
+			inner, err := asn1.Marshal(envelope)
+			require.NoError(t, err)
+			info.Content.FullBytes = nil
+			info.Content.Bytes = inner
+			invalid, err := asn1.Marshal(info)
+			require.NoError(t, err)
+
+			plaintext, err := DecryptEnvelopedData(invalid, certificate, privateKey)
+			require.Nil(t, plaintext)
+			const context = "invalid PKINIT CMS content cipher IV"
+			if tt.wantCause {
+				require.ErrorContains(t, err, context)
+				require.ErrorAs(t, err, new(asn1.StructuralError))
+				return
+			}
+			require.EqualError(t, err, context)
+		})
+	}
 }
 
 func testRSARecipient(t *testing.T) (*x509.Certificate, *rsa.PrivateKey) {

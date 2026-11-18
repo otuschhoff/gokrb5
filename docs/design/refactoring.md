@@ -824,6 +824,26 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 45 (2026-11-18, PKINIT error contracts; Q-03):
+PKINIT DER encoders and decoders, CMS envelope operations, and signer
+public-key encoding now identify the failed operation and preserve the
+underlying cause. A malformed CMS IV retains its decode error; a well-formed
+IV of the wrong size is still rejected separately. An unencodable signer
+key no longer looks like a certificate mismatch. Successful wire encodings,
+cipher selection, and certificate selection and trust rules are unchanged.
+
+Regression tests pin the request and both reply encodings and verify error
+causes for invalid DER, invalid IVs, and unsupported signer keys. Both module
+test suites and changed-line lint gates passed. The v8 PKINIT, client, PKU2U,
+and `gokinit` packages passed build, vet, and race tests. `FuzzPKASRep` passed a
+60-second run (751,076 executions), and v8 cross-package statement coverage
+was 86.7%, above the 86.0% floor. Live KDC interoperability was not run;
+Docker daemon access was denied.
+
+The canonical v8 total fell from 927 to 908 (`wrapcheck`: 347 to 330).
+All 17 PKINIT `wrapcheck` findings were resolved, with no new canonical
+findings and zero gosec findings.
+
 Slice 44 (2026-11-18, v8 command error contracts):
 `gokinit`, `goklist`, and `gokdestroy` preserve flag parsing errors while
 retaining help and usage exit codes and quiet and silent behavior. Shared

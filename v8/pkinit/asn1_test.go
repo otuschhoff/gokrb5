@@ -2,11 +2,117 @@ package pkinit
 
 import (
 	"bytes"
+	"encoding/hex"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
 )
+
+func TestPKINITDEREncodings(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		marshal func() ([]byte, error)
+		wantHex string
+	}{
+		{
+			name:    "request",
+			marshal: PAPKAsReq{SignedAuthPack: []byte("signed")}.Marshal,
+			wantHex: "300880067369676e6564",
+		},
+		{
+			name:    "dh reply",
+			marshal: PAPKAsRep{DHInfo: &DHRepInfo{DHSignedData: []byte("signed")}}.Marshal,
+			wantHex: "a00a300880067369676e6564",
+		},
+		{
+			name:    "rsa reply",
+			marshal: PAPKAsRep{EncKeyPack: []byte("key")}.Marshal,
+			wantHex: "81036b6579",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			der, err := tt.marshal()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := hex.EncodeToString(der); got != tt.wantHex {
+				t.Errorf("DER = %s, want %s", got, tt.wantHex)
+			}
+		})
+	}
+}
+
+func TestPKINITDERDecodeErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name, context string
+		decode        func([]byte) error
+		der           []byte
+	}{
+		{
+			name:    "truncated request",
+			context: "decode PKINIT DER value",
+			decode:  new(PAPKAsReq).Unmarshal,
+			der:     []byte{0x30},
+		},
+		{
+			name:    "truncated sequence field",
+			context: "decode PKINIT DER sequence field",
+			decode:  new(AuthPack).Unmarshal,
+			der:     []byte{0x30, 0x01, 0xa0},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tt.decode(tt.der)
+			if _, ok := errors.AsType[asn1.SyntaxError](err); !ok || !strings.Contains(err.Error(), tt.context) {
+				t.Fatalf("want %q with ASN.1 syntax cause, got %v", tt.context, err)
+			}
+		})
+	}
+}
+
+func TestPKINITDERMarshalErrors(t *testing.T) {
+	t.Parallel()
+
+	pack := AuthPack{
+		PKAuthenticator: PKAuthenticator{
+			CTime:      time.Date(2026, 9, 6, 12, 34, 56, 0, time.UTC),
+			PAChecksum: []byte{1},
+		},
+		SupportedKDFs: []KDFAlgorithmID{{ID: asn1.ObjectIdentifier{1}}},
+	}
+	keyInfo := KDCDHKeyInfo{DHKeyExpiration: time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)}
+	tests := []struct {
+		name, context string
+		marshal       func() ([]byte, error)
+	}{
+		{name: "invalid kdf oid", context: "marshal PKINIT field [4]", marshal: pack.Marshal},
+		{name: "out-of-range expiry", context: "marshal PKINIT KDCDHKeyInfo", marshal: keyInfo.Marshal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			der, err := tt.marshal()
+			_, typed := errors.AsType[asn1.StructuralError](err)
+			if der != nil || !typed || !strings.Contains(err.Error(), tt.context) {
+				t.Fatalf("want no output and %q with ASN.1 structural cause, got %x, %v", tt.context, der, err)
+			}
+		})
+	}
+}
 
 func TestAuthPackRoundTrip(t *testing.T) {
 	now := time.Date(2026, 9, 6, 12, 34, 56, 0, time.UTC)

@@ -11,6 +11,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -97,7 +98,7 @@ func encryptEnvelopedData(random io.Reader, content []byte, recipient *x509.Cert
 	}
 	ivDER, err := asn1.Marshal(iv)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("marshal PKINIT CMS content cipher IV: %w", err)
 	}
 	enveloped := cmsEnvelopedData{
 		Version: 0,
@@ -117,10 +118,14 @@ func encryptEnvelopedData(random io.Reader, content []byte, recipient *x509.Cert
 	if err != nil {
 		return nil, fmt.Errorf("marshal PKINIT CMS EnvelopedData: %w", err)
 	}
-	return asn1.Marshal(cmsContentInfo{
+	der, err := asn1.Marshal(cmsContentInfo{
 		ContentType: oidCMSEnvelopedData,
 		Content:     asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: envelopedDER},
 	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal PKINIT CMS ContentInfo: %w", err)
+	}
+	return der, nil
 }
 
 // DecryptEnvelopedData decrypts a strict one-recipient PKINIT CMS envelope.
@@ -153,7 +158,10 @@ func DecryptEnvelopedData(der []byte, recipient *x509.Certificate, privateKey cr
 	if err != nil {
 		return nil, fmt.Errorf("decrypt PKINIT CMS content key: %w", err)
 	}
-	encryptedContent := enveloped.EncryptedContentInfo
+	return decryptCMSContent(enveloped.EncryptedContentInfo, contentKey)
+}
+
+func decryptCMSContent(encryptedContent cmsEncryptedContentInfo, contentKey []byte) ([]byte, error) {
 	if !encryptedContent.ContentType.Equal(oidCMSData) {
 		return nil, fmt.Errorf("unsupported PKINIT CMS encrypted content type")
 	}
@@ -162,8 +170,12 @@ func DecryptEnvelopedData(der []byte, recipient *x509.Certificate, privateKey cr
 		return nil, err
 	}
 	var iv []byte
-	if err := strictStdUnmarshal(encryptedContent.ContentEncryptionAlgorithm.Parameters.FullBytes, &iv); err != nil || len(iv) != block.BlockSize() {
-		return nil, fmt.Errorf("invalid PKINIT CMS content cipher IV")
+	const invalidIV = "invalid PKINIT CMS content cipher IV"
+	if err := strictStdUnmarshal(encryptedContent.ContentEncryptionAlgorithm.Parameters.FullBytes, &iv); err != nil {
+		return nil, fmt.Errorf("%s: %w", invalidIV, err)
+	}
+	if len(iv) != block.BlockSize() {
+		return nil, errors.New(invalidIV)
 	}
 	if len(encryptedContent.EncryptedContent) == 0 || len(encryptedContent.EncryptedContent)%block.BlockSize() != 0 {
 		return nil, fmt.Errorf("invalid PKINIT CMS ciphertext length")
@@ -196,10 +208,17 @@ func newContentCipher(random io.Reader, algorithm ContentEncryptionAlgorithm) (c
 func contentCipher(algorithm asn1.ObjectIdentifier, key []byte) (cipher.Block, error) {
 	switch {
 	case algorithm.Equal(oidAES128CBC) && len(key) == 16, algorithm.Equal(oidAES256CBC) && len(key) == 32:
-		return aes.NewCipher(key)
+		block, err := aes.NewCipher(key)
+		if err != nil {
+			return nil, fmt.Errorf("initialize PKINIT CMS AES cipher: %w", err)
+		}
+		return block, nil
 	case algorithm.Equal(oidTripleDESCBC) && len(key) == 24:
-		// #nosec G405 -- used only for the legacy CMS TripleDES-CBC OID.
-		return des.NewTripleDESCipher(key)
+		block, err := des.NewTripleDESCipher(key) // #nosec G405 -- used only for the legacy CMS TripleDES-CBC OID.
+		if err != nil {
+			return nil, fmt.Errorf("initialize PKINIT CMS TripleDES cipher: %w", err)
+		}
+		return block, nil
 	default:
 		return nil, fmt.Errorf("unsupported PKINIT CMS content encryption algorithm or key size")
 	}
@@ -234,7 +253,7 @@ func pkcs7Unpad(content []byte, blockSize int) ([]byte, error) {
 func strictStdUnmarshal(der []byte, value interface{}) error {
 	rest, err := asn1.Unmarshal(der, value)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse DER: %w", err)
 	}
 	if len(rest) != 0 {
 		return fmt.Errorf("CMS value contains %d trailing bytes", len(rest))
