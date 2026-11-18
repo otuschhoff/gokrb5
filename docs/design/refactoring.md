@@ -824,6 +824,25 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 59 (2026-11-19, PKINIT KDF portability; Q-05):
+The RFC 8636 counter KDF rounds the output length with division and remainder
+instead of an addition that can overflow. It checks the block count against
+the 32-bit wire counter in a widened type and checks rounded slice capacity
+before allocating. This fixes the Linux/386 compile failure documented in
+Slice 58 and the oversized-length panic reproduced on amd64. Counter numbering
+and derived bytes are unchanged.
+
+Regression tests cover empty output, exact and partial digest blocks, and
+oversized output. Existing RFC 4556 and RFC 8636 vectors pass. Both module
+suites passed on the default architecture, and the full v8 suite ran
+successfully on Linux/386, including PKINIT and SPNEGO. Focused race, build,
+and vet checks passed. V8 cross-package statement coverage remained 87.2%.
+Live interoperability was not run; Docker access was unavailable.
+
+Both changed-line lint gates passed. The canonical and supplemental v8
+inventories were unchanged at 647 and 3,685 findings, respectively, and
+v8 continued to report zero gosec findings.
+
 Slice 58 (2026-11-19, SPNEGO HTTP error contracts; Q-03):
 The HTTP clients preserve typed transport, URL, and host/port errors with
 operation context. Both clients use the same request-body replay helper.

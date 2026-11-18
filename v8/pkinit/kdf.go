@@ -109,18 +109,21 @@ func pkinitUint32(name string, value int) (uint32, error) {
 }
 
 func counterKDF(hashFunc func() hash.Hash, secret, otherInfo []byte, outputBytes int) ([]byte, error) {
-	hashSize := hashFunc().Size()
 	if outputBytes < 0 {
 		return nil, fmt.Errorf("PKINIT KDF output length cannot be negative")
 	}
-	blocks := (outputBytes + hashSize - 1) / hashSize
-	if blocks > math.MaxUint32 {
+	hashSize := hashFunc().Size()
+	blocks := outputBytes / hashSize
+	if outputBytes%hashSize != 0 {
+		blocks++
+	}
+	if int64(blocks) > math.MaxUint32 || blocks > math.MaxInt/hashSize {
 		return nil, fmt.Errorf("PKINIT KDF output is too long")
 	}
 	output := make([]byte, 0, blocks*hashSize)
 	var counter [4]byte
-	for block := 1; block <= blocks; block++ {
-		counterValue, err := pkinitUint32("KDF counter", block)
+	for block := range blocks {
+		counterValue, err := pkinitUint32("KDF counter", block+1)
 		if err != nil {
 			return nil, err
 		}

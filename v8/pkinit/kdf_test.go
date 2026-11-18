@@ -1,7 +1,10 @@
 package pkinit
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/hex"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,6 +39,51 @@ func TestDeriveLegacyReplyKeyRFC4556Set1(t *testing.T) {
 func TestDeriveReplyKeyRejectsUnknownKDF(t *testing.T) {
 	_, err := DeriveReplyKey(KDFAlgorithmID{ID: []int{1, 2, 3}}, nil, KRB5PrincipalName{}, KRB5PrincipalName{}, nil, nil, etypeID.AES256_CTS_HMAC_SHA1_96)
 	require.ErrorContains(t, err, "unsupported PKINIT KDF OID")
+}
+
+func TestCounterKDFBlockBoundaries(t *testing.T) {
+	t.Parallel()
+
+	first := sha256.Sum256([]byte("\x00\x00\x00\x01secretinfo"))
+	second := sha256.Sum256([]byte("\x00\x00\x00\x02secretinfo"))
+	var expected [2 * sha256.Size]byte
+	copy(expected[:], first[:])
+	copy(expected[sha256.Size:], second[:])
+
+	tests := []struct {
+		name   string
+		length int
+	}{
+		{name: "empty", length: 0},
+		{name: "partial first block", length: sha256.Size - 1},
+		{name: "exact first block", length: sha256.Size},
+		{name: "partial second block", length: sha256.Size + 1},
+		{name: "exact second block", length: len(expected)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			seed, err := counterKDF(sha256.New, []byte("secret"), []byte("info"), tt.length)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if seed == nil || !bytes.Equal(seed, expected[:tt.length]) {
+				t.Fatalf("seed = %x, want %x", seed, expected[:tt.length])
+			}
+		})
+	}
+}
+
+func TestCounterKDFRejectsOversizedOutput(t *testing.T) {
+	t.Parallel()
+
+	// This exceeds the counter range on 64-bit platforms and the rounded
+	// slice capacity on 32-bit platforms. Neither path should allocate.
+	seed, err := counterKDF(sha256.New, nil, nil, math.MaxInt)
+	if seed != nil || err == nil || err.Error() != "PKINIT KDF output is too long" {
+		t.Fatalf("counterKDF returned %d bytes and %v, want an output length error", len(seed), err)
+	}
 }
 
 func bytesOf(value byte, count int) []byte {
