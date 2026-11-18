@@ -2,7 +2,7 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-14 done (formatter normalization,
+(floor raised to 86.0%), and Phase 5 slices 1-15 done (formatter normalization,
 keytab complexity, dead code, mechanical clarity, shadow elimination,
 errorlint, revive mechanical, exported documentation, the NDR carry-over,
 I/O/body-ownership cleanup, checked type assertions, and named-return clarity).
@@ -34,7 +34,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,511 canonical lint findings after Phase 5 slices 1-14 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,501 canonical lint findings after Phase 5 slices 1-15 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -823,6 +823,19 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 15 (2026-11-18, credentials/PKINIT/PKU2U nil invariants): the three
+remaining small NilAway package slices are clean. `CCache` accessors now
+provide useful zero values on a nil receiver, skip nil credential entries,
+and preserve all non-nil behavior; privileged integration tests use fatal
+constructor checks and `user.Current` errors are propagated. PKINIT
+`Exchange.ProcessReply` rejects a nil receiver before any reply-field access;
+PKU2U `TrustedCertifiers.Unmarshal` rejects a nil destination. Regressions
+cover nil CCache access/lookup/enumeration, nil PKINIT exchange with a validly
+encoded DH reply, and nil trusted-certifier decode destination. Target-package
+NilAway findings fall to zero, the full NilAway total falls from 286 to 275,
+and the canonical total falls from 1,511 to 1,501. Target and client race
+suites pass; full v8 coverage remains 87.0%.
 
 Slice 14 (2026-11-18, gssapi nil invariants): the gssapi NilAway slice is
 zero. Every successful `NewSecurityContext` use in unit/fuzz tests now checks

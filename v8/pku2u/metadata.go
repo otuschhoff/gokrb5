@@ -22,6 +22,9 @@ func (m TrustedCertifiers) Marshal() ([]byte, error) {
 // Unmarshal decodes trusted-certifier metadata and rejects trailing data or
 // entries which do not identify a certifier.
 func (m *TrustedCertifiers) Unmarshal(data []byte) error {
+	if m == nil {
+		return fmt.Errorf("PKU2U trusted-certifier destination is nil")
+	}
 	var decoded []pkinit.ExternalPrincipalIdentifier
 	rest, err := asn1.Unmarshal(data, &decoded)
 	if err != nil {

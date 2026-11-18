@@ -131,7 +131,10 @@ func klist() ([]string, error) {
 }
 
 func loadCCache() (*CCache, error) {
-	usr, _ := user.Current()
+	usr, err := user.Current()
+	if err != nil {
+		return nil, fmt.Errorf("resolve current OS user: %w", err)
+	}
 	cpath := "/tmp/krb5cc_" + usr.Uid
 	return LoadCCache(cpath)
 }
@@ -145,7 +148,7 @@ func TestLoadCCache(t *testing.T) {
 	}
 	c, err := loadCCache()
 	if err != nil {
-		t.Errorf("error loading CCache: %v", err)
+		t.Fatalf("error loading CCache: %v", err)
 	}
 	pn := c.GetClientPrincipalName()
 	assert.Equal(t, "testuser1", pn.PrincipalNameString(), "principal not as expected")
@@ -170,7 +173,7 @@ func TestCCacheEntries(t *testing.T) {
 	}
 	c, err := loadCCache()
 	if err != nil {
-		t.Errorf("error loading CCache: %v", err)
+		t.Fatalf("error loading CCache: %v", err)
 	}
 	creds := c.GetEntries()
 	var found bool

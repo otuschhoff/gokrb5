@@ -9,6 +9,7 @@ import (
 	"encoding/asn1"
 	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,6 +25,17 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
+
+func TestProcessReplyRejectsNilExchange(t *testing.T) {
+	encoded, err := (PAPKAsRep{DHInfo: &DHRepInfo{DHSignedData: []byte{1}}}).Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exchange *Exchange
+	if _, err := exchange.ProcessReply(encoded, etypeID.AES256_CTS_HMAC_SHA1_96); err == nil || !strings.Contains(err.Error(), "exchange is nil") {
+		t.Fatalf("nil exchange error = %v", err)
+	}
+}
 
 func TestBeginExchangeBuildsBoundAuthPack(t *testing.T) {
 	certificate, key := testClientCertificate(t, "alice@EXAMPLE.COM", oidClientAuth)

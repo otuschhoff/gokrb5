@@ -334,6 +334,9 @@ func selectPKINITKDF(offered []KDFAlgorithmID) (KDFAlgorithmID, error) {
 
 // ProcessReply authenticates PA-PK-AS-REP and derives its AS reply key.
 func (exchange *Exchange) ProcessReply(paValue []byte, replyEType int32) (*ExchangeResult, error) {
+	if exchange == nil {
+		return nil, fmt.Errorf("PKINIT exchange is nil")
+	}
 	var reply PAPKAsRep
 	if err := reply.Unmarshal(paValue); err != nil {
 		return nil, fmt.Errorf("decode PA-PK-AS-REP: %w", err)

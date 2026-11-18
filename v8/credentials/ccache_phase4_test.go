@@ -517,6 +517,23 @@ func TestDefaultCCacheNameResolution(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestNilCCacheAccessors(t *testing.T) {
+	var cache *CCache
+	assert.Empty(t, cache.GetClientPrincipalName().NameString)
+	assert.Empty(t, cache.GetClientRealm())
+	assert.NotNil(t, cache.GetClientCredentials())
+	assert.False(t, cache.Contains(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user")))
+	entry, ok := cache.GetEntry(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user"))
+	assert.NotNil(t, entry)
+	assert.False(t, ok)
+	assert.Empty(t, cache.GetEntries())
+
+	cache = new(CCache)
+	cache.Credentials = []*Credential{nil, {Server: Principal{Realm: "X-CACHECONF:test"}}}
+	assert.Empty(t, cache.GetEntries())
+	assert.False(t, cache.Contains(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user")))
+}
+
 func FuzzCCacheUnmarshal(f *testing.F) {
 	for _, encoded := range ccacheFixtures() {
 		data, err := hex.DecodeString(encoded)

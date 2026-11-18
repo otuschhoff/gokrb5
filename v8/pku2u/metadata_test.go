@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"math/big"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +33,17 @@ func TestTrustedCertifiersRoundTrip(t *testing.T) {
 	}
 	if err := got.Unmarshal(append(data, 0)); err == nil {
 		t.Fatal("accepted trailing metadata")
+	}
+}
+
+func TestTrustedCertifiersUnmarshalRejectsNilDestination(t *testing.T) {
+	data, err := (TrustedCertifiers{}).Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata *TrustedCertifiers
+	if err := metadata.Unmarshal(data); err == nil || !strings.Contains(err.Error(), "destination is nil") {
+		t.Fatalf("nil destination error = %v", err)
 	}
 }
 

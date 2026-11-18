@@ -302,16 +302,25 @@ func parseCredential(b []byte, p *int, c *CCache, e *binary.ByteOrder) (*Credent
 
 // GetClientPrincipalName returns a PrincipalName type for the client the credentials cache is for.
 func (c *CCache) GetClientPrincipalName() types.PrincipalName {
+	if c == nil {
+		return types.PrincipalName{}
+	}
 	return c.DefaultPrincipal.PrincipalName
 }
 
 // GetClientRealm returns the reals of the client the credentials cache is for.
 func (c *CCache) GetClientRealm() string {
+	if c == nil {
+		return ""
+	}
 	return c.DefaultPrincipal.Realm
 }
 
 // GetClientCredentials returns a Credentials object representing the client of the credentials cache.
 func (c *CCache) GetClientCredentials() *Credentials {
+	if c == nil {
+		return new(Credentials)
+	}
 	return &Credentials{
 		username: c.DefaultPrincipal.PrincipalName.PrincipalNameString(),
 		realm:    c.GetClientRealm(),
@@ -321,8 +330,11 @@ func (c *CCache) GetClientCredentials() *Credentials {
 
 // Contains tests if the cache contains a credential for the provided server PrincipalName
 func (c *CCache) Contains(p types.PrincipalName) bool {
+	if c == nil {
+		return false
+	}
 	for _, cred := range c.Credentials {
-		if cred.Server.PrincipalName.Equal(p) {
+		if cred != nil && cred.Server.PrincipalName.Equal(p) {
 			return true
 		}
 	}
@@ -332,9 +344,12 @@ func (c *CCache) Contains(p types.PrincipalName) bool {
 // GetEntry returns a specific credential for the PrincipalName provided.
 func (c *CCache) GetEntry(p types.PrincipalName) (*Credential, bool) {
 	cred := new(Credential)
+	if c == nil {
+		return cred, false
+	}
 	var found bool
 	for i := range c.Credentials {
-		if c.Credentials[i].Server.PrincipalName.Equal(p) {
+		if c.Credentials[i] != nil && c.Credentials[i].Server.PrincipalName.Equal(p) {
 			cred = c.Credentials[i]
 			found = true
 			break
@@ -349,7 +364,13 @@ func (c *CCache) GetEntry(p types.PrincipalName) (*Credential, bool) {
 // GetEntries filters out configuration entries an returns a slice of credentials.
 func (c *CCache) GetEntries() []*Credential {
 	creds := make([]*Credential, 0)
+	if c == nil {
+		return creds
+	}
 	for _, cred := range c.Credentials {
+		if cred == nil {
+			continue
+		}
 		// Filter out configuration entries
 		if strings.HasPrefix(cred.Server.Realm, "X-CACHECONF") {
 			continue
