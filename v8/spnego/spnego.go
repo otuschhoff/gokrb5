@@ -588,7 +588,7 @@ func contextFlagSet(contextFlags []int, flag int) bool {
 // Log will write to the service's logger if it is configured.
 func (s *SPNEGO) Log(format string, v ...interface{}) {
 	if s.serviceSettings.Logger() != nil {
-		s.serviceSettings.Logger().Output(2, fmt.Sprintf(format, v...))
+		_ = s.serviceSettings.Logger().Output(2, fmt.Sprintf(format, v...)) // Logging is deliberately best effort behind this void API.
 	}
 }
 

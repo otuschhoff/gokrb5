@@ -33,7 +33,10 @@ func TestVerifyAPREQ(t *testing.T) {
 	}
 	b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 	kt := keytab.New()
-	kt.Unmarshal(b)
+	if err := kt.Unmarshal(b); err != nil {
+		panic(err)
+	}
+
 	st := time.Now().UTC()
 	tkt, sessionKey, err := messages.NewTicket(cl.Credentials.CName(), cl.Credentials.Domain(),
 		sname, "TEST.GOKRB5",
@@ -127,7 +130,10 @@ func TestVerifyAPREQWithPrincipalOverride(t *testing.T) {
 	}
 	b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 	kt := keytab.New()
-	kt.Unmarshal(b)
+	if err := kt.Unmarshal(b); err != nil {
+		panic(err)
+	}
+
 	st := time.Now().UTC()
 	tkt, sessionKey, err := messages.NewTicket(cl.Credentials.CName(), cl.Credentials.Domain(),
 		sname, "TEST.GOKRB5",
@@ -172,7 +178,10 @@ func TestVerifyAPREQ_KRB_AP_ERR_BADMATCH(t *testing.T) {
 	}
 	b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 	kt := keytab.New()
-	kt.Unmarshal(b)
+	if err := kt.Unmarshal(b); err != nil {
+		panic(err)
+	}
+
 	st := time.Now().UTC()
 	tkt, sessionKey, err := messages.NewTicket(cl.Credentials.CName(), cl.Credentials.Domain(),
 		sname, "TEST.GOKRB5",
@@ -224,7 +233,10 @@ func TestVerifyAPREQ_LargeClockSkew(t *testing.T) {
 	}
 	b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 	kt := keytab.New()
-	kt.Unmarshal(b)
+	if err := kt.Unmarshal(b); err != nil {
+		panic(err)
+	}
+
 	st := time.Now().UTC()
 	tkt, sessionKey, err := messages.NewTicket(cl.Credentials.CName(), cl.Credentials.Domain(),
 		sname, "TEST.GOKRB5",
@@ -274,7 +286,10 @@ func TestVerifyAPREQ_Replay(t *testing.T) {
 	}
 	b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 	kt := keytab.New()
-	kt.Unmarshal(b)
+	if err := kt.Unmarshal(b); err != nil {
+		panic(err)
+	}
+
 	st := time.Now().UTC()
 	tkt, sessionKey, err := messages.NewTicket(cl.Credentials.CName(), cl.Credentials.Domain(),
 		sname, "TEST.GOKRB5",
@@ -326,7 +341,10 @@ func TestVerifyAPREQ_FutureTicket(t *testing.T) {
 	}
 	b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 	kt := keytab.New()
-	kt.Unmarshal(b)
+	if err := kt.Unmarshal(b); err != nil {
+		panic(err)
+	}
+
 	st := time.Now().UTC()
 	tkt, sessionKey, err := messages.NewTicket(cl.Credentials.CName(), cl.Credentials.Domain(),
 		sname, "TEST.GOKRB5",
@@ -375,7 +393,10 @@ func TestVerifyAPREQ_InvalidTicket(t *testing.T) {
 	}
 	b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 	kt := keytab.New()
-	kt.Unmarshal(b)
+	if err := kt.Unmarshal(b); err != nil {
+		panic(err)
+	}
+
 	st := time.Now().UTC()
 	f := types.NewKrbFlags()
 	types.SetFlag(&f, flags.Invalid)
@@ -425,7 +446,10 @@ func TestVerifyAPREQ_ExpiredTicket(t *testing.T) {
 	}
 	b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 	kt := keytab.New()
-	kt.Unmarshal(b)
+	if err := kt.Unmarshal(b); err != nil {
+		panic(err)
+	}
+
 	st := time.Now().UTC()
 	tkt, sessionKey, err := messages.NewTicket(cl.Credentials.CName(), cl.Credentials.Domain(),
 		sname, "TEST.GOKRB5",
@@ -531,7 +555,7 @@ func TestServicePrincipalAllowed(t *testing.T) {
 	}
 	kt := keytab.New()
 	if err := kt.Unmarshal(b); err != nil {
-		t.Fatal(err)
+		panic(err)
 	}
 	sname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "HTTP/host.test.gokrb5")
 
@@ -580,7 +604,7 @@ func TestExtractDelegatedCredentials(t *testing.T) {
 
 func newTestAuthenticator(creds credentials.Credentials) types.Authenticator {
 	auth, _ := types.NewAuthenticator(creds.Domain(), creds.CName())
-	auth.GenerateSeqNumberAndSubKey(18, 32)
+	_ = auth.GenerateSeqNumberAndSubKey(18, 32)
 	// auth.Cksum = types.Checksum{
 	//	CksumType: chksumtype.GSSAPI,
 	//	Checksum:  newAuthenticatorChksum([]int{GSS_C_INTEG_FLAG, GSS_C_CONF_FLAG}),
@@ -591,7 +615,10 @@ func newTestAuthenticator(creds credentials.Credentials) types.Authenticator {
 func getClient() *client.Client {
 	b, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER1_TEST_GOKRB5)
 	kt := keytab.New()
-	kt.Unmarshal(b)
+	if err := kt.Unmarshal(b); err != nil {
+		panic(err)
+	}
+
 	c, _ := config.NewFromString(testdata.KRB5_CONF)
 	cl := client.NewWithKeytab("testuser1", "TEST.GOKRB5", kt, c)
 	return cl

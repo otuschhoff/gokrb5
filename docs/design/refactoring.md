@@ -2,9 +2,10 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-9 done (formatter normalization,
+(floor raised to 86.0%), and Phase 5 slices 1-10 done (formatter normalization,
 keytab complexity, dead code, mechanical clarity, shadow elimination,
-errorlint, revive mechanical, exported documentation, and the NDR carry-over).
+errorlint, revive mechanical, exported documentation, the NDR carry-over,
+and I/O/body-ownership cleanup).
 Remaining canonical debt is concentrated in the classification-heavy
 categories (gosec, NilAway, wrapcheck, errcheck, gocognit/nestif, ireturn,
 nonamedreturns, bodyclose) plus documented intentional categories (iana
@@ -33,7 +34,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,869 canonical lint findings after Phase 5 slices 1-9 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,691 canonical lint findings after Phase 5 slices 1-10 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -823,8 +824,23 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
-Full v8 unit and race suites pass; the changed-line lint gate is clean for
-both modules; cross-package coverage is 87.0%, above the 86.0% floor.
+Slice 10 (2026-11-18, Q-03/Q-06 I/O and body ownership): production errcheck
+is zero. CLI diagnostics that already select a failing exit code remain
+best-effort with explicit discards; successful-output writes now propagate
+through the command exit status, verbose cache output fails the command, and
+password input joins prompt/newline, terminal-restore, and close failures in
+operation order. `config.Load` returns the partial config on parse errors while
+joining parse and close causes. RC4-HMAC `RandomToKey` explicitly documents the
+infallible `hash.Hash` writer contract, and existing void logger APIs remain
+best-effort with explicit discards. Test setup now checks keytab/token decode,
+authenticator generation, buffer writes, file writes, and closes; integration
+subprocess pipes and HTTP response bodies have deterministic ownership. All
+35 bodyclose findings are resolved through real closes; the retained HTTP
+method test closes each response immediately after status inspection rather
+than storing responses in a slice. The full canonical scan now reports zero
+errcheck and zero bodyclose findings. The v8 canonical total is 1,691. Full v8 unit and
+race suites pass; the changed-line lint gate is clean for both modules;
+cross-package coverage remains 87.0%, above the 86.0% floor.
 
 Preserve v8's Go 1.26.0 floor. Validate proposed modernizations on the supported
 module toolchain and retain tagged/platform code. Measure optimizations before

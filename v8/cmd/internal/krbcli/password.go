@@ -29,21 +29,31 @@ func ReadPassword(prompt string, stdin io.Reader, stderr io.Writer, allowStdin b
 	}
 	tty, err := openControllingTerminal()
 	if err == nil {
-		defer tty.close()
 		state, err := term.MakeRaw(int(tty.input.Fd()))
 		if err != nil {
-			return "", err
+			closeErr := tty.close()
+			return "", errors.Join(err, closeErr)
 		}
-		defer term.Restore(int(tty.input.Fd()), state)
-		if _, ierr := fmt.Fprint(tty.output, prompt); ierr != nil {
-			return "", ierr
-		}
-		password, err := term.ReadPassword(int(tty.input.Fd()))
-		fmt.Fprintln(tty.output)
-		if err != nil {
+		var password []byte
+		funcErr := func() error {
+			if _, err := fmt.Fprint(tty.output, prompt); err != nil {
+				return err
+			}
+			password, err = term.ReadPassword(int(tty.input.Fd()))
+			newlineErr := writeNewline(tty.output)
+			return errors.Join(err, newlineErr)
+		}()
+		restoreErr := term.Restore(int(tty.input.Fd()), state)
+		closeErr := tty.close()
+		if err := errors.Join(funcErr, restoreErr, closeErr); err != nil {
 			return "", err
 		}
 		return string(password), nil
 	}
 	return "", errors.New("Cannot read password")
+}
+
+func writeNewline(w io.Writer) error {
+	_, err := fmt.Fprintln(w)
+	return err
 }

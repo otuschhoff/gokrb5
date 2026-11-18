@@ -508,7 +508,7 @@ func TestEndToEndHTTP(t *testing.T) {
 			http.Error(writer, "read request body", http.StatusInternalServerError)
 			return
 		}
-		fmt.Fprintf(writer, "%s:%s", certificateIdentity.UPN, body)
+		_, _ = fmt.Fprintf(writer, "%s:%s", certificateIdentity.UPN, body)
 	}), func() gssapi.ContextMechanism {
 		return negoex.New(negoex.NewPKU2UScheme(NewAcceptor(serverIdentity, anchors)))
 	})
@@ -525,7 +525,7 @@ func TestEndToEndHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer response.Body.Close() //nolint:errcheck // test response cleanup is intentionally best effort
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		t.Fatal(err)
@@ -568,7 +568,7 @@ func TestConcurrentHTTPExchanges(t *testing.T) {
 			}
 			response, err := client.Do(request)
 			if err == nil {
-				response.Body.Close()
+				_ = response.Body.Close()
 				if response.StatusCode != http.StatusNoContent {
 					err = fmt.Errorf("HTTP status %d", response.StatusCode)
 				}

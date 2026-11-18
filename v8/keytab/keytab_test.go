@@ -537,7 +537,8 @@ func TestBadKeytabs(_ *testing.T) {
 	for _, v := range badPayloads {
 		decodedKt, _ := base64.StdEncoding.DecodeString(v)
 		parsedKt := new(Keytab)
-		parsedKt.Unmarshal(decodedKt)
+		_ = parsedKt.Unmarshal(decodedKt)
+
 	}
 }
 
@@ -620,12 +621,24 @@ func TestKeytab_GetEncryptionKey(t *testing.T) {
 	realm := "TEST.GOKRB5"
 
 	kt := New()
-	kt.AddEntry(princ, realm, "abcdefg", time.Unix(100, 0), 1, 18)
-	kt.AddEntry(princ, realm, "abcdefg", time.Unix(200, 0), 2, 18)
-	kt.AddEntry(princ, realm, "abcdefg", time.Unix(300, 0), 3, 18)
-	kt.AddEntry(princ, realm, "abcdefg", time.Unix(400, 0), 4, 18)
-	kt.AddEntry(princ, realm, "abcdefg", time.Unix(350, 0), 5, 18)
-	kt.AddEntry("HTTP/other.test.gokrb5", realm, "abcdefg", time.Unix(500, 0), 5, 18)
+	if err := kt.AddEntry(princ, realm, "abcdefg", time.Unix(100, 0), 1, 18); err != nil {
+		t.Fatal(err)
+	}
+	if err := kt.AddEntry(princ, realm, "abcdefg", time.Unix(200, 0), 2, 18); err != nil {
+		t.Fatal(err)
+	}
+	if err := kt.AddEntry(princ, realm, "abcdefg", time.Unix(300, 0), 3, 18); err != nil {
+		t.Fatal(err)
+	}
+	if err := kt.AddEntry(princ, realm, "abcdefg", time.Unix(400, 0), 4, 18); err != nil {
+		t.Fatal(err)
+	}
+	if err := kt.AddEntry(princ, realm, "abcdefg", time.Unix(350, 0), 5, 18); err != nil {
+		t.Fatal(err)
+	}
+	if err := kt.AddEntry("HTTP/other.test.gokrb5", realm, "abcdefg", time.Unix(500, 0), 5, 18); err != nil {
+		t.Fatal(err)
+	}
 
 	pn := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, princ)
 

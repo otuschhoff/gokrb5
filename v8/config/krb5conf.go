@@ -362,9 +362,12 @@ func Load(cfgPath string) (*Config, error) {
 	if err != nil {
 		return nil, errors.New("configuration file could not be opened: " + cfgPath + " " + err.Error())
 	}
-	defer fh.Close()
-	scanner := bufio.NewScanner(fh)
-	return NewFromScanner(scanner)
+	cfg, parseErr := NewFromScanner(bufio.NewScanner(fh))
+	closeErr := fh.Close()
+	if err := errors.Join(parseErr, closeErr); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
 }
 
 // NewFromString creates a new Config struct from a string.

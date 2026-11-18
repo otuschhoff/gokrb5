@@ -255,7 +255,7 @@ func TestNegotiatingClientHTTPExchange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer response.Body.Close() //nolint:errcheck // test response cleanup is intentionally best effort
 	if response.StatusCode != http.StatusOK || client.Context() == nil {
 		t.Fatalf("status/context = %d/%v", response.StatusCode, client.Context())
 	}
@@ -269,10 +269,18 @@ func TestNegotiatingClientHTTPExchange(t *testing.T) {
 
 func TestNegotiatingClientProtocolGuards(t *testing.T) {
 	request, _ := http.NewRequest(http.MethodGet, "http://server.example", nil)
-	if _, err := NewNegotiatingClient(nil, "service", nil).Do(request); err == nil || !strings.Contains(err.Error(), "factory is required") {
+	unexpectedResponse, err := NewNegotiatingClient(nil, "service", nil).Do(request)
+	if unexpectedResponse != nil {
+		_ = unexpectedResponse.Body.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "factory is required") {
 		t.Fatalf("nil factory error = %v", err)
 	}
-	if _, err := NewNegotiatingClient(nil, "service", func() gssapi.ContextMechanism { return nil }).Do(request); err == nil || !strings.Contains(err.Error(), "returned nil") {
+	unexpectedResponse, err = NewNegotiatingClient(nil, "service", func() gssapi.ContextMechanism { return nil }).Do(request)
+	if unexpectedResponse != nil {
+		_ = unexpectedResponse.Body.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "returned nil") {
 		t.Fatalf("nil mechanism error = %v", err)
 	}
 
@@ -333,7 +341,11 @@ func TestNegotiatingClientProtocolGuards(t *testing.T) {
 				return newTestContextMechanism(1, "guard")
 			})
 			current, _ := http.NewRequest(http.MethodGet, "http://server.example", nil)
-			if _, err := client.Do(current); err == nil || !strings.Contains(err.Error(), test.want) {
+			unexpectedResponse, err := client.Do(current)
+			if unexpectedResponse != nil {
+				_ = unexpectedResponse.Body.Close()
+			}
+			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("protocol guard error = %v, want %q", err, test.want)
 			}
 		})
@@ -359,7 +371,7 @@ func TestSPNEGOContextHTTPExchange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer response.Body.Close() //nolint:errcheck // test response cleanup is intentionally best effort
 	if response.StatusCode != http.StatusNoContent || innerCalls != 1 {
 		t.Fatalf("status/inner calls = %d/%d", response.StatusCode, innerCalls)
 	}
@@ -435,11 +447,19 @@ func (closer failingReadCloser) Close() error { return closer.closeErr }
 func TestNegotiatingClientErrors(t *testing.T) {
 	request, _ := http.NewRequest(http.MethodGet, "http://example.test", nil)
 	client := NewNegotiatingClient(nil, "target", nil)
-	if _, err := client.Do(request); err == nil || !strings.Contains(err.Error(), "factory is required") {
+	unexpectedResponse, err := client.Do(request)
+	if unexpectedResponse != nil {
+		_ = unexpectedResponse.Body.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "factory is required") {
 		t.Fatalf("nil factory error = %v", err)
 	}
 	client = NewNegotiatingClient(nil, "target", func() gssapi.ContextMechanism { return nil })
-	if _, err := client.Do(request); err == nil || !strings.Contains(err.Error(), "returned nil") {
+	unexpectedResponse, err = client.Do(request)
+	if unexpectedResponse != nil {
+		_ = unexpectedResponse.Body.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "returned nil") {
 		t.Fatalf("nil mechanism error = %v", err)
 	}
 
@@ -467,7 +487,11 @@ func TestNegotiatingClientErrors(t *testing.T) {
 			client := NewNegotiatingClient(httpClient, "target", func() gssapi.ContextMechanism {
 				return newTestContextMechanism(1, "http")
 			})
-			if _, err := client.Do(request); err == nil || !strings.Contains(err.Error(), test.wantErr) {
+			unexpectedResponse, err := client.Do(request)
+			if unexpectedResponse != nil {
+				_ = unexpectedResponse.Body.Close()
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
 				t.Fatalf("error = %v, want containing %q", err, test.wantErr)
 			}
 		})
@@ -480,7 +504,11 @@ func TestNegotiatingClientTransportAndRoundLimit(t *testing.T) {
 	client := NewNegotiatingClient(&http.Client{Transport: negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, transportErr
 	})}, "target", func() gssapi.ContextMechanism { return newTestContextMechanism(1, "http") })
-	if _, err := client.Do(request); !errors.Is(err, transportErr) {
+	unexpectedResponse, err := client.Do(request)
+	if unexpectedResponse != nil {
+		_ = unexpectedResponse.Body.Close()
+	}
+	if !errors.Is(err, transportErr) {
 		t.Fatalf("transport error = %v", err)
 	}
 
@@ -506,7 +534,11 @@ func TestNegotiatingClientTransportAndRoundLimit(t *testing.T) {
 	client = NewNegotiatingClient(httpClient, "target", func() gssapi.ContextMechanism {
 		return newTestContextMechanism(1, "http")
 	})
-	if _, err := client.Do(request); err == nil || !strings.Contains(err.Error(), "exceeded 10 round trips") {
+	unexpectedResponse, err = client.Do(request)
+	if unexpectedResponse != nil {
+		_ = unexpectedResponse.Body.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "exceeded 10 round trips") {
 		t.Fatalf("round limit error = %v", err)
 	}
 	if calls != 10 {
@@ -554,32 +586,45 @@ func TestLegacyHTTPClientMethodsWithoutChallenge(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(nil, server.Client(), "HTTP/server.example")
-	responses := make([]*http.Response, 0, 4)
-	response, err := client.Get(server.URL + "/get")
+	getResponse, err := client.Get(server.URL + "/get")
 	if err != nil {
 		t.Fatal(err)
 	}
-	responses = append(responses, response)
-	response, err = client.Post(server.URL+"/post", "text/plain", strings.NewReader("post body"))
+	if getResponse.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d", getResponse.StatusCode)
+	}
+	if err := getResponse.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	postResponse, err := client.Post(server.URL+"/post", "text/plain", strings.NewReader("post body"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	responses = append(responses, response)
-	response, err = client.PostForm(server.URL+"/form", map[string][]string{"key": {"value"}})
+	if postResponse.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d", postResponse.StatusCode)
+	}
+	if err := postResponse.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	formResponse, err := client.PostForm(server.URL+"/form", map[string][]string{"key": {"value"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	responses = append(responses, response)
-	response, err = client.Head(server.URL + "/head")
+	if formResponse.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d", formResponse.StatusCode)
+	}
+	if err := formResponse.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	headResponse, err := client.Head(server.URL + "/head")
 	if err != nil {
 		t.Fatal(err)
 	}
-	responses = append(responses, response)
-	for _, response := range responses {
-		if response.StatusCode != http.StatusNoContent {
-			t.Fatalf("status = %d", response.StatusCode)
-		}
-		response.Body.Close()
+	if headResponse.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d", headResponse.StatusCode)
+	}
+	if err := headResponse.Body.Close(); err != nil {
+		t.Fatal(err)
 	}
 	if len(received) != 4 || received[0].method != http.MethodGet || received[1].body != "post body" ||
 		received[2].body != "key=value" || received[3].method != http.MethodHead {
@@ -638,7 +683,11 @@ func TestLegacyHTTPClientChallengeAndRedirectGuards(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusUnauthorized, Header: header, Body: io.NopCloser(strings.NewReader("challenge"))}, nil
 	})}
 	legacy := NewClient(client.NewWithPassword("alice", "EXAMPLE.ORG", "password", config.New()), httpClient, "HTTP/server.example.org")
-	if _, err := legacy.Do(request); err == nil || !strings.Contains(err.Error(), "acquire client credential") {
+	unexpectedResponse, err := legacy.Do(request)
+	if unexpectedResponse != nil {
+		_ = unexpectedResponse.Body.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "acquire client credential") {
 		t.Fatalf("challenge error = %v", err)
 	}
 
@@ -650,7 +699,11 @@ func TestLegacyHTTPClientChallengeAndRedirectGuards(t *testing.T) {
 	defer server.Close()
 	legacy = NewClient(nil, server.Client(), "HTTP/server.example.org")
 	request, _ = http.NewRequest(http.MethodPost, server.URL, strings.NewReader("body"))
-	if _, err := legacy.Do(request); err == nil || !strings.Contains(err.Error(), "10 redirects") {
+	redirectResponse, err := legacy.Do(request)
+	if redirectResponse != nil {
+		defer redirectResponse.Body.Close() //nolint:errcheck // test response cleanup is intentionally best effort
+	}
+	if err == nil || !strings.Contains(err.Error(), "10 redirects") {
 		t.Fatalf("redirect limit error = %v", err)
 	}
 	if redirects != 10 {
@@ -675,7 +728,10 @@ func TestLegacyHTTPClientClearsContextBeforeNegotiation(t *testing.T) {
 	if requestErr != nil {
 		t.Fatal(requestErr)
 	}
-	_, err := legacy.Do(request)
+	response, err := legacy.Do(request)
+	if response != nil {
+		defer response.Body.Close() //nolint:errcheck // test response cleanup is intentionally best effort //nolint:errcheck // test response cleanup is intentionally best effort
+	}
 	if err == nil {
 		t.Fatal("negotiation unexpectedly succeeded")
 	}

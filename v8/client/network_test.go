@@ -25,7 +25,7 @@ func startTCPResponseServer(t *testing.T, response []byte) (*net.TCPAddr, <-chan
 			serverErr <- acceptErr
 			return
 		}
-		defer connection.Close()
+		defer func() { _ = connection.Close() }()
 		header := make([]byte, 4)
 		if _, readErr := io.ReadFull(connection, header); readErr != nil {
 			serverErr <- readErr
@@ -100,7 +100,7 @@ func TestSendToKDCTransportSelection(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer server.Close()
+		defer func() { _ = server.Close() }()
 		serverErr := make(chan error, 1)
 		go func() {
 			request := make([]byte, 32)
@@ -131,7 +131,7 @@ func TestSendUDPSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 	serverErr := make(chan error, 1)
 	go func() {
 		request := make([]byte, 32)
@@ -184,7 +184,7 @@ func TestDialSendUDPFailover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 	serverErr := make(chan error, 1)
 	go func() {
 		request := make([]byte, 32)
@@ -214,7 +214,7 @@ func TestSendUDPRejectsEmptyResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 	serverErr := make(chan error, 1)
 	go func() {
 		request := make([]byte, 32)
@@ -245,7 +245,7 @@ func TestSendOnClosedConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer udpServer.Close()
+	defer func() { _ = udpServer.Close() }()
 	udpConnection, err := net.DialUDP("udp", nil, udpServer.LocalAddr().(*net.UDPAddr))
 	if err != nil {
 		t.Fatal(err)
@@ -261,7 +261,7 @@ func TestSendOnClosedConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tcpListener.Close()
+	defer func() { _ = tcpListener.Close() }()
 	tcpConnection, err := net.DialTCP("tcp", nil, tcpListener.Addr().(*net.TCPAddr))
 	if err != nil {
 		t.Fatal(err)

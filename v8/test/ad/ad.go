@@ -309,7 +309,7 @@ func resolvConfDomain() string {
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var search string
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {

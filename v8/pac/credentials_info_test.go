@@ -14,8 +14,8 @@ func TestNTLMSupplementalCredUnmarshal(t *testing.T) {
 	lm := bytes.Repeat([]byte{0x11}, 16)
 	nt := bytes.Repeat([]byte{0x22}, 16)
 	buffer := new(bytes.Buffer)
-	binary.Write(buffer, binary.LittleEndian, uint32(0))
-	binary.Write(buffer, binary.LittleEndian, uint32(1<<24|1<<25))
+	_ = binary.Write(buffer, binary.LittleEndian, uint32(0))
+	_ = binary.Write(buffer, binary.LittleEndian, uint32(1<<24|1<<25))
 	buffer.Write(lm)
 	buffer.Write(nt)
 

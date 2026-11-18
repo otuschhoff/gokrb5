@@ -129,7 +129,9 @@ func TestKRB5Token_newAuthenticatorWithSubkeyGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error creating authenticator: %v", err)
 	}
-	a.GenerateSeqNumberAndSubKey(etypeID, keyLen)
+	if err := a.GenerateSeqNumberAndSubKey(etypeID, keyLen); err != nil {
+		t.Fatal(err)
+	}
 	assert.Equal(t, int32(32771), a.Cksum.CksumType, "Checksum type in authenticator for SPNEGO mechtoken not as expected.")
 	assert.Equal(t, etypeID, a.SubKey.KeyType, "Subkey not of the expected type.")
 	assert.Equal(t, keyLen, len(a.SubKey.KeyValue), "Subkey value not of the right length")

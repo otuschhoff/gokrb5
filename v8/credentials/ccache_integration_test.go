@@ -61,8 +61,13 @@ func login() error {
 	if err != nil {
 		return fmt.Errorf("cannot open krb5.conf: %w", err)
 	}
-	defer file.Close()
-	fmt.Fprintf(file, testdata.KRB5_CONF)
+	if _, err := fmt.Fprintf(file, testdata.KRB5_CONF); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
 
 	cmd := exec.Command(kinitCmd, "testuser1@TEST.GOKRB5")
 
@@ -77,13 +82,13 @@ func login() error {
 	}
 
 	go func() {
-		io.WriteString(stdinW, "passwordvalue")
-		stdinW.Close()
+		_, _ = io.WriteString(stdinW, "passwordvalue")
+		_ = stdinW.Close()
 	}()
 	errBuf := new(bytes.Buffer)
 	go func() {
-		io.Copy(errBuf, stderrR)
-		stderrR.Close()
+		_, _ = io.Copy(errBuf, stderrR)
+		_ = stderrR.Close()
 	}()
 
 	err = cmd.Wait()

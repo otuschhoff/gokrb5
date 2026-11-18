@@ -34,7 +34,10 @@ func TestClient_SetSPNEGOHeader(t *testing.T) {
 	test.Integration(t)
 	b, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER1_TEST_GOKRB5)
 	kt := keytab.New()
-	kt.Unmarshal(b)
+	if err := kt.Unmarshal(b); err != nil {
+		panic(err)
+	}
+
 	c, _ := config.NewFromString(testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
@@ -60,6 +63,9 @@ func TestClient_SetSPNEGOHeader(t *testing.T) {
 		for _, p := range paths {
 			r, _ := http.NewRequest("GET", url+p, nil)
 			httpResp, err := http.DefaultClient.Do(r)
+			if httpResp != nil {
+				defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
+			}
 			if err != nil {
 				t.Fatalf("%s request error: %v", url+p, err)
 			}
@@ -71,6 +77,9 @@ func TestClient_SetSPNEGOHeader(t *testing.T) {
 			}
 
 			httpResp, err = http.DefaultClient.Do(r)
+			if httpResp != nil {
+				defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
+			}
 			if err != nil {
 				t.Fatalf("%s request error: %v\n", url+p, err)
 			}
@@ -83,7 +92,10 @@ func TestSPNEGOHTTPClient(t *testing.T) {
 	test.Integration(t)
 	b, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER1_TEST_GOKRB5)
 	kt := keytab.New()
-	kt.Unmarshal(b)
+	if err := kt.Unmarshal(b); err != nil {
+		panic(err)
+	}
+
 	c, _ := config.NewFromString(testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
@@ -117,6 +129,9 @@ func TestSPNEGOHTTPClient(t *testing.T) {
 			}
 			spnegoCl := NewClient(cl, httpCl, "")
 			httpResp, err := spnegoCl.Do(r)
+			if httpResp != nil {
+				defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
+			}
 			if err != nil {
 				t.Fatalf("%s request error: %v", url+p, err)
 			}
@@ -130,6 +145,9 @@ func TestService_SPNEGOKRB_NoAuthHeader(t *testing.T) {
 	defer s.Close()
 	r, _ := http.NewRequest("GET", s.URL, nil)
 	httpResp, err := http.DefaultClient.Do(r)
+	if httpResp != nil {
+		defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
+	}
 	if err != nil {
 		t.Fatalf("Request error: %v\n", err)
 	}
@@ -151,6 +169,9 @@ func TestService_SPNEGOKRB_ValidUser(t *testing.T) {
 	}
 
 	httpResp, err := http.DefaultClient.Do(r)
+	if httpResp != nil {
+		defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
+	}
 	if err != nil {
 		t.Fatalf("Request error: %v\n", err)
 	}
@@ -181,6 +202,9 @@ func TestService_SPNEGOKRB_ValidUser_RawKRB5Token(t *testing.T) {
 	r.Header.Set(HTTPHeaderAuthRequest, hs)
 
 	httpResp, err := http.DefaultClient.Do(r)
+	if httpResp != nil {
+		defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
+	}
 	if err != nil {
 		t.Fatalf("Request error: %v\n", err)
 	}
@@ -202,6 +226,9 @@ func TestService_SPNEGOKRB_Replay(t *testing.T) {
 
 	// First request with this ticket should be accepted
 	httpResp, err := http.DefaultClient.Do(r1)
+	if httpResp != nil {
+		defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
+	}
 	if err != nil {
 		t.Fatalf("Request error: %v\n", err)
 	}
@@ -209,6 +236,9 @@ func TestService_SPNEGOKRB_Replay(t *testing.T) {
 
 	// Use ticket again should be rejected
 	httpResp, err = http.DefaultClient.Do(r1)
+	if httpResp != nil {
+		defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
+	}
 	if err != nil {
 		t.Fatalf("Request error: %v\n", err)
 	}
@@ -224,6 +254,9 @@ func TestService_SPNEGOKRB_Replay(t *testing.T) {
 
 	// First use of 2nd ticket should be accepted
 	httpResp, err = http.DefaultClient.Do(r2)
+	if httpResp != nil {
+		defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
+	}
 	if err != nil {
 		t.Fatalf("Request error: %v\n", err)
 	}
@@ -231,6 +264,9 @@ func TestService_SPNEGOKRB_Replay(t *testing.T) {
 
 	// Using the 1st ticket again should still be rejected
 	httpResp, err = http.DefaultClient.Do(r1)
+	if httpResp != nil {
+		defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
+	}
 	if err != nil {
 		t.Fatalf("Request error: %v\n", err)
 	}
@@ -238,6 +274,9 @@ func TestService_SPNEGOKRB_Replay(t *testing.T) {
 
 	// Using the 2nd again should be rejected as replay
 	httpResp, err = http.DefaultClient.Do(r2)
+	if httpResp != nil {
+		defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
+	}
 	if err != nil {
 		t.Fatalf("Request error: %v\n", err)
 	}
@@ -309,7 +348,9 @@ func TestService_SPNEGOKRB_Upload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error copying bytes: %v", err)
 	}
-	bodyWriter.Close()
+	if err := bodyWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	r, _ := http.NewRequest("POST", s.URL, bodyBuf)
 	r.Header.Set("Content-Type", bodyWriter.FormDataContentType())
@@ -326,7 +367,9 @@ func TestService_SPNEGOKRB_Upload(t *testing.T) {
 	if httpResp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(httpResp.Body)
 		bodyString := string(bodyBytes)
-		httpResp.Body.Close()
+		if err := httpResp.Body.Close(); err != nil {
+			t.Fatal(err)
+		}
 		t.Errorf("unexpected code from http server (%d): %s", httpResp.StatusCode, bodyString)
 	}
 }
@@ -353,14 +396,21 @@ func TestDiscardAndCloseReportsReadAndCloseErrors(t *testing.T) {
 
 func httpGet(r *http.Request, wg *sync.WaitGroup) {
 	defer wg.Done()
-	http.DefaultClient.Do(r)
+	discardedResponse, err := http.DefaultClient.Do(r)
+	if err != nil {
+		return
+	}
+	defer discardedResponse.Body.Close() //nolint:errcheck // fire-and-forget test response cleanup is intentionally best effort
 }
 
 func httpServerWithoutSessionManager() *httptest.Server {
 	l := log.New(os.Stderr, "GOKRB5 Service Tests: ", log.LstdFlags)
 	b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 	kt := keytab.New()
-	kt.Unmarshal(b)
+	if err := kt.Unmarshal(b); err != nil {
+		panic(err)
+	}
+
 	th := http.HandlerFunc(testAppHandler)
 	s := httptest.NewServer(SPNEGOKRB5Authenticate(th, kt, service.Logger(l)))
 	return s
@@ -370,7 +420,10 @@ func httpServer() *httptest.Server {
 	l := log.New(os.Stderr, "GOKRB5 Service Tests: ", log.LstdFlags)
 	b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 	kt := keytab.New()
-	kt.Unmarshal(b)
+	if err := kt.Unmarshal(b); err != nil {
+		panic(err)
+	}
+
 	th := http.HandlerFunc(testAppHandler)
 	s := httptest.NewServer(SPNEGOKRB5Authenticate(th, kt, service.Logger(l), service.SessionManager(NewSessionMgr("gokrb5"))))
 	return s
@@ -389,7 +442,7 @@ func testAppHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "INVALID_FILE", http.StatusBadRequest)
 			return
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		// write out to /dev/null
 		_, err = io.Copy(io.Discard, file)
@@ -400,7 +453,7 @@ func testAppHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	id := goidentity.FromHTTPRequestContext(r)
-	fmt.Fprintf(w, "<html>\nTEST.GOKRB5 Handler\nAuthenticed user: %s\nUser's realm: %s\n</html>",
+	_, _ = fmt.Fprintf(w, "<html>\nTEST.GOKRB5 Handler\nAuthenticed user: %s\nUser's realm: %s\n</html>",
 		id.UserName(),
 		id.Domain())
 }
@@ -408,7 +461,10 @@ func testAppHandler(w http.ResponseWriter, r *http.Request) {
 func getClient() *client.Client {
 	b, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER1_TEST_GOKRB5)
 	kt := keytab.New()
-	kt.Unmarshal(b)
+	if err := kt.Unmarshal(b); err != nil {
+		panic(err)
+	}
+
 	c, _ := config.NewFromString(testdata.KRB5_CONF)
 	c.LibDefaults.NoAddresses = true
 	addr := os.Getenv("TEST_KDC_ADDR")

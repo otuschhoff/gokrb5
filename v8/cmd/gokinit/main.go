@@ -84,11 +84,11 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
-		fmt.Fprintf(stderr, "gokinit: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "gokinit: %v\n", err)
 		return 1
 	}
 	if opts.validate {
-		fmt.Fprintln(stderr, "gokinit: -v not supported")
+		_, _ = fmt.Fprintln(stderr, "gokinit: -v not supported")
 		return 1
 	}
 	cfg, err := krbcli.LoadConfig()
@@ -147,7 +147,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				return writeCache(cl, cacheName, opts.verbose, stdout, stderr)
 			}
 		}
-		fmt.Fprintf(stderr, "kinit: %s while getting initial credentials\n", krbcli.InitialCredentialErrorText(err, principal.String(), principal.Realm))
+		_, _ = fmt.Fprintf(stderr, "kinit: %s while getting initial credentials\n", krbcli.InitialCredentialErrorText(err, principal.String(), principal.Realm))
 		return 1
 	}
 	return writeCache(cl, cacheName, opts.verbose, stdout, stderr)
@@ -158,7 +158,7 @@ func parseArgs(args []string, stderr io.Writer) (initOptions, error) {
 	args = expandKeytabArgs(args)
 	fs := flag.NewFlagSet("gokinit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.Usage = func() { fmt.Fprintln(stderr, usageLine) }
+	fs.Usage = func() { _, _ = fmt.Fprintln(stderr, usageLine) }
 	fs.BoolVar(&opts.verbose, "V", false, "verbose output")
 	fs.StringVar(&opts.lifetime, "l", "", "ticket lifetime")
 	fs.StringVar(&opts.renewLifetime, "r", "", "renewable lifetime")
@@ -415,7 +415,9 @@ func isPasswordExpired(err error) bool {
 }
 
 func changeExpiredPassword(cl *client.Client, principal string, stdin io.Reader, stderr io.Writer, passwordStdin bool) error {
-	fmt.Fprintln(stderr, "Password expired.  You must change it now.")
+	if _, err := fmt.Fprintln(stderr, "Password expired.  You must change it now."); err != nil {
+		return err
+	}
 	first, err := krbcli.ReadPassword("Enter new password: ", stdin, stderr, passwordStdin)
 	if err != nil {
 		return err
@@ -446,9 +448,15 @@ func writeCache(cl *client.Client, cacheName string, verbose bool, stdout, stder
 		return fail(stderr, err, "while storing credentials")
 	}
 	if verbose {
-		fmt.Fprintf(stdout, "Using default cache: %s\n", displayCacheName(cacheName))
-		fmt.Fprintf(stdout, "Using principal: %s@%s\n", cl.Credentials.CName().PrincipalNameString(), cl.Credentials.Domain())
-		fmt.Fprintln(stdout, "Authenticated to Kerberos v5")
+		if _, err := fmt.Fprintf(stdout, "Using default cache: %s\n", displayCacheName(cacheName)); err != nil {
+			return fail(stderr, err, "while reporting cached credentials")
+		}
+		if _, err := fmt.Fprintf(stdout, "Using principal: %s@%s\n", cl.Credentials.CName().PrincipalNameString(), cl.Credentials.Domain()); err != nil {
+			return fail(stderr, err, "while reporting cached credentials")
+		}
+		if _, err := fmt.Fprintln(stdout, "Authenticated to Kerberos v5"); err != nil {
+			return fail(stderr, err, "while reporting cached credentials")
+		}
 	}
 	return 0
 }
@@ -476,6 +484,6 @@ func displayCacheName(name string) string {
 }
 
 func fail(stderr io.Writer, err error, context string) int {
-	fmt.Fprintf(stderr, "kinit: %s %s\n", krbcli.ErrorText(err), context)
+	_, _ = fmt.Fprintf(stderr, "kinit: %s %s\n", krbcli.ErrorText(err), context)
 	return 1
 }

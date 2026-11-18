@@ -112,7 +112,9 @@ func TestChallengeChecksumVerification(t *testing.T) {
 	t.Parallel()
 	challenge, _ := hex.DecodeString(testChallengeFromAcceptor)
 	var wt WrapToken
-	wt.Unmarshal(challenge, true)
+	if err := wt.Unmarshal(challenge, true); err != nil {
+		t.Fatal(err)
+	}
 	challengeOk, cErr := wt.Verify(getSessionKey(), acceptorSeal)
 	assert.Nil(t, cErr, "Error occurred during checksum verification.")
 	assert.True(t, challengeOk, "Checksum verification failed.")
@@ -122,7 +124,9 @@ func TestResponseChecksumVerification(t *testing.T) {
 	t.Parallel()
 	reply, _ := hex.DecodeString(testChallengeReplyFromInitiator)
 	var wt WrapToken
-	wt.Unmarshal(reply, false)
+	if err := wt.Unmarshal(reply, false); err != nil {
+		t.Fatal(err)
+	}
 	replyOk, rErr := wt.Verify(getSessionKey(), initiatorSeal)
 	assert.Nil(t, rErr, "Error occurred during checksum verification.")
 	assert.True(t, replyOk, "Checksum verification failed.")
@@ -132,7 +136,9 @@ func TestChecksumVerificationFailure(t *testing.T) {
 	t.Parallel()
 	challenge, _ := hex.DecodeString(testChallengeFromAcceptor)
 	var wt WrapToken
-	wt.Unmarshal(challenge, true)
+	if err := wt.Unmarshal(challenge, true); err != nil {
+		t.Fatal(err)
+	}
 
 	// Test a failure with the correct key but wrong keyusage:
 	challengeOk, cErr := wt.Verify(getSessionKey(), initiatorSeal)

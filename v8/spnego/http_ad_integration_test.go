@@ -30,7 +30,7 @@ func TestSPNEGO_AD_EndToEnd(t *testing.T) {
 	l := log.New(os.Stderr, "SPNEGO AD: ", log.LstdFlags)
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := goidentity.FromHTTPRequestContext(r)
-		fmt.Fprintf(w, "%s@%s|%d", id.UserName(), id.Domain(), len(id.AuthzAttributes()))
+		_, _ = fmt.Fprintf(w, "%s@%s|%d", id.UserName(), id.Domain(), len(id.AuthzAttributes()))
 	})
 	srv := httptest.NewServer(SPNEGOKRB5Authenticate(inner, env.Keytab, service.Logger(l)))
 	defer srv.Close()
@@ -44,7 +44,7 @@ func TestSPNEGO_AD_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SPNEGO request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // test response cleanup is intentionally best effort
 	body, _ := io.ReadAll(resp.Body)
 	assert.Equal(t, http.StatusOK, resp.StatusCode, "acceptor should authenticate the AD user: %s", body)
 

@@ -159,7 +159,10 @@ func TestPACTypeVerify(t *testing.T) {
 
 	b, _ = hex.DecodeString(testdata.KEYTAB_SYSHTTP_TEST_GOKRB5)
 	kt := keytab.New()
-	kt.Unmarshal(b)
+	if err := kt.Unmarshal(b); err != nil {
+		t.Fatal(err)
+	}
+
 	pn, _ := types.ParseSPNString("sysHTTP")
 	key, _, err := kt.GetEncryptionKey(pn, "TEST.GOKRB5", 2, 18)
 	if err != nil {

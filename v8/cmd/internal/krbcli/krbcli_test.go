@@ -62,10 +62,10 @@ func TestReadPasswordFromTTYWithoutEcho(t *testing.T) {
 	if os.Getenv("GOKRB5_PASSWORD_HELPER") == "1" {
 		password, err := ReadPassword("Password: ", os.Stdin, os.Stderr, false)
 		if err != nil {
-			fmt.Fprintln(os.Stdout, err)
+			_, _ = fmt.Fprintln(os.Stdout, err)
 			os.Exit(2)
 		}
-		fmt.Fprintf(os.Stdout, "RESULT:%s\n", password)
+		_, _ = fmt.Fprintf(os.Stdout, "RESULT:%s\n", password)
 		os.Exit(0)
 	}
 	if runtime.GOOS == "windows" {
@@ -77,7 +77,7 @@ func TestReadPasswordFromTTYWithoutEcho(t *testing.T) {
 	if err != nil {
 		t.Skipf("PTY unavailable: %v", err)
 	}
-	defer tty.Close()
+	defer func() { _ = tty.Close() }()
 	reader := bufio.NewReader(tty)
 	prompt, err := reader.ReadString(' ')
 	if err != nil {

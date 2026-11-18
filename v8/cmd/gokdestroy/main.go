@@ -30,7 +30,9 @@ func run(args []string, stderr io.Writer) int {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
-		fmt.Fprintf(stderr, "gokdestroy: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "gokdestroy: %v\n", err); werr != nil {
+			return 1
+		}
 		return 1
 	}
 	if opts.all {
@@ -80,7 +82,7 @@ func parseArgs(args []string, stderr io.Writer) (destroyOptions, error) {
 	var opts destroyOptions
 	fs := flag.NewFlagSet("gokdestroy", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.Usage = func() { fmt.Fprintln(stderr, usageLine) }
+	fs.Usage = func() { _, _ = fmt.Fprintln(stderr, usageLine) }
 	fs.BoolVar(&opts.all, "A", false, "destroy all caches")
 	fs.BoolVar(&opts.quiet, "q", false, "quiet")
 	fs.StringVar(&opts.cacheName, "c", "", "credential cache name")
@@ -98,7 +100,7 @@ func parseArgs(args []string, stderr io.Writer) (destroyOptions, error) {
 
 func fail(stderr io.Writer, err error, quiet bool) int {
 	if !quiet {
-		fmt.Fprintf(stderr, "gokdestroy: %s while destroying cache\n", krbcli.ErrorText(err))
+		_, _ = fmt.Fprintf(stderr, "gokdestroy: %s while destroying cache\n", krbcli.ErrorText(err))
 	}
 	return 1
 }

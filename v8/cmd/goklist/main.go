@@ -40,7 +40,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 0
 		}
 		if !opts.silent {
-			fmt.Fprintf(stderr, "goklist: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "goklist: %v\n", err)
 		}
 		return 1
 	}
@@ -54,7 +54,7 @@ func parseArgs(args []string, stderr io.Writer) (listOptions, error) {
 	var opts listOptions
 	fs := flag.NewFlagSet("goklist", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.Usage = func() { fmt.Fprintln(stderr, usageLine) }
+	fs.Usage = func() { _, _ = fmt.Fprintln(stderr, usageLine) }
 	fs.BoolVar(&opts.keytab, "k", false, "list keytab")
 	fs.BoolVar(&opts.showTimestamp, "t", false, "show keytab timestamps")
 	fs.BoolVar(&opts.showKeys, "K", false, "show key values")
@@ -93,7 +93,9 @@ func listKeytab(opts listOptions, stdout, stderr io.Writer) int {
 		return fail(stderr, err, opts.silent)
 	}
 	if !opts.silent {
-		fmt.Fprint(stdout, kt.Klist(opts.showTimestamp, opts.showKeys, opts.showEtypes))
+		if _, err := fmt.Fprint(stdout, kt.Klist(opts.showTimestamp, opts.showKeys, opts.showEtypes)); err != nil {
+			return fail(stderr, err, opts.silent)
+		}
 	}
 	return 0
 }
@@ -127,17 +129,27 @@ func listCache(opts listOptions, stdout, stderr io.Writer) int {
 		}
 		return 1
 	}
-	fmt.Fprintf(stdout, "Ticket cache: %s\n", displayCacheName(name))
-	fmt.Fprintf(stdout, "Default principal: %s\n\n", principalString(cache.DefaultPrincipal))
-	fmt.Fprintln(stdout, "Valid starting     Expires            Service principal")
+	if _, err := fmt.Fprintf(stdout, "Ticket cache: %s\n", displayCacheName(name)); err != nil {
+		return fail(stderr, err, opts.silent)
+	}
+	if _, err := fmt.Fprintf(stdout, "Default principal: %s\n\n", principalString(cache.DefaultPrincipal)); err != nil {
+		return fail(stderr, err, opts.silent)
+	}
+	if _, err := fmt.Fprintln(stdout, "Valid starting     Expires            Service principal"); err != nil {
+		return fail(stderr, err, opts.silent)
+	}
 	for _, entry := range entries {
 		start := entry.StartTime
 		if start.IsZero() {
 			start = entry.AuthTime
 		}
-		fmt.Fprintf(stdout, "%s  %s  %s\n", formatTime(start), formatTime(entry.EndTime), principalString(entry.Server))
+		if _, err := fmt.Fprintf(stdout, "%s  %s  %s\n", formatTime(start), formatTime(entry.EndTime), principalString(entry.Server)); err != nil {
+			return fail(stderr, err, opts.silent)
+		}
 		if !entry.RenewTill.IsZero() && entry.RenewTill.Unix() > 0 {
-			fmt.Fprintf(stdout, "\trenew until %s\n", formatTime(entry.RenewTill))
+			if _, err := fmt.Fprintf(stdout, "\trenew until %s\n", formatTime(entry.RenewTill)); err != nil {
+				return fail(stderr, err, opts.silent)
+			}
 		}
 		if opts.showEtypes {
 			ticketEType := int32(0)
@@ -145,7 +157,9 @@ func listCache(opts listOptions, stdout, stderr io.Writer) int {
 			if err := ticket.Unmarshal(entry.Ticket); err == nil {
 				ticketEType = ticket.EncPart.EType
 			}
-			fmt.Fprintf(stdout, "\tEtype (skey, tkt): %s, %s\n", etypeID.ETypeToString(entry.Key.KeyType), etypeID.ETypeToString(ticketEType))
+			if _, err := fmt.Fprintf(stdout, "\tEtype (skey, tkt): %s, %s\n", etypeID.ETypeToString(entry.Key.KeyType), etypeID.ETypeToString(ticketEType)); err != nil {
+				return fail(stderr, err, opts.silent)
+			}
 		}
 	}
 	return 0
@@ -172,7 +186,7 @@ func displayCacheName(name string) string {
 
 func fail(stderr io.Writer, err error, silent bool) int {
 	if !silent {
-		fmt.Fprintf(stderr, "goklist: %s\n", krbcli.ErrorText(err))
+		_, _ = fmt.Fprintf(stderr, "goklist: %s\n", krbcli.ErrorText(err))
 	}
 	return 1
 }

@@ -25,7 +25,9 @@ func TestClient_Login_DNSKDCs(t *testing.T) {
 
 	b, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER1_TEST_GOKRB5)
 	kt := keytab.New()
-	kt.Unmarshal(b)
+	if err := kt.Unmarshal(b); err != nil {
+		t.Fatal(err)
+	}
 	cl := NewWithKeytab("testuser1", "TEST.GOKRB5", kt, c)
 
 	err := cl.Login()

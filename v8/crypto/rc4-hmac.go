@@ -78,7 +78,7 @@ func (e RC4HMAC) StringToKey(secret string, _ string, _ string) ([]byte, error) 
 func (e RC4HMAC) RandomToKey(b []byte) []byte {
 	r := bytes.NewReader(b)
 	h := md4.New()
-	io.Copy(h, r)
+	_, _ = io.Copy(h, r) // hash.Hash writes are infallible by contract.
 	return h.Sum(nil)
 }
 

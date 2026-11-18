@@ -239,7 +239,7 @@ func (s *Settings) Logger() *log.Logger {
 // Log will write to the service's logger if it is configured.
 func (cl *Client) Log(format string, v ...interface{}) {
 	if cl.settings.Logger() != nil {
-		cl.settings.Logger().Output(2, fmt.Sprintf(format, v...))
+		_ = cl.settings.Logger().Output(2, fmt.Sprintf(format, v...)) // Logging is deliberately best effort behind this void API.
 	}
 }
 

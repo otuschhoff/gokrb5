@@ -95,7 +95,9 @@ func TestMICChallengeChecksumVerification(t *testing.T) {
 	t.Parallel()
 	challenge, _ := hex.DecodeString(testMICChallengeFromAcceptor)
 	var mt MICToken
-	mt.Unmarshal(challenge, true)
+	if err := mt.Unmarshal(challenge, true); err != nil {
+		t.Fatal(err)
+	}
 	mt.Payload, _ = hex.DecodeString(testMICPayload)
 	challengeOk, cErr := mt.Verify(getSessionKey(), acceptorSign)
 	assert.Nil(t, cErr, "Error occurred during checksum verification.")
@@ -106,7 +108,9 @@ func TestMICResponseChecksumVerification(t *testing.T) {
 	t.Parallel()
 	reply, _ := hex.DecodeString(testMICChallengeReplyFromInitiator)
 	var mt MICToken
-	mt.Unmarshal(reply, false)
+	if err := mt.Unmarshal(reply, false); err != nil {
+		t.Fatal(err)
+	}
 	mt.Payload, _ = hex.DecodeString(testMICPayload)
 	replyOk, rErr := mt.Verify(getSessionKey(), initiatorSign)
 	assert.Nil(t, rErr, "Error occurred during checksum verification.")
@@ -117,7 +121,9 @@ func TestMICChecksumVerificationFailure(t *testing.T) {
 	t.Parallel()
 	challenge, _ := hex.DecodeString(testMICChallengeFromAcceptor)
 	var mt MICToken
-	mt.Unmarshal(challenge, true)
+	if err := mt.Unmarshal(challenge, true); err != nil {
+		t.Fatal(err)
+	}
 
 	// Test a failure with the correct key but wrong keyusage:
 	challengeOk, cErr := mt.Verify(getSessionKey(), initiatorSign)

@@ -463,8 +463,10 @@ const (
 func TestLoad(t *testing.T) {
 	t.Parallel()
 	cf, _ := os.CreateTemp(os.TempDir(), "TEST-gokrb5-krb5.conf")
-	defer os.Remove(cf.Name())
-	cf.WriteString(krb5Conf)
+	t.Cleanup(func() { _ = os.Remove(cf.Name()) })
+	if _, err := cf.WriteString(krb5Conf); err != nil {
+		t.Fatal(err)
+	}
 
 	c, err := Load(cf.Name())
 	if err != nil {
@@ -496,8 +498,10 @@ func TestLoad(t *testing.T) {
 func TestLoadWithV4Lines(t *testing.T) {
 	t.Parallel()
 	cf, _ := os.CreateTemp(os.TempDir(), "TEST-gokrb5-krb5.conf")
-	defer os.Remove(cf.Name())
-	cf.WriteString(krb5ConfV4Lines)
+	t.Cleanup(func() { _ = os.Remove(cf.Name()) })
+	if _, err := cf.WriteString(krb5ConfV4Lines); err != nil {
+		t.Fatal(err)
+	}
 
 	c, err := Load(cf.Name())
 	if err == nil {
@@ -592,8 +596,10 @@ func TestLoadNoBlankLines(t *testing.T) {
 func TestLoadTabs(t *testing.T) {
 	t.Parallel()
 	cf, _ := os.CreateTemp(os.TempDir(), "TEST-gokrb5-krb5.conf")
-	defer os.Remove(cf.Name())
-	cf.WriteString(krb5ConfTabs)
+	t.Cleanup(func() { _ = os.Remove(cf.Name()) })
+	if _, err := cf.WriteString(krb5ConfTabs); err != nil {
+		t.Fatal(err)
+	}
 
 	c, err := Load(cf.Name())
 	if err != nil {

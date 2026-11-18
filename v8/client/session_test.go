@@ -28,7 +28,10 @@ func TestMultiThreadedClientSession(t *testing.T) {
 
 	b, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER1_TEST_GOKRB5)
 	kt := keytab.New()
-	kt.Unmarshal(b)
+	if err := kt.Unmarshal(b); err != nil {
+		t.Fatal(err)
+	}
+
 	c, _ := config.NewFromString(testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
@@ -65,7 +68,7 @@ func TestMultiThreadedClientSession(t *testing.T) {
 				t.Logf("error getting session: %v", err)
 			}
 			_, _, _, r, _ := cl.sessionTimes("TEST.GOKRB5")
-			fmt.Fprintf(io.Discard, "%v", r)
+			_, _ = fmt.Fprintf(io.Discard, "%v", r)
 		}()
 		time.Sleep(time.Second)
 	}
@@ -82,7 +85,10 @@ func TestClient_AutoRenew_Goroutine(t *testing.T) {
 	}
 	b, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER2_TEST_GOKRB5)
 	kt := keytab.New()
-	kt.Unmarshal(b)
+	if err := kt.Unmarshal(b); err != nil {
+		t.Fatal(err)
+	}
+
 	c, _ := config.NewFromString(testdata.KRB5_CONF)
 	c.Realms[0].KDC = []string{addr + ":" + testdata.KDC_PORT_TEST_GOKRB5_SHORTTICKETS}
 	c.LibDefaults.PreferredPreauthTypes = []int{int(etypeID.DES3_CBC_SHA1_KD)} // a preauth etype the KDC does not support. Test this does not cause renewal to fail.
@@ -109,8 +115,13 @@ func TestClient_AutoRenew_Goroutine(t *testing.T) {
 		}
 		b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 		skt := keytab.New()
-		skt.Unmarshal(b)
-		tkt.DecryptEncPart(skt, nil)
+		if err := skt.Unmarshal(b); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := tkt.DecryptEncPart(skt, nil); err != nil {
+			t.Fatal(err)
+		}
 		assert.Equal(t, spn, tkt.SName.PrincipalNameString())
 		assert.Equal(t, int32(18), key.KeyType)
 		if runtime.NumGoroutine() > n {
