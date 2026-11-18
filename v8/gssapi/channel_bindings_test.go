@@ -13,19 +13,17 @@ func TestTLSChannelBindings(t *testing.T) {
 	if _, err := TLSServerEndPoint(tls.ConnectionState{}); err == nil {
 		t.Fatal("missing peer certificate accepted")
 	}
-	for _, algorithm := range []x509.SignatureAlgorithm{x509.SHA256WithRSA, x509.SHA384WithRSA, x509.SHA512WithRSA} {
+	for algorithm, digestBytes := range map[x509.SignatureAlgorithm]int{
+		x509.SHA256WithRSA: 32,
+		x509.SHA384WithRSA: 48,
+		x509.SHA512WithRSA: 64,
+	} {
 		state := tls.ConnectionState{PeerCertificates: []*x509.Certificate{{Raw: []byte("certificate"), SignatureAlgorithm: algorithm}}}
 		bindings, err := TLSServerEndPoint(state)
 		if err != nil || !bytes.HasPrefix(bindings.ApplicationData, []byte("tls-server-end-point:")) {
 			t.Fatalf("TLS server endpoint for %v = %x, %v", algorithm, bindings.ApplicationData, err)
 		}
-		wantLength := len("tls-server-end-point:") + 32
-		switch algorithm {
-		case x509.SHA384WithRSA:
-			wantLength += 16
-		case x509.SHA512WithRSA:
-			wantLength += 32
-		}
+		wantLength := len("tls-server-end-point:") + digestBytes
 		if len(bindings.ApplicationData) != wantLength {
 			t.Fatalf("binding length for %v = %d, want %d", algorithm, len(bindings.ApplicationData), wantLength)
 		}

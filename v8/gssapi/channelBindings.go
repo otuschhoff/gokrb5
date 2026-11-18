@@ -59,7 +59,13 @@ func TLSServerEndPoint(state tls.ConnectionState) (ChannelBindings, error) {
 		digest = sha512.New384()
 	case x509.SHA512WithRSA, x509.SHA512WithRSAPSS, x509.ECDSAWithSHA512:
 		digest = sha512.New()
+	case x509.UnknownSignatureAlgorithm, x509.MD2WithRSA, x509.MD5WithRSA,
+		x509.SHA1WithRSA, x509.SHA256WithRSA, x509.DSAWithSHA1, x509.DSAWithSHA256,
+		x509.ECDSAWithSHA1, x509.ECDSAWithSHA256, x509.SHA256WithRSAPSS,
+		x509.PureEd25519:
+		digest = sha256.New()
 	default:
+		// Future x509.SignatureAlgorithm values retain the RFC 5929 SHA-256 default.
 		digest = sha256.New()
 	}
 	_, _ = digest.Write(certificate.Raw)

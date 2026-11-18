@@ -2,7 +2,7 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-12 done (formatter normalization,
+(floor raised to 86.0%), and Phase 5 slices 1-13 done (formatter normalization,
 keytab complexity, dead code, mechanical clarity, shadow elimination,
 errorlint, revive mechanical, exported documentation, the NDR carry-over,
 I/O/body-ownership cleanup, checked type assertions, and named-return clarity).
@@ -34,7 +34,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,552 canonical lint findings after Phase 5 slices 1-12 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,549 canonical lint findings after Phase 5 slices 1-13 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -823,6 +823,20 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 13 (2026-11-18, exhaustive enum handling): cleared all four exhaustive
+diagnostics. TLS signature-algorithm selection now explicitly enumerates every
+x509.SignatureAlgorithm required by exhaustive and retains a SHA-256 default
+for future enum values; the test replaces its enum switch with a
+map expectation (so it tests digest length without duplicating production
+dispatch). NDR `noteConformantValue` and `fill` explicitly handle every
+reflect.Kind, preserving the existing no-op and `unsupported type` behavior.
+Review found NilAway treating the TLS digest as potentially nil despite the
+complete cases; adding the future-value default also makes the hash invariant
+explicit. Full v8 race tests and 87.0% coverage pass. Canonical findings are
+1,549; interfacebloat remains intentionally open because the flagged public
+interfaces describe protocol capabilities rather than accidental optional
+mixins.
 
 Slice 12 (2026-11-18, return clarity): all 68 functions carrying 134 named
 result diagnostics now use unnamed signatures while preserving the original
