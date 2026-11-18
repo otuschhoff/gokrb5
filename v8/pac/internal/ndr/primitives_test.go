@@ -236,7 +236,11 @@ func wrapNDRBody(body []byte) []byte {
 	data[0] = protocolVersion
 	data[1] = 0x10
 	binary.LittleEndian.PutUint16(data[2:4], commonHeaderBytes)
-	binary.LittleEndian.PutUint32(data[8:12], uint32((objectLength+7)/8*8))
+	objectLengthAligned := (objectLength + 7) / 8 * 8
+	if objectLengthAligned > math.MaxUint32 {
+		panic("NDR test object length exceeds uint32")
+	}
+	binary.LittleEndian.PutUint32(data[8:12], uint32(objectLengthAligned)) // #nosec G115 -- checked against MaxUint32 above.
 	binary.LittleEndian.PutUint32(data[16:20], 1)
 	data = append(data, body...)
 	for len(data)%8 != 0 {

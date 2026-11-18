@@ -125,31 +125,60 @@ func (k *UPNDNSInfo) Marshal() ([]byte, error) {
 	if extended {
 		fields = append(fields, sam, sid)
 	}
-	offsets := make([]uint16, len(fields))
-	size := alignUPNDNS(headerLength)
-	for i, field := range fields {
-		if len(field) > math.MaxUint16 || size > math.MaxUint16 || size+len(field) > math.MaxUint16 {
-			return nil, fmt.Errorf("UPN_DNS_INFO is too large")
-		}
-		offsets[i] = uint16(size)
-		size = alignUPNDNS(size + len(field))
+	offsets, size, err := upnDNSOffsets(headerLength, fields)
+	if err != nil {
+		return nil, err
 	}
 	b := make([]byte, size)
-	binary.LittleEndian.PutUint16(b[0:2], uint16(len(upn)))
-	binary.LittleEndian.PutUint16(b[2:4], offsets[0])
-	binary.LittleEndian.PutUint16(b[4:6], uint16(len(domain)))
-	binary.LittleEndian.PutUint16(b[6:8], offsets[1])
-	binary.LittleEndian.PutUint32(b[8:12], k.Flags)
-	if extended {
-		binary.LittleEndian.PutUint16(b[12:14], uint16(len(sam)))
-		binary.LittleEndian.PutUint16(b[14:16], offsets[2])
-		binary.LittleEndian.PutUint16(b[16:18], uint16(len(sid)))
-		binary.LittleEndian.PutUint16(b[18:20], offsets[3])
+	if err := writeUPNDNSHeader(b, k.Flags, fields, offsets); err != nil {
+		return nil, err
 	}
 	for i, field := range fields {
 		copy(b[int(offsets[i]):], field)
 	}
 	return b, nil
+}
+
+func upnDNSOffsets(headerLength int, fields [][]byte) ([]uint16, int, error) {
+	offsets := make([]uint16, len(fields))
+	size := alignUPNDNS(headerLength)
+	for i, field := range fields {
+		if len(field) > math.MaxUint16 || size > math.MaxUint16 || size+len(field) > math.MaxUint16 {
+			return nil, 0, fmt.Errorf("UPN_DNS_INFO is too large")
+		}
+		offset, err := pacUint16FromInt("UPN_DNS_INFO offset", size)
+		if err != nil {
+			return nil, 0, err
+		}
+		offsets[i] = offset
+		size = alignUPNDNS(size + len(field))
+	}
+	return offsets, size, nil
+}
+
+func writeUPNDNSHeader(b []byte, flags uint32, fields [][]byte, offsets []uint16) error {
+	for i := 0; i < len(fields); i += 2 {
+		length, err := pacUint16FromInt("UPN_DNS_INFO field length", len(fields[i]))
+		if err != nil {
+			return err
+		}
+		base := 0
+		if i == 2 {
+			base = 12
+		}
+		binary.LittleEndian.PutUint16(b[base:base+2], length)
+		binary.LittleEndian.PutUint16(b[base+2:base+4], offsets[i])
+		if i+1 < len(fields) {
+			length, err = pacUint16FromInt("UPN_DNS_INFO field length", len(fields[i+1]))
+			if err != nil {
+				return err
+			}
+			binary.LittleEndian.PutUint16(b[base+4:base+6], length)
+			binary.LittleEndian.PutUint16(b[base+6:base+8], offsets[i+1])
+		}
+	}
+	binary.LittleEndian.PutUint32(b[8:12], flags)
+	return nil
 }
 
 func decodeUPNDNSString(b []byte, offset, length uint16, name string) (string, error) {

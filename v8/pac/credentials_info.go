@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/jcmturner/rpc/v2/mstypes"
 
@@ -59,7 +60,10 @@ func (c *CredentialsInfo) Unmarshal(b []byte, k types.EncryptionKey) error {
 
 // DecryptEncPart decrypts the encrypted part of the CredentialsInfo.
 func (c *CredentialsInfo) DecryptEncPart(k types.EncryptionKey) error {
-	if k.KeyType != int32(c.EType) {
+	if c.EType > math.MaxInt32 {
+		return fmt.Errorf("credential encryption type %d exceeds int32 range", c.EType)
+	}
+	if int64(k.KeyType) != int64(c.EType) {
 		return fmt.Errorf("key provided is not the correct type. Type needed: %d, type provided: %d", c.EType, k.KeyType)
 	}
 	pt, err := crypto.DecryptMessage(c.PACCredentialDataEncrypted, k, keyusage.KERB_NON_KERB_SALT)

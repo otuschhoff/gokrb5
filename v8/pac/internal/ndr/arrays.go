@@ -120,14 +120,29 @@ func multiDimensionalIndexPermutations(l []int) [][]int {
 }
 
 // precedingMax reads off the next conformant max value
+func ndrUint32ToInt(value uint32) (int, error) {
+	converted := uint64(value)
+	if converted > uint64(^uint(0)>>1) {
+		return 0, fmt.Errorf("NDR count %d exceeds platform int range", value)
+	}
+	return int(converted), nil // #nosec G115 -- conversion is bounded by the platform max int above.
+}
+
+func ndrUint64ToInt(value uint64) (int, error) {
+	if value > uint64(^uint(0)>>1) {
+		return 0, fmt.Errorf("NDR count %d exceeds platform int range", value)
+	}
+	return int(value), nil // #nosec G115 -- conversion is bounded by the platform max int above.
+}
+
 func (dec *Decoder) validateDimensions(lengths []int) error {
 	elements := uint64(1)
 	for _, length := range lengths {
-		if length < 0 || uint64(length) > uint64(dec.size) {
+		if length < 0 || int64(length) > int64(dec.size) {
 			return fmt.Errorf("array dimension %d exceeds NDR input size %d", length, dec.size)
 		}
-		elements *= uint64(length)
-		if elements > uint64(dec.size) {
+		elements *= uint64(length)       // #nosec G115 -- slice lengths and validated dimensions are nonnegative.
+		if elements > uint64(dec.size) { // #nosec G115 -- decoder size is validated as nonnegative when created.
 			return fmt.Errorf("array element count %d exceeds NDR input size %d", elements, dec.size)
 		}
 	}
@@ -141,7 +156,7 @@ func (dec *Decoder) precedingMax() uint32 {
 	}
 	m := dec.conformantMax[0]
 	dec.conformantMax = dec.conformantMax[1:]
-	if uint64(m) > uint64(dec.size) {
+	if int64(m) > int64(dec.size) {
 		dec.resourceErr = fmt.Errorf("conformant array count %d exceeds NDR input size %d", m, dec.size)
 		return 0
 	}
@@ -215,7 +230,10 @@ func (dec *Decoder) fillConformantArray(v reflect.Value, tag reflect.StructTag, 
 // fillUniDimensionalConformantArray fills the uni-dimensional slice value.
 func (dec *Decoder) fillUniDimensionalConformantArray(v reflect.Value, tag reflect.StructTag, def *[]deferedPtr) error {
 	m := dec.precedingMax()
-	n := int(m)
+	n, err := ndrUint32ToInt(m)
+	if err != nil {
+		return err
+	}
 	a := reflect.MakeSlice(v.Type(), n, n)
 	for i := 0; i < n; i++ {
 		err := dec.fill(a.Index(i), tag, def)
@@ -234,7 +252,12 @@ func (dec *Decoder) fillMultiDimensionalConformantArray(v reflect.Value, d int, 
 	// Read the max size of each dimensions from the ndr stream
 	l := make([]int, d)
 	for i := range l {
-		l[i] = int(dec.precedingMax())
+		maximum := dec.precedingMax()
+		maximumInt, err := ndrUint32ToInt(maximum)
+		if err != nil {
+			return err
+		}
+		l[i] = maximumInt
 	}
 	if err := dec.validateDimensions(l); err != nil {
 		return err
@@ -292,13 +315,20 @@ func (dec *Decoder) fillUniDimensionalVaryingArray(v reflect.Value, tag reflect.
 	t := v.Type()
 	// Total size of the array is the offset in the index being passed plus the actual count of elements being passed.
 	n64 := uint64(s) + uint64(o)
-	if n64 > uint64(dec.size) {
+	if n64 > uint64(dec.size) { // #nosec G115 -- decoder size is validated as nonnegative when created.
 		return fmt.Errorf("varying array length %d exceeds NDR input size %d", n64, dec.size)
 	}
-	n := int(n64)
+	n, err := ndrUint64ToInt(n64)
+	if err != nil {
+		return err
+	}
 	a := reflect.MakeSlice(t, n, n)
 	// Populate the array starting at the offset specified
-	for i := int(o); i < n; i++ {
+	offset, err := ndrUint32ToInt(o)
+	if err != nil {
+		return err
+	}
+	for i := offset; i < n; i++ {
 		err := dec.fill(a.Index(i), tag, def)
 		if err != nil {
 			return fmt.Errorf("could not fill index %d of uni-dimensional varying array: %w", i, err)
@@ -333,16 +363,22 @@ func (dec *Decoder) readVaryingDimensions(d int) ([]int, []int, error) {
 		if err != nil {
 			return nil, nil, fmt.Errorf("could not read offset of dimension %d: %w", i+1, err)
 		}
-		offsets[i] = int(offset)
+		offsets[i], err = ndrUint32ToInt(offset)
+		if err != nil {
+			return nil, nil, err
+		}
 		count, err := dec.readUint32()
 		if err != nil {
 			return nil, nil, fmt.Errorf("could not read size of dimension %d: %w", i+1, err)
 		}
 		length := uint64(count) + uint64(offset)
-		if length > uint64(dec.size) {
+		if length > uint64(dec.size) { // #nosec G115 -- decoder size is validated as nonnegative when created.
 			return nil, nil, fmt.Errorf("dimension %d length %d exceeds NDR input size %d", i+1, length, dec.size)
 		}
-		lengths[i] = int(length)
+		lengths[i], err = ndrUint64ToInt(length)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	return offsets, lengths, nil
 }
@@ -412,26 +448,43 @@ func (dec *Decoder) fillMultiDimensionalConformantVaryingArray(v reflect.Value, 
 func (dec *Decoder) readConformantVaryingDimensions(d int) ([]int, []int, []int, error) {
 	maximums := make([]int, d)
 	for i := range maximums {
-		maximums[i] = int(dec.precedingMax())
+		maximum, err := ndrUint32ToInt(dec.precedingMax())
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		maximums[i] = maximum
 	}
 	offsets := make([]int, d)
 	lengths := make([]int, d)
 	for i := range lengths {
-		offset, err := dec.readUint32()
+		offset, length, err := dec.readConformantVaryingDimension(maximums[i], i+1)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("could not read offset of dimension %d: %w", i+1, err)
+			return nil, nil, nil, err
 		}
-		offsets[i] = int(offset)
-		count, err := dec.readUint32()
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("could not read actual count of dimension %d: %w", i+1, err)
-		}
-		if uint64(maximums[i]) < uint64(count)+uint64(offset) {
-			return nil, nil, nil, errors.New("max count is less than the offset plus actual count")
-		}
-		lengths[i] = int(offset) + int(count)
+		offsets[i], lengths[i] = offset, length
 	}
 	return maximums, offsets, lengths, nil
+}
+
+func (dec *Decoder) readConformantVaryingDimension(maximum, dimension int) (int, int, error) {
+	offset, err := dec.readUint32()
+	if err != nil {
+		return 0, 0, fmt.Errorf("could not read offset of dimension %d: %w", dimension, err)
+	}
+	count, err := dec.readUint32()
+	if err != nil {
+		return 0, 0, fmt.Errorf("could not read actual count of dimension %d: %w", dimension, err)
+	}
+	combined := uint64(count) + uint64(offset)
+	if uint64(maximum) < combined { // #nosec G115 -- maximum is a validated nonnegative int.
+		return 0, 0, errors.New("max count is less than the offset plus actual count")
+	}
+	offsetInt, err := ndrUint32ToInt(offset)
+	if err != nil {
+		return 0, 0, err
+	}
+	length, err := ndrUint64ToInt(combined)
+	return offsetInt, length, err
 }
 
 // initializeMultiDimensionalSlice allocates the nested slices described by

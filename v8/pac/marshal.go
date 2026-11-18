@@ -52,44 +52,68 @@ func (pac *PACType) marshalBuffers() ([]pacBuffer, error) {
 			return nil, fmt.Errorf("%w: duplicate buffer type %d", ErrPACMalformed, info.ULType)
 		}
 		seen[info.ULType] = struct{}{}
-		end := info.Offset + uint64(info.CBBufferSize)
-		if end < info.Offset || end > uint64(len(pac.Data)) {
-			return nil, fmt.Errorf("%w: buffer type %d is out of bounds", ErrPACMalformed, info.ULType)
+		payload, err := pac.marshalBufferPayload(info)
+		if err != nil {
+			return nil, err
 		}
-		payload := append([]byte(nil), pac.Data[int(info.Offset):int(end)]...)
-		var err error
-		switch info.ULType {
-		case infoTypePACServerSignatureData:
-			payload, err = marshalOptionalSignature(pac.ServerChecksum, payload)
-		case infoTypePACKDCSignatureData:
-			payload, err = marshalOptionalSignature(pac.KDCChecksum, payload)
-		case infoTypePACTicketChecksum:
-			payload, err = marshalOptionalSignature(pac.TicketChecksum, payload)
-		case infoTypePACFullChecksum:
-			payload, err = marshalOptionalSignature(pac.FullChecksum, payload)
-		case infoTypePACAttributesInfo:
-			if pac.AttributesInfo != nil {
-				payload, err = pac.AttributesInfo.Marshal()
-			}
-		case infoTypePACRequestor:
-			if pac.Requestor != nil {
-				payload, err = pac.Requestor.Marshal()
-			}
-		case infoTypePACClientInfo:
-			if pac.ClientInfo != nil {
-				payload, err = pac.ClientInfo.Marshal()
-			}
-		case infoTypeUPNDNSInfo:
-			if pac.UPNDNSInfo != nil {
-				payload, err = pac.UPNDNSInfo.Marshal()
-			}
-		}
+		payload, err = pac.marshalBufferValue(info.ULType, payload)
 		if err != nil {
 			return nil, fmt.Errorf("marshal PAC buffer type %d: %w", info.ULType, err)
 		}
 		buffers = append(buffers, pacBuffer{typeID: info.ULType, data: payload})
 	}
 	return buffers, nil
+}
+
+func (pac *PACType) marshalBufferValue(typeID uint32, original []byte) ([]byte, error) {
+	var typed []byte
+	var err error
+	switch typeID {
+	case infoTypePACServerSignatureData:
+		return marshalOptionalSignature(pac.ServerChecksum, original)
+	case infoTypePACKDCSignatureData:
+		return marshalOptionalSignature(pac.KDCChecksum, original)
+	case infoTypePACTicketChecksum:
+		return marshalOptionalSignature(pac.TicketChecksum, original)
+	case infoTypePACFullChecksum:
+		return marshalOptionalSignature(pac.FullChecksum, original)
+	case infoTypePACAttributesInfo:
+		if pac.AttributesInfo != nil {
+			typed, err = pac.AttributesInfo.Marshal()
+		}
+	case infoTypePACRequestor:
+		if pac.Requestor != nil {
+			typed, err = pac.Requestor.Marshal()
+		}
+	case infoTypePACClientInfo:
+		if pac.ClientInfo != nil {
+			typed, err = pac.ClientInfo.Marshal()
+		}
+	case infoTypeUPNDNSInfo:
+		if pac.UPNDNSInfo != nil {
+			typed, err = pac.UPNDNSInfo.Marshal()
+		}
+	}
+	if err != nil || typed != nil {
+		return typed, err
+	}
+	return original, nil
+}
+
+func (pac *PACType) marshalBufferPayload(info InfoBuffer) ([]byte, error) {
+	end := info.Offset + uint64(info.CBBufferSize)
+	if end < info.Offset || end > uint64(len(pac.Data)) {
+		return nil, fmt.Errorf("%w: buffer type %d is out of bounds", ErrPACMalformed, info.ULType)
+	}
+	start, err := pacIntFromUint64("buffer offset", info.Offset)
+	if err != nil {
+		return nil, err
+	}
+	stop, err := pacIntFromUint64("buffer end", end)
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), pac.Data[start:stop]...), nil
 }
 
 func marshalOptionalSignature(signature *SignatureData, original []byte) ([]byte, error) {
@@ -100,27 +124,47 @@ func marshalOptionalSignature(signature *SignatureData, original []byte) ([]byte
 }
 
 func marshalPACBuffers(version uint32, buffers []pacBuffer) ([]byte, error) {
-	headerLength := uint64(8 + len(buffers)*16)
+	headerSize := 8 + len(buffers)*16
+	if headerSize < 0 {
+		return nil, fmt.Errorf("%w: PAC header size overflows", ErrPACMalformed)
+	}
+	headerLength := uint64(headerSize) // #nosec G115 -- nonnegative checked above.
 	offset := alignPAC(headerLength)
 	for _, buffer := range buffers {
 		if uint64(len(buffer.data)) > math.MaxUint32 || offset > math.MaxUint64-uint64(len(buffer.data))-pacAlignment+1 {
 			return nil, fmt.Errorf("%w: PAC is too large", ErrPACMalformed)
 		}
 		offset = alignPAC(offset + uint64(len(buffer.data)))
-		if offset > uint64(maxInt()) {
+		if offset > uint64(maxInt()) { // #nosec G115 -- maxInt is nonnegative.
 			return nil, fmt.Errorf("%w: PAC is too large", ErrPACMalformed)
 		}
 	}
-	data := make([]byte, int(offset))
-	binary.LittleEndian.PutUint32(data, uint32(len(buffers)))
+	allocation, err := pacIntFromUint64("PAC allocation", offset)
+	if err != nil {
+		return nil, err
+	}
+	data := make([]byte, allocation)
+	bufferCount, err := pacUint32FromInt("buffer count", len(buffers))
+	if err != nil {
+		return nil, err
+	}
+	binary.LittleEndian.PutUint32(data, bufferCount)
 	binary.LittleEndian.PutUint32(data[4:], version)
 	offset = alignPAC(headerLength)
 	for i, buffer := range buffers {
 		entry := 8 + i*16
 		binary.LittleEndian.PutUint32(data[entry:], buffer.typeID)
-		binary.LittleEndian.PutUint32(data[entry+4:], uint32(len(buffer.data)))
+		bufferLength, err := pacUint32FromInt("buffer length", len(buffer.data))
+		if err != nil {
+			return nil, err
+		}
+		binary.LittleEndian.PutUint32(data[entry+4:], bufferLength)
 		binary.LittleEndian.PutUint64(data[entry+8:], offset)
-		copy(data[int(offset):], buffer.data)
+		bufferOffset, err := pacIntFromUint64("buffer offset", offset)
+		if err != nil {
+			return nil, err
+		}
+		copy(data[bufferOffset:], buffer.data)
 		offset = alignPAC(offset + uint64(len(buffer.data)))
 	}
 	return data, nil
@@ -211,7 +255,7 @@ func checksumTypeForKey(key types.EncryptionKey) (uint32, error) {
 	if len(key.KeyValue) != etype.GetKeyByteSize() {
 		return 0, fmt.Errorf("key length is %d, expected %d", len(key.KeyValue), etype.GetKeyByteSize())
 	}
-	return uint32(etype.GetHashID()), nil
+	return pacUint32FromInt32("checksum type", etype.GetHashID())
 }
 
 func setSignatureBuffer(buffers []pacBuffer, typeID, signatureType uint32) ([]pacBuffer, error) {
@@ -246,7 +290,18 @@ func signatureBytes(data []byte, buffers []pacBuffer, typeID uint32) ([]byte, er
 	header := 8 + index*16
 	offset := binary.LittleEndian.Uint64(data[header+8:])
 	length := binary.LittleEndian.Uint32(data[header+4:])
-	return data[int(offset)+4 : int(offset)+int(length)], nil
+	start, err := pacIntFromUint64("signature offset", offset)
+	if err != nil {
+		return nil, err
+	}
+	lengthInt, err := pacUint32ToInt("signature length", length)
+	if err != nil {
+		return nil, err
+	}
+	if lengthInt < 4 || start > len(data)-lengthInt {
+		return nil, fmt.Errorf("PAC signature range exceeds data")
+	}
+	return data[start+4 : start+lengthInt], nil
 }
 
 func writeChecksum(data []byte, buffers []pacBuffer, typeID uint32, key types.EncryptionKey, input []byte) error {

@@ -37,7 +37,7 @@ func TestDecodeClaimsSetRejectsOversizedConformantCount(t *testing.T) {
 	// bounded decoder must reject it instead of allocating from it.
 	binary.LittleEndian.PutUint32(claims[40:], 0xffffffff)
 	m := &mstypes.ClaimsSetMetadata{
-		ClaimsSetSize:     uint32(len(claims)),
+		ClaimsSetSize:     mustPACUint32(t, len(claims)),
 		ClaimsSetBytes:    claims,
 		CompressionFormat: mstypes.CompressionFormatNone,
 	}

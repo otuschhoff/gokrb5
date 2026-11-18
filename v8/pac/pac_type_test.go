@@ -18,6 +18,33 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+func mustPACUint32(t *testing.T, value int) uint32 {
+	t.Helper()
+	result, err := pacUint32FromInt("test value", value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func mustPACInt(t *testing.T, value uint64) int {
+	t.Helper()
+	result, err := pacIntFromUint64("test value", value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func mustPACInt32(t *testing.T, value uint32) int32 {
+	t.Helper()
+	result, err := pacUint32ToInt32("test value", value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
 func TestPACBoundsChecks(t *testing.T) {
 	t.Run("unsupported version", func(t *testing.T) {
 		b := make([]byte, 8)
@@ -51,7 +78,7 @@ func TestPACBoundsChecks(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pac := PACType{CBuffers: uint32(len(tt.buffer)), Buffers: tt.buffer, Data: tt.data}
+			pac := PACType{CBuffers: mustPACUint32(t, len(tt.buffer)), Buffers: tt.buffer, Data: tt.data}
 			if tt.name == "count mismatch" {
 				pac.CBuffers++
 			}
@@ -74,7 +101,7 @@ func TestPACRejectsDuplicateValidationInfo(t *testing.T) {
 	var buffers []pacBuffer
 	var validation pacBuffer
 	for _, info := range original.Buffers {
-		payload := append([]byte(nil), original.Data[int(info.Offset):int(info.Offset)+int(info.CBBufferSize)]...)
+		payload := append([]byte(nil), original.Data[mustPACInt(t, info.Offset):mustPACInt(t, info.Offset)+int(info.CBBufferSize)]...)
 		buffer := pacBuffer{typeID: info.ULType, data: payload}
 		buffers = append(buffers, buffer)
 		if info.ULType == infoTypeKerbValidationInfo {
@@ -159,8 +186,8 @@ func TestPACTypeVerify(t *testing.T) {
 
 	b, _ = hex.DecodeString(testdata.KEYTAB_SYSHTTP_TEST_GOKRB5)
 	kt := keytab.New()
-	if err := kt.Unmarshal(b); err != nil {
-		t.Fatal(err)
+	if unmarshalErr := kt.Unmarshal(b); unmarshalErr != nil {
+		t.Fatal(unmarshalErr)
 	}
 
 	pn, _ := types.ParseSPNString("sysHTTP")

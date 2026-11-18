@@ -108,7 +108,15 @@ func (pac *PACType) zeroChecksum(data []byte, typeID uint32) error {
 		if buffer.CBBufferSize < 4 || end < buffer.Offset || end > uint64(len(data)) {
 			return fmt.Errorf("%w: invalid checksum buffer type %d", ErrPACMalformed, typeID)
 		}
-		for i := int(buffer.Offset) + 4; i < int(end); i++ {
+		start, err := pacIntFromUint64("checksum buffer offset", buffer.Offset)
+		if err != nil {
+			return err
+		}
+		stop, err := pacIntFromUint64("checksum buffer end", end)
+		if err != nil {
+			return err
+		}
+		for i := start + 4; i < stop; i++ {
 			data[i] = 0
 		}
 	}
@@ -119,7 +127,11 @@ func (pac *PACType) zeroChecksum(data []byte, typeID uint32) error {
 }
 
 func verifyPACChecksum(signature *SignatureData, key types.EncryptionKey, data []byte, name string) error {
-	etype, err := crypto.GetChksumEtype(int32(signature.SignatureType))
+	checksumType, err := pacUint32ToInt32("checksum type", signature.SignatureType)
+	if err != nil {
+		return err
+	}
+	etype, err := crypto.GetChksumEtype(checksumType)
 	if err != nil {
 		return err
 	}

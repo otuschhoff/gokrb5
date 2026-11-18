@@ -39,7 +39,11 @@ type invalidDecoderUnion struct {
 type parentSizedBytes []byte
 
 func (parentSizedBytes) Size(parent interface{}) int {
-	return int(reflect.ValueOf(parent).FieldByName("Length").Uint())
+	length := reflect.ValueOf(parent).FieldByName("Length").Uint()
+	if length > uint64(^uint(0)>>1) {
+		return 0
+	}
+	return int(length) // #nosec G115 -- bounded by platform max int above.
 }
 
 type failingReader struct{}

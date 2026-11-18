@@ -45,7 +45,11 @@ func (k ClientInfo) Marshal() ([]byte, error) {
 	b := make([]byte, 10+len(units)*2)
 	binary.LittleEndian.PutUint32(b[0:4], k.ClientID.LowDateTime)
 	binary.LittleEndian.PutUint32(b[4:8], k.ClientID.HighDateTime)
-	binary.LittleEndian.PutUint16(b[8:10], uint16(len(units)*2))
+	length, err := pacUint16FromInt("PAC_CLIENT_INFO name length", len(units)*2)
+	if err != nil {
+		return nil, err
+	}
+	binary.LittleEndian.PutUint16(b[8:10], length)
 	for i, unit := range units {
 		binary.LittleEndian.PutUint16(b[10+i*2:], unit)
 	}

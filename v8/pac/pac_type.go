@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 
 	"github.com/jcmturner/rpc/v2/mstypes"
 
@@ -14,6 +15,48 @@ import (
 // ErrPACMalformed indicates that a PAC has an invalid buffer table or range.
 var ErrPACMalformed = errors.New("PAC is malformed")
 
+func pacUint32FromInt(name string, value int) (uint32, error) {
+	if value < 0 || uint64(value) > uint64(math.MaxUint32) { // #nosec G115 -- nonnegative branch required before conversion is checked.
+		return 0, fmt.Errorf("%w: %s %d exceeds uint32 range", ErrPACMalformed, name, value)
+	}
+	return uint32(value), nil // #nosec G115 -- bounded above by MaxUint32.
+}
+
+func pacUint32FromInt32(name string, value int32) (uint32, error) {
+	if value < 0 {
+		return 0, fmt.Errorf("%w: %s %d cannot be negative", ErrPACMalformed, name, value)
+	}
+	return uint32(value), nil // #nosec G115 -- nonnegative checked above.
+}
+
+func pacUint16FromInt(name string, value int) (uint16, error) {
+	if value < 0 || value > math.MaxUint16 {
+		return 0, fmt.Errorf("%w: %s %d exceeds uint16 range", ErrPACMalformed, name, value)
+	}
+	return uint16(value), nil // #nosec G115 -- bounded above by MaxUint16.
+}
+
+func pacUint32ToInt32(name string, value uint32) (int32, error) {
+	if value > math.MaxInt32 {
+		return 0, fmt.Errorf("%w: %s %d exceeds int32 range", ErrPACMalformed, name, value)
+	}
+	return int32(value), nil // #nosec G115 -- bounded by MaxInt32 above.
+}
+
+func pacUint32ToInt(name string, value uint32) (int, error) {
+	if uint64(value) > uint64(maxInt()) { // #nosec G115 -- nonnegative platform int bound.
+		return 0, fmt.Errorf("%w: %s %d exceeds platform int range", ErrPACMalformed, name, value)
+	}
+	return int(value), nil // #nosec G115 -- bounded by platform max int above.
+}
+
+func pacIntFromUint64(name string, value uint64) (int, error) {
+	if value > uint64(maxInt()) { // #nosec G115 -- maxInt is nonnegative.
+		return 0, fmt.Errorf("%w: %s %d exceeds platform int range", ErrPACMalformed, name, value)
+	}
+	return int(value), nil // #nosec G115 -- bounded above by platform max int.
+}
+
 func copyPACRange(data []byte, offset, size uint64) ([]byte, error) {
 	end := offset + size
 	if end < offset {
@@ -22,7 +65,15 @@ func copyPACRange(data []byte, offset, size uint64) ([]byte, error) {
 	if end > uint64(len(data)) {
 		return nil, fmt.Errorf("%w: range [%d:%d] exceeds data size %d", ErrPACMalformed, offset, end, len(data))
 	}
-	return append([]byte(nil), data[int(offset):int(end)]...), nil
+	start, err := pacIntFromUint64("range offset", offset)
+	if err != nil {
+		return nil, err
+	}
+	stop, err := pacIntFromUint64("range end", end)
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), data[start:stop]...), nil
 }
 
 const (
@@ -94,7 +145,10 @@ func (pac *PACType) Unmarshal(b []byte) error {
 	if pac.Version != 0 {
 		return fmt.Errorf("%w: unsupported version %d", ErrPACMalformed, pac.Version)
 	}
-	maxBuffers := uint32((len(b) - 8) / 16)
+	maxBuffers, err := pacUint32FromInt("table capacity", (len(b)-8)/16)
+	if err != nil {
+		return err
+	}
 	if pac.CBuffers > maxBuffers {
 		return fmt.Errorf("%w: buffer count %d exceeds table capacity %d", ErrPACMalformed, pac.CBuffers, maxBuffers)
 	}

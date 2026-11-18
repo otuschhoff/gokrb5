@@ -156,9 +156,9 @@ func TestPACSignFullChecksumOrder(t *testing.T) {
 
 	tampered := append([]byte(nil), serverInput...)
 	payloadOffset := binary.LittleEndian.Uint64(data[16:])
-	tampered[int(payloadOffset)] ^= 0xff
+	tampered[mustPACInt(t, payloadOffset)] ^= 0xff
 	serverSignatureData := signatureDataForTest(t, buffers, infoTypePACServerSignatureData)
-	etype, err := crypto.GetChksumEtype(int32(serverSignatureData.SignatureType))
+	etype, err := crypto.GetChksumEtype(mustPACInt32(t, serverSignatureData.SignatureType))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func readTestBuffers(t *testing.T, data []byte) []pacBuffer {
 		buffers[i].typeID = binary.LittleEndian.Uint32(data[header:])
 		length := binary.LittleEndian.Uint32(data[header+4:])
 		offset := binary.LittleEndian.Uint64(data[header+8:])
-		buffers[i].data = data[int(offset) : int(offset)+int(length)]
+		buffers[i].data = data[mustPACInt(t, offset) : mustPACInt(t, offset)+int(length)]
 	}
 	return buffers
 }
@@ -228,7 +228,7 @@ func zeroTestSignature(t *testing.T, data []byte, buffers []pacBuffer, typeID ui
 	header := 8 + index*16
 	offset := binary.LittleEndian.Uint64(data[header+8:])
 	length := binary.LittleEndian.Uint32(data[header+4:])
-	for i := int(offset) + 4; i < int(offset)+int(length); i++ {
+	for i := mustPACInt(t, offset) + 4; i < mustPACInt(t, offset)+int(length); i++ {
 		data[i] = 0
 	}
 }
@@ -236,7 +236,7 @@ func zeroTestSignature(t *testing.T, data []byte, buffers []pacBuffer, typeID ui
 func verifyTestSignature(t *testing.T, buffers []pacBuffer, typeID uint32, key types.EncryptionKey, input []byte) {
 	t.Helper()
 	signature := signatureDataForTest(t, buffers, typeID)
-	etype, err := crypto.GetChksumEtype(int32(signature.SignatureType))
+	etype, err := crypto.GetChksumEtype(mustPACInt32(t, signature.SignatureType))
 	if err != nil {
 		t.Fatal(err)
 	}

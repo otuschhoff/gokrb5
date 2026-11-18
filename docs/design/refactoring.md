@@ -824,6 +824,17 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 26 (2026-11-18, PAC/NDR wire ranges): PAC G115 findings are zero.
+PAC buffer offsets, allocation sizes, signature ranges, checksum identifiers,
+UPN/DNS lengths, and client-name lengths now use checked platform or wire-width
+conversions. NDR pipe and multidimensional counts are bounded by input size
+and converted to platform `int` through explicit helpers; decoder-size and
+reflect-length conversions are documented at their proven nonnegative bounds.
+Malformed ranges return errors rather than truncating offsets. Checked helpers
+replace fixture-only casts, preserving byte-exact PAC vectors and existing
+error contracts. PAC G115 falls 51 to 0, total G115 falls 124 to 73, gosec
+falls 208 to 157, and canonical findings fall 1,196 to 1,143; coverage measures 86.8%.
+
 Slice 25 (2026-11-18, credential-cache wire ranges): credentials G115
 findings are zero. Cache unmarshalling now decodes signed fields directly and
 marshalling uses checked int32/uint16 helpers for header, principal, key,

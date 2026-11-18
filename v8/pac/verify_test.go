@@ -63,7 +63,7 @@ func parsedPACForVerification(t *testing.T, data []byte, authTime time.Time) PAC
 		t.Fatal(err)
 	}
 	for _, buffer := range parsed.Buffers {
-		start := int(buffer.Offset)
+		start := mustPACInt(t, buffer.Offset)
 		payload := parsed.Data[start : start+int(buffer.CBBufferSize)]
 		var signature SignatureData
 		switch buffer.ULType {

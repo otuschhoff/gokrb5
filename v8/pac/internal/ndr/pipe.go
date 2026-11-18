@@ -6,35 +6,46 @@ import (
 )
 
 func (dec *Decoder) fillPipe(v reflect.Value, tag reflect.StructTag) error {
-	s, err := dec.readUint32() // read element count of first chunk
+	count, err := dec.readPipeCount(0)
 	if err != nil {
 		return err
 	}
-	if uint64(s) > uint64(dec.size) {
-		return fmt.Errorf("pipe chunk count %d exceeds NDR input size %d", s, dec.size)
-	}
-	a := reflect.MakeSlice(v.Type(), 0, 0)
-	c := reflect.MakeSlice(v.Type(), int(s), int(s))
-	for s != 0 {
-		for i := 0; i < int(s); i++ {
-			ferr := dec.fill(c.Index(i), tag, &[]deferedPtr{})
-			if ferr != nil {
-				return fmt.Errorf("could not fill element %d of pipe: %w", i, ferr)
-			}
+	all := reflect.MakeSlice(v.Type(), 0, 0)
+	for count != 0 {
+		chunk := reflect.MakeSlice(v.Type(), count, count)
+		if fillErr := dec.fillPipeChunk(chunk, tag); fillErr != nil {
+			return fillErr
 		}
-		if uint64(c.Len()) > uint64(dec.size)-uint64(a.Len()) {
+		if uint64(chunk.Len()) > uint64(dec.size)-uint64(all.Len()) { // #nosec G115 -- decoder lengths are nonnegative.
 			return fmt.Errorf("pipe element count exceeds NDR input size %d", dec.size)
 		}
-		a = reflect.AppendSlice(a, c)
-		s, err = dec.readUint32() // read element count of next chunk
+		all = reflect.AppendSlice(all, chunk)
+		count, err = dec.readPipeCount(all.Len())
 		if err != nil {
 			return err
 		}
-		if uint64(s) > uint64(dec.size)-uint64(a.Len()) {
-			return fmt.Errorf("pipe element count exceeds NDR input size %d", dec.size)
-		}
-		c = reflect.MakeSlice(v.Type(), int(s), int(s))
 	}
-	v.Set(a)
+	v.Set(all)
+	return nil
+}
+
+func (dec *Decoder) readPipeCount(existing int) (int, error) {
+	count, err := dec.readUint32()
+	if err != nil {
+		return 0, err
+	}
+	available := dec.size - existing
+	if available < 0 || uint64(count) > uint64(available) { // #nosec G115 -- available is checked nonnegative.
+		return 0, fmt.Errorf("pipe element count exceeds NDR input size %d", dec.size)
+	}
+	return ndrUint32ToInt(count)
+}
+
+func (dec *Decoder) fillPipeChunk(chunk reflect.Value, tag reflect.StructTag) error {
+	for i := 0; i < chunk.Len(); i++ {
+		if err := dec.fill(chunk.Index(i), tag, &[]deferedPtr{}); err != nil {
+			return fmt.Errorf("could not fill element %d of pipe: %w", i, err)
+		}
+	}
 	return nil
 }
