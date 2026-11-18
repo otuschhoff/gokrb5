@@ -276,8 +276,8 @@ func (c *Client) do(req *http.Request, redirects, challenges int) (*http.Respons
 	if respUnauthorizedNegotiate(resp) {
 		return c.retryUnauthorized(req, resp, redirects, challenges)
 	}
-	if err := c.verifyMutualResponse(req, resp); err != nil {
-		return resp, err
+	if ierr := c.verifyMutualResponse(req, resp); ierr != nil {
+		return resp, ierr
 	}
 	return resp, err
 }
@@ -420,18 +420,18 @@ func setRequestSPN(r *http.Request) (types.PrincipalName, error) {
 	// This if statement checks if the host includes a port number
 	if strings.LastIndex(r.URL.Host, ":") > strings.LastIndex(r.URL.Host, "]") {
 		// There is a port number in the URL
-		h, p, err := net.SplitHostPort(h)
+		host, p, err := net.SplitHostPort(h)
 		if err != nil {
 			return types.PrincipalName{}, err
 		}
-		name, err := net.LookupCNAME(h)
+		name, err := net.LookupCNAME(host)
 		if name != "" && err == nil {
 			// Underlyng canonical name should be used for SPN
-			h = strings.ToLower(name)
+			host = strings.ToLower(name)
 		}
-		h = strings.TrimSuffix(h, ".")
-		r.Host = fmt.Sprintf("%s:%s", h, p)
-		return types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "HTTP/"+h), nil
+		host = strings.TrimSuffix(host, ".")
+		r.Host = fmt.Sprintf("%s:%s", host, p)
+		return types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "HTTP/"+host), nil
 	}
 	name, err := net.LookupCNAME(h)
 	if name != "" && err == nil {
@@ -512,6 +512,9 @@ func responseSPNEGOToken(resp *http.Response) (*SPNEGOToken, error) {
 
 // Service side functionality //
 
+// contextKey is the type of SPNEGO context keys, avoiding built-in type collisions.
+type contextKey string
+
 const (
 	// spnegoNegTokenRespKRBAcceptCompleted - The response on successful authentication always has this header. Capturing as const so we don't have marshaling and encoding overhead.
 	spnegoNegTokenRespKRBAcceptCompleted = "Negotiate oRQwEqADCgEAoQsGCSqGSIb3EgECAg=="
@@ -522,7 +525,7 @@ const (
 	// sessionCredentials is the session value key holding the credentials jcmturner/goidentity/Identity object.
 	sessionCredentials = "github.com/otuschhoff/gokrb5/v8/sessionCredentials"
 	// ctxCredentials is the SPNEGO context key holding the credentials jcmturner/goidentity/Identity object.
-	ctxCredentials = "github.com/otuschhoff/gokrb5/v8/ctxCredentials"
+	ctxCredentials contextKey = "github.com/otuschhoff/gokrb5/v8/ctxCredentials"
 	// HTTPHeaderAuthRequest is the header that will hold authn/z information.
 	HTTPHeaderAuthRequest = "Authorization"
 	// HTTPHeaderAuthResponse is the header that will hold SPNEGO data from the server.

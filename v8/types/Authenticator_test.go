@@ -16,7 +16,7 @@ import (
 
 func unmarshalAuthenticatorTest(t *testing.T, v string) Authenticator {
 	var a Authenticator
-	//t.Logf("Starting unmarshal tests of %s", v)
+	// t.Logf("Starting unmarshal tests of %s", v)
 	b, err := hex.DecodeString(v)
 	if err != nil {
 		t.Fatalf("Test vector read error: %v", err)

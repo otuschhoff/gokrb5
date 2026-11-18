@@ -59,7 +59,7 @@ func (mt *MICToken) Marshal() ([]byte, error) {
 	}
 
 	bytes := make([]byte, micHdrLen+len(mt.Checksum))
-	copy(bytes[0:micHdrLen], mt.getMICChecksumHeader()[:])
+	copy(bytes[0:micHdrLen], mt.getMICChecksumHeader())
 	copy(bytes[micHdrLen:], mt.Checksum)
 
 	return bytes, nil

@@ -45,8 +45,8 @@ func AppendToFile(name string, entries ...Entry) (err error) {
 		}
 	}()
 	// Creation may race, but the lock serializes header inspection and each append.
-	if err := lockFile(f); err != nil {
-		return err
+	if ierr := lockFile(f); ierr != nil {
+		return ierr
 	}
 	defer func() {
 		if unlockErr := unlockFile(f); unlockErr != nil {

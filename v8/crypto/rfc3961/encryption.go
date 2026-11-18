@@ -41,12 +41,12 @@ func DES3EncryptData(key, data []byte, e etype.EType) ([]byte, []byte, error) {
 // The encrypted data is concatenated with its integrity hash to create an encrypted message.
 func DES3EncryptMessage(key, message []byte, usage uint32, e etype.EType) ([]byte, []byte, error) {
 	// confounder
-	c := make([]byte, e.GetConfounderByteSize())
-	_, err := rand.Read(c)
+	plainBytes := make([]byte, e.GetConfounderByteSize())
+	_, err := rand.Read(plainBytes)
 	if err != nil {
 		return []byte{}, []byte{}, fmt.Errorf("could not generate random confounder: %w", err)
 	}
-	plainBytes := append(c, message...)
+	plainBytes = append(plainBytes, message...)
 	plainBytes, err = common.ZeroPad(plainBytes, e.GetMessageBlockByteSize())
 	if err != nil {
 		return nil, nil, fmt.Errorf("error padding plaintext: %w", err)

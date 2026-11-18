@@ -180,9 +180,9 @@ func MarshalTicketSequence(tkts []Ticket) (asn1.RawValue, error) {
 	// 1st byte -> Identifier Octet - In this case an OCTET STRING (ASN TAG
 	// 2nd byte -> The length (this will be the size indicated in the input bytes + 2 for the additional bytes we add here.
 	// Application Tag:
-	//| Byte:       | 8                            | 7                          | 6                                         | 5 | 4 | 3 | 2 | 1             |
-	//| Value:      | 0                            | 1                          | 1                                         | From the RFC spec 4120        |
-	//| Explanation | Defined by the ASN1 encoding rules for an application tag | A value of 1 indicates a constructed type | The ASN Application tag value |
+	// | Byte:       | 8                            | 7                          | 6                                         | 5 | 4 | 3 | 2 | 1             |
+	// | Value:      | 0                            | 1                          | 1                                         | From the RFC spec 4120        |
+	// | Explanation | Defined by the ASN1 encoding rules for an application tag | A value of 1 indicates a constructed type | The ASN Application tag value |
 	btkts = append(asn1tools.MarshalLengthBytes(len(btkts)), btkts...)
 	btkts = append([]byte{byte(32 + asn1.TagSequence)}, btkts...)
 	raw.Bytes = btkts
@@ -235,8 +235,8 @@ func (t *Ticket) GetPACTypeWithOptions(keytab *keytab.Keytab, sname *types.Princ
 		return false, pac.PACType{}, nil
 	}
 	var p pac.PACType
-	if err := p.Unmarshal(entries[0].ADData); err != nil {
-		return true, p, fmt.Errorf("error unmarshaling PAC: %w", err)
+	if ierr := p.Unmarshal(entries[0].ADData); ierr != nil {
+		return true, p, fmt.Errorf("error unmarshaling PAC: %w", ierr)
 	}
 	if sname == nil {
 		sname = &t.SName

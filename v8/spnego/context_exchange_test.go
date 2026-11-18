@@ -399,9 +399,9 @@ func TestSPNEGOInvalidStateTransitions(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			authenticated, _, status := clientMechanism.ContinueSecContext(test.token)
-			require.False(t, authenticated)
-			require.Equal(t, test.code, status.Code)
+			gotAuthenticated, _, gotStatus := clientMechanism.ContinueSecContext(test.token)
+			require.False(t, gotAuthenticated)
+			require.Equal(t, test.code, gotStatus.Code)
 		})
 	}
 

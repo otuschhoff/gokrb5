@@ -155,11 +155,11 @@ func TestAppendToFilePreservesV1AndHighKVNO(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "v1.keytab")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
+	if ierr := os.WriteFile(path, data, 0o600); ierr != nil {
+		t.Fatal(ierr)
 	}
-	if err := AppendToFile(path, testEntry(300)); err != nil {
-		t.Fatal(err)
+	if ierr := AppendToFile(path, testEntry(300)); ierr != nil {
+		t.Fatal(ierr)
 	}
 	loaded, err := Load(path)
 	if err != nil {

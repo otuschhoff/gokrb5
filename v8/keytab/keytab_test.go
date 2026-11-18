@@ -181,8 +181,8 @@ func TestMarshalByteExactVsKtutil(t *testing.T) {
 				t.Fatal(err)
 			}
 			kt := New()
-			if err := kt.Unmarshal(b); err != nil {
-				t.Fatal(err)
+			if ierr := kt.Unmarshal(b); ierr != nil {
+				t.Fatal(ierr)
 			}
 			marshaled, err := kt.Marshal()
 			if err != nil {
@@ -204,8 +204,8 @@ func TestUnmarshalV1RoundTrip(t *testing.T) {
 				t.Fatal(err)
 			}
 			kt := New()
-			if err := kt.Unmarshal(b); err != nil {
-				t.Fatal(err)
+			if ierr := kt.Unmarshal(b); ierr != nil {
+				t.Fatal(ierr)
 			}
 			assert.False(t, kt.Entries[0].kvno32Present)
 
@@ -240,8 +240,8 @@ func TestUnmarshalV1KVNO32(t *testing.T) {
 			b = append(b, trailer...)
 
 			kt := New()
-			if err := kt.Unmarshal(b); err != nil {
-				t.Fatal(err)
+			if ierr := kt.Unmarshal(b); ierr != nil {
+				t.Fatal(ierr)
 			}
 			assert.True(t, kt.Entries[0].kvno32Present)
 			assert.Equal(t, uint32(300), kt.Entries[0].KVNO)
@@ -278,7 +278,8 @@ func TestUnmarshalKVNO32Presence(t *testing.T) {
 	assert.False(t, kt.Entries[0].kvno32Present)
 	assert.Equal(t, uint32(44), kt.Entries[0].KVNO)
 
-	withZeroFill := append(withoutTrailer, 0, 0, 0, 0)
+	withoutTrailer = append(withoutTrailer, 0, 0, 0, 0)
+	withZeroFill := withoutTrailer
 	binary.BigEndian.PutUint32(withZeroFill[2:6], binary.BigEndian.Uint32(withZeroFill[2:6])+4)
 	if err := kt.Unmarshal(withZeroFill); err != nil {
 		t.Fatal(err)
@@ -495,8 +496,7 @@ func TestLoad(t *testing.T) {
 // This test provides inputs to readBytes that previously
 // caused a panic.
 func TestReadBytes(t *testing.T) {
-	var endian binary.ByteOrder
-	endian = binary.BigEndian
+	var endian binary.ByteOrder = binary.BigEndian
 	p := 0
 
 	if _, err := readBytes(nil, &p, 1, &endian); err == nil {
@@ -555,8 +555,8 @@ func TestKeytabEntriesUser(t *testing.T) {
 	}
 
 	// Generate the same keytab with gokrb5
-	var ts time.Time = ktutil.Entries[0].Timestamp
-	var encTypes []int32 = []int32{
+	ts := ktutil.Entries[0].Timestamp
+	encTypes := []int32{
 		etypeID.AES256_CTS_HMAC_SHA1_96,
 		etypeID.AES128_CTS_HMAC_SHA1_96,
 		etypeID.RC4_HMAC,
@@ -592,8 +592,8 @@ func TestKeytabEntriesService(t *testing.T) {
 	}
 
 	// Generate the same keytab with gokrb5
-	var ts time.Time = ktutil.Entries[0].Timestamp
-	var encTypes []int32 = []int32{
+	ts := ktutil.Entries[0].Timestamp
+	encTypes := []int32{
 		etypeID.AES256_CTS_HMAC_SHA1_96,
 		etypeID.AES128_CTS_HMAC_SHA1_96,
 		etypeID.RC4_HMAC,
@@ -688,8 +688,8 @@ func TestGetEntryKVNO8Fallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	kt := New()
-	if err := kt.Unmarshal(b); err != nil {
-		t.Fatal(err)
+	if ierr := kt.Unmarshal(b); ierr != nil {
+		t.Fatal(ierr)
 	}
 	p := kt.Entries[0].Principal
 
@@ -832,8 +832,8 @@ func TestAddKeyAndEntryWithSalt(t *testing.T) {
 		t.Fatal(err)
 	}
 	kt := New()
-	if err := kt.AddKey(p, 1, types.EncryptionKey{KeyType: 18, KeyValue: key}, time.Unix(1700000000, 0)); err != nil {
-		t.Fatal(err)
+	if ierr := kt.AddKey(p, 1, types.EncryptionKey{KeyType: 18, KeyValue: key}, time.Unix(1700000000, 0)); ierr != nil {
+		t.Fatal(ierr)
 	}
 	p.Components[0] = "changed"
 	key[0] = 0

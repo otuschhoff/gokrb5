@@ -27,7 +27,7 @@ func (a *AttributesInfo) Unmarshal(b []byte) error {
 		return fmt.Errorf("%w: PAC_ATTRIBUTES_INFO flags length is %d, want 2", ErrPACMalformed, a.FlagsLength)
 	}
 	a.Flags = binary.LittleEndian.Uint32(b[4:8])
-	if a.Flags & ^uint32(PACWasRequested|PACWasGivenImplicitly) != 0 {
+	if a.Flags & ^(PACWasRequested|PACWasGivenImplicitly) != 0 {
 		return fmt.Errorf("%w: PAC_ATTRIBUTES_INFO contains unknown flags %#x", ErrPACMalformed, a.Flags)
 	}
 	return nil
@@ -41,7 +41,7 @@ func (a AttributesInfo) Marshal() ([]byte, error) {
 	if a.FlagsLength != pacAttributesFlagBits {
 		return nil, fmt.Errorf("PAC_ATTRIBUTES_INFO flags length is %d, want 2", a.FlagsLength)
 	}
-	if a.Flags & ^uint32(PACWasRequested|PACWasGivenImplicitly) != 0 {
+	if a.Flags & ^(PACWasRequested|PACWasGivenImplicitly) != 0 {
 		return nil, fmt.Errorf("PAC_ATTRIBUTES_INFO contains unknown flags %#x", a.Flags)
 	}
 	b := make([]byte, 8)

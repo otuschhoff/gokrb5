@@ -27,8 +27,8 @@ func TestAuthPackRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got AuthPack
-	if err := got.Unmarshal(encoded); err != nil {
-		t.Fatal(err)
+	if ierr := got.Unmarshal(encoded); ierr != nil {
+		t.Fatal(ierr)
 	}
 	reencoded, err := got.Marshal()
 	if err != nil {
@@ -53,8 +53,8 @@ func TestPAPKAsRepChoices(t *testing.T) {
 			t.Fatal(err)
 		}
 		var got PAPKAsRep
-		if err := got.Unmarshal(encoded); err != nil {
-			t.Fatal(err)
+		if ierr := got.Unmarshal(encoded); ierr != nil {
+			t.Fatal(ierr)
 		}
 		reencoded, err := got.Marshal()
 		if err != nil {

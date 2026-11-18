@@ -162,7 +162,8 @@ func testUPNSAN(t *testing.T, upn string) []byte {
 	require.NoError(t, err)
 	typeDER, err := asn1.Marshal(oidUPN)
 	require.NoError(t, err)
-	otherNameDER := append(typeDER, mustMarshal(t, asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: upnDER})...)
+	typeDER = append(typeDER, mustMarshal(t, asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: upnDER})...)
+	otherNameDER := typeDER
 	return mustMarshal(t, asn1.RawValue{Class: asn1.ClassUniversal, Tag: asn1.TagSequence, IsCompound: true, Bytes: mustMarshal(t, asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: otherNameDER})})
 }
 

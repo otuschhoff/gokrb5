@@ -54,7 +54,7 @@ func TestClient_SetSPNEGOHeader(t *testing.T) {
 	}
 	paths := []string{
 		"/modkerb/index.html",
-		//"/modgssapi/index.html",
+		// "/modgssapi/index.html",
 	}
 	for _, url := range urls {
 		for _, p := range paths {
@@ -403,7 +403,6 @@ func testAppHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "<html>\nTEST.GOKRB5 Handler\nAuthenticed user: %s\nUser's realm: %s\n</html>",
 		id.UserName(),
 		id.Domain())
-	return
 }
 
 func getClient() *client.Client {

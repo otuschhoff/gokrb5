@@ -48,8 +48,8 @@ func TestClient_GetServiceTicket_AD(t *testing.T) {
 	}
 
 	cl := NewWithPassword(env.User, env.UserRealm, env.Password, env.Config, adSettings()...)
-	if err := cl.Login(); err != nil {
-		t.Fatalf("Error on login: %v", err)
+	if ierr := cl.Login(); ierr != nil {
+		t.Fatalf("Error on login: %v", ierr)
 	}
 	tkt, key, err := cl.GetServiceTicket(spn)
 	if err != nil {
@@ -58,8 +58,8 @@ func TestClient_GetServiceTicket_AD(t *testing.T) {
 	assert.True(t, strings.EqualFold(spn, tkt.SName.PrincipalNameString()), "ticket sname %q should match %q", tkt.SName.PrincipalNameString(), spn)
 	assert.NotEmpty(t, key.KeyValue, "session key should be present")
 
-	if err := tkt.DecryptEncPart(env.Keytab, nil); err != nil {
-		t.Fatalf("could not decrypt service ticket with %s: %v", env.KeytabPath, err)
+	if ierr := tkt.DecryptEncPart(env.Keytab, nil); ierr != nil {
+		t.Fatalf("could not decrypt service ticket with %s: %v", env.KeytabPath, ierr)
 	}
 	assert.True(t, strings.EqualFold(env.User, tkt.DecryptedEncPart.CName.PrincipalNameString()), "ticket cname should be the logged in user")
 
@@ -89,8 +89,8 @@ func TestClient_GetServiceTicket_AD_CachedTicketReused(t *testing.T) {
 	}
 
 	cl := NewWithPassword(env.User, env.UserRealm, env.Password, env.Config, adSettings()...)
-	if err := cl.Login(); err != nil {
-		t.Fatalf("Error on login: %v", err)
+	if ierr := cl.Login(); ierr != nil {
+		t.Fatalf("Error on login: %v", ierr)
 	}
 	first, _, err := cl.GetServiceTicket(spn)
 	if err != nil {

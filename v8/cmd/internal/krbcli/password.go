@@ -35,8 +35,8 @@ func ReadPassword(prompt string, stdin io.Reader, stderr io.Writer, allowStdin b
 			return "", err
 		}
 		defer term.Restore(int(tty.input.Fd()), state)
-		if _, err := fmt.Fprint(tty.output, prompt); err != nil {
-			return "", err
+		if _, ierr := fmt.Fprint(tty.output, prompt); ierr != nil {
+			return "", ierr
 		}
 		password, err := term.ReadPassword(int(tty.input.Fd()))
 		fmt.Fprintln(tty.output)

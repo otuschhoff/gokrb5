@@ -56,9 +56,9 @@ func TestASExchangeIssuesSelfTicket(t *testing.T) {
 	for _, pa := range clientState.request.PAData {
 		if pa.PADataType == patype.PA_PAC_REQUEST {
 			pacRequests++
-			request, err := pa.GetKerbPAPACRequest()
-			if err != nil || request.IncludePAC {
-				t.Fatalf("PKU2U PAC request = %#v, %v", request, err)
+			request, rerr := pa.GetKerbPAPACRequest()
+			if rerr != nil || request.IncludePAC {
+				t.Fatalf("PKU2U PAC request = %#v, %v", request, rerr)
 			}
 		}
 	}
@@ -223,15 +223,15 @@ func TestEndToEndContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := acceptor.ExchangeMetadata(initiatorMetadata, false); err != nil {
-		t.Fatal(err)
+	if ierr := acceptor.ExchangeMetadata(initiatorMetadata, false); ierr != nil {
+		t.Fatal(ierr)
 	}
 	acceptorMetadata, err := acceptor.QueryMetadata("", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := initiator.ExchangeMetadata(acceptorMetadata, true); err != nil {
-		t.Fatal(err)
+	if ierr := initiator.ExchangeMetadata(acceptorMetadata, true); ierr != nil {
+		t.Fatal(ierr)
 	}
 
 	asRequest, _, done, err := initiator.InitSecContext("host/server.example.com", nil)
@@ -313,8 +313,8 @@ func TestAPExchangeRejectsInvalidRequests(t *testing.T) {
 			t.Fatal(err)
 		}
 		authenticator.Cksum = types.Checksum{CksumType: chksumtype.GSSAPI, Checksum: checksum}
-		if err := authenticator.GenerateSeqNumberAndSubKey(clientResult.sessionKey.KeyType, len(clientResult.sessionKey.KeyValue)); err != nil {
-			t.Fatal(err)
+		if ierr := authenticator.GenerateSeqNumberAndSubKey(clientResult.sessionKey.KeyType, len(clientResult.sessionKey.KeyValue)); ierr != nil {
+			t.Fatal(ierr)
 		}
 		if mutate != nil {
 			mutate(&authenticator)

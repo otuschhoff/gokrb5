@@ -153,18 +153,18 @@ func (a *APReq) Marshal() ([]byte, error) {
 // The service ticket encrypted part and authenticator will be decrypted as part of this operation.
 func (a *APReq) Verify(kt *keytab.Keytab, d time.Duration, cAddr types.HostAddress, snameOverride *types.PrincipalName) (bool, error) {
 	// Decrypt ticket's encrypted part with service key
-	//TODO decrypt with service's session key from its TGT is use-to-user. Need to figure out how to get TGT.
-	//if types.IsFlagSet(&a.APOptions, flags.APOptionUseSessionKey) {
+	// TODO decrypt with service's session key from its TGT is use-to-user. Need to figure out how to get TGT.
+	// if types.IsFlagSet(&a.APOptions, flags.APOptionUseSessionKey) {
 	//	err := a.Ticket.Decrypt(tgt.DecryptedEncPart.Key)
 	//	if err != nil {
 	//		return false, krberror.Errorf(err, krberror.DecryptingError, "error decrypting encpart of ticket provided using session key")
 	//	}
-	//} else {
+	// } else {
 	//	err := a.Ticket.DecryptEncPart(*kt, &a.Ticket.SName)
 	//	if err != nil {
 	//		return false, krberror.Errorf(err, krberror.DecryptingError, "error decrypting encpart of service ticket provided")
 	//	}
-	//}
+	// }
 	sname := &a.Ticket.SName
 	if snameOverride != nil {
 		sname = snameOverride

@@ -129,7 +129,7 @@ func TestPAC_ClientClaimsInfoMultiEntry_Unmarshal(t *testing.T) {
 }
 
 // Compressed claims not yet supported.
-//func TestPAC_ClientClaimsInfo_Unmarshal_UnsupportedCompression(t *testing.T) {
+// func TestPAC_ClientClaimsInfo_Unmarshal_UnsupportedCompression(t *testing.T) {
 //	t.Parallel()
 //	b, err := hex.DecodeString(testdata.MarshaledPAC_ClientClaimsInfo_XPRESS_HUFF)
 //	if err != nil {

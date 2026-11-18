@@ -24,8 +24,8 @@ type APREQResult struct {
 }
 
 // VerifyAPREQ verifies an AP_REQ sent to the service. Returns a boolean for if the AP_REQ is valid and the client's principal name and realm.
-func VerifyAPREQ(APReq *messages.APReq, s *Settings) (bool, *credentials.Credentials, error) {
-	result, err := VerifyAPREQWithResult(APReq, s)
+func VerifyAPREQ(apReq *messages.APReq, s *Settings) (bool, *credentials.Credentials, error) {
+	result, err := VerifyAPREQWithResult(apReq, s)
 	if err != nil {
 		return false, nil, err
 	}
@@ -33,25 +33,25 @@ func VerifyAPREQ(APReq *messages.APReq, s *Settings) (bool, *credentials.Credent
 }
 
 // VerifyAPREQWithResult verifies an AP_REQ and returns its GSS negotiation data.
-func VerifyAPREQWithResult(APReq *messages.APReq, s *Settings) (APREQResult, error) {
+func VerifyAPREQWithResult(apReq *messages.APReq, s *Settings) (APREQResult, error) {
 	var result APREQResult
-	if !servicePrincipalAllowed(APReq.Ticket.SName, APReq.Ticket.Realm, s) {
-		return result, messages.NewKRBError(APReq.Ticket.SName, APReq.Ticket.Realm, errorcode.KRB_AP_ERR_NOT_US, "ticket service principal is not accepted")
+	if !servicePrincipalAllowed(apReq.Ticket.SName, apReq.Ticket.Realm, s) {
+		return result, messages.NewKRBError(apReq.Ticket.SName, apReq.Ticket.Realm, errorcode.KRB_AP_ERR_NOT_US, "ticket service principal is not accepted")
 	}
-	ok, err := APReq.Verify(s.Keytab, s.MaxClockSkew(), s.ClientAddress(), s.KeytabPrincipal())
+	ok, err := apReq.Verify(s.Keytab, s.MaxClockSkew(), s.ClientAddress(), s.KeytabPrincipal())
 	if err != nil || !ok {
 		return result, err
 	}
 
-	if s.RequireHostAddr() && len(APReq.Ticket.DecryptedEncPart.CAddr) < 1 {
+	if s.RequireHostAddr() && len(apReq.Ticket.DecryptedEncPart.CAddr) < 1 {
 		return result,
-			messages.NewKRBError(APReq.Ticket.SName, APReq.Ticket.Realm, errorcode.KRB_AP_ERR_BADADDR, "ticket does not contain HostAddress values required")
+			messages.NewKRBError(apReq.Ticket.SName, apReq.Ticket.Realm, errorcode.KRB_AP_ERR_BADADDR, "ticket does not contain HostAddress values required")
 	}
-	cbtAdvertised, err := authenticatorAdvertisesCBT(APReq.Authenticator.AuthorizationData)
+	cbtAdvertised, err := authenticatorAdvertisesCBT(apReq.Authenticator.AuthorizationData)
 	if err != nil {
 		return result, err
 	}
-	checksum, hasChecksum, err := verifyAuthenticatorChecksumWithCBT(APReq.Authenticator.Cksum, s, cbtAdvertised)
+	checksum, hasChecksum, err := verifyAuthenticatorChecksumWithCBT(apReq.Authenticator.Cksum, s, cbtAdvertised)
 	if err != nil {
 		return result, err
 	}
@@ -60,18 +60,18 @@ func VerifyAPREQWithResult(APReq *messages.APReq, s *Settings) (APREQResult, err
 
 	// Check for replay
 	rc := GetReplayCache(s.MaxClockSkew())
-	if rc.IsReplay(APReq.Ticket.SName, APReq.Authenticator) {
+	if rc.IsReplay(apReq.Ticket.SName, apReq.Authenticator) {
 		return result,
-			messages.NewKRBError(APReq.Ticket.SName, APReq.Ticket.Realm, errorcode.KRB_AP_ERR_REPEAT, "replay detected")
+			messages.NewKRBError(apReq.Ticket.SName, apReq.Ticket.Realm, errorcode.KRB_AP_ERR_REPEAT, "replay detected")
 	}
 
-	c := credentials.NewFromPrincipalName(APReq.Authenticator.CName, APReq.Authenticator.CRealm)
+	c := credentials.NewFromPrincipalName(apReq.Authenticator.CName, apReq.Authenticator.CRealm)
 	result.Credentials = c
 	c.SetAuthTime(time.Now().UTC())
 	c.SetAuthenticated(true)
-	c.SetValidUntil(APReq.Ticket.DecryptedEncPart.EndTime)
+	c.SetValidUntil(apReq.Ticket.DecryptedEncPart.EndTime)
 	if checksum.Flags&gssapi.ContextFlagDeleg != 0 {
-		delegated, err := extractDelegatedCredentials(checksum, APReq.Ticket.DecryptedEncPart.Key)
+		delegated, err := extractDelegatedCredentials(checksum, apReq.Ticket.DecryptedEncPart.Key)
 		if err != nil {
 			return result, err
 		}
@@ -80,13 +80,13 @@ func VerifyAPREQWithResult(APReq *messages.APReq, s *Settings) (APREQResult, err
 
 	// PAC decoding
 	if !s.disablePACDecoding {
-		isPAC, pac, err := APReq.Ticket.GetPACType(s.Keytab, s.KeytabPrincipal(), s.Logger())
+		isPAC, pac, err := apReq.Ticket.GetPACType(s.Keytab, s.KeytabPrincipal(), s.Logger())
 		if isPAC && err != nil {
 			return result, err
 		}
 		if isPAC {
 			// There is a valid PAC. Adding attributes to creds
-			c.SetADCredentials(adCredentialsFromPAC(pac, APReq.Ticket.DecryptedEncPart.AuthTime))
+			c.SetADCredentials(adCredentialsFromPAC(pac, apReq.Ticket.DecryptedEncPart.AuthTime))
 		}
 	}
 	return result, nil

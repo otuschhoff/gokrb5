@@ -168,7 +168,7 @@ func TestCCacheV1V2NativeByteOrder(t *testing.T) {
 		require.NoError(t, cache.Unmarshal(data))
 		assert.Equal(t, uint8(2), cache.Version)
 		assert.Equal(t, "TEST.GOKRB5", cache.DefaultPrincipal.Realm)
-		assert.Equal(t, int32(nametype.KRB_NT_PRINCIPAL), cache.DefaultPrincipal.PrincipalName.NameType)
+		assert.Equal(t, nametype.KRB_NT_PRINCIPAL, cache.DefaultPrincipal.PrincipalName.NameType)
 	})
 	t.Run("version 2 truncated", func(t *testing.T) {
 		data := append([]byte{5, 2}, principalV2("TEST.GOKRB5", "testuser1")...)

@@ -74,9 +74,9 @@ func beginASExchange(settings settings, target string) ([]byte, *initiatorASStat
 			if realm != Realm {
 				return fmt.Errorf("PKU2U identity used with realm %q", realm)
 			}
-			mapped, err := PrincipalFromCertificate(identity.Certificate)
-			if err != nil {
-				return err
+			mapped, perr := PrincipalFromCertificate(identity.Certificate)
+			if perr != nil {
+				return perr
 			}
 			if !mapped.Equal(principal) {
 				return fmt.Errorf("PKU2U identity does not match client principal")
@@ -85,9 +85,9 @@ func beginASExchange(settings settings, target string) ([]byte, *initiatorASStat
 		},
 		Mode: pkinit.ModeDH, MinimumDHBits: settings.minimumDHBits, CurrentTime: settings.currentTime(),
 		ValidateKDCSigner: func(signed *pkinit.VerifiedSignedData) error {
-			chain, err := settings.validatePeer(signed, sname)
-			if err != nil {
-				return err
+			chain, verr := settings.validatePeer(signed, sname)
+			if verr != nil {
+				return verr
 			}
 			state.peer, state.peerChain = signed, chain
 			return nil

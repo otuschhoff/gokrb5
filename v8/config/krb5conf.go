@@ -251,7 +251,7 @@ func (r *Realm) parseLines(name string, lines []string) (err error) {
 			r.KPasswdServer = append(r.KPasswdServer, s[0]+":464")
 		}
 	}
-	return
+	return err
 }
 
 // Parse the lines of the [realms] section of the configuration into an slice of Realm structs.
@@ -268,7 +268,7 @@ func parseRealms(lines []string) (realms []Realm, err error) {
 		if l == "" {
 			continue
 		}
-		//if strings.Contains(l, "v4_") {
+		// if strings.Contains(l, "v4_") {
 		//	return nil, errors.New("v4 configurations are not supported in Realms section")
 		//}
 		if strings.Contains(l, "{") {
@@ -294,7 +294,7 @@ func parseRealms(lines []string) (realms []Realm, err error) {
 				if e != nil {
 					if _, ok := e.(UnsupportedDirective); !ok {
 						err = e
-						return
+						return realms, err
 					}
 					err = e
 				}
@@ -302,7 +302,7 @@ func parseRealms(lines []string) (realms []Realm, err error) {
 			}
 		}
 	}
-	return
+	return realms, err
 }
 
 // DomainRealm maps the domains to realms representing the [domain_realm] section of the configuration.
@@ -385,27 +385,32 @@ func NewFromScanner(scanner *bufio.Scanner) (*Config, error) {
 	sections := make(map[int]string)
 	var sectionLineNum []int
 	var lines []string
+	commentLine := regexp.MustCompile(`^\s*(#|;|\n)`)
+	libdefaultsSection := regexp.MustCompile(`^\s*\[libdefaults\]\s*`)
+	realmsSection := regexp.MustCompile(`^\s*\[realms\]\s*`)
+	domainRealmSection := regexp.MustCompile(`^\s*\[domain_realm\]\s*`)
+	unknownSection := regexp.MustCompile(`^\s*\[.*\]\s*`)
 	for scanner.Scan() {
 		// Skip comments and blank lines
-		if matched, _ := regexp.MatchString(`^\s*(#|;|\n)`, scanner.Text()); matched {
+		if commentLine.MatchString(scanner.Text()) {
 			continue
 		}
-		if matched, _ := regexp.MatchString(`^\s*\[libdefaults\]\s*`, scanner.Text()); matched {
+		if libdefaultsSection.MatchString(scanner.Text()) {
 			sections[len(lines)] = "libdefaults"
 			sectionLineNum = append(sectionLineNum, len(lines))
 			continue
 		}
-		if matched, _ := regexp.MatchString(`^\s*\[realms\]\s*`, scanner.Text()); matched {
+		if realmsSection.MatchString(scanner.Text()) {
 			sections[len(lines)] = "realms"
 			sectionLineNum = append(sectionLineNum, len(lines))
 			continue
 		}
-		if matched, _ := regexp.MatchString(`^\s*\[domain_realm\]\s*`, scanner.Text()); matched {
+		if domainRealmSection.MatchString(scanner.Text()) {
 			sections[len(lines)] = "domain_realm"
 			sectionLineNum = append(sectionLineNum, len(lines))
 			continue
 		}
-		if matched, _ := regexp.MatchString(`^\s*\[.*\]\s*`, scanner.Text()); matched {
+		if unknownSection.MatchString(scanner.Text()) {
 			sections[len(lines)] = "unknown_section"
 			sectionLineNum = append(sectionLineNum, len(lines))
 			continue
@@ -479,7 +484,7 @@ func parseETypes(s []string, w bool) []int32 {
 
 // Parse a time duration string in the configuration to a golang time.Duration.
 func parseDuration(s string) (time.Duration, error) {
-	s = strings.Replace(strings.TrimSpace(s), " ", "", -1)
+	s = strings.ReplaceAll(strings.TrimSpace(s), " ", "")
 
 	// handle Nd[NmNs]
 	if strings.Contains(s, "d") {
@@ -494,7 +499,7 @@ func parseDuration(s string) (time.Duration, error) {
 			if err != nil {
 				return time.Duration(0), errors.New("invalid time duration")
 			}
-			d = d + dp
+			d += dp
 		}
 		return d, nil
 	}
@@ -527,7 +532,7 @@ func parseDuration(s string) (time.Duration, error) {
 		}
 		d := time.Duration(i[0])*time.Hour + time.Duration(i[1])*time.Minute
 		if len(i) == 3 {
-			d = d + time.Duration(i[2])*time.Second
+			d += time.Duration(i[2]) * time.Second
 		}
 		return d, nil
 	}

@@ -11,7 +11,7 @@ const (
 )
 
 func uint16SliceToString(a []uint16) string {
-	s := make([]rune, len(a), len(a))
+	s := make([]rune, len(a))
 	for i := range s {
 		s[i] = rune(a[i])
 	}
@@ -51,15 +51,13 @@ func (dec *Decoder) readConformantVaryingString(def *[]deferedPtr) (string, erro
 func (dec *Decoder) readStringsArray(v reflect.Value, tag reflect.StructTag, def *[]deferedPtr) error {
 	d, _ := sliceDimensions(v.Type())
 	ndrTag := parseTags(tag)
-	var m []int
-	//var ms int
 	if ndrTag.HasValue(TagConformant) {
+		// Per-dimension maximum counts, consumed from the stream but unused.
 		for i := 0; i < d; i++ {
-			m = append(m, int(dec.precedingMax()))
+			_ = dec.precedingMax()
 		}
 		// common max size
 		_ = dec.precedingMax()
-		//ms = int(n)
 	}
 	tag = reflect.StructTag(subStringArrayTag)
 	err := dec.fillVaryingArray(v, tag, def)

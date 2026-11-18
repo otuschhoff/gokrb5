@@ -85,8 +85,8 @@ func (initiator *Initiator) InitSecContext(target string, input []byte, _ ...gss
 		if err != nil {
 			return nil, nil, false, err
 		}
-		if err := authenticator.GenerateSeqNumberAndSubKey(result.sessionKey.KeyType, etype.GetKeyByteSize()); err != nil {
-			return nil, nil, false, err
+		if ierr := authenticator.GenerateSeqNumberAndSubKey(result.sessionKey.KeyType, etype.GetKeyByteSize()); ierr != nil {
+			return nil, nil, false, ierr
 		}
 		request, err := messages.NewAPReq(result.ticket, result.sessionKey, authenticator)
 		if err != nil {

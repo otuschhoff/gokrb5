@@ -210,8 +210,8 @@ func TestPublicS4UServiceTicketRoundTripsAndCaches(t *testing.T) {
 	if string(gotSelfKey.KeyValue) != string(selfKey.KeyValue) {
 		t.Fatalf("S4U2self key = %x", gotSelfKey.KeyValue)
 	}
-	if _, _, err := client.GetServiceTicketForUser(user, "EXAMPLE.ORG", selfSPN); err != nil || calls != 2 {
-		t.Fatalf("cached S4U2self = calls %d, error %v", calls, err)
+	if _, _, ierr := client.GetServiceTicketForUser(user, "EXAMPLE.ORG", selfSPN); ierr != nil || calls != 2 {
+		t.Fatalf("cached S4U2self = calls %d, error %v", calls, ierr)
 	}
 
 	ticket, gotProxyKey, err := client.GetServiceTicketOnBehalfOf(evidence, targetSPN, S4UWithResourceBasedDelegation())

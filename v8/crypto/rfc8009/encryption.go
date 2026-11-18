@@ -38,15 +38,13 @@ func EncryptMessage(key, message []byte, usage uint32, e etype.EType) ([]byte, [
 	if len(key) != kl {
 		return []byte{}, []byte{}, fmt.Errorf("incorrect keysize: expected: %v actual: %v", kl, len(key))
 	}
-	if len(key) != e.GetKeyByteSize() {
-	}
 	// confounder
-	c := make([]byte, e.GetConfounderByteSize())
-	_, err := rand.Read(c)
+	plainBytes := make([]byte, e.GetConfounderByteSize())
+	_, err := rand.Read(plainBytes)
 	if err != nil {
 		return []byte{}, []byte{}, fmt.Errorf("could not generate random confounder: %w", err)
 	}
-	plainBytes := append(c, message...)
+	plainBytes = append(plainBytes, message...)
 
 	// Derive key for encryption from usage
 	var k []byte
@@ -118,7 +116,8 @@ func GetIntegityHash(iv, c, key []byte, usage uint32, e etype.EType) ([]byte, er
 	// Generate and append integrity hash
 	// Rather than calculating the hash over the confounder and plaintext
 	// it is calculated over the iv concatenated with the AES cipher output.
-	ib := append(iv, c...)
+	iv = append(iv, c...)
+	ib := iv
 	return common.GetIntegrityHash(ib, key, usage, e)
 }
 
@@ -131,7 +130,8 @@ func VerifyIntegrity(key, ct []byte, usage uint32, etype etype.EType) bool {
 	h := make([]byte, checksumSize)
 	copy(h, ct[len(ct)-checksumSize:])
 	ivz := make([]byte, etype.GetConfounderByteSize())
-	ib := append(ivz, ct[:len(ct)-checksumSize]...)
+	ivz = append(ivz, ct[:len(ct)-checksumSize]...)
+	ib := ivz
 	expectedMAC, err := common.GetIntegrityHash(ib, key, usage, etype)
 	if err != nil {
 		return false

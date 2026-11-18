@@ -23,8 +23,8 @@ func MarshalLengthBytes(l int) []byte {
 	p := 1
 	for i := 1; i < 127; {
 		b = append([]byte{byte((l % (p * 256)) / p)}, b...)
-		p = p * 256
-		l = l - l%p
+		p *= 256
+		l -= l % p
 		if l <= 0 {
 			break
 		}

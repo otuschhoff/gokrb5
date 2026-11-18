@@ -20,9 +20,10 @@ func TestTLSChannelBindings(t *testing.T) {
 			t.Fatalf("TLS server endpoint for %v = %x, %v", algorithm, bindings.ApplicationData, err)
 		}
 		wantLength := len("tls-server-end-point:") + 32
-		if algorithm == x509.SHA384WithRSA {
+		switch algorithm {
+		case x509.SHA384WithRSA:
 			wantLength += 16
-		} else if algorithm == x509.SHA512WithRSA {
+		case x509.SHA512WithRSA:
 			wantLength += 32
 		}
 		if len(bindings.ApplicationData) != wantLength {

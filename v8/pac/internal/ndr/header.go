@@ -58,7 +58,7 @@ func (dec *Decoder) readCommonHeader() error {
 	if err != nil {
 		return Malformed{EText: "could not read first byte of common header for version", cause: err}
 	}
-	dec.ch.Version = uint8(vb)
+	dec.ch.Version = vb
 	if dec.ch.Version != protocolVersion {
 		return Malformed{EText: fmt.Sprintf("byte stream does not indicate a RPC Type serialization of version %v", protocolVersion)}
 	}
@@ -71,7 +71,7 @@ func (dec *Decoder) readCommonHeader() error {
 	if endian != 0 && endian != 1 {
 		return Malformed{EText: "common header does not indicate a valid endianness"}
 	}
-	dec.ch.CharacterEncoding = uint8(vb & 0xF)
+	dec.ch.CharacterEncoding = vb & 0xF
 	if dec.ch.CharacterEncoding != 0 && dec.ch.CharacterEncoding != 1 {
 		return Malformed{EText: "common header does not indicate a valid character encoding"}
 	}

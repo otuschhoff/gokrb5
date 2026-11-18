@@ -376,7 +376,8 @@ func asRequestOptions(opts initOptions, cfg *config.Config) (messages.ASReqOptio
 			if err != nil {
 				return result, err
 			}
-			result.Addresses = append(addresses, types.HostAddressesFromNetIPs(cfg.LibDefaults.ExtraAddresses)...)
+			addresses = append(addresses, types.HostAddressesFromNetIPs(cfg.LibDefaults.ExtraAddresses)...)
+			result.Addresses = addresses
 		} else {
 			result.Addresses = []types.HostAddress{}
 		}

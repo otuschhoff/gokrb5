@@ -36,10 +36,10 @@ func TestMSKILEPADataWrappers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded, err := pacOptions.GetPAPACOptions(); err != nil || !IsFlagSet(&decoded.Options, 0) || !IsFlagSet(&decoded.Options, 3) {
-		t.Fatalf("PAC options = %+v, %v", decoded, err)
+	if decoded, ierr := pacOptions.GetPAPACOptions(); ierr != nil || !IsFlagSet(&decoded.Options, 0) || !IsFlagSet(&decoded.Options, 3) {
+		t.Fatalf("PAC options = %+v, %v", decoded, ierr)
 	}
-	if _, err := NewPAPACOptionsPAData(-1); err == nil {
+	if _, ierr := NewPAPACOptionsPAData(-1); ierr == nil {
 		t.Fatal("negative PAC option accepted")
 	}
 
@@ -48,8 +48,8 @@ func TestMSKILEPADataWrappers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded, err := forUserPA.GetPAForUser(); err != nil || !decoded.UserName.Equal(principal) {
-		t.Fatalf("PA-FOR-USER = %+v, %v", decoded, err)
+	if decoded, ierr := forUserPA.GetPAForUser(); ierr != nil || !decoded.UserName.Equal(principal) {
+		t.Fatalf("PA-FOR-USER = %+v, %v", decoded, ierr)
 	}
 
 	userID := S4UUserID{Nonce: 7, CName: principal, CRealm: "EXAMPLE.ORG", Options: NewKrbFlags()}
@@ -74,8 +74,8 @@ func TestMSKILEPADataWrappers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded, err := supportedPA.GetPASupportedEncTypes(); err != nil || decoded != 3 {
-		t.Fatalf("supported enctypes = %v, %v", decoded, err)
+	if decoded, ierr := supportedPA.GetPASupportedEncTypes(); ierr != nil || decoded != 3 {
+		t.Fatalf("supported enctypes = %v, %v", decoded, ierr)
 	}
 
 	keyRequest := KerbKeyListReq{17, 18}
@@ -83,16 +83,16 @@ func TestMSKILEPADataWrappers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded, err := keyRequestPA.GetKerbKeyListReq(); err != nil || !reflect.DeepEqual(decoded, keyRequest) {
-		t.Fatalf("key request = %+v, %v", decoded, err)
+	if decoded, ierr := keyRequestPA.GetKerbKeyListReq(); ierr != nil || !reflect.DeepEqual(decoded, keyRequest) {
+		t.Fatalf("key request = %+v, %v", decoded, ierr)
 	}
 	keyReply := KerbKeyListRep{{KeyType: 17, KeyValue: []byte("key")}}
 	keyReplyPA, err := NewKerbKeyListRepPAData(keyReply)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded, err := keyReplyPA.GetKerbKeyListRep(); err != nil || !reflect.DeepEqual(decoded, keyReply) {
-		t.Fatalf("key reply = %+v, %v", decoded, err)
+	if decoded, ierr := keyReplyPA.GetKerbKeyListRep(); ierr != nil || !reflect.DeepEqual(decoded, keyReply) {
+		t.Fatalf("key reply = %+v, %v", decoded, ierr)
 	}
 
 	referral := PASvrReferralData{ReferredName: principal, ReferredRealm: "CHILD.EXAMPLE.ORG"}
@@ -100,16 +100,16 @@ func TestMSKILEPADataWrappers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded, err := referralPA.GetPASvrReferralInfo(); err != nil || decoded.ReferredRealm != referral.ReferredRealm {
-		t.Fatalf("referral = %+v, %v", decoded, err)
+	if decoded, ierr := referralPA.GetPASvrReferralInfo(); ierr != nil || decoded.ReferredRealm != referral.ReferredRealm {
+		t.Fatalf("referral = %+v, %v", decoded, ierr)
 	}
 	superseded := KerbSupersededByUser{Name: principal, Realm: "EXAMPLE.ORG"}
 	supersededPA, err := NewKerbSupersededByUserPAData(superseded)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded, err := supersededPA.GetKerbSupersededByUser(); err != nil || !decoded.Name.Equal(principal) {
-		t.Fatalf("superseded user = %+v, %v", decoded, err)
+	if decoded, ierr := supersededPA.GetKerbSupersededByUser(); ierr != nil || !decoded.Name.Equal(principal) {
+		t.Fatalf("superseded user = %+v, %v", decoded, ierr)
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -118,8 +118,8 @@ func TestMSKILEPADataWrappers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded, err := keyPackagePA.GetKerbDMSAKeyPackage(); err != nil || len(decoded.CurrentKeys) != 1 {
-		t.Fatalf("dMSA package = %+v, %v", decoded, err)
+	if decoded, ierr := keyPackagePA.GetKerbDMSAKeyPackage(); ierr != nil || len(decoded.CurrentKeys) != 1 {
+		t.Fatalf("dMSA package = %+v, %v", decoded, ierr)
 	}
 	keyPackageEntry, err := NewKerbDMSAKeyPackageEntry(keyPackage)
 	if err != nil {
@@ -226,8 +226,8 @@ func TestMSKILEExactVectors(t *testing.T) {
 
 	var restriction KerbADRestrictionEntry
 	fixture := mustHex(t, testdata.MSKILEKerbADRestrictionEntry)
-	if err := restriction.Unmarshal(fixture); err != nil {
-		t.Fatal(err)
+	if ierr := restriction.Unmarshal(fixture); ierr != nil {
+		t.Fatal(ierr)
 	}
 	reencoded, err := restriction.Marshal()
 	if err != nil {
@@ -308,8 +308,8 @@ func roundTripMSKILE(t *testing.T, want, got mskileCodec) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := got.Unmarshal(b); err != nil {
-		t.Fatal(err)
+	if ierr := got.Unmarshal(b); ierr != nil {
+		t.Fatal(ierr)
 	}
 	reencoded, err := got.Marshal()
 	if err != nil {
@@ -418,7 +418,7 @@ func TestMSKILEExtendedErrorAndAuthorizationDataHelpers(t *testing.T) {
 		t.Fatalf("extended error round trip: got %#v, %v", gotExt, err)
 	}
 	errorData.DataType = int32(msflags.KERB_AP_ERR_TYPE_SKEW_RECOVERY)
-	if _, err := errorData.GetKerbExtError(); err == nil {
+	if _, ierr := errorData.GetKerbExtError(); ierr == nil {
 		t.Fatal("wrong KERB-ERROR-DATA type was accepted")
 	}
 
@@ -435,11 +435,11 @@ func TestMSKILEExtendedErrorAndAuthorizationDataHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := gotRestriction.GetLSAPTokenInfoIntegrity(); err != nil {
-		t.Fatal(err)
+	if _, ierr := gotRestriction.GetLSAPTokenInfoIntegrity(); ierr != nil {
+		t.Fatal(ierr)
 	}
 	entry.ADType = adtype.KerbLocal
-	if _, err := entry.GetKerbADRestrictionEntry(); err == nil {
+	if _, ierr := entry.GetKerbADRestrictionEntry(); ierr == nil {
 		t.Fatal("wrong restriction authorization-data type was accepted")
 	}
 
@@ -477,37 +477,37 @@ func TestFASTPADataHelpers(t *testing.T) {
 		t.Fatalf("PA-FX-ERROR round trip: got %x, %v", got, err)
 	}
 	pa.PADataType = patype.PA_FX_FAST
-	if _, err := pa.GetPAFXError(); err == nil {
+	if _, ierr := pa.GetPAFXError(); ierr == nil {
 		t.Fatal("wrong PA-FX-ERROR PA-DATA type was accepted")
 	}
 
 	request := PAFXFastRequest{}
-	if err := request.Unmarshal(mustHex(t, testdata.MSKILEPAFXFastRequest)); err != nil {
-		t.Fatal(err)
+	if ierr := request.Unmarshal(mustHex(t, testdata.MSKILEPAFXFastRequest)); ierr != nil {
+		t.Fatal(ierr)
 	}
 	pa, err = NewPAFXFastRequestPAData(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pa.GetPAFXFastRequest(); err != nil {
-		t.Fatal(err)
+	if _, ierr := pa.GetPAFXFastRequest(); ierr != nil {
+		t.Fatal(ierr)
 	}
 
 	reply := PAFXFastReply{}
-	if err := reply.Unmarshal(mustHex(t, testdata.MSKILEPAFXFastReply)); err != nil {
-		t.Fatal(err)
+	if ierr := reply.Unmarshal(mustHex(t, testdata.MSKILEPAFXFastReply)); ierr != nil {
+		t.Fatal(ierr)
 	}
 	pa, err = NewPAFXFastReplyPAData(reply)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pa.GetPAFXFastReply(); err != nil {
-		t.Fatal(err)
+	if _, ierr := pa.GetPAFXFastReply(); ierr != nil {
+		t.Fatal(ierr)
 	}
 
 	challenge := PAEncryptedChallenge{}
-	if err := challenge.Unmarshal(mustHex(t, testdata.MSKILEPAEncryptedChallenge)); err != nil {
-		t.Fatal(err)
+	if ierr := challenge.Unmarshal(mustHex(t, testdata.MSKILEPAEncryptedChallenge)); ierr != nil {
+		t.Fatal(ierr)
 	}
 	pa, err = NewPAEncryptedChallengePAData(challenge)
 	if err != nil {

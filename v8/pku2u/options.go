@@ -59,15 +59,15 @@ func WithMinimumDHBits(bits int) Option {
 }
 
 func newSettings(identity *Identity, roots *x509.CertPool, options []Option) settings {
-	settings := settings{
+	s := settings{
 		identity: identity, roots: roots, clockSkew: 5 * time.Minute,
 		ticketLifetime: 10 * time.Hour, minimumDHBits: 2048,
 		currentTime: func() time.Time { return time.Now().UTC() },
 	}
 	for _, option := range options {
 		if option != nil {
-			option(&settings)
+			option(&s)
 		}
 	}
-	return settings
+	return s
 }

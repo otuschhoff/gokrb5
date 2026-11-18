@@ -58,7 +58,7 @@ func NewCache() *Cache {
 func (c *Cache) getEntry(spn string) (CacheEntry, bool) {
 	c.mux.RLock()
 	defer c.mux.RUnlock()
-	e, ok := (*c).Entries[spn]
+	e, ok := c.Entries[spn]
 	return e, ok
 }
 
@@ -95,7 +95,7 @@ func (c *Cache) addEntryWithDetails(tkt messages.Ticket, authTime, startTime, en
 func (c *Cache) addEntryWithKey(cacheKey, spn string, tkt messages.Ticket, authTime, startTime, endTime, renewTill time.Time, sessionKey types.EncryptionKey, ticketFlags asn1.BitString, addresses []types.HostAddress, authData []types.AuthorizationDataEntry, isSKey bool, secondTicket []byte) CacheEntry {
 	c.mux.Lock()
 	defer c.mux.Unlock()
-	(*c).Entries[cacheKey] = CacheEntry{
+	c.Entries[cacheKey] = CacheEntry{
 		SPN:          spn,
 		Ticket:       tkt,
 		AuthTime:     authTime,
@@ -137,11 +137,11 @@ func (cl *Client) GetCachedTicket(spn string) (messages.Ticket, types.Encryption
 			cl.Log("ticket received from cache for %s", spn)
 			return e.Ticket, e.SessionKey, true
 		} else if time.Now().UTC().Before(e.RenewTill) {
-			e, err := cl.renewTicket(e)
-			if err != nil {
+			renewed, rerr := cl.renewTicket(e)
+			if rerr != nil {
 				return e.Ticket, e.SessionKey, false
 			}
-			return e.Ticket, e.SessionKey, true
+			return renewed.Ticket, renewed.SessionKey, true
 		}
 	}
 	var tkt messages.Ticket

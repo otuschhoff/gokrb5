@@ -238,9 +238,10 @@ func (c *Conversation) continueStep(input []byte, messages []Message) ([]byte, b
 	}
 	exchange := findExchange(messages, messageType, c.selected.AuthScheme())
 	var mechanismInput []byte
-	if exchange != nil {
+	switch {
+	case exchange != nil:
 		mechanismInput = exchange.Exchange
-	} else if c.mechanismDone {
+	case c.mechanismDone:
 		sendAlert, err := c.verifyIncoming(input, messages)
 		if err != nil {
 			return nil, false, err
@@ -250,7 +251,7 @@ func (c *Conversation) continueStep(input []byte, messages []Message) ([]byte, b
 		}
 		c.transcript = append(c.transcript, input...)
 		return c.emit(nil, sendAlert)
-	} else if !(c.initiator && c.step == 2) {
+	case !c.initiator || c.step != 2:
 		return nil, false, ErrUnexpectedToken
 	}
 	var mechanismToken []byte
@@ -384,7 +385,7 @@ func (c *Conversation) verifyIncoming(input []byte, messages []Message) (bool, e
 }
 
 func (c *Conversation) processMetadata(messages []Message, receivingAcceptorMetadata bool) {
-	messageType := uint32(MessageTypeInitiatorMetaData)
+	messageType := MessageTypeInitiatorMetaData
 	if receivingAcceptorMetadata {
 		messageType = MessageTypeAcceptorMetaData
 	}

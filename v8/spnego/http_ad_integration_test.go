@@ -36,8 +36,8 @@ func TestSPNEGO_AD_EndToEnd(t *testing.T) {
 	defer srv.Close()
 
 	cl := client.NewWithPassword(env.User, env.UserRealm, env.Password, env.Config, client.Logger(l), client.DisablePAReqEncPARep(true))
-	if err := cl.Login(); err != nil {
-		t.Fatalf("Error on login: %v", err)
+	if ierr := cl.Login(); ierr != nil {
+		t.Fatalf("Error on login: %v", ierr)
 	}
 	r, _ := http.NewRequest("GET", srv.URL, nil)
 	resp, err := NewClient(cl, srv.Client(), spn).Do(r)

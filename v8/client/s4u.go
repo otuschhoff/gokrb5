@@ -154,9 +154,9 @@ func (cl *Client) s4u2SelfExchange(service, user types.PrincipalName, userRealm,
 			continue
 		}
 		if request.PAData.Contains(patype.PA_S4U_X509_USER) && replyPAData.Contains(patype.PA_S4U_X509_USER) {
-			normalized, err := reply.VerifyS4UX509UserReply(request, sessionKey)
-			if err != nil {
-				return messages.TGSRep{}, fmt.Errorf("verify PA-S4U-X509-USER reply: %w", err)
+			normalized, verr := reply.VerifyS4UX509UserReply(request, sessionKey)
+			if verr != nil {
+				return messages.TGSRep{}, fmt.Errorf("verify PA-S4U-X509-USER reply: %w", verr)
 			}
 			user, userRealm = normalized.CName, normalized.CRealm
 			subjectCertificate = nil

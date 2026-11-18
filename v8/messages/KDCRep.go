@@ -394,22 +394,22 @@ func (k *TGSRep) verify(cfg *config.Config, tgsReq TGSReq, verifyCName bool) (bo
 	if k.DecryptedEncPart.Nonce != tgsReq.ReqBody.Nonce {
 		return false, krberror.NewErrorf(krberror.KRBMsgError, "possible replay attack, nonce in response does not match that in request")
 	}
-	//if k.Ticket.SName.NameType != tgsReq.ReqBody.SName.NameType || k.Ticket.SName.NameString == nil {
+	// if k.Ticket.SName.NameType != tgsReq.ReqBody.SName.NameType || k.Ticket.SName.NameString == nil {
 	//	return false, krberror.NewErrorf(krberror.KRBMsgError, "SName in response ticket does not match what was requested. Requested: %v; Reply: %v", tgsReq.ReqBody.SName, k.Ticket.SName)
-	//}
-	//for i := range k.Ticket.SName.NameString {
+	// }
+	// for i := range k.Ticket.SName.NameString {
 	//	if k.Ticket.SName.NameString[i] != tgsReq.ReqBody.SName.NameString[i] {
 	//		return false, krberror.NewErrorf(krberror.KRBMsgError, "SName in response ticket does not match what was requested. Requested: %+v; Reply: %+v", tgsReq.ReqBody.SName, k.Ticket.SName)
 	//	}
-	//}
-	//if k.DecryptedEncPart.SName.NameType != tgsReq.ReqBody.SName.NameType || k.DecryptedEncPart.SName.NameString == nil {
+	// }
+	// if k.DecryptedEncPart.SName.NameType != tgsReq.ReqBody.SName.NameType || k.DecryptedEncPart.SName.NameString == nil {
 	//	return false, krberror.NewErrorf(krberror.KRBMsgError, "SName in response does not match what was requested. Requested: %v; Reply: %v", tgsReq.ReqBody.SName, k.DecryptedEncPart.SName)
-	//}
-	//for i := range k.DecryptedEncPart.SName.NameString {
+	// }
+	// for i := range k.DecryptedEncPart.SName.NameString {
 	//	if k.DecryptedEncPart.SName.NameString[i] != tgsReq.ReqBody.SName.NameString[i] {
 	//		return false, krberror.NewErrorf(krberror.KRBMsgError, "SName in response does not match what was requested. Requested: %+v; Reply: %+v", tgsReq.ReqBody.SName, k.DecryptedEncPart.SName)
 	//	}
-	//}
+	// }
 	if !types.RealmEqual(k.DecryptedEncPart.SRealm, tgsReq.ReqBody.Realm) {
 		return false, krberror.NewErrorf(krberror.KRBMsgError, "SRealm in response does not match what was requested. Requested: %s; Reply: %s", tgsReq.ReqBody.Realm, k.DecryptedEncPart.SRealm)
 	}

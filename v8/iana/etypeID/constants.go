@@ -5,7 +5,7 @@ import "fmt"
 
 // Kerberos encryption type assigned numbers.
 const (
-	//RESERVED : 0
+	// RESERVED : 0
 	DES_CBC_CRC                  int32 = 1
 	DES_CBC_MD4                  int32 = 2
 	DES_CBC_MD5                  int32 = 3
@@ -26,14 +26,14 @@ const (
 	AES256_CTS_HMAC_SHA1_96      int32 = 18
 	AES128_CTS_HMAC_SHA256_128   int32 = 19
 	AES256_CTS_HMAC_SHA384_192   int32 = 20
-	//UNASSIGNED : 21-22
+	// UNASSIGNED : 21-22
 	RC4_HMAC             int32 = 23
 	RC4_HMAC_EXP         int32 = 24
 	CAMELLIA128_CTS_CMAC int32 = 25
 	CAMELLIA256_CTS_CMAC int32 = 26
-	//UNASSIGNED : 27-64
+	// UNASSIGNED : 27-64
 	SUBKEY_KEYMATERIAL int32 = 65
-	//UNASSIGNED : 66-2147483647
+	// UNASSIGNED : 66-2147483647
 )
 
 // ETypesByName is a map of EncType names to their assigned EncType number.

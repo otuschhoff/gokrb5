@@ -75,8 +75,8 @@ func readKKDCPResponse(resp *http.Response, proxyURL string) ([]byte, error) {
 		return nil, fmt.Errorf("KKDCP response from %s exceeds %d bytes", proxyURL, maxKKDCPResponseSize)
 	}
 	var proxyReply types.KDCProxyMessage
-	if err := proxyReply.Unmarshal(encoded); err != nil {
-		return nil, fmt.Errorf("decode KKDCP response from %s: %w", proxyURL, err)
+	if ierr := proxyReply.Unmarshal(encoded); ierr != nil {
+		return nil, fmt.Errorf("decode KKDCP response from %s: %w", proxyURL, ierr)
 	}
 	reply, err := proxyReply.KerberosMessage()
 	if err != nil {
@@ -93,11 +93,12 @@ func (cl *Client) sendToServers(servers map[int]string, realm string, message []
 			reply []byte
 			err   error
 		)
-		if strings.Contains(server, "://") {
+		switch {
+		case strings.Contains(server, "://"):
 			reply, err = cl.sendKKDCP(server, realm, message)
-		} else if tcp {
+		case tcp:
 			reply, err = dialSendTCP(map[int]string{1: server}, message)
-		} else {
+		default:
 			reply, err = dialSendUDP(map[int]string{1: server}, message)
 		}
 		if err == nil {

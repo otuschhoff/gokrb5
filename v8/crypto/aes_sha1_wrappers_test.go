@@ -44,8 +44,8 @@ func TestAESSHA1WrapperContracts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got, err := test.etype.DecryptData(test.key, ciphertext); err != nil || !bytes.Equal(got, message) {
-				t.Fatalf("raw decrypted = %x, %v", got, err)
+			if got, ierr := test.etype.DecryptData(test.key, ciphertext); ierr != nil || !bytes.Equal(got, message) {
+				t.Fatalf("raw decrypted = %x, %v", got, ierr)
 			}
 			if test.etype.VerifyIntegrity(test.key, encrypted, message, 42) {
 				t.Fatal("invalid integrity input was accepted")

@@ -611,15 +611,15 @@ func (s *SPNEGOToken) Marshal() ([]byte, error) {
 		if err != nil {
 			return b, fmt.Errorf("could not marshal NegTokenInit: %w", err)
 		}
-		b = append(hb, tb...)
-		return asn1tools.AddASNAppTag(b, 0), nil
+		hb = append(hb, tb...)
+		return asn1tools.AddASNAppTag(hb, 0), nil
 	}
 	if s.Resp {
-		b, err := s.NegTokenResp.Marshal()
+		rb, err := s.NegTokenResp.Marshal()
 		if err != nil {
 			return b, fmt.Errorf("could not marshal NegTokenResp: %w", err)
 		}
-		return b, nil
+		return rb, nil
 	}
 	return b, errors.New("SPNEGO cannot be marshalled. It contains neither a NegTokenInit or NegTokenResp")
 }

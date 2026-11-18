@@ -19,31 +19,31 @@ func ChangePasswdMsg(cname types.PrincipalName, realm, password string, tkt mess
 	chpwdb, err := chgpasswd.Marshal()
 	if err != nil {
 		err = krberror.Errorf(err, krberror.KRBMsgError, "error marshaling change passwd data")
-		return
+		return r, k, err
 	}
 
 	// Generate authenticator
 	auth, err := types.NewAuthenticator(realm, cname)
 	if err != nil {
 		err = krberror.Errorf(err, krberror.KRBMsgError, "error generating new authenticator")
-		return
+		return r, k, err
 	}
 	etype, err := crypto.GetEtype(sessionKey.KeyType)
 	if err != nil {
 		err = krberror.Errorf(err, krberror.KRBMsgError, "error generating subkey etype")
-		return
+		return r, k, err
 	}
 	err = auth.GenerateSeqNumberAndSubKey(etype.GetETypeID(), etype.GetKeyByteSize())
 	if err != nil {
 		err = krberror.Errorf(err, krberror.KRBMsgError, "error generating subkey")
-		return
+		return r, k, err
 	}
 	k = auth.SubKey
 
 	// Generate AP_REQ
 	APreq, err := messages.NewAPReq(tkt, sessionKey, auth)
 	if err != nil {
-		return
+		return r, k, err
 	}
 
 	// Form the KRBPriv encpart data
@@ -57,12 +57,12 @@ func ChangePasswdMsg(cname types.PrincipalName, realm, password string, tkt mess
 	err = kpriv.EncryptEncPart(k)
 	if err != nil {
 		err = krberror.Errorf(err, krberror.EncryptingError, "error encrypting change passwd data")
-		return
+		return r, k, err
 	}
 
 	r = Request{
 		APREQ:   APreq,
 		KRBPriv: kpriv,
 	}
-	return
+	return r, k, err
 }

@@ -83,7 +83,7 @@ func (dec *Decoder) readUint8() (uint8, error) {
 	if err != nil {
 		return uint8(0), err
 	}
-	return uint8(b), nil
+	return b, nil
 }
 
 // readUint16 reads bytes representing a 16bit unsigned integer.

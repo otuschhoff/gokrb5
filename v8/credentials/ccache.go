@@ -224,9 +224,9 @@ func parseCredential(b []byte, p *int, c *CCache, e *binary.ByteOrder) (cred *Cr
 	key.KeyType = int32(keyType)
 	if c.Version == 3 {
 		// repeated twice in version 3
-		repeatedKeyType, err := readUint16(b, p, *e)
-		if err != nil {
-			return nil, err
+		repeatedKeyType, kerr := readUint16(b, p, *e)
+		if kerr != nil {
+			return nil, kerr
 		}
 		if repeatedKeyType != keyType {
 			return nil, errors.New("invalid version 3 credential cache key type")
@@ -295,7 +295,7 @@ func parseCredential(b []byte, p *int, c *CCache, e *binary.ByteOrder) (cred *Cr
 	if err != nil {
 		return nil, err
 	}
-	return
+	return cred, err
 }
 
 // GetClientPrincipalName returns a PrincipalName type for the client the credentials cache is for.
@@ -359,14 +359,10 @@ func (c *CCache) GetEntries() []*Credential {
 
 func (h *headerField) valid() bool {
 	// See https://web.mit.edu/kerberos/krb5-latest/doc/formats/ccache_file_format.html - Header format
-	switch h.tag {
-	case headerFieldTagKDCOffset:
-		if h.length != 8 || len(h.value) != 8 {
-			return false
-		}
-		return true
+	if h.tag != headerFieldTagKDCOffset {
+		return false
 	}
-	return false
+	return h.length == 8 && len(h.value) == 8
 }
 
 func readData(b []byte, p *int, e binary.ByteOrder) ([]byte, error) {
@@ -449,14 +445,13 @@ func isNativeEndianLittle() bool {
 	p := unsafe.Pointer(&x)
 	bp := (*[4]byte)(p)
 
-	var endian bool
-	if 0x01 == bp[0] {
-		endian = false
-	} else if (0x78 & 0xff) == (bp[0] & 0xff) {
-		endian = true
-	} else {
+	switch {
+	case bp[0] == 0x01:
+		return false
+	case bp[0]&0xff == 0x78&0xff:
+		return true
+	default:
 		// Default to big endian
-		endian = false
+		return false
 	}
-	return endian
 }

@@ -201,11 +201,11 @@ func TestFindRepoRootFromGitHubWorkspace(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(wd) }()
 	other := filepath.Join(t.TempDir(), "outside")
-	if err := os.MkdirAll(other, 0o755); err != nil {
-		t.Fatal(err)
+	if ierr := os.MkdirAll(other, 0o755); ierr != nil {
+		t.Fatal(ierr)
 	}
-	if err := os.Chdir(other); err != nil {
-		t.Fatal(err)
+	if ierr := os.Chdir(other); ierr != nil {
+		t.Fatal(ierr)
 	}
 	t.Setenv("GITHUB_WORKSPACE", root)
 	got, err := findRepoRoot()

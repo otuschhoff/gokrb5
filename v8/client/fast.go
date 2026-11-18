@@ -89,8 +89,8 @@ func (state *fastState) activate(cl *Client, realm string) error {
 	now := clientNow().UTC().Add(cl.KDCTimeOffset())
 	auth.CTime = now.Truncate(time.Second)
 	auth.Cusec = now.Nanosecond() / int(time.Microsecond)
-	if err := auth.GenerateSeqNumberAndSubKey(armor.key.KeyType, et.GetKeyByteSize()); err != nil {
-		return fmt.Errorf("create FAST armor subkey: %w", err)
+	if ierr := auth.GenerateSeqNumberAndSubKey(armor.key.KeyType, et.GetKeyByteSize()); ierr != nil {
+		return fmt.Errorf("create FAST armor subkey: %w", ierr)
 	}
 	apReq, err := messages.NewAPReqWithKeyUsage(armor.ticket, armor.key, auth, keyusage.AP_REQ_AUTHENTICATOR)
 	if err != nil {
@@ -240,7 +240,8 @@ func (state *fastState) wrapTGSRequest(request messages.TGSReq, tgt messages.Tic
 	if err != nil {
 		return request, err
 	}
-	request.PAData = append(outerPAData, fastPA)
+	outerPAData = append(outerPAData, fastPA)
+	request.PAData = outerPAData
 	return request, nil
 }
 
@@ -305,7 +306,8 @@ func (state *fastState) setASPreAuth(cl *Client, hint *messages.KRBError, reques
 			}
 		}
 	}
-	request.PAData = append(inner, challenge)
+	inner = append(inner, challenge)
+	request.PAData = inner
 	state.sentChallenge = true
 	cl.settings.preAuthEType = et
 	cl.settings.preAuthType = patype.PA_ENCRYPTED_CHALLENGE
@@ -366,8 +368,8 @@ func (state *fastState) unwrapError(outer messages.KRBError, nonce int) (message
 		if decodeErr != nil {
 			return inner, decodeErr
 		}
-		if err := inner.Unmarshal(encoded); err != nil {
-			return inner, err
+		if ierr := inner.Unmarshal(encoded); ierr != nil {
+			return inner, ierr
 		}
 		found = true
 	}
@@ -391,12 +393,12 @@ func (state *fastState) verifyASReplyWithKey(cl *Client, reply *messages.ASRep, 
 	if err != nil {
 		return types.EncryptionKey{}, err
 	}
-	if err := state.verifyFinished(reply.Ticket, reply.CName, reply.CRealm, response.Finished); err != nil {
-		return types.EncryptionKey{}, err
+	if ierr := state.verifyFinished(reply.Ticket, reply.CName, reply.CRealm, response.Finished); ierr != nil {
+		return types.EncryptionKey{}, ierr
 	}
 	if state.sentChallenge {
-		if err := state.verifyKDCChallenge(response.PAData); err != nil {
-			return types.EncryptionKey{}, err
+		if ierr := state.verifyKDCChallenge(response.PAData); ierr != nil {
+			return types.EncryptionKey{}, ierr
 		}
 		if len(response.StrengthenKey.KeyValue) == 0 {
 			return types.EncryptionKey{}, fmt.Errorf("FAST encrypted-challenge reply omitted strengthen-key")
@@ -409,9 +411,9 @@ func (state *fastState) verifyASReplyWithKey(cl *Client, reply *messages.ASRep, 
 			return types.EncryptionKey{}, err
 		}
 	} else if len(replyKey.KeyValue) == 0 {
-		et, err := crypto.GetEtype(reply.EncPart.EType)
-		if err != nil {
-			return types.EncryptionKey{}, err
+		et, terr := crypto.GetEtype(reply.EncPart.EType)
+		if terr != nil {
+			return types.EncryptionKey{}, terr
 		}
 		replyKey, _, err = cl.Key(et, reply.EncPart.KVNO, nil)
 		if err != nil {
@@ -438,8 +440,8 @@ func (state *fastState) verifyTGSReply(cl *Client, reply *messages.TGSRep, reque
 	if err != nil {
 		return err
 	}
-	if err := state.verifyFinished(reply.Ticket, reply.CName, reply.CRealm, response.Finished); err != nil {
-		return err
+	if ierr := state.verifyFinished(reply.Ticket, reply.CName, reply.CRealm, response.Finished); ierr != nil {
+		return ierr
 	}
 	if len(response.StrengthenKey.KeyValue) == 0 {
 		return fmt.Errorf("FAST TGS reply omitted strengthen-key")

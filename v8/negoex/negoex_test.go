@@ -158,8 +158,8 @@ func TestDecoderRejectsOutOfRangeVectors(t *testing.T) {
 		t.Fatal(err)
 	}
 	binary.LittleEndian.PutUint32(data[56:60], ^uint32(0))
-	if _, err := Unmarshal(data); !errors.Is(err, ErrInvalidMessageSize) {
-		t.Fatalf("error = %v", err)
+	if _, ierr := Unmarshal(data); !errors.Is(ierr, ErrInvalidMessageSize) {
+		t.Fatalf("error = %v", ierr)
 	}
 
 	data, err = message.MarshalBinary()

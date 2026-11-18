@@ -16,8 +16,8 @@ func Checksum(key []byte, usage uint32, data []byte) ([]byte, error) {
 	Ksign := mac.Sum(nil)
 
 	// Format data
-	tb := UsageToMSMsgType(usage)
-	p := append(tb, data...)
+	p := UsageToMSMsgType(usage)
+	p = append(p, data...)
 	h := md5.New()
 	rb := bytes.NewReader(p)
 	_, err := io.Copy(h, rb)

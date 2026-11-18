@@ -80,7 +80,6 @@ func makeSubSlices(v reflect.Value, l []int) {
 			makeSubSlices(v.Index(i), l[1:])
 		}
 	}
-	return
 }
 
 // multiDimensionalIndexPermutations returns all the permutations of the indexes of a multi-dimensional slice.
@@ -91,7 +90,7 @@ func multiDimensionalIndexPermutations(l []int) (ps [][]int) {
 			return nil
 		}
 	}
-	z := make([]int, len(l), len(l)) // The zeros permutation
+	z := make([]int, len(l)) // The zeros permutation
 	ps = append(ps, z)
 	// for each dimension, in reverse
 	for i := len(l) - 1; i >= 0; i-- {
@@ -101,7 +100,7 @@ func multiDimensionalIndexPermutations(l []int) (ps [][]int) {
 		for j := 1; j <= l[i]-1; j++ {
 			// For each existing permutation
 			for _, p := range ws {
-				np := make([]int, len(p), len(p))
+				np := make([]int, len(p))
 				copy(np, p)
 				np[i] = j
 				ps = append(ps, np)
@@ -221,7 +220,7 @@ func (dec *Decoder) fillUniDimensionalConformantArray(v reflect.Value, tag refle
 // method not to panic.
 func (dec *Decoder) fillMultiDimensionalConformantArray(v reflect.Value, d int, tag reflect.StructTag, def *[]deferedPtr) error {
 	// Read the max size of each dimensions from the ndr stream
-	l := make([]int, d, d)
+	l := make([]int, d)
 	for i := range l {
 		l[i] = int(dec.precedingMax())
 	}
@@ -302,8 +301,8 @@ func (dec *Decoder) fillUniDimensionalVaryingArray(v reflect.Value, tag reflect.
 // method not to panic.
 func (dec *Decoder) fillMultiDimensionalVaryingArray(v reflect.Value, d int, tag reflect.StructTag, def *[]deferedPtr) error {
 	// Read the offset and actual count of each dimensions from the ndr stream
-	o := make([]int, d, d)
-	l := make([]int, d, d)
+	o := make([]int, d)
+	l := make([]int, d)
 	for i := range l {
 		off, err := dec.readUint32()
 		if err != nil {
@@ -404,12 +403,12 @@ func (dec *Decoder) fillUniDimensionalConformantVaryingArray(v reflect.Value, ta
 // method not to panic.
 func (dec *Decoder) fillMultiDimensionalConformantVaryingArray(v reflect.Value, d int, tag reflect.StructTag, def *[]deferedPtr) error {
 	// Read the offset and actual count of each dimensions from the ndr stream
-	m := make([]int, d, d)
+	m := make([]int, d)
 	for i := range m {
 		m[i] = int(dec.precedingMax())
 	}
-	o := make([]int, d, d)
-	l := make([]int, d, d)
+	o := make([]int, d)
+	l := make([]int, d)
 	for i := range l {
 		off, err := dec.readUint32()
 		if err != nil {

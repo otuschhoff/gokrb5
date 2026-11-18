@@ -2,9 +2,12 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 started with the formatter and keytab
-complexity slices. Phase 3/4 interoperability and Windows exit evidence
-remains an external CI obligation.
+(floor raised to 86.0%), and Phase 5 slices 1-5 done (formatter normalization,
+keytab complexity, dead code, mechanical clarity, shadow elimination).
+Remaining canonical debt is concentrated in the classification-heavy
+categories (gosec, NilAway, wrapcheck, errcheck, revive, errorlint,
+nonamedreturns, forcetypeassert). Phase 3/4 interoperability and Windows exit
+evidence remains an external CI obligation.
 Assessment date: 2026-11-17.
 Scope: `v8` module (`github.com/otuschhoff/gokrb5/v8`) only. Root-module v7
 refactoring is out of scope; whole-project lint automation remains unchanged.
@@ -27,7 +30,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 2,449 canonical lint findings after Phase 5 slices 1-2 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 2,103 canonical lint findings after Phase 5 slices 1-5 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -722,6 +725,44 @@ parameters in pac and messages tests. The v8 canonical scan now reports zero
 suite, race tests for all touched packages, a 60-second `FuzzDecodeArrays`
 run (5.4 million executions), and the changed-line lint gate (0 issues, both
 modules) pass.
+
+Slice 4 (2026-11-18, mechanical clarity sweep): cleared all canonical gocritic
+and mechanical staticcheck findings in v8 plus unconvert, copyloopvar, and
+nakedret: comment formatting, operator-assignment forms, redundant
+dereferences and conversions, loop-variable copies (safe at the Go 1.26
+floor), per-call regexp compilation replacing in-loop `regexp.MatchString`,
+switch rewrites of tagged if-else chains, explicit return values replacing
+naked returns in long functions, `make` capacity simplifications, a typed
+SPNEGO context key (SA1029), De Morgan simplification, and removal of a dead
+nil check, an empty branch, a duplicated NDR pipe bounds check, and a dead
+append accumulation (SA4010; the stream reads were preserved). appendAssign
+sites were reviewed individually: every source slice was exact-capacity or
+dead after the append, so all were rewritten as same-name assignments with
+identical observable behavior. Deliberately not touched: ST1005 error texts
+(several are pinned by characterization tests), SA1019 legacy cryptography
+(MD4 for RC4-HMAC, the best-effort rc4 key wipe, PKCS1v15 in PKINIT, PEM
+helpers deferred under Q-08, PKINIT CRL APIs needing a compatibility review),
+and four pedantic govet inline reports against stdlib `reflect.Ptr` uses
+(inlining the constant would harm readability; reviewed, not actionable).
+
+Slice 5 (2026-11-18, govet shadow elimination; Q-08): eliminated all 146
+shadow findings in v8 production and test code by renaming inner declarations
+(script-assisted for `if`-initializers, hand-reviewed for everything else).
+Notably, `client.sendToKDC`'s UDP-first block was verified self-consistent
+under the shadowed name before renaming, and `GetCachedTicket`'s cache-hit
+short-circuit now returns distinctly named variables. Discovered and recorded
+but NOT fixed (wire-acceptance behavior change, needs a dedicated correctness
+slice with characterization): NDR `readCommonHeader` computes
+`CharacterEncoding` from the version byte (`vb & 0xF`) instead of the
+endianness/encoding byte (`eb & 0xF`), so the field always reads 1 and the
+encoding validation never rejects; nothing consumes the field today.
+
+The v8 canonical total is now 2,103 (from 2,435): gocritic 0, unconvert 0,
+copyloopvar 0, nakedret 0, govet 4 (only the documented inline reports),
+staticcheck 24 (all documented deferral categories above). Full v8 unit and
+race suites, the changed-line lint gate (0 issues, both modules), and 45-60
+second seeded fuzz runs of the touched decoders (NDR arrays, SPNEGO negtoken,
+GSS wrap/MIC) pass.
 
 Preserve v8's Go 1.26.0 floor. Validate proposed modernizations on the supported
 module toolchain and retain tagged/platform code. Measure optimizations before

@@ -90,12 +90,12 @@ func (k *UPNDNSInfo) Unmarshal(b []byte) (err error) {
 		}
 		sidBytes := b[int(k.SIDOffset) : int(k.SIDOffset)+int(k.SIDLength)]
 		var requestor Requestor
-		if err := requestor.Unmarshal(sidBytes); err != nil {
-			return fmt.Errorf("UPN_DNS_INFO SID: %w", err)
+		if ierr := requestor.Unmarshal(sidBytes); ierr != nil {
+			return fmt.Errorf("UPN_DNS_INFO SID: %w", ierr)
 		}
 		k.ObjectSID = &requestor.SID
 	}
-	return
+	return err
 }
 
 // Marshal returns the UPN_DNS_INFO encoding.

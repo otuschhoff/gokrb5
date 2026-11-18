@@ -68,13 +68,13 @@ func TestFASTASRequestEncryptsInnerRequest(t *testing.T) {
 		t.Fatalf("armor type = %d, want %d", fastPA.ArmoredData.Armor.ArmorType, fxFastArmorAPRequest)
 	}
 	var armorAPReq messages.APReq
-	if err := armorAPReq.Unmarshal(fastPA.ArmoredData.Armor.ArmorValue); err != nil {
-		t.Fatal(err)
+	if ierr := armorAPReq.Unmarshal(fastPA.ArmoredData.Armor.ArmorValue); ierr != nil {
+		t.Fatal(ierr)
 	}
-	if err := armorAPReq.DecryptAuthenticatorWithKeyUsage(state.armor.key, keyusage.AP_REQ_AUTHENTICATOR); err != nil {
-		t.Fatal(err)
+	if ierr := armorAPReq.DecryptAuthenticatorWithKeyUsage(state.armor.key, keyusage.AP_REQ_AUTHENTICATOR); ierr != nil {
+		t.Fatal(ierr)
 	}
-	if err := armorAPReq.DecryptAuthenticatorWithKeyUsage(state.armor.key, keyusage.TGS_REQ_PA_TGS_REQ_AP_REQ_AUTHENTICATOR); err == nil {
+	if ierr := armorAPReq.DecryptAuthenticatorWithKeyUsage(state.armor.key, keyusage.TGS_REQ_PA_TGS_REQ_AP_REQ_AUTHENTICATOR); ierr == nil {
 		t.Fatal("FAST armor authenticator accepted TGS-REQ key usage")
 	}
 	if len(armorAPReq.Authenticator.SubKey.KeyValue) == 0 {
@@ -119,8 +119,8 @@ func TestFASTASPreAuthEchoesCookie(t *testing.T) {
 	hint.CName = cl.Credentials.CName()
 	hint.CRealm = cl.Credentials.Realm()
 	hint.EData = encoded
-	if err := state.setASPreAuth(cl, &hint, &request); err != nil {
-		t.Fatal(err)
+	if ierr := state.setASPreAuth(cl, &hint, &request); ierr != nil {
+		t.Fatal(ierr)
 	}
 	secondMethodData, err := asn1.Marshal(types.PADataSequence{{PADataType: patype.PA_FX_COOKIE, PADataValue: []byte("replacement-cookie")}})
 	if err != nil {
@@ -444,8 +444,8 @@ func TestFASTVerifyTGSReplyUsesStrengthenedSubkey(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := &fastState{active: true}
-	if _, err := state.wrapTGSRequest(request, tgt, sessionKey); err != nil {
-		t.Fatal(err)
+	if _, ierr := state.wrapTGSRequest(request, tgt, sessionKey); ierr != nil {
+		t.Fatal(ierr)
 	}
 	strengthen := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("strengthen-key!!")}
 	replyKey, err := crypto.KRBFXCF2(strengthen, state.replyKey, []byte("strengthenkey"), []byte("replykey"))

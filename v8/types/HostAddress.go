@@ -31,13 +31,14 @@ func GetHostAddress(s string) (HostAddress, error) {
 	}
 	ip := net.ParseIP(cAddr)
 	var ht int32
-	if ip.To4() != nil {
+	switch {
+	case ip.To4() != nil:
 		ht = addrtype.IPv4
 		ip = ip.To4()
-	} else if ip.To16() != nil {
+	case ip.To16() != nil:
 		ht = addrtype.IPv6
 		ip = ip.To16()
-	} else {
+	default:
 		return h, fmt.Errorf("could not determine client address type for %q", cAddr)
 	}
 	h = HostAddress{
@@ -58,7 +59,7 @@ func (h *HostAddress) GetAddress() (string, error) {
 func LocalHostAddresses() (ha HostAddresses, err error) {
 	ifs, err := net.Interfaces()
 	if err != nil {
-		return
+		return ha, err
 	}
 	for _, iface := range ifs {
 		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {

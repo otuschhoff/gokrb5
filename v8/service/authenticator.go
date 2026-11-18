@@ -39,31 +39,31 @@ func (a KRB5BasicAuthenticator) Authenticate() (i goidentity.Identity, ok bool, 
 	a.realm, a.username, a.password, err = parseBasicHeaderValue(a.BasicHeaderValue)
 	if err != nil {
 		err = fmt.Errorf("could not parse basic authentication header: %w", err)
-		return
+		return i, ok, err
 	}
 	cl := client.NewWithPassword(a.username, a.realm, a.password, a.clientConfig)
 	err = cl.Login()
 	if err != nil {
 		// Username and/or password could be wrong
 		err = fmt.Errorf("error with user credentials during login: %w", err)
-		return
+		return i, ok, err
 	}
 	tkt, _, err := cl.GetServiceTicket(a.serviceSettings.SName())
 	if err != nil {
 		err = fmt.Errorf("could not get service ticket: %w", err)
-		return
+		return i, ok, err
 	}
 	err = tkt.DecryptEncPart(a.serviceSettings.Keytab, a.serviceSettings.KeytabPrincipal())
 	if err != nil {
 		err = fmt.Errorf("could not decrypt service ticket: %w", err)
-		return
+		return i, ok, err
 	}
 	cl.Credentials.SetAuthTime(time.Now().UTC())
 	cl.Credentials.SetAuthenticated(true)
 	isPAC, pac, err := tkt.GetPACType(a.serviceSettings.Keytab, a.serviceSettings.KeytabPrincipal(), a.serviceSettings.Logger())
 	if isPAC && err != nil {
 		err = fmt.Errorf("error processing PAC: %w", err)
-		return
+		return i, ok, err
 	}
 	if isPAC {
 		// There is a valid PAC. Adding attributes to creds
@@ -71,7 +71,7 @@ func (a KRB5BasicAuthenticator) Authenticate() (i goidentity.Identity, ok bool, 
 	}
 	ok = true
 	i = cl.Credentials
-	return
+	return i, ok, err
 }
 
 // Mechanism returns the authentication mechanism.
@@ -95,15 +95,16 @@ func parseBasicHeaderValue(s string) (domain, username, password string, err err
 	// <Username> - no domain specified
 	// <Domain>\<Username>
 	// <Username>@<Domain>
-	if strings.Contains(vc[0], `\`) {
+	switch {
+	case strings.Contains(vc[0], `\`):
 		u := strings.SplitN(vc[0], `\`, 2)
 		domain = u[0]
 		username = u[1]
-	} else if strings.Contains(vc[0], `@`) {
+	case strings.Contains(vc[0], `@`):
 		u := strings.SplitN(vc[0], `@`, 2)
 		domain = u[1]
 		username = u[0]
-	} else {
+	default:
 		username = vc[0]
 	}
 	return

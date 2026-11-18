@@ -428,8 +428,8 @@ func (cl *Client) retrievePKINITCredentials(tgt messages.Ticket, reply messages.
 	if err != nil {
 		return fmt.Errorf("request PKINIT credential U2U ticket: %w", err)
 	}
-	if err := response.Ticket.Decrypt(reply.Key); err != nil {
-		return fmt.Errorf("decrypt PKINIT credential U2U ticket: %w", err)
+	if ierr := response.Ticket.Decrypt(reply.Key); ierr != nil {
+		return fmt.Errorf("decrypt PKINIT credential U2U ticket: %w", ierr)
 	}
 	entries, err := response.Ticket.DecryptedEncPart.AuthorizationData.EntriesOfType(adtype.ADWin2KPAC)
 	if err != nil {
@@ -505,9 +505,8 @@ func intersectETypes(preferred, available []int32) []int32 {
 func (cl *Client) AffirmLogin() error {
 	_, endTime, _, _, err := cl.sessionTimes(cl.Credentials.Domain())
 	if err != nil || time.Now().UTC().After(endTime) {
-		err := cl.Login()
-		if err != nil {
-			return fmt.Errorf("could not get valid TGT for client's realm: %w", err)
+		if lerr := cl.Login(); lerr != nil {
+			return fmt.Errorf("could not get valid TGT for client's realm: %w", lerr)
 		}
 	}
 	return nil
@@ -520,9 +519,8 @@ func (cl *Client) realmLogin(realm string) error {
 	}
 	_, endTime, _, _, err := cl.sessionTimes(cl.Credentials.Domain())
 	if err != nil || time.Now().UTC().After(endTime) {
-		err := cl.Login()
-		if err != nil {
-			return fmt.Errorf("could not get valid TGT for client's realm: %w", err)
+		if lerr := cl.Login(); lerr != nil {
+			return fmt.Errorf("could not get valid TGT for client's realm: %w", lerr)
 		}
 	}
 	tgt, skey, err := cl.sessionTGT(cl.Credentials.Domain())

@@ -150,8 +150,8 @@ func TestListDefaultKeytabAndCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	keytabPath := filepath.Join(directory, "default.keytab")
-	if err := os.WriteFile(keytabPath, keytabData, 0o600); err != nil {
-		t.Fatal(err)
+	if ierr := os.WriteFile(keytabPath, keytabData, 0o600); ierr != nil {
+		t.Fatal(ierr)
 	}
 	t.Setenv("KRB5_KTNAME", "FILE:"+keytabPath)
 	var stdout, stderr bytes.Buffer

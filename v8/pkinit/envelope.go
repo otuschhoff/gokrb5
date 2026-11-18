@@ -78,8 +78,8 @@ func encryptEnvelopedData(random io.Reader, content []byte, recipient *x509.Cert
 		return nil, err
 	}
 	iv := make([]byte, block.BlockSize())
-	if _, err := io.ReadFull(random, iv); err != nil {
-		return nil, fmt.Errorf("generate PKINIT CMS IV: %w", err)
+	if _, ierr := io.ReadFull(random, iv); ierr != nil {
+		return nil, fmt.Errorf("generate PKINIT CMS IV: %w", ierr)
 	}
 	padded := pkcs7Pad(content, block.BlockSize())
 	ciphertext := make([]byte, len(padded))
@@ -89,8 +89,8 @@ func encryptEnvelopedData(random io.Reader, content []byte, recipient *x509.Cert
 		return nil, fmt.Errorf("encrypt PKINIT CMS content key: %w", err)
 	}
 	issuer := asn1.RawValue{FullBytes: recipient.RawIssuer}
-	if _, err := asn1.Unmarshal(recipient.RawIssuer, &issuer); err != nil {
-		return nil, fmt.Errorf("decode recipient issuer: %w", err)
+	if _, ierr := asn1.Unmarshal(recipient.RawIssuer, &issuer); ierr != nil {
+		return nil, fmt.Errorf("decode recipient issuer: %w", ierr)
 	}
 	ivDER, err := asn1.Marshal(iv)
 	if err != nil {

@@ -68,8 +68,8 @@ func TestPACRejectsDuplicateValidationInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 	var original PACType
-	if err := original.Unmarshal(b); err != nil {
-		t.Fatal(err)
+	if ierr := original.Unmarshal(b); ierr != nil {
+		t.Fatal(ierr)
 	}
 	var buffers []pacBuffer
 	var validation pacBuffer
@@ -86,8 +86,8 @@ func TestPACRejectsDuplicateValidationInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 	var duplicate PACType
-	if err := duplicate.Unmarshal(data); err != nil {
-		t.Fatal(err)
+	if ierr := duplicate.Unmarshal(data); ierr != nil {
+		t.Fatal(ierr)
 	}
 	err = duplicate.ProcessPACInfoBuffers(types.EncryptionKey{}, log.New(&bytes.Buffer{}, "", 0))
 	if !errors.Is(err, ErrPACMalformed) {

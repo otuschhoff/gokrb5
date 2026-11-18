@@ -180,10 +180,8 @@ func (dec *Decoder) isPointer(v reflect.Value, tag reflect.StructTag, def *[]def
 func getReflectValue(s interface{}) (v reflect.Value) {
 	if r, ok := s.(reflect.Value); ok {
 		v = r
-	} else {
-		if reflect.ValueOf(s).Kind() == reflect.Ptr {
-			v = reflect.ValueOf(s).Elem()
-		}
+	} else if reflect.ValueOf(s).Kind() == reflect.Ptr {
+		v = reflect.ValueOf(s).Elem()
 	}
 	return
 }
@@ -232,7 +230,7 @@ func (dec *Decoder) readBytes(n int) ([]byte, error) {
 		}
 		return nil, fmt.Errorf("cannot read %d bytes from %d remaining NDR bytes: %w", n, dec.r.Buffered(), cause)
 	}
-	b := make([]byte, n, n)
+	b := make([]byte, n)
 	m, err := dec.r.Read(b)
 	if err != nil || m != n {
 		if err == nil {

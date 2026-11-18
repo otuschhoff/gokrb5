@@ -233,9 +233,9 @@ func NewASReqWithOptions(realm string, c *config.Config, cname, sname types.Prin
 	if options.Addresses != nil {
 		a.ReqBody.Addresses = append([]types.HostAddress(nil), options.Addresses...)
 	} else if !c.LibDefaults.NoAddresses {
-		ha, err := types.LocalHostAddresses()
-		if err != nil {
-			return a, fmt.Errorf("could not get local addresses: %w", err)
+		ha, herr := types.LocalHostAddresses()
+		if herr != nil {
+			return a, fmt.Errorf("could not get local addresses: %w", herr)
 		}
 		ha = append(ha, types.HostAddressesFromNetIPs(c.LibDefaults.ExtraAddresses)...)
 		a.ReqBody.Addresses = ha
@@ -276,8 +276,8 @@ func NewS4U2SelfTGSReq(cname types.PrincipalName, kdcRealm string, c *config.Con
 	if err != nil {
 		return a, err
 	}
-	if err := a.setPAData(tgt, sessionKey); err != nil {
-		return a, err
+	if ierr := a.setPAData(tgt, sessionKey); ierr != nil {
+		return a, ierr
 	}
 	paForUser, err := NewPAForUserPAData(user, userRealm, sessionKey)
 	if err != nil {
@@ -497,8 +497,8 @@ func (k *TGSReq) setPADataWithSubkey(tgt Ticket, sessionKey types.EncryptionKey,
 		Checksum:  cb,
 	}
 	if includeSubkey {
-		if err := auth.GenerateSeqNumberAndSubKey(sessionKey.KeyType, etype.GetKeyByteSize()); err != nil {
-			return types.EncryptionKey{}, nil, krberror.Errorf(err, krberror.KRBMsgError, "error generating TGS authenticator subkey")
+		if ierr := auth.GenerateSeqNumberAndSubKey(sessionKey.KeyType, etype.GetKeyByteSize()); ierr != nil {
+			return types.EncryptionKey{}, nil, krberror.Errorf(ierr, krberror.KRBMsgError, "error generating TGS authenticator subkey")
 		}
 	}
 	// Create AP_REQ

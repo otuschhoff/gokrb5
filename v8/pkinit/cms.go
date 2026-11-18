@@ -34,8 +34,8 @@ func SignSignedData(contentType goforkasn1.ObjectIdentifier, content []byte, cha
 	if err != nil {
 		return nil, fmt.Errorf("create PKINIT CMS SignedData: %w", err)
 	}
-	if err := signedData.AddSignerInfo(chain, signer); err != nil {
-		return nil, fmt.Errorf("sign PKINIT CMS content: %w", err)
+	if ierr := signedData.AddSignerInfo(chain, signer); ierr != nil {
+		return nil, fmt.Errorf("sign PKINIT CMS content: %w", ierr)
 	}
 	der, err := signedData.ContentInfoDER()
 	if err != nil {

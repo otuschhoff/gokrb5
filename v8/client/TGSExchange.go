@@ -44,11 +44,11 @@ func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messa
 	if err != nil {
 		if kdcErr, ok := errors.AsType[messages.KRBError](err); ok {
 			if fast != nil {
-				kdcErr, unwrapErr := fast.unwrapError(kdcErr, tgsReq.ReqBody.Nonce)
+				unwrappedKDC, unwrapErr := fast.unwrapError(kdcErr, tgsReq.ReqBody.Nonce)
 				if unwrapErr != nil {
 					return tgsReq, tgsRep, krberror.Errorf(unwrapErr, krberror.KRBMsgError, "TGS Exchange Error: invalid FAST error response")
 				}
-				err = kdcErr
+				err = unwrappedKDC
 			}
 			return tgsReq, tgsRep, krberror.Errorf(err, krberror.KDCError, "TGS Exchange Error: kerberos error response from KDC when requesting for %s", tgsReq.ReqBody.SName.PrincipalNameString())
 		}
@@ -59,16 +59,16 @@ func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messa
 		return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: failed to process the TGS_REP")
 	}
 	if fast != nil {
-		if err := fast.verifyTGSReply(cl, &tgsRep, tgsReq); err != nil {
-			return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: FAST TGS_REP is not valid")
+		if ierr := fast.verifyTGSReply(cl, &tgsRep, tgsReq); ierr != nil {
+			return tgsReq, tgsRep, krberror.Errorf(ierr, krberror.EncodingError, "TGS Exchange Error: FAST TGS_REP is not valid")
 		}
 	} else {
 		err = tgsRep.DecryptEncPart(sessionKey)
 		if err != nil {
 			return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: failed to process the TGS_REP")
 		}
-		if ok, err := tgsRep.Verify(cl.Config, tgsReq); !ok {
-			return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: TGS_REP is not valid")
+		if ok, ierr := tgsRep.Verify(cl.Config, tgsReq); !ok {
+			return tgsReq, tgsRep, krberror.Errorf(ierr, krberror.EncodingError, "TGS Exchange Error: TGS_REP is not valid")
 		}
 	}
 
@@ -79,9 +79,9 @@ func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messa
 		// Server referral https://tools.ietf.org/html/rfc6806.html#section-8
 		// The TGS Rep contains a TGT for another domain as the service resides in that domain.
 		cl.addSession(tgsRep.Ticket, tgsRep.DecryptedEncPart)
-		realm, err := referralRealm(tgsRep.DecryptedEncPart.EncPAData, tgsRep.Ticket.SName.NameString[len(tgsRep.Ticket.SName.NameString)-1])
-		if err != nil {
-			return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: invalid PA-SVR-REFERRAL-INFO")
+		realm, rerr := referralRealm(tgsRep.DecryptedEncPart.EncPAData, tgsRep.Ticket.SName.NameString[len(tgsRep.Ticket.SName.NameString)-1])
+		if rerr != nil {
+			return tgsReq, tgsRep, krberror.Errorf(rerr, krberror.EncodingError, "TGS Exchange Error: invalid PA-SVR-REFERRAL-INFO")
 		}
 		options := cl.tgsReqOptions(realm)
 		referral++
@@ -145,9 +145,9 @@ func referralRealm(paData types.PADataSequence, fallback string) (string, error)
 func (cl *Client) GetServiceTicket(spn string) (messages.Ticket, types.EncryptionKey, error) {
 	var tkt messages.Ticket
 	var skey types.EncryptionKey
-	if tkt, skey, ok := cl.GetCachedTicket(spn); ok {
+	if cachedTkt, cachedSkey, ok := cl.GetCachedTicket(spn); ok {
 		// Already a valid ticket in the cache
-		return tkt, skey, nil
+		return cachedTkt, cachedSkey, nil
 	}
 	princ := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, spn)
 	realm := cl.spnRealm(princ)

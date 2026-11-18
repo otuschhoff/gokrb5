@@ -21,8 +21,8 @@ func TestPACMarshalAlignmentAndPreservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var decoded PACType
-	if err := decoded.Unmarshal(data); err != nil {
-		t.Fatal(err)
+	if ierr := decoded.Unmarshal(data); ierr != nil {
+		t.Fatal(ierr)
 	}
 	if decoded.CBuffers != 1 || decoded.Buffers[0].Offset%8 != 0 {
 		t.Fatalf("unexpected buffer table: %+v", decoded.Buffers)
@@ -73,8 +73,8 @@ func TestPACMarshalReencodesTypedBuffers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := pac.Unmarshal(raw); err != nil {
-		t.Fatal(err)
+	if ierr := pac.Unmarshal(raw); ierr != nil {
+		t.Fatal(ierr)
 	}
 	encoded, err := pac.Marshal()
 	if err != nil {

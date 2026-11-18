@@ -184,26 +184,17 @@ func (m *KRB5Token) Verify() (bool, gssapi.Status) {
 
 // IsAPReq tests if the MechToken contains an AP_REQ.
 func (m *KRB5Token) IsAPReq() bool {
-	if hex.EncodeToString(m.tokID) == TOK_ID_KRB_AP_REQ {
-		return true
-	}
-	return false
+	return hex.EncodeToString(m.tokID) == TOK_ID_KRB_AP_REQ
 }
 
 // IsAPRep tests if the MechToken contains an AP_REP.
 func (m *KRB5Token) IsAPRep() bool {
-	if hex.EncodeToString(m.tokID) == TOK_ID_KRB_AP_REP {
-		return true
-	}
-	return false
+	return hex.EncodeToString(m.tokID) == TOK_ID_KRB_AP_REP
 }
 
 // IsKRBError tests if the MechToken contains an KRB_ERROR.
 func (m *KRB5Token) IsKRBError() bool {
-	if hex.EncodeToString(m.tokID) == TOK_ID_KRB_ERROR {
-		return true
-	}
-	return false
+	return hex.EncodeToString(m.tokID) == TOK_ID_KRB_ERROR
 }
 
 // Context returns the KRB5 token's context which will contain any verify user identity information.
@@ -212,10 +203,10 @@ func (m *KRB5Token) Context() context.Context {
 }
 
 // NewKRB5TokenAPREQ creates a new KRB5 token with AP_REQ
-func NewKRB5TokenAPREQ(cl *client.Client, tkt messages.Ticket, sessionKey types.EncryptionKey, GSSAPIFlags []int, APOptions []int) (KRB5Token, error) {
+func NewKRB5TokenAPREQ(cl *client.Client, tkt messages.Ticket, sessionKey types.EncryptionKey, gssAPIFlags []int, apOptions []int) (KRB5Token, error) {
 	return NewKRB5TokenAPREQWithOptions(cl, tkt, sessionKey, KRB5TokenAPREQOptions{
-		GSSAPIFlags: GSSAPIFlags,
-		APOptions:   APOptions,
+		GSSAPIFlags: gssAPIFlags,
+		APOptions:   apOptions,
 	})
 }
 
@@ -260,13 +251,13 @@ func NewKRB5TokenAPREQWithOptions(cl *client.Client, tkt messages.Ticket, sessio
 		return m, err
 	}
 	if options.ChannelBindings != nil {
-		entry, err := types.NewADAuthDataAPOptionsEntry(msflags.KERB_AP_OPTIONS_CBT)
-		if err != nil {
-			return m, err
+		entry, cerr := types.NewADAuthDataAPOptionsEntry(msflags.KERB_AP_OPTIONS_CBT)
+		if cerr != nil {
+			return m, cerr
 		}
-		encoded, err := asn1.Marshal(types.AuthorizationData{entry})
-		if err != nil {
-			return m, err
+		encoded, merr := asn1.Marshal(types.AuthorizationData{entry})
+		if merr != nil {
+			return m, merr
 		}
 		auth.AuthorizationData = append(auth.AuthorizationData, types.AuthorizationDataEntry{ADType: adtype.ADIfRelevant, ADData: encoded})
 	}
@@ -274,8 +265,8 @@ func NewKRB5TokenAPREQWithOptions(cl *client.Client, tkt messages.Ticket, sessio
 	if err != nil {
 		return m, err
 	}
-	if err := auth.GenerateSeqNumberAndSubKey(sessionKey.KeyType, et.GetKeyByteSize()); err != nil {
-		return m, err
+	if ierr := auth.GenerateSeqNumberAndSubKey(sessionKey.KeyType, et.GetKeyByteSize()); ierr != nil {
+		return m, ierr
 	}
 	APReq, err := messages.NewAPReq(
 		tkt,

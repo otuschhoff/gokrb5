@@ -21,8 +21,8 @@ func TestClientS4U2SelfAD(t *testing.T) {
 		t.Fatal(err)
 	}
 	cl := NewWithKeytab(machine.Components[0], machine.Realm, env.Keytab, env.Config, adSettings()...)
-	if err := cl.Login(); err != nil {
-		t.Fatalf("service login failed: %v", err)
+	if ierr := cl.Login(); ierr != nil {
+		t.Fatalf("service login failed: %v", ierr)
 	}
 	user := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, env.User)
 	ticket, key, err := cl.GetServiceTicketForUser(user, env.UserRealm, spn, S4UWithForwardable(true))

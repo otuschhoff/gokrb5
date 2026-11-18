@@ -97,13 +97,13 @@ func TestASRepPublicVerificationPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	kt := keytab.New()
-	if err := kt.Unmarshal(keytabBytes); err != nil {
-		t.Fatal(err)
+	if ierr := kt.Unmarshal(keytabBytes); ierr != nil {
+		t.Fatal(ierr)
 	}
 
 	var inspected ASRep
-	if err := inspected.Unmarshal(replyBytes); err != nil {
-		t.Fatal(err)
+	if ierr := inspected.Unmarshal(replyBytes); ierr != nil {
+		t.Fatal(ierr)
 	}
 	key, _, err := kt.GetEncryptionKey(inspected.CName, inspected.CRealm, inspected.EncPart.KVNO, inspected.EncPart.EType)
 	if err != nil {
@@ -495,7 +495,7 @@ func TestUnmarshalASRepDecodeAndDecrypt(t *testing.T) {
 	assert.Equal(t, 1, asRep.Ticket.EncPart.KVNO, "Ticket encrypted part KVNO not as expected")
 	assert.Equal(t, etypeID.ETypesByName["aes256-cts-hmac-sha1-96"], asRep.EncPart.EType, "Etype of encrypted part not as expected")
 	assert.Equal(t, 0, asRep.EncPart.KVNO, "Encrypted part KVNO not as expected")
-	//t.Log("Finished testing unecrypted parts of AS REP")
+	// t.Log("Finished testing unecrypted parts of AS REP")
 	ktb, _ := hex.DecodeString(testuser1EType18Keytab)
 	kt := keytab.New()
 	err = kt.Unmarshal(ktb)

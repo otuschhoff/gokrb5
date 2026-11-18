@@ -115,9 +115,10 @@ func classifyPrincipalName(s string) (bool, error) {
 			escaped = false
 			continue
 		}
-		if r == '\\' {
+		switch r {
+		case '\\':
 			escaped = true
-		} else if r == '@' {
+		case '@':
 			unescapedAts++
 		}
 	}

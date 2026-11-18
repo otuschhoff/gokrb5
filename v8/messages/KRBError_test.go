@@ -74,7 +74,8 @@ func TestKRBErrorMethodData(t *testing.T) {
 		t.Fatal("non-preauth KRB-ERROR accepted as METHOD-DATA")
 	}
 	k.ErrorCode = errorcode.KDC_ERR_PREAUTH_REQUIRED
-	k.EData = append(b, 0)
+	b = append(b, 0)
+	k.EData = b
 	if _, err := k.MethodData(); err == nil {
 		t.Fatal("METHOD-DATA with trailing bytes was accepted")
 	}

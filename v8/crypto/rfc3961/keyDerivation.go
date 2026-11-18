@@ -39,7 +39,7 @@ func DeriveRandom(key, usage []byte, e etype.EType) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		i = i + copy(out[i:], K)
+		i += copy(out[i:], K)
 	}
 	return out, nil
 }
@@ -96,16 +96,16 @@ func PseudoRandom(key, b []byte, e etype.EType) ([]byte, error) {
 }
 
 func stretch56Bits(b []byte) []byte {
-	d := make([]byte, len(b), len(b))
+	d := make([]byte, len(b))
 	copy(d, b)
 	var lb byte
 	for i, v := range d {
 		bv, nb := calcEvenParity(v)
 		d[i] = nb
 		if bv != 0 {
-			lb = lb | (1 << uint(i+1))
+			lb |= (1 << uint(i+1))
 		} else {
-			lb = lb &^ (1 << uint(i+1))
+			lb &^= (1 << uint(i+1))
 		}
 	}
 	_, lb = calcEvenParity(lb)
@@ -126,10 +126,10 @@ func calcEvenParity(b byte) (uint8, uint8) {
 	}
 	if c%2 == 0 {
 		// Even number of 1s so set parity to 1
-		b = b | 1
+		b |= 1
 	} else {
 		// Odd number of 1s so set parity to 0
-		b = b &^ 1
+		b &^= 1
 	}
 	return lowestbit, b
 }

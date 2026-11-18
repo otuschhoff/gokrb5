@@ -183,8 +183,8 @@ func TestNegotiatorLifecycleGuardsAndHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := parseSPNEGOResponse(initBytes); !errors.Is(err, ErrUnexpectedSPNEGO) {
-		t.Fatalf("initiator-as-response error = %v", err)
+	if _, ierr := parseSPNEGOResponse(initBytes); !errors.Is(ierr, ErrUnexpectedSPNEGO) {
+		t.Fatalf("initiator-as-response error = %v", ierr)
 	}
 	responseBytes, err := marshalSPNEGOToken(&SPNEGOToken{Resp: true})
 	if err != nil {

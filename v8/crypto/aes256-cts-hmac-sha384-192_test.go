@@ -84,7 +84,8 @@ func TestAes256CtsHmacSha384192_Cypto(t *testing.T) {
 		ke, _ := hex.DecodeString(test.ke)
 		cf, _ := hex.DecodeString(test.confounder)
 		ct, _ := hex.DecodeString(test.cipher)
-		cfm := append(cf, m...)
+		cf = append(cf, m...)
+		cfm := cf
 
 		// Test encryption to raw encrypted bytes
 		_, c, err := e.EncryptData(ke, cfm)
@@ -118,7 +119,8 @@ func TestAes256CtsHmacSha384192_Cypto(t *testing.T) {
 
 		// Test the integrity hash
 		ivz := make([]byte, e.GetConfounderByteSize())
-		hm := append(ivz, b...)
+		ivz = append(ivz, b...)
+		hm := ivz
 		mac, _ := common.GetIntegrityHash(hm, protocolBaseKey, testUsage, e)
 		assert.Equal(t, test.hash, hex.EncodeToString(mac), "HMAC result not as expected - test %v", i)
 	}

@@ -28,12 +28,12 @@ func EncryptMessage(key, message []byte, usage uint32, e etype.EType) ([]byte, [
 		return []byte{}, []byte{}, fmt.Errorf("incorrect keysize: expected: %v actual: %v", e.GetKeyByteSize(), len(key))
 	}
 	// confounder
-	c := make([]byte, e.GetConfounderByteSize())
-	_, err := rand.Read(c)
+	plainBytes := make([]byte, e.GetConfounderByteSize())
+	_, err := rand.Read(plainBytes)
 	if err != nil {
 		return []byte{}, []byte{}, fmt.Errorf("could not generate random confounder: %w", err)
 	}
-	plainBytes := append(c, message...)
+	plainBytes = append(plainBytes, message...)
 
 	// Derive key for encryption from usage
 	var k []byte

@@ -169,8 +169,8 @@ func TestWriteCacheOmitsGSSRefreshTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	cache := new(credentials.CCache)
-	if err := cache.Unmarshal(data); err != nil {
-		t.Fatal(err)
+	if ierr := cache.Unmarshal(data); ierr != nil {
+		t.Fatal(ierr)
 	}
 	cl, err := client.NewFromCCache(cache, config.New())
 	if err != nil {
@@ -298,14 +298,14 @@ func TestLoadKeytabAndVerboseCacheOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "client.keytab")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
+	if ierr := os.WriteFile(path, data, 0o600); ierr != nil {
+		t.Fatal(ierr)
 	}
 	loaded, err := loadKeytab(initOptions{keytabName: path}, config.New())
 	if err != nil || len(loaded.Entries) == 0 {
 		t.Fatalf("loaded keytab entries = %d, %v", len(loaded.Entries), err)
 	}
-	if _, err := loadKeytab(initOptions{keytabName: filepath.Join(t.TempDir(), "missing")}, config.New()); err == nil {
+	if _, ierr := loadKeytab(initOptions{keytabName: filepath.Join(t.TempDir(), "missing")}, config.New()); ierr == nil {
 		t.Fatal("missing keytab returned no error")
 	}
 
@@ -314,8 +314,8 @@ func TestLoadKeytabAndVerboseCacheOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	cache := new(credentials.CCache)
-	if err := cache.Unmarshal(cacheData); err != nil {
-		t.Fatal(err)
+	if ierr := cache.Unmarshal(cacheData); ierr != nil {
+		t.Fatal(ierr)
 	}
 	cl, err := client.NewFromCCache(cache, config.New())
 	if err != nil {

@@ -18,7 +18,6 @@ func TestEnctypesRejectTruncatedCiphertext(t *testing.T) {
 		RC4HMAC{},
 	}
 	for _, enctype := range enctypes {
-		enctype := enctype
 		t.Run(enctypeID(enctype), func(t *testing.T) {
 			t.Parallel()
 			key := make([]byte, enctype.GetKeyByteSize())

@@ -13,10 +13,10 @@ import (
 func TestClient_Login_DNSKDCs(t *testing.T) {
 	test.Privileged(t)
 
-	//ns := os.Getenv("DNSUTILS_OVERRIDE_NS")
-	//if ns == "" {
+	// ns := os.Getenv("DNSUTILS_OVERRIDE_NS")
+	// if ns == "" {
 	//	os.Setenv("DNSUTILS_OVERRIDE_NS", testdata.TEST_NS)
-	//}
+	// }
 	c, _ := config.NewFromString(testdata.KRB5_CONF)
 	// Set to lookup KDCs in DNS
 	c.LibDefaults.DNSLookupKDC = true

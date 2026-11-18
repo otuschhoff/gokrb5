@@ -21,23 +21,23 @@ func (cl *Client) sendToKDC(b []byte, realm string) ([]byte, error) {
 	var rb []byte
 	if cl.Config.LibDefaults.UDPPreferenceLimit == 1 {
 		// 1 means we should always use TCP
-		rb, errtcp := cl.sendKDCTCP(realm, b)
+		rtcp, errtcp := cl.sendKDCTCP(realm, b)
 		if errtcp != nil {
 			if e, ok := errors.AsType[messages.KRBError](errtcp); ok {
-				return rb, e
+				return rtcp, e
 			}
-			return rb, fmt.Errorf("communication error with KDC via TCP: %w", errtcp)
+			return rtcp, fmt.Errorf("communication error with KDC via TCP: %w", errtcp)
 		}
-		return rb, nil
+		return rtcp, nil
 	}
 	if len(b) <= cl.Config.LibDefaults.UDPPreferenceLimit {
 		// Try UDP first, TCP second
-		rb, errudp := cl.sendKDCUDP(realm, b)
+		rudp, errudp := cl.sendKDCUDP(realm, b)
 		if errudp != nil {
 			if e, ok := errors.AsType[messages.KRBError](errudp); ok && e.ErrorCode != errorcode.KRB_ERR_RESPONSE_TOO_BIG {
 				// Got a KRBError from KDC
 				// If this is not a KRB_ERR_RESPONSE_TOO_BIG we will return immediately otherwise will try TCP.
-				return rb, e
+				return rudp, e
 			}
 			// Try TCP
 			r, errtcp := cl.sendKDCTCP(realm, b)
@@ -48,9 +48,9 @@ func (cl *Client) sendToKDC(b []byte, realm string) ([]byte, error) {
 				}
 				return r, fmt.Errorf("failed to communicate with KDC via UDP and TCP: %w", errors.Join(errudp, errtcp))
 			}
-			rb = r
+			rudp = r
 		}
-		return rb, nil
+		return rudp, nil
 	}
 	// Try TCP first, UDP second
 	rb, errtcp := cl.sendKDCTCP(realm, b)
@@ -95,9 +95,9 @@ func dialSendUDP(kdcs map[int]string, b []byte) ([]byte, error) {
 			errs = append(errs, fmt.Errorf("error establishing connection to %s: %w", kdcs[i], err))
 			continue
 		}
-		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		if ierr := conn.SetDeadline(time.Now().Add(5 * time.Second)); ierr != nil {
 			closeErr := conn.Close()
-			errs = append(errs, fmt.Errorf("error setting deadline on connection to %s: %w", kdcs[i], err))
+			errs = append(errs, fmt.Errorf("error setting deadline on connection to %s: %w", kdcs[i], ierr))
 			if closeErr != nil {
 				errs = append(errs, fmt.Errorf("error closing connection to %s: %w", kdcs[i], closeErr))
 			}
@@ -162,9 +162,9 @@ func dialSendTCP(kdcs map[int]string, b []byte) ([]byte, error) {
 			errs = append(errs, fmt.Errorf("error establishing connection to %s: %w", kdcs[i], err))
 			continue
 		}
-		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		if ierr := conn.SetDeadline(time.Now().Add(5 * time.Second)); ierr != nil {
 			closeErr := conn.Close()
-			errs = append(errs, fmt.Errorf("error setting deadline on connection to %s: %w", kdcs[i], err))
+			errs = append(errs, fmt.Errorf("error setting deadline on connection to %s: %w", kdcs[i], ierr))
 			if closeErr != nil {
 				errs = append(errs, fmt.Errorf("error closing connection to %s: %w", kdcs[i], closeErr))
 			}

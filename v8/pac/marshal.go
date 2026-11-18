@@ -181,17 +181,17 @@ func (pac *PACType) Sign(serverKey, kdcKey types.EncryptionKey, signOptions ...S
 		return nil, err
 	}
 	if options.TicketData != nil {
-		if err := writeChecksum(data, buffers, infoTypePACTicketChecksum, kdcKey, options.TicketData); err != nil {
-			return nil, err
+		if ierr := writeChecksum(data, buffers, infoTypePACTicketChecksum, kdcKey, options.TicketData); ierr != nil {
+			return nil, ierr
 		}
 	}
 	if includeFull {
-		if err := writeChecksum(data, buffers, infoTypePACFullChecksum, kdcKey, data); err != nil {
-			return nil, err
+		if ierr := writeChecksum(data, buffers, infoTypePACFullChecksum, kdcKey, data); ierr != nil {
+			return nil, ierr
 		}
 	}
-	if err := writeChecksum(data, buffers, infoTypePACServerSignatureData, serverKey, data); err != nil {
-		return nil, err
+	if ierr := writeChecksum(data, buffers, infoTypePACServerSignatureData, serverKey, data); ierr != nil {
+		return nil, ierr
 	}
 	serverSignature, err := signatureBytes(data, buffers, infoTypePACServerSignatureData)
 	if err != nil {

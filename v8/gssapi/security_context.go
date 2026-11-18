@@ -61,9 +61,9 @@ func (context *SecurityContext) Wrap(message []byte, confidential bool) ([]byte,
 	}
 	if confidential {
 		plaintext := append(append([]byte(nil), message...), header...)
-		_, ciphertext, err := etype.EncryptMessage(context.key.KeyValue, plaintext, context.sendSealUsage())
-		if err != nil {
-			return nil, err
+		_, ciphertext, cerr := etype.EncryptMessage(context.key.KeyValue, plaintext, context.sendSealUsage())
+		if cerr != nil {
+			return nil, cerr
 		}
 		context.sendSequence++
 		return append(header, ciphertext...), nil
@@ -77,8 +77,8 @@ func (context *SecurityContext) Wrap(message []byte, confidential bool) ([]byte,
 		return nil, err
 	}
 	context.sendSequence++
-	token := append(header, message...)
-	return append(token, checksum...), nil
+	header = append(header, message...)
+	return append(header, checksum...), nil
 }
 
 // Unwrap verifies and optionally decrypts a peer RFC 4121 wrap token.
@@ -120,9 +120,9 @@ func (context *SecurityContext) Unwrap(token []byte) ([]byte, bool, error) {
 		if len(body) < minimumLength {
 			return nil, false, fmt.Errorf("RFC 4121 encrypted body is too short")
 		}
-		plaintext, err := crypto.DecryptMessage(body, context.key, context.receiveSealUsage())
-		if err != nil {
-			return nil, false, err
+		plaintext, perr := crypto.DecryptMessage(body, context.key, context.receiveSealUsage())
+		if perr != nil {
+			return nil, false, perr
 		}
 		if len(plaintext) < HdrLen+ec {
 			return nil, false, fmt.Errorf("invalid RFC 4121 wrap extra count")

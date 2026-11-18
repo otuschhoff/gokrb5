@@ -38,9 +38,9 @@ func run(args []string, stderr io.Writer) int {
 	}
 	name := opts.cacheName
 	if name == "" {
-		cfg, err := krbcli.LoadConfig()
-		if err != nil {
-			return fail(stderr, err, opts.quiet)
+		cfg, lerr := krbcli.LoadConfig()
+		if lerr != nil {
+			return fail(stderr, lerr, opts.quiet)
 		}
 		name, err = credentials.DefaultCCacheName(cfg)
 		if err != nil {

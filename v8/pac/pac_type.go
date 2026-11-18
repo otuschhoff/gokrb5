@@ -84,11 +84,11 @@ func (pac *PACType) Unmarshal(b []byte) (err error) {
 	r := mstypes.NewReader(bytes.NewReader(b))
 	pac.CBuffers, err = r.Uint32()
 	if err != nil {
-		return
+		return err
 	}
 	pac.Version, err = r.Uint32()
 	if err != nil {
-		return
+		return err
 	}
 	if pac.Version != 0 {
 		return fmt.Errorf("%w: unsupported version %d", ErrPACMalformed, pac.Version)
@@ -101,15 +101,15 @@ func (pac *PACType) Unmarshal(b []byte) (err error) {
 	for i := range buf {
 		buf[i].ULType, err = r.Uint32()
 		if err != nil {
-			return
+			return err
 		}
 		buf[i].CBBufferSize, err = r.Uint32()
 		if err != nil {
-			return
+			return err
 		}
 		buf[i].Offset, err = r.Uint64()
 		if err != nil {
-			return
+			return err
 		}
 	}
 	pac.Buffers = buf

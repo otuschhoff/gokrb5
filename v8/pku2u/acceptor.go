@@ -97,8 +97,8 @@ func (acceptor *Acceptor) acceptAPRequest(encoded []byte) ([]byte, gssapi.Contex
 	if err != nil || !valid {
 		return nil, nil, fmt.Errorf("validate PKU2U ticket: %w", err)
 	}
-	if err := request.DecryptAuthenticator(request.Ticket.DecryptedEncPart.Key); err != nil {
-		return nil, nil, err
+	if ierr := request.DecryptAuthenticator(request.Ticket.DecryptedEncPart.Key); ierr != nil {
+		return nil, nil, ierr
 	}
 	if request.Authenticator.CRealm != Realm || !request.Authenticator.CName.Equal(request.Ticket.DecryptedEncPart.CName) {
 		return nil, nil, fmt.Errorf("PKU2U authenticator identity does not match ticket")
@@ -115,8 +115,8 @@ func (acceptor *Acceptor) acceptAPRequest(encoded []byte) ([]byte, gssapi.Contex
 		return nil, nil, fmt.Errorf("PKU2U authenticator lacks an RFC 4121 checksum")
 	}
 	var checksum gssapi.AuthenticatorChecksum
-	if err := checksum.Unmarshal(request.Authenticator.Cksum.Checksum); err != nil {
-		return nil, nil, err
+	if ierr := checksum.Unmarshal(request.Authenticator.Cksum.Checksum); ierr != nil {
+		return nil, nil, ierr
 	}
 	required := uint32(gssapi.ContextFlagMutual | gssapi.ContextFlagInteg)
 	if checksum.Flags&required != required {

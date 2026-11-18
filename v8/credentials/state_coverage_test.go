@@ -135,13 +135,13 @@ func TestCredentialsExpiryAttributesAndSerialization(t *testing.T) {
 		t.Fatal(err)
 	}
 	decoded := New("", "")
-	if err := decoded.Unmarshal(encoded); err != nil {
-		t.Fatal(err)
+	if ierr := decoded.Unmarshal(encoded); ierr != nil {
+		t.Fatal(ierr)
 	}
 	if decoded.UserName() != "user" || decoded.Realm() != "EXAMPLE.COM" || !decoded.ValidUntil().Equal(future) {
 		t.Fatalf("round-tripped credentials = %+v", decoded)
 	}
-	if err := decoded.Unmarshal([]byte("not a gob")); err == nil {
+	if ierr := decoded.Unmarshal([]byte("not a gob")); ierr == nil {
 		t.Fatal("invalid credential encoding was accepted")
 	}
 

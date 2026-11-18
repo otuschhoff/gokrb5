@@ -122,7 +122,7 @@ func BeginExchange(req *messages.ASReq, options ExchangeOptions) (*Exchange, err
 		server: KRB5PrincipalName{Realm: req.ReqBody.Realm, PrincipalName: req.ReqBody.SName},
 	}
 	authPack := AuthPack{PKAuthenticator: PKAuthenticator{
-		CUSec: int(options.CurrentTime.Nanosecond() / int(time.Microsecond)), CTime: options.CurrentTime,
+		CUSec: options.CurrentTime.Nanosecond() / int(time.Microsecond), CTime: options.CurrentTime,
 		Nonce: exchange.nonce, PAChecksum: checksum[:], FreshnessToken: append([]byte(nil), options.FreshnessToken...),
 	}}
 	switch options.Mode {
@@ -139,13 +139,13 @@ func BeginExchange(req *messages.ASReq, options ExchangeOptions) (*Exchange, err
 		if err != nil {
 			return nil, err
 		}
-		publicKey, err := exchange.dhKey.PublicKey()
-		if err != nil {
-			return nil, err
+		publicKey, perr := exchange.dhKey.PublicKey()
+		if perr != nil {
+			return nil, perr
 		}
 		exchange.clientNonce = make([]byte, 32)
-		if _, err := io.ReadFull(options.Random, exchange.clientNonce); err != nil {
-			return nil, fmt.Errorf("generate PKINIT client DH nonce: %w", err)
+		if _, rerr := io.ReadFull(options.Random, exchange.clientNonce); rerr != nil {
+			return nil, fmt.Errorf("generate PKINIT client DH nonce: %w", rerr)
 		}
 		authPack.ClientPublicValue = &publicKey
 		authPack.ClientDHNonce = append([]byte(nil), exchange.clientNonce...)
@@ -228,12 +228,12 @@ func AcceptExchange(req *messages.ASReq, options AcceptorOptions) (*AcceptorResu
 	if err != nil {
 		return nil, err
 	}
-	if err := options.ValidateSigner(signed); err != nil {
-		return nil, err
+	if ierr := options.ValidateSigner(signed); ierr != nil {
+		return nil, ierr
 	}
 	var authPack AuthPack
-	if err := authPack.Unmarshal(signed.Content); err != nil {
-		return nil, fmt.Errorf("decode PKINIT AuthPack: %w", err)
+	if ierr := authPack.Unmarshal(signed.Content); ierr != nil {
+		return nil, fmt.Errorf("decode PKINIT AuthPack: %w", ierr)
 	}
 	if authPack.ClientPublicValue == nil {
 		return nil, fmt.Errorf("PKINIT acceptor requires Diffie-Hellman key agreement")
@@ -351,17 +351,17 @@ func (exchange *Exchange) processDHReply(reply *DHRepInfo, paValue []byte, reply
 		return nil, err
 	}
 	if exchange.options.ValidateKDCSigner != nil {
-		if err := exchange.options.ValidateKDCSigner(signed); err != nil {
-			return nil, err
+		if ierr := exchange.options.ValidateKDCSigner(signed); ierr != nil {
+			return nil, ierr
 		}
 	} else {
-		if _, err := ValidateKDCCertificate(signed, exchange.options.KDCCertificate); err != nil {
-			return nil, err
+		if _, ierr := ValidateKDCCertificate(signed, exchange.options.KDCCertificate); ierr != nil {
+			return nil, ierr
 		}
 	}
 	var keyInfo KDCDHKeyInfo
-	if err := keyInfo.Unmarshal(signed.Content); err != nil {
-		return nil, fmt.Errorf("decode PKINIT KDC DH key info: %w", err)
+	if ierr := keyInfo.Unmarshal(signed.Content); ierr != nil {
+		return nil, fmt.Errorf("decode PKINIT KDC DH key info: %w", ierr)
 	}
 	if keyInfo.DHKeyExpiration.IsZero() {
 		if keyInfo.Nonce != exchange.nonce || len(reply.ServerDHNonce) != 0 {
@@ -371,8 +371,8 @@ func (exchange *Exchange) processDHReply(reply *DHRepInfo, paValue []byte, reply
 		if keyInfo.Nonce != 0 || !keyInfo.DHKeyExpiration.After(exchange.options.CurrentTime) {
 			return nil, fmt.Errorf("PKINIT reused KDC DH key has an invalid nonce or expiration")
 		}
-		et, err := krbcrypto.GetEtype(replyEType)
-		if err != nil || len(reply.ServerDHNonce) < et.GetKeyByteSize() {
+		et, kerr := krbcrypto.GetEtype(replyEType)
+		if kerr != nil || len(reply.ServerDHNonce) < et.GetKeyByteSize() {
 			return nil, fmt.Errorf("PKINIT reused KDC DH key has an insufficient server nonce")
 		}
 	}
@@ -412,12 +412,12 @@ func (exchange *Exchange) processRSAReply(encrypted []byte) (*ExchangeResult, er
 	if err != nil {
 		return nil, err
 	}
-	if _, err := ValidateKDCCertificate(signed, exchange.options.KDCCertificate); err != nil {
-		return nil, err
+	if _, ierr := ValidateKDCCertificate(signed, exchange.options.KDCCertificate); ierr != nil {
+		return nil, ierr
 	}
 	var pack ReplyKeyPack
-	if err := pack.Unmarshal(signed.Content); err != nil {
-		return nil, fmt.Errorf("decode PKINIT ReplyKeyPack: %w", err)
+	if ierr := pack.Unmarshal(signed.Content); ierr != nil {
+		return nil, fmt.Errorf("decode PKINIT ReplyKeyPack: %w", ierr)
 	}
 	checksumType, err := krbcrypto.GetChksumEtype(pack.ASChecksum.CksumType)
 	if err != nil || checksumType.GetETypeID() != pack.ReplyKey.KeyType {

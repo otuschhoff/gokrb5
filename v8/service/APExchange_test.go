@@ -76,8 +76,8 @@ func TestVerifyAPREQIgnoresKerbLocalAndRestrictionEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	kt := keytab.New()
-	if err := kt.Unmarshal(b); err != nil {
-		t.Fatal(err)
+	if ierr := kt.Unmarshal(b); ierr != nil {
+		t.Fatal(ierr)
 	}
 	now := time.Now().UTC()
 	tkt, sessionKey, err := messages.NewTicket(
@@ -491,7 +491,6 @@ func TestExtendedProtectionPolicy(t *testing.T) {
 		{name: "required configuration", policy: ExtendedProtectionRequired, check: present, wantErr: true},
 	}
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			_, _, err := verifyAuthenticatorChecksum(test.check, NewSettings(nil, ExtendedProtection(test.policy), ChannelBindings(test.binding)))
@@ -540,8 +539,8 @@ func TestExtractDelegatedCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ticket.Unmarshal(ticketBytes); err != nil {
-		t.Fatal(err)
+	if ierr := ticket.Unmarshal(ticketBytes); ierr != nil {
+		t.Fatal(ierr)
 	}
 	key := types.EncryptionKey{KeyType: 18, KeyValue: []byte("0123456789abcdef0123456789abcdef")}
 	info := messages.KrbCredInfo{
@@ -573,7 +572,7 @@ func TestExtractDelegatedCredentials(t *testing.T) {
 func newTestAuthenticator(creds credentials.Credentials) types.Authenticator {
 	auth, _ := types.NewAuthenticator(creds.Domain(), creds.CName())
 	auth.GenerateSeqNumberAndSubKey(18, 32)
-	//auth.Cksum = types.Checksum{
+	// auth.Cksum = types.Checksum{
 	//	CksumType: chksumtype.GSSAPI,
 	//	Checksum:  newAuthenticatorChksum([]int{GSS_C_INTEG_FLAG, GSS_C_CONF_FLAG}),
 	//}

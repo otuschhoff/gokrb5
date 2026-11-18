@@ -154,8 +154,8 @@ func TestTGSReqMSKILEOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := req.addMSKILEPAData(cfg, TGSReqOptions{SupportedEncTypes: msflags.SupportedEncTypeClaims}); err != nil {
-		t.Fatal(err)
+	if ierr := req.addMSKILEPAData(cfg, TGSReqOptions{SupportedEncTypes: msflags.SupportedEncTypeClaims}); ierr != nil {
+		t.Fatal(ierr)
 	}
 	assert.Equal(t, []int32{etypeID.AES256_CTS_HMAC_SHA1_96, etypeID.RC4_HMAC, etypeID.AES128_CTS_HMAC_SHA1_96}, req.ReqBody.EType)
 	assert.Equal(t, original, cfg.LibDefaults.DefaultTGSEnctypeIDs)

@@ -17,11 +17,11 @@ import (
 )
 
 // ASExchange performs an AS exchange for the client to retrieve a TGT.
-func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (messages.ASRep, error) {
+func (cl *Client) ASExchange(realm string, asReq messages.ASReq, referral int) (messages.ASRep, error) {
 	if ok, err := cl.IsConfigured(); !ok {
 		return messages.ASRep{}, krberror.Errorf(err, krberror.ConfigError, "AS Exchange cannot be performed")
 	}
-	exchange := asExchange{cl: cl, realm: realm, request: ASReq}
+	exchange := asExchange{cl: cl, realm: realm, request: asReq}
 	if err := exchange.prepare(); err != nil {
 		return messages.ASRep{}, err
 	}
@@ -401,10 +401,10 @@ func kdcErrorTime(err messages.KRBError) time.Time {
 }
 
 // setPAData adds pre-authentication data to the AS_REQ.
-func setPAData(cl *Client, krberr *messages.KRBError, ASReq *messages.ASReq) error {
-	if !cl.settings.DisablePAReqEncPARep() && !ASReq.PAData.Contains(patype.PA_REQ_ENC_PA_REP) {
+func setPAData(cl *Client, krberr *messages.KRBError, asReq *messages.ASReq) error {
+	if !cl.settings.DisablePAReqEncPARep() && !asReq.PAData.Contains(patype.PA_REQ_ENC_PA_REP) {
 		pa := types.PAData{PADataType: patype.PA_REQ_ENC_PA_REP}
-		ASReq.PAData = append(ASReq.PAData, pa)
+		asReq.PAData = append(asReq.PAData, pa)
 	}
 	if cl.settings.pkinitOptions != nil && cl.settings.pkinitOptions.Identity != nil {
 		return nil
@@ -418,14 +418,14 @@ func setPAData(cl *Client, krberr *messages.KRBError, ASReq *messages.ASReq) err
 		if krberr == nil {
 			// This is not in response to an error from the KDC. It is preemptive or renewal
 			// There is no KRB Error that tells us the etype to use
-			et, key, kvno, err = firstAvailablePreAuthKey(cl, ASReq.ReqBody.EType)
+			et, key, kvno, err = firstAvailablePreAuthKey(cl, asReq.ReqBody.EType)
 			if err != nil {
 				return krberror.Errorf(err, krberror.EncryptingError, "error getting key from credentials")
 			}
 			cl.settings.preAuthEType = et.GetETypeID()
 		} else {
 			// Get the etype to use from the PA data in the KRBError e-data
-			et, err = preAuthEType(krberr, ASReq.ReqBody.EType)
+			et, err = preAuthEType(krberr, asReq.ReqBody.EType)
 			if err != nil {
 				return krberror.Errorf(err, krberror.EncryptingError, "error getting etype for pre-auth encryption")
 			}
@@ -452,13 +452,14 @@ func setPAData(cl *Client, krberr *messages.KRBError, ASReq *messages.ASReq) err
 			PADataType:  patype.PA_ENC_TIMESTAMP,
 			PADataValue: pb,
 		}
-		filtered := ASReq.PAData[:0]
-		for _, existing := range ASReq.PAData {
+		filtered := asReq.PAData[:0]
+		for _, existing := range asReq.PAData {
 			if existing.PADataType != patype.PA_ENC_TIMESTAMP {
 				filtered = append(filtered, existing)
 			}
 		}
-		ASReq.PAData = append(filtered, pa)
+		filtered = append(filtered, pa)
+		asReq.PAData = filtered
 		cl.settings.preAuthType = patype.PA_ENC_TIMESTAMP
 	}
 	return nil

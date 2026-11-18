@@ -120,7 +120,7 @@ func TestDes3CbcSha1KdEncryptionAndChecksums(t *testing.T) {
 	}
 	tamperedMessage := append([]byte(nil), encryptedMessage...)
 	tamperedMessage[len(tamperedMessage)-1] ^= 0xff
-	if _, err := enctype.DecryptMessage(key, tamperedMessage, usage); err == nil {
+	if _, ierr := enctype.DecryptMessage(key, tamperedMessage, usage); ierr == nil {
 		t.Fatal("tampered ciphertext was accepted")
 	}
 

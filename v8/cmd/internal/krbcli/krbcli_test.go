@@ -84,8 +84,8 @@ func TestReadPasswordFromTTYWithoutEcho(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Equal(t, "Password: ", prompt)
-	if _, err := io.WriteString(tty, "secret\n"); err != nil {
-		t.Fatal(err)
+	if _, ierr := io.WriteString(tty, "secret\n"); ierr != nil {
+		t.Fatal(ierr)
 	}
 	output, err := io.ReadAll(reader)
 	if err != nil && !errors.Is(err, syscall.EIO) {

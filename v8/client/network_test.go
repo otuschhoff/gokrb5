@@ -250,11 +250,11 @@ func TestSendOnClosedConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := udpConnection.Close(); err != nil {
-		t.Fatal(err)
+	if ierr := udpConnection.Close(); ierr != nil {
+		t.Fatal(ierr)
 	}
-	if _, err := sendUDP(udpConnection, []byte("request")); err == nil || !strings.Contains(err.Error(), "error sending") {
-		t.Fatalf("closed UDP connection error = %v", err)
+	if _, ierr := sendUDP(udpConnection, []byte("request")); ierr == nil || !strings.Contains(ierr.Error(), "error sending") {
+		t.Fatalf("closed UDP connection error = %v", ierr)
 	}
 
 	tcpListener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})

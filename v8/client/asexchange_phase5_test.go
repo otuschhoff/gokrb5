@@ -176,7 +176,7 @@ func TestSetPADataETypeFromTktEnctypes(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Equal(t, int32(17), cl.settings.preAuthEType)
-	assert.Equal(t, int32(patype.PA_ENC_TIMESTAMP), cl.settings.preAuthType)
+	assert.Equal(t, patype.PA_ENC_TIMESTAMP, cl.settings.preAuthType)
 	for _, pa := range req.PAData {
 		if pa.PADataType != patype.PA_ENC_TIMESTAMP {
 			continue
@@ -426,8 +426,8 @@ func TestClientCCacheExportRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	original := new(credentials.CCache)
-	if err := original.Unmarshal(data); err != nil {
-		t.Fatal(err)
+	if ierr := original.Unmarshal(data); ierr != nil {
+		t.Fatal(ierr)
 	}
 	cl, err := NewFromCCache(original, config.New())
 	if err != nil {
@@ -454,14 +454,14 @@ func TestClientCCacheExportRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	reparsed := new(credentials.CCache)
-	if err := reparsed.Unmarshal(encoded); err != nil {
-		t.Fatal(err)
+	if ierr := reparsed.Unmarshal(encoded); ierr != nil {
+		t.Fatal(ierr)
 	}
 	cl2, err := NewFromCCache(reparsed, config.New())
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Equal(t, int32(patype.PA_ENC_TIMESTAMP), cl2.settings.preAuthType)
+	assert.Equal(t, patype.PA_ENC_TIMESTAMP, cl2.settings.preAuthType)
 	exportedAgain, err := cl2.CCache()
 	if err != nil {
 		t.Fatal(err)
@@ -485,8 +485,8 @@ func TestNewFromCCacheMatchesTGTRealmCaseInsensitively(t *testing.T) {
 		t.Fatal(err)
 	}
 	original := new(credentials.CCache)
-	if err := original.Unmarshal(data); err != nil {
-		t.Fatal(err)
+	if ierr := original.Unmarshal(data); ierr != nil {
+		t.Fatal(ierr)
 	}
 	// Lower-case the default principal's realm while the TGT credential entry keeps its
 	// original (upper-case) realm, simulating the casing mismatch.
@@ -514,13 +514,13 @@ func TestClientCCacheExportAssociatesPATypeWithInitialService(t *testing.T) {
 		t.Fatal(err)
 	}
 	original := new(credentials.CCache)
-	if err := original.Unmarshal(data); err != nil {
-		t.Fatal(err)
+	if ierr := original.Unmarshal(data); ierr != nil {
+		t.Fatal(ierr)
 	}
 	credential := original.GetEntries()[0]
 	var ticket messages.Ticket
-	if err := ticket.Unmarshal(credential.Ticket); err != nil {
-		t.Fatal(err)
+	if ierr := ticket.Unmarshal(credential.Ticket); ierr != nil {
+		t.Fatal(ierr)
 	}
 	ticket.SName = types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "HTTP/host.example.org")
 	ticket.Realm = "EXAMPLE.ORG"

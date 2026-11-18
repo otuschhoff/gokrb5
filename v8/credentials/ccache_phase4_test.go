@@ -104,8 +104,8 @@ func TestCCacheMarshalByteExactFixtures(t *testing.T) {
 				t.Fatal(err)
 			}
 			cache := new(CCache)
-			if err := cache.Unmarshal(data); err != nil {
-				t.Fatal(err)
+			if ierr := cache.Unmarshal(data); ierr != nil {
+				t.Fatal(ierr)
 			}
 			marshaled, err := cache.Marshal()
 			if err != nil {
@@ -158,8 +158,8 @@ func TestCCacheUnknownHeaderTagPreserved(t *testing.T) {
 	data := []byte{5, 4, 0, 7, 0, 99, 0, 3, 'a', 'b', 'c'}
 	data = append(data, v3[2:]...)
 	cache := new(CCache)
-	if err := cache.Unmarshal(data); err != nil {
-		t.Fatal(err)
+	if ierr := cache.Unmarshal(data); ierr != nil {
+		t.Fatal(ierr)
 	}
 	if assert.Len(t, cache.Header.fields, 1) {
 		assert.Equal(t, uint16(99), cache.Header.fields[0].tag)
@@ -473,8 +473,8 @@ func TestCCacheWriteFileAtomicAndMode0600(t *testing.T) {
 	assert.Equal(t, cache.DefaultPrincipal, loaded.DefaultPrincipal)
 
 	original := []byte("existing cache remains intact")
-	if err := os.WriteFile(path, original, 0o600); err != nil {
-		t.Fatal(err)
+	if ierr := os.WriteFile(path, original, 0o600); ierr != nil {
+		t.Fatal(ierr)
 	}
 	cache.Credentials = append(cache.Credentials, nil)
 	assert.Error(t, cache.WriteFile(path))
@@ -504,14 +504,14 @@ func TestDefaultCCacheNameResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.NotContains(t, path, "%{")
-	if err := os.Setenv("KRB5CCNAME", "FILE:/tmp/environment-cache"); err != nil {
-		t.Fatal(err)
+	if ierr := os.Setenv("KRB5CCNAME", "FILE:/tmp/environment-cache"); ierr != nil {
+		t.Fatal(ierr)
 	}
 	path, err = DefaultCCacheName(cfg)
 	assert.NoError(t, err)
 	assert.Equal(t, "/tmp/environment-cache", path)
-	if err := os.Setenv("KRB5CCNAME", "DIR:/tmp/cache"); err != nil {
-		t.Fatal(err)
+	if ierr := os.Setenv("KRB5CCNAME", "DIR:/tmp/cache"); ierr != nil {
+		t.Fatal(ierr)
 	}
 	_, err = DefaultCCacheName(cfg)
 	assert.Error(t, err)

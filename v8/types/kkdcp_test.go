@@ -13,8 +13,8 @@ func TestKDCProxyMessageFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	var message KDCProxyMessage
-	if err := message.Unmarshal(b); err != nil {
-		t.Fatal(err)
+	if ierr := message.Unmarshal(b); ierr != nil {
+		t.Fatal(ierr)
 	}
 	if len(message.KerbMessage) == 0 || message.TargetDomain != "krb5data" {
 		t.Fatalf("decoded message has payload length %d and target domain %q", len(message.KerbMessage), message.TargetDomain)

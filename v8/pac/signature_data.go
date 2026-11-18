@@ -73,7 +73,7 @@ func (k *SignatureData) Unmarshal(b []byte) (rb []byte, err error) {
 
 	k.SignatureType, err = r.Uint32()
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	c, err := signatureLength(k.SignatureType)
@@ -85,14 +85,14 @@ func (k *SignatureData) Unmarshal(b []byte) (rb []byte, err error) {
 	}
 	k.Signature, err = r.ReadBytes(c)
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	// When the KDC is not an Read Only Domain Controller (RODC), this field does not exist.
 	if len(b) >= 4+c+2 {
 		k.RODCIdentifier, err = r.Uint16()
 		if err != nil {
-			return
+			return nil, err
 		}
 		k.HasRODCIdentifier = true
 	} else {
@@ -106,5 +106,5 @@ func (k *SignatureData) Unmarshal(b []byte) (rb []byte, err error) {
 	z := make([]byte, len(b))
 	copy(rb[4:4+c], z)
 
-	return
+	return rb, err
 }

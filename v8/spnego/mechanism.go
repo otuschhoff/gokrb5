@@ -120,8 +120,8 @@ func (c *mechanismConversation) initStep(input []byte, options ...gssapi.Mechani
 		if marshalErr != nil {
 			return nil, c.context, false, marshalErr
 		}
-		if err := c.context.VerifyMIC(mechList, token.NegTokenResp.MechListMIC); err != nil {
-			return nil, c.context, false, err
+		if ierr := c.context.VerifyMIC(mechList, token.NegTokenResp.MechListMIC); ierr != nil {
+			return nil, c.context, false, ierr
 		}
 	} else if state == NegStateRequestMIC {
 		return nil, c.context, false, ErrMissingMechListMIC

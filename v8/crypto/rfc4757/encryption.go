@@ -42,17 +42,17 @@ func EncryptMessage(key, data []byte, usage uint32, export bool, e etype.EType) 
 	}
 	k1 := key
 	k2 := HMAC(k1, UsageToMSMsgType(usage))
-	toenc := append(confounder, data...)
-	chksum := HMAC(k2, toenc)
+	confounder = append(confounder, data...)
+	chksum := HMAC(k2, confounder)
 	k3 := HMAC(k2, chksum)
 
-	ed, err := EncryptData(k3, toenc, e)
+	ed, err := EncryptData(k3, confounder, e)
 	if err != nil {
 		return []byte{}, fmt.Errorf("error encrypting data: %w", err)
 	}
 
-	msg := append(chksum, ed...)
-	return msg, nil
+	chksum = append(chksum, ed...)
+	return chksum, nil
 }
 
 // DecryptMessage decrypts the message provided using the methods specific to the etype provided as defined in RFC 4757.

@@ -43,8 +43,8 @@ func TestKKDCPTransport(t *testing.T) {
 			return
 		}
 		var proxyRequest types.KDCProxyMessage
-		if err := proxyRequest.Unmarshal(body); err != nil {
-			t.Errorf("decode proxy request: %v", err)
+		if ierr := proxyRequest.Unmarshal(body); ierr != nil {
+			t.Errorf("decode proxy request: %v", ierr)
 			http.Error(w, "decode request", http.StatusBadRequest)
 			return
 		}
