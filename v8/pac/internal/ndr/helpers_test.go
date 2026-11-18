@@ -9,6 +9,15 @@ import (
 
 type fixedRawBytes []byte
 
+func mustNDRTestType[T any](t *testing.T, value any) T {
+	t.Helper()
+	result, ok := value.(T)
+	if !ok {
+		t.Fatalf("unexpected type %T", value)
+	}
+	return result
+}
+
 func (fixedRawBytes) Size(interface{}) int { return 3 }
 
 type invalidSizeBytes []byte

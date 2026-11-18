@@ -123,30 +123,30 @@ func TestDecodeArraysAndString(t *testing.T) {
 		})
 	}
 
-	if got := *tests[0].value.(*struct{ Value [4]uint8 }); got.Value != [4]uint8{1, 2, 3, 4} {
+	if got := *mustNDRTestType[*struct{ Value [4]uint8 }](t, tests[0].value); got.Value != [4]uint8{1, 2, 3, 4} {
 		t.Fatalf("fixed array = %v", got.Value)
 	}
 	for _, index := range []int{1, 2, 3} {
 		var got []uint32
 		switch index {
 		case 1:
-			got = tests[index].value.(*struct {
+			got = mustNDRTestType[*struct {
 				Value []uint32 `ndr:"conformant"`
-			}).Value
+			}](t, tests[index].value).Value
 		case 2:
-			got = tests[index].value.(*struct {
+			got = mustNDRTestType[*struct {
 				Value []uint32 `ndr:"varying"`
-			}).Value
+			}](t, tests[index].value).Value
 		case 3:
-			got = tests[index].value.(*struct {
+			got = mustNDRTestType[*struct {
 				Value []uint32 `ndr:"conformant,varying"`
-			}).Value
+			}](t, tests[index].value).Value
 		}
 		if len(got) != 3 || got[0] != 10 || got[1] != 20 || got[2] != 30 {
 			t.Fatalf("%s = %v", tests[index].name, got)
 		}
 	}
-	if got := tests[4].value.(*struct{ Value string }).Value; got != "OK" {
+	if got := mustNDRTestType[*struct{ Value string }](t, tests[4].value).Value; got != "OK" {
 		t.Fatalf("string = %q, want OK", got)
 	}
 }

@@ -16,6 +16,15 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+func mustNegoexTestType[T any](t *testing.T, value any) T {
+	t.Helper()
+	result, ok := value.(T)
+	if !ok {
+		t.Fatalf("unexpected type %T", value)
+	}
+	return result
+}
+
 func testHeader(messageType, sequence uint32) MessageHeader {
 	return MessageHeader{
 		MessageType: messageType,
@@ -54,7 +63,7 @@ func TestMessageHeaderRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := decoded[0].(*ExchangeMessage)
+	got := mustNegoexTestType[*ExchangeMessage](t, decoded[0])
 	if !reflect.DeepEqual(got.Exchange, message.Exchange) || got.Header.SequenceNum != 7 || got.AuthScheme != message.AuthScheme {
 		t.Fatalf("round trip mismatch: %#v", got)
 	}
@@ -83,7 +92,7 @@ func TestNegoMessageVectors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := decoded[0].(*NegoMessage)
+	got := mustNegoexTestType[*NegoMessage](t, decoded[0])
 	if !reflect.DeepEqual(got.AuthSchemes, message.AuthSchemes) || !reflect.DeepEqual(got.Extensions, message.Extensions) || got.Random != message.Random {
 		t.Fatalf("round trip mismatch: %#v", got)
 	}
@@ -106,7 +115,7 @@ func TestMSExampleInitiatorNegoFixture(t *testing.T) {
 	if len(messages) != 1 {
 		t.Fatalf("decoded %d messages", len(messages))
 	}
-	nego := messages[0].(*NegoMessage)
+	nego := mustNegoexTestType[*NegoMessage](t, messages[0])
 	if len(nego.AuthSchemes) != 1 || nego.AuthSchemes[0] != (AuthScheme{0x5c, 0x33, 0x53, 0x0d, 0xea, 0xf9, 0x0d, 0x4d, 0xb2, 0xec, 0x4a, 0xe3, 0x78, 0x6e, 0xc3, 0x08}) {
 		t.Fatalf("auth schemes = %x", nego.AuthSchemes)
 	}
@@ -141,11 +150,11 @@ func TestVerifyAndAlertRoundTrip(t *testing.T) {
 	if len(messages) != 2 {
 		t.Fatalf("decoded %d messages", len(messages))
 	}
-	gotVerify := messages[0].(*VerifyMessage)
+	gotVerify := mustNegoexTestType[*VerifyMessage](t, messages[0])
 	if gotVerify.Offset != 0 || gotVerify.Checksum.Scheme != ChecksumSchemeRFC3961 || !reflect.DeepEqual(gotVerify.Checksum.Value, verify.Checksum.Value) {
 		t.Fatalf("verify mismatch: %#v", gotVerify)
 	}
-	gotAlert := messages[1].(*AlertMessage)
+	gotAlert := mustNegoexTestType[*AlertMessage](t, messages[1])
 	if len(gotAlert.Alerts) != 1 || !gotAlert.Alerts[0].IsVerifyNoKey() {
 		t.Fatalf("alert mismatch: %#v", gotAlert)
 	}

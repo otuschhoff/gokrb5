@@ -19,6 +19,15 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+func mustPKINITTestType[T any](t *testing.T, value any) T {
+	t.Helper()
+	result, ok := value.(T)
+	if !ok {
+		t.Fatalf("unexpected type %T", value)
+	}
+	return result
+}
+
 func TestPEMIdentityAndUPNSelection(t *testing.T) {
 	certificate, key := testClientCertificate(t, "alice@EXAMPLE.COM", oidSmartCardLogon)
 	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
@@ -108,7 +117,7 @@ func TestPrivateKeyFormatsAndIdentityPolicies(t *testing.T) {
 	require.NoError(t, err)
 	signer, err := parsePrivateKey(x509.MarshalPKCS1PrivateKey(rsaKey))
 	require.NoError(t, err)
-	require.Equal(t, rsaKey.PublicKey, *signer.Public().(*rsa.PublicKey))
+	require.Equal(t, rsaKey.PublicKey, *mustPKINITTestType[*rsa.PublicKey](t, signer.Public()))
 
 	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)

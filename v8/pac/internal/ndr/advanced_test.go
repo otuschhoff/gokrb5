@@ -17,7 +17,8 @@ type decoderUnion struct {
 }
 
 func (decoderUnion) SwitchFunc(discriminant interface{}) string {
-	if discriminant.(uint16) == 1 {
+	value, ok := discriminant.(uint16)
+	if ok && value == 1 {
 		return "Number"
 	}
 	return "Bytes"
@@ -138,7 +139,7 @@ func TestDecodeMultidimensionalArrays(t *testing.T) {
 			if err := NewDecoder(bytes.NewReader(wrapNDRBody(test.body))).Decode(value.Interface()); err != nil {
 				t.Fatal(err)
 			}
-			got := value.Elem().Field(0).Interface().([][]uint32)
+			got := mustNDRTestType[[][]uint32](t, value.Elem().Field(0).Interface())
 			want := [][]uint32{{1, 2, 3}, {4, 5, 6}}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("array = %v, want %v", got, want)

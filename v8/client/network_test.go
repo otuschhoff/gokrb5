@@ -11,6 +11,15 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/config"
 )
 
+func mustClientTestType[T any](t *testing.T, value any) T {
+	t.Helper()
+	result, ok := value.(T)
+	if !ok {
+		t.Fatalf("unexpected type %T", value)
+	}
+	return result
+}
+
 func startTCPResponseServer(t *testing.T, response []byte) (*net.TCPAddr, <-chan error) {
 	t.Helper()
 	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
@@ -39,7 +48,7 @@ func startTCPResponseServer(t *testing.T, response []byte) (*net.TCPAddr, <-chan
 		_, writeErr := io.Copy(connection, bytes.NewReader(response))
 		serverErr <- writeErr
 	}()
-	return listener.Addr().(*net.TCPAddr), serverErr
+	return mustClientTestType[*net.TCPAddr](t, listener.Addr()), serverErr
 }
 
 func TestSendTCPResponseFraming(t *testing.T) {
@@ -148,7 +157,7 @@ func TestSendUDPSuccess(t *testing.T) {
 		serverErr <- writeErr
 	}()
 
-	connection, err := net.DialUDP("udp", nil, server.LocalAddr().(*net.UDPAddr))
+	connection, err := net.DialUDP("udp", nil, mustClientTestType[*net.UDPAddr](t, server.LocalAddr()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +236,7 @@ func TestSendUDPRejectsEmptyResponse(t *testing.T) {
 		serverErr <- writeErr
 	}()
 
-	connection, err := net.DialUDP("udp", nil, server.LocalAddr().(*net.UDPAddr))
+	connection, err := net.DialUDP("udp", nil, mustClientTestType[*net.UDPAddr](t, server.LocalAddr()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +255,7 @@ func TestSendOnClosedConnections(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = udpServer.Close() }()
-	udpConnection, err := net.DialUDP("udp", nil, udpServer.LocalAddr().(*net.UDPAddr))
+	udpConnection, err := net.DialUDP("udp", nil, mustClientTestType[*net.UDPAddr](t, udpServer.LocalAddr()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +271,7 @@ func TestSendOnClosedConnections(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = tcpListener.Close() }()
-	tcpConnection, err := net.DialTCP("tcp", nil, tcpListener.Addr().(*net.TCPAddr))
+	tcpConnection, err := net.DialTCP("tcp", nil, mustClientTestType[*net.TCPAddr](t, tcpListener.Addr()))
 	if err != nil {
 		t.Fatal(err)
 	}

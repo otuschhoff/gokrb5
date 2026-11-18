@@ -31,6 +31,15 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+func mustPKU2UTestType[T any](t *testing.T, value any) T {
+	t.Helper()
+	result, ok := value.(T)
+	if !ok {
+		t.Fatalf("unexpected type %T", value)
+	}
+	return result
+}
+
 func TestASExchangeIssuesSelfTicket(t *testing.T) {
 	root, rootKey := newPKU2URoot(t)
 	clientCertificate, clientKey := newPKU2ULeaf(t, root, rootKey, "Alice", nil, upnSAN(t, "alice@example.com"))
@@ -464,7 +473,7 @@ func TestEndToEndOverSPNEGO(t *testing.T) {
 	}{
 		{name: "standalone", wrap: func(mechanism gssapi.ContextMechanism) gssapi.ContextMechanism { return mechanism }},
 		{name: "NEGOEX", wrap: func(mechanism gssapi.ContextMechanism) gssapi.ContextMechanism {
-			return negoex.New(negoex.NewPKU2UScheme(mechanism.(negoex.PKU2UMechanism)))
+			return negoex.New(negoex.NewPKU2UScheme(mustPKU2UTestType[negoex.PKU2UMechanism](t, mechanism)))
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {

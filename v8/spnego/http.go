@@ -360,7 +360,10 @@ func (c *Client) verifyMutualResponse(req *http.Request, resp *http.Response) er
 	if responseToken == nil {
 		return errors.New("server did not return a mutual-authentication token")
 	}
-	spnegoContext := pending.(*SPNEGO)
+	spnegoContext, ok := pending.(*SPNEGO)
+	if !ok {
+		return errors.New("pending mutual-authentication context has invalid type")
+	}
 	authenticated, _, status := spnegoContext.ContinueSecContext(responseToken)
 	if !authenticated || status.Code != gssapi.StatusComplete {
 		return fmt.Errorf("server mutual authentication failed: %w", status)
@@ -579,7 +582,11 @@ func SPNEGOKRB5Authenticate(inner http.Handler, kt *keytab.Keytab, settings ...f
 
 		if authed {
 			// Authentication successful; get user's credentials from the context
-			id := ctx.Value(ctxCredentials).(*credentials.Credentials)
+			id, ok := ctx.Value(ctxCredentials).(*credentials.Credentials)
+			if !ok || id == nil {
+				spnegoResponseReject(spnego, w, "%s - SPNEGO authenticated context is missing credentials", r.RemoteAddr)
+				return
+			}
 			// Create a new session if a session manager has been configured
 			err = newSession(spnego, r, w, id)
 			if err != nil {
@@ -623,7 +630,8 @@ func SPNEGOContextAuthenticate(inner http.Handler, factory ContextMechanismFacto
 		}
 		now := time.Now()
 		exchanges.Range(func(key, value interface{}) bool {
-			if now.After(value.(*contextHTTPExchange).expires) {
+			exchange, ok := value.(*contextHTTPExchange)
+			if !ok || now.After(exchange.expires) {
 				exchanges.Delete(key)
 			}
 			return true
@@ -652,7 +660,13 @@ func SPNEGOContextAuthenticate(inner http.Handler, factory ContextMechanismFacto
 				HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: request.TLS != nil,
 			})
 		}
-		exchange := value.(*contextHTTPExchange)
+		exchange, ok := value.(*contextHTTPExchange)
+		if !ok {
+			exchanges.Delete(exchangeID)
+			expireContextHTTPExchangeCookie(writer, request)
+			http.Error(writer, UnauthorizedMsg, http.StatusUnauthorized)
+			return
+		}
 		exchange.mu.Lock()
 		output, context, done, stepErr := exchange.negotiator.AcceptSecContext(input)
 		exchange.mu.Unlock()

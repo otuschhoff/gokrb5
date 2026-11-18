@@ -197,7 +197,7 @@ func TestService_SPNEGOKRB_ValidUser_RawKRB5Token(t *testing.T) {
 	}
 
 	// Use the raw KRB5 context token
-	nb := st.(*SPNEGOToken).NegTokenInit.MechTokenBytes
+	nb := mustSPNEGOTestType[*SPNEGOToken](t, st).NegTokenInit.MechTokenBytes
 	hs := "Negotiate " + base64.StdEncoding.EncodeToString(nb)
 	r.Header.Set(HTTPHeaderAuthRequest, hs)
 

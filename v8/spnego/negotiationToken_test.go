@@ -31,7 +31,7 @@ func TestUnmarshal_negTokenInit(t *testing.T) {
 	}
 	assert.IsType(t, NegTokenInit{}, nt, "Not the expected type NegTokenInit")
 	assert.True(t, isInit, "Boolean indicating type is negTokenInit is not true")
-	nInit := nt.(NegTokenInit)
+	nInit := mustSPNEGOTestType[NegTokenInit](t, nt)
 	assert.Equal(t, 4, len(nInit.MechTypes))
 	expectMechTypes := []asn1.ObjectIdentifier{
 		[]int{1, 2, 840, 113554, 1, 2, 2},
@@ -52,7 +52,7 @@ func TestMarshal_negTokenInit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error unmarshalling negotiation token: %v", err)
 	}
-	nInit := nt.(NegTokenInit)
+	nInit := mustSPNEGOTestType[NegTokenInit](t, nt)
 	mb, err := nInit.Marshal()
 	if err != nil {
 		t.Fatalf("Error marshalling negotiation init token: %v", err)
@@ -72,7 +72,7 @@ func TestUnmarshal_negTokenResp(t *testing.T) {
 	}
 	assert.IsType(t, NegTokenResp{}, nt, "Not the expected type NegTokenResp")
 	assert.False(t, isInit, "Boolean indicating type is negTokenInit is not false")
-	nResp := nt.(NegTokenResp)
+	nResp := mustSPNEGOTestType[NegTokenResp](t, nt)
 	assert.Equal(t, asn1.Enumerated(0), nResp.NegState)
 	assert.Equal(t, asn1.ObjectIdentifier{1, 2, 840, 113554, 1, 2, 2}, nResp.SupportedMech, "SupportedMech type not as expected.")
 }
@@ -87,7 +87,7 @@ func TestMarshal_negTokenResp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error unmarshalling negotiation token: %v", err)
 	}
-	nResp := nt.(NegTokenResp)
+	nResp := mustSPNEGOTestType[NegTokenResp](t, nt)
 	mb, err := nResp.Marshal()
 	if err != nil {
 		t.Fatalf("Error marshalling negotiation init token: %v", err)

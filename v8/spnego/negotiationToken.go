@@ -201,7 +201,10 @@ func (n *NegTokenInit) Unmarshal(b []byte) error {
 	if !init {
 		return errors.New("bytes were not that of a NegTokenInit")
 	}
-	nInit := nt.(NegTokenInit)
+	nInit, ok := nt.(NegTokenInit)
+	if !ok {
+		return errors.New("bytes decoded as an unexpected NegTokenInit value")
+	}
 	n.MechTokenBytes = nInit.MechTokenBytes
 	n.NegHints = nInit.NegHints
 	n.MechListMIC = nInit.MechListMIC
@@ -293,7 +296,10 @@ func (n *NegTokenResp) Unmarshal(b []byte) error {
 	if init {
 		return errors.New("bytes were not that of a NegTokenResp")
 	}
-	nResp := nt.(NegTokenResp)
+	nResp, ok := nt.(NegTokenResp)
+	if !ok {
+		return errors.New("bytes decoded as an unexpected NegTokenResp value")
+	}
 	n.MechListMIC = nResp.MechListMIC
 	n.NegState = nResp.NegState
 	n.ResponseToken = nResp.ResponseToken

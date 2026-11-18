@@ -2,10 +2,10 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-10 done (formatter normalization,
+(floor raised to 86.0%), and Phase 5 slices 1-11 done (formatter normalization,
 keytab complexity, dead code, mechanical clarity, shadow elimination,
 errorlint, revive mechanical, exported documentation, the NDR carry-over,
-and I/O/body-ownership cleanup).
+I/O/body-ownership cleanup, and checked type assertions).
 Remaining canonical debt is concentrated in the classification-heavy
 categories (gosec, NilAway, wrapcheck, errcheck, gocognit/nestif, ireturn,
 nonamedreturns, bodyclose) plus documented intentional categories (iana
@@ -34,7 +34,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,691 canonical lint findings after Phase 5 slices 1-10 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,658 canonical lint findings after Phase 5 slices 1-11 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -823,6 +823,21 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 11 (2026-11-18, checked type assertions): all 41 forcetypeassert
+findings are cleared. Seven production SPNEGO assertions now fail closed or
+return an internal error when state has the wrong concrete type: pending
+mutual-authentication entries, authenticated credential context values,
+multi-round HTTP exchange map values, negotiation-token init/resp values,
+and `InitSecContext`'s mechanism token. The exchange cleanup loop deletes
+invalid map entries rather than panicking. Tests use package-local generic
+`mustXTestType` helpers to turn expected fixture assertions into explicit
+fatal type mismatches; this preserves the exact-value checks without unchecked
+panics. `decoderUnion.SwitchFunc` uses a normal checked assertion because it
+is a union-discriminant test implementation with no testing handle. A new
+regression verifies that a pending mutual-authentication entry of the wrong
+type is rejected. SPNEGO/client/PKINIT/PKU2U/NEGOEX/NDR focused race suites pass,
+and the changed-line lint gate is clean. The canonical total is 1,658.
 
 Slice 10 (2026-11-18, Q-03/Q-06 I/O and body ownership): production errcheck
 is zero. CLI diagnostics that already select a failing exit code remain

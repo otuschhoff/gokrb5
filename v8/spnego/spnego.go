@@ -99,7 +99,10 @@ func (s *SPNEGO) InitSecContext() (gssapi.ContextToken, error) {
 	if err != nil {
 		return &SPNEGOToken{}, fmt.Errorf("could not create NegTokenInit: %w", err)
 	}
-	mechanismToken := negTokenInit.mechToken.(*KRB5Token)
+	mechanismToken, ok := negTokenInit.mechToken.(*KRB5Token)
+	if !ok || mechanismToken == nil {
+		return &SPNEGOToken{}, errors.New("could not create NegTokenInit: mechanism token is not a Kerberos token")
+	}
 	s.offeredMechTypes = append([]asn1.ObjectIdentifier(nil), negTokenInit.MechTypes...)
 	s.requireMechMIC = len(negTokenInit.MechListMIC) > 0
 	s.authenticator = mechanismToken.APReq.Authenticator

@@ -10,6 +10,15 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/ntstatus"
 )
 
+func mustKrberrorTestType[T any](t *testing.T, value any) T {
+	t.Helper()
+	result, ok := value.(T)
+	if !ok {
+		t.Fatalf("unexpected type %T", value)
+	}
+	return result
+}
+
 func TestErrorf(t *testing.T) {
 	err := fmt.Errorf("an error")
 	var a Krberror
@@ -72,7 +81,7 @@ func TestPolicyErrorContracts(t *testing.T) {
 	if !ok || status != ntstatus.STATUS_ACCOUNT_DISABLED {
 		t.Fatalf("policy NTStatus = %v, %v", status, ok)
 	}
-	withoutStatus := NewPolicyError(ErrProtocolTransitionNotPermitted, errors.New("denied")).(PolicyError) //nolint:errorlint // The test verifies exact wrapper identity; errors.As would accept wrapped forms.
+	withoutStatus := mustKrberrorTestType[PolicyError](t, NewPolicyError(ErrProtocolTransitionNotPermitted, errors.New("denied"))) //nolint:errorlint // The test verifies exact wrapper identity; errors.As would accept wrapped forms.
 	if status, ok := withoutStatus.NTStatus(); ok || status != 0 {
 		t.Fatalf("missing NTStatus = %v, %v", status, ok)
 	}

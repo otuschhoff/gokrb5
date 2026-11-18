@@ -26,6 +26,15 @@ import (
 
 var contextExchangeID atomic.Uint64
 
+func mustSPNEGOTestType[T any](t *testing.T, value any) T {
+	t.Helper()
+	result, ok := value.(T)
+	if !ok {
+		t.Fatalf("unexpected type %T", value)
+	}
+	return result
+}
+
 func TestMutualContextExchange(t *testing.T) {
 	initiator, acceptor, initial := newContextExchange(t, []int{gssapi.ContextFlagMutual, gssapi.ContextFlagInteg})
 	authenticated, _, status := acceptor.AcceptSecContext(initial)
@@ -121,6 +130,26 @@ func TestNonMutualInitiatorContextAvailableAfterInitialToken(t *testing.T) {
 	requireSecurityContextsExchange(t, initiator, acceptor)
 }
 
+func TestHTTPClientRejectsInvalidMutualContextType(t *testing.T) {
+	request, err := http.NewRequest(http.MethodGet, "http://host.test.gokrb5", nil)
+	require.NoError(t, err)
+	_, acceptor, initial := newContextExchange(t, []int{gssapi.ContextFlagMutual})
+	_, _, status := acceptor.AcceptSecContext(initial)
+	require.Equal(t, gssapi.StatusComplete, status.Code)
+	responseBytes, err := acceptor.ResponseToken().Marshal()
+	require.NoError(t, err)
+	response := &http.Response{Header: make(http.Header), Body: http.NoBody}
+	response.Header.Set(HTTPHeaderAuthResponse, "Negotiate "+base64.StdEncoding.EncodeToString(responseBytes))
+
+	httpClient := NewClientWithOptions(nil, nil, "HTTP/host.test.gokrb5", KRB5TokenAPREQOptions{
+		GSSAPIFlags: []int{gssapi.ContextFlagMutual},
+	})
+	httpClient.contexts.Store(request, "not a SPNEGO context")
+	err = httpClient.verifyMutualResponse(request, response)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid type")
+}
+
 func TestHTTPClientPublishesMutualSecurityContext(t *testing.T) {
 	initiator, acceptor, initial := newContextExchange(t, []int{gssapi.ContextFlagMutual, gssapi.ContextFlagInteg})
 	authenticated, _, status := acceptor.AcceptSecContext(initial)
@@ -150,7 +179,7 @@ func TestHTTPClientPublishesMutualSecurityContext(t *testing.T) {
 
 func TestMutualContextExchangeWithMechListMIC(t *testing.T) {
 	initiator, acceptor, initial := newContextExchange(t, []int{gssapi.ContextFlagMutual, gssapi.ContextFlagInteg})
-	initialToken := initial.(*SPNEGOToken)
+	initialToken := mustSPNEGOTestType[*SPNEGOToken](t, initial)
 	initialToken.NegTokenInit.MechTypes = []asn1.ObjectIdentifier{
 		gssapi.OIDMSLegacyKRB5.OID(),
 		gssapi.OIDKRB5.OID(),
@@ -162,7 +191,7 @@ func TestMutualContextExchangeWithMechListMIC(t *testing.T) {
 	authenticated, _, status := acceptor.AcceptSecContext(initial)
 	require.True(t, authenticated, status.Error())
 	require.Equal(t, gssapi.StatusComplete, status.Code)
-	response := acceptor.ResponseToken().(*SPNEGOToken)
+	response := mustSPNEGOTestType[*SPNEGOToken](t, acceptor.ResponseToken())
 	require.NotEmpty(t, response.NegTokenResp.MechListMIC)
 	require.Equal(t, gssapi.OIDMSLegacyKRB5.OID(), response.NegTokenResp.SupportedMech)
 
@@ -173,7 +202,7 @@ func TestMutualContextExchangeWithMechListMIC(t *testing.T) {
 
 func TestContextExchangeRejectsTamperedMechList(t *testing.T) {
 	initiator, acceptor, initial := newContextExchange(t, []int{gssapi.ContextFlagInteg})
-	initialToken := initial.(*SPNEGOToken)
+	initialToken := mustSPNEGOTestType[*SPNEGOToken](t, initial)
 	initialToken.NegTokenInit.MechTypes = []asn1.ObjectIdentifier{
 		gssapi.OIDMSLegacyKRB5.OID(),
 		gssapi.OIDKRB5.OID(),
@@ -194,9 +223,9 @@ func TestLegacyOIDFirstContextExchange(t *testing.T) {
 			gssapi.OIDKRB5.OID(),
 		},
 	})
-	initialToken := initial.(*SPNEGOToken)
+	initialToken := mustSPNEGOTestType[*SPNEGOToken](t, initial)
 	require.Equal(t, gssapi.OIDMSLegacyKRB5.OID(), initialToken.NegTokenInit.MechTypes[0])
-	mechanismToken := initialToken.NegTokenInit.mechToken.(*KRB5Token)
+	mechanismToken := mustSPNEGOTestType[*KRB5Token](t, initialToken.NegTokenInit.mechToken)
 	require.Equal(t, gssapi.OIDMSLegacyKRB5.OID(), mechanismToken.OID)
 	require.Empty(t, initialToken.NegTokenInit.MechListMIC)
 
@@ -220,7 +249,7 @@ func TestRequestMICContextExchange(t *testing.T) {
 	authenticated, _, status := acceptor.AcceptSecContext(initial)
 	require.False(t, authenticated)
 	require.Equal(t, gssapi.StatusContinueNeeded, status.Code)
-	requestMIC := acceptor.ResponseToken().(*SPNEGOToken)
+	requestMIC := mustSPNEGOTestType[*SPNEGOToken](t, acceptor.ResponseToken())
 	require.Equal(t, NegStateRequestMIC, requestMIC.NegTokenResp.State())
 	require.Equal(t, gssapi.OIDKRB5.OID(), requestMIC.NegTokenResp.SupportedMech)
 	require.NotEmpty(t, requestMIC.NegTokenResp.MechListMIC)
@@ -251,7 +280,7 @@ func TestRequestMICContextExchangeWithoutMutualAuth(t *testing.T) {
 	authenticated, _, status := acceptor.AcceptSecContext(initial)
 	require.False(t, authenticated)
 	require.Equal(t, gssapi.StatusContinueNeeded, status.Code)
-	requestMIC := acceptor.ResponseToken().(*SPNEGOToken)
+	requestMIC := mustSPNEGOTestType[*SPNEGOToken](t, acceptor.ResponseToken())
 	require.Empty(t, requestMIC.NegTokenResp.ResponseToken)
 
 	authenticated, _, status = initiator.ContinueSecContext(requestMIC)
@@ -282,7 +311,7 @@ func TestRequestMICContextExchangeRejectsTampering(t *testing.T) {
 			authenticated, _, status := acceptor.AcceptSecContext(initial)
 			require.False(t, authenticated)
 			require.Equal(t, gssapi.StatusContinueNeeded, status.Code)
-			requestMIC := acceptor.ResponseToken().(*SPNEGOToken)
+			requestMIC := mustSPNEGOTestType[*SPNEGOToken](t, acceptor.ResponseToken())
 
 			if tamperResponse != nil {
 				tamperResponse(requestMIC)
@@ -295,7 +324,7 @@ func TestRequestMICContextExchangeRejectsTampering(t *testing.T) {
 			authenticated, _, status = initiator.ContinueSecContext(requestMIC)
 			require.False(t, authenticated)
 			require.Equal(t, gssapi.StatusContinueNeeded, status.Code)
-			initiatorMIC := initiator.ResponseToken().(*SPNEGOToken)
+			initiatorMIC := mustSPNEGOTestType[*SPNEGOToken](t, initiator.ResponseToken())
 			initiatorMIC.NegTokenResp.MechListMIC[len(initiatorMIC.NegTokenResp.MechListMIC)-1] ^= 0xff
 			authenticated, _, status = acceptor.AcceptSecContext(initiatorMIC)
 			require.False(t, authenticated)
