@@ -824,6 +824,17 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 34 (2026-11-18, SPNEGO exchange cookie attributes): cookie G124
+findings are zero. SPNEGO exchange creation and expiration now share one
+cookie constructor, consistently setting `Path=/`, `HttpOnly`, and
+`SameSite=Strict`, with `Secure` tied to the actual TLS state of the request.
+The dynamic transport-aware `Secure` choice is documented with a scoped G124
+exception because forcing it on plaintext HTTP would prevent negotiation.
+The TLS continuation test now exercises a real TLS server, and a direct
+attribute test covers both HTTPS and HTTP cookies. G124 falls 3 to 0, gosec
+falls 80 to 77, and canonical findings fall 1,066 to 1,062; coverage remains
+86.5%.
+
 Slice 33 (2026-11-18, bounded slice traversal): all v8 G602 findings are
 zero. Multidimensional NDR allocation snapshots the next dimension only after
 an explicit nonempty check, and PKINIT SID formatting walks fixed four-byte

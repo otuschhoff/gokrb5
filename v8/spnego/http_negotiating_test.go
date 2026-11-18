@@ -2,6 +2,7 @@ package spnego
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -216,7 +217,10 @@ func TestNegotiatingClientHTTPExchange(t *testing.T) {
 			if request.Header.Get(HTTPHeaderAuthRequest) != "" {
 				t.Error("initial request unexpectedly had authorization")
 			}
-			http.SetCookie(writer, &http.Cookie{Name: contextHTTPExchangeCookie, Value: "exchange-id"})
+			http.SetCookie(writer, &http.Cookie{ // #nosec G124 -- plaintext httptest transport needs a non-Secure continuation cookie.
+				Name: contextHTTPExchangeCookie, Value: "exchange-id", Path: "/",
+				HttpOnly: true, SameSite: http.SameSiteStrictMode,
+			})
 			writer.Header().Set(HTTPHeaderAuthResponse, HTTPHeaderAuthResponseValueKey)
 			http.Error(writer, UnauthorizedMsg, http.StatusUnauthorized)
 			return
@@ -352,6 +356,19 @@ func TestNegotiatingClientProtocolGuards(t *testing.T) {
 	}
 }
 
+func TestContextHTTPExchangeCookieAttributes(t *testing.T) {
+	httpsRequest := mustHTTPRequest(t, http.MethodGet, "https://server.example", nil)
+	httpsRequest.TLS = &tls.ConnectionState{}
+	cookie := contextHTTPExchangeCookieForRequest(httpsRequest, "exchange", 60)
+	if !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode || !cookie.Secure || cookie.Path != "/" || cookie.MaxAge != 60 {
+		t.Fatalf("HTTPS exchange cookie attributes = %+v", cookie)
+	}
+	httpRequest := mustHTTPRequest(t, http.MethodGet, "http://server.example", nil)
+	if contextHTTPExchangeCookieForRequest(httpRequest, "exchange", 60).Secure {
+		t.Fatal("plaintext HTTP exchange cookie unexpectedly marked Secure")
+	}
+}
+
 func TestSPNEGOContextHTTPExchange(t *testing.T) {
 	innerCalls := 0
 	handler := SPNEGOContextAuthenticate(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
@@ -360,7 +377,7 @@ func TestSPNEGOContextHTTPExchange(t *testing.T) {
 	}), func() gssapi.ContextMechanism {
 		return newTestContextMechanism(1, "context-http")
 	})
-	server := httptest.NewServer(handler)
+	server := httptest.NewTLSServer(handler)
 	defer server.Close()
 
 	client := NewNegotiatingClient(server.Client(), "HTTP/server.example", func() gssapi.ContextMechanism {
@@ -593,8 +610,8 @@ func TestLegacyHTTPClientMethodsWithoutChallenge(t *testing.T) {
 	if getResponse.StatusCode != http.StatusNoContent {
 		t.Fatalf("status = %d", getResponse.StatusCode)
 	}
-	if err := getResponse.Body.Close(); err != nil {
-		t.Fatal(err)
+	if closeErr := getResponse.Body.Close(); closeErr != nil {
+		t.Fatal(closeErr)
 	}
 	postResponse, err := client.Post(server.URL+"/post", "text/plain", strings.NewReader("post body"))
 	if err != nil {

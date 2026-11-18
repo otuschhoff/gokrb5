@@ -668,10 +668,7 @@ func SPNEGOContextAuthenticate(inner http.Handler, factory ContextMechanismFacto
 			exchangeID = hex.EncodeToString(idBytes[:])
 			value = &contextHTTPExchange{negotiator: NewNegotiator(mechanism), expires: now.Add(contextHTTPExchangeTTL)}
 			exchanges.Store(exchangeID, value)
-			http.SetCookie(writer, &http.Cookie{
-				Name: contextHTTPExchangeCookie, Value: exchangeID, Path: "/", MaxAge: int(contextHTTPExchangeTTL.Seconds()),
-				HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: request.TLS != nil,
-			})
+			http.SetCookie(writer, contextHTTPExchangeCookieForRequest(request, exchangeID, int(contextHTTPExchangeTTL.Seconds())))
 		}
 		exchange, ok := value.(*contextHTTPExchange)
 		if !ok {
@@ -712,11 +709,15 @@ func SPNEGOContextAuthenticate(inner http.Handler, factory ContextMechanismFacto
 	})
 }
 
-func expireContextHTTPExchangeCookie(writer http.ResponseWriter, request *http.Request) {
-	http.SetCookie(writer, &http.Cookie{
-		Name: contextHTTPExchangeCookie, Path: "/", MaxAge: -1,
+func contextHTTPExchangeCookieForRequest(request *http.Request, value string, maxAge int) *http.Cookie {
+	return &http.Cookie{ // #nosec G124 -- Secure is set when the request arrived over TLS; plaintext behavior is required for plain-HTTP callers.
+		Name: contextHTTPExchangeCookie, Value: value, Path: "/", MaxAge: maxAge,
 		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: request.TLS != nil,
-	})
+	}
+}
+
+func expireContextHTTPExchangeCookie(writer http.ResponseWriter, request *http.Request) {
+	http.SetCookie(writer, contextHTTPExchangeCookieForRequest(request, "", -1))
 }
 
 func getAuthorizationNegotiationHeaderAsSPNEGOToken(spnego *SPNEGO, r *http.Request, w http.ResponseWriter) (*SPNEGOToken, error) {
