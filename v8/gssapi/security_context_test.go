@@ -3,6 +3,7 @@ package gssapi
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -214,7 +215,8 @@ func TestNewSecurityContextRejectsUnsupportedKeys(t *testing.T) {
 	_, err = NewSecurityContext(types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: make([]byte, 15)}, true, 0, 0, false)
 	assert.ErrorContains(t, err, "invalid key length")
 	_, err = NewSecurityContext(types.EncryptionKey{KeyType: 999, KeyValue: make([]byte, 16)}, true, 0, 0, false)
-	assert.Error(t, err)
+	assert.ErrorContains(t, err, "select RFC 4121 context enctype:")
+	assert.ErrorContains(t, errors.Unwrap(err), "unsupported EType")
 }
 
 func TestSecurityContextRejectsMalformedWrapTokens(t *testing.T) {
@@ -281,37 +283,49 @@ func TestSecurityContextRejectsInvalidConfidentialExtraCount(t *testing.T) {
 	assert.ErrorContains(t, err, "extra count")
 }
 
-func TestSecurityContextPropagatesCryptoErrors(t *testing.T) {
+func TestSecurityContextPropagatesSendCryptoErrors(t *testing.T) {
+	t.Parallel()
+
 	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
 
 	unknownEtype := mustSecurityContext(t, key, true, 7, 0, true)
 	unknownEtype.key.KeyType = 999
 	_, err := unknownEtype.Wrap([]byte("message"), false)
-	assert.Error(t, err)
+	assert.ErrorContains(t, err, "select RFC 4121 wrap enctype:")
+	assert.ErrorContains(t, errors.Unwrap(err), "unsupported EType")
 	assert.Equal(t, uint64(7), unknownEtype.sendSequence)
 
 	badSealKey := mustSecurityContext(t, key, true, 7, 0, true)
 	badSealKey.key.KeyValue = []byte("short")
 	_, err = badSealKey.Wrap([]byte("message"), true)
-	assert.Error(t, err)
+	assert.ErrorContains(t, err, "encrypt RFC 4121 wrap token:")
+	assert.ErrorContains(t, errors.Unwrap(err), "incorrect keysize")
 	assert.Equal(t, uint64(7), badSealKey.sendSequence)
 
 	badSignKey := mustSecurityContext(t, key, true, 7, 0, true)
 	badSignKey.key.KeyValue = []byte("short")
 	_, err = badSignKey.Wrap([]byte("message"), false)
-	assert.Error(t, err)
+	assert.ErrorContains(t, err, "compute RFC 4121 wrap checksum:")
+	assert.ErrorContains(t, errors.Unwrap(err), "incorrect keysize")
 	assert.Equal(t, uint64(7), badSignKey.sendSequence)
 	_, err = badSignKey.GetMIC([]byte("message"))
-	assert.Error(t, err)
+	assert.ErrorContains(t, err, "compute MIC checksum:")
+	assert.ErrorContains(t, errors.Unwrap(err), "incorrect keysize")
 	assert.Equal(t, uint64(7), badSignKey.sendSequence)
+}
 
+func TestSecurityContextPropagatesReceiveCryptoErrors(t *testing.T) {
+	t.Parallel()
+
+	key := getSessionKey()
 	initiator := mustSecurityContext(t, key, true, 0, 0, true)
 	sealed, err := initiator.Wrap([]byte("message"), true)
 	require.NoError(t, err)
 	badDecryptKey := mustSecurityContext(t, key, false, 0, 0, true)
 	badDecryptKey.key.KeyValue = []byte("short")
 	_, _, err = badDecryptKey.Unwrap(sealed)
-	assert.Error(t, err)
+	assert.ErrorContains(t, err, "decrypt RFC 4121 wrap token:")
+	assert.ErrorContains(t, errors.Unwrap(err), "incorrect keysize")
 	assert.Zero(t, badDecryptKey.receiveSequence)
 
 	plainInitiator := mustSecurityContext(t, key, true, 0, 0, true)
@@ -320,8 +334,35 @@ func TestSecurityContextPropagatesCryptoErrors(t *testing.T) {
 	badUnwrapEtype := mustSecurityContext(t, key, false, 0, 0, true)
 	badUnwrapEtype.key.KeyType = 999
 	_, _, err = badUnwrapEtype.Unwrap(plain)
-	assert.Error(t, err)
+	assert.ErrorContains(t, err, "select RFC 4121 unwrap enctype:")
+	assert.ErrorContains(t, errors.Unwrap(err), "unsupported EType")
 	assert.Zero(t, badUnwrapEtype.receiveSequence)
+}
+
+func TestSecurityContextUnwrapPreservesChecksumFailure(t *testing.T) {
+	t.Parallel()
+
+	const sequence = 7
+	key := getSessionKey()
+	initiator := mustSecurityContext(t, key, true, sequence, 0, false)
+	acceptor := mustSecurityContext(t, key, false, 0, sequence, false)
+	message := []byte("integrity-protected payload")
+	token, err := initiator.Wrap(message, false)
+	require.NoError(t, err)
+
+	acceptor.key.KeyValue = []byte("short")
+	decoded, confidential, err := acceptor.Unwrap(token)
+	assert.Nil(t, decoded)
+	assert.False(t, confidential)
+	assert.ErrorContains(t, err, "compute RFC 4121 wrap checksum:")
+	assert.ErrorContains(t, errors.Unwrap(err), "incorrect keysize")
+	assert.Equal(t, uint64(sequence), acceptor.receiveSequence)
+
+	acceptor.key.KeyValue = key.KeyValue
+	decoded, confidential, err = acceptor.Unwrap(token)
+	require.NoError(t, err)
+	assert.False(t, confidential)
+	assert.Equal(t, message, decoded)
 }
 
 func TestSecurityContextRejectsMalformedMIC(t *testing.T) {

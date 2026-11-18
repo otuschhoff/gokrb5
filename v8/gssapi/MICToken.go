@@ -92,9 +92,13 @@ func (mt *MICToken) checksum(key types.EncryptionKey, keyUsage uint32) ([]byte, 
 
 	encType, err := crypto.GetEtype(key.KeyType)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("select MIC checksum enctype: %w", err)
 	}
-	return encType.GetChecksumHash(key.KeyValue, d, keyUsage)
+	checksum, err := encType.GetChecksumHash(key.KeyValue, d, keyUsage)
+	if err != nil {
+		return nil, fmt.Errorf("compute MIC checksum: %w", err)
+	}
+	return checksum, nil
 }
 
 // Build a header suitable for a checksum computation
@@ -116,9 +120,7 @@ func (mt *MICToken) Verify(key types.EncryptionKey, keyUsage uint32) (bool, erro
 		return false, err
 	}
 	if !hmac.Equal(computed, mt.Checksum) {
-		return false, fmt.Errorf(
-			"checksum mismatch. Computed: %s, Contained in token: %s",
-			hex.EncodeToString(computed), hex.EncodeToString(mt.Checksum))
+		return false, errors.New("checksum mismatch")
 	}
 	return true, nil
 }

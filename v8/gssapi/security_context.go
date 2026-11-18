@@ -28,7 +28,7 @@ type SecurityContext struct {
 func NewSecurityContext(key types.EncryptionKey, initiator bool, sendSequence, receiveSequence uint64, acceptorSubkey bool) (*SecurityContext, error) {
 	etype, err := crypto.GetEtype(key.KeyType)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("select RFC 4121 context enctype: %w", err)
 	}
 	switch key.KeyType {
 	case 17, 18, 19, 20:
@@ -61,13 +61,13 @@ func (context *SecurityContext) Wrap(message []byte, confidential bool) ([]byte,
 	header := wrapHeader(flags, 0, 0, context.sendSequence)
 	etype, err := crypto.GetEtype(context.key.KeyType)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("select RFC 4121 wrap enctype: %w", err)
 	}
 	if confidential {
 		plaintext := append(append([]byte(nil), message...), header...)
 		_, ciphertext, cerr := etype.EncryptMessage(context.key.KeyValue, plaintext, context.sendSealUsage())
 		if cerr != nil {
-			return nil, cerr
+			return nil, fmt.Errorf("encrypt RFC 4121 wrap token: %w", cerr)
 		}
 		context.sendSequence++
 		return append(header, ciphertext...), nil
@@ -81,7 +81,7 @@ func (context *SecurityContext) Wrap(message []byte, confidential bool) ([]byte,
 	checksumHeader := checksumWrapHeader(header)
 	checksum, err := etype.GetChecksumHash(context.key.KeyValue, append(append([]byte(nil), message...), checksumHeader...), context.sendSealUsage())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("compute RFC 4121 wrap checksum: %w", err)
 	}
 	context.sendSequence++
 	header = append(header, message...)
@@ -123,7 +123,7 @@ func (context *SecurityContext) Unwrap(token []byte) ([]byte, bool, error) {
 
 	etype, err := crypto.GetEtype(context.key.KeyType)
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("select RFC 4121 unwrap enctype: %w", err)
 	}
 	if confidential {
 		minimumLength := etype.GetHMACBitLength()/8 + etype.GetConfounderByteSize() + HdrLen
@@ -132,7 +132,7 @@ func (context *SecurityContext) Unwrap(token []byte) ([]byte, bool, error) {
 		}
 		plaintext, perr := crypto.DecryptMessage(body, context.key, context.receiveSealUsage())
 		if perr != nil {
-			return nil, false, perr
+			return nil, false, fmt.Errorf("decrypt RFC 4121 wrap token: %w", perr)
 		}
 		if len(plaintext) < HdrLen+ec {
 			return nil, false, fmt.Errorf("invalid RFC 4121 wrap extra count")
@@ -151,7 +151,10 @@ func (context *SecurityContext) Unwrap(token []byte) ([]byte, bool, error) {
 	}
 	message, checksum := body[:len(body)-ec], body[len(body)-ec:]
 	expected, err := etype.GetChecksumHash(context.key.KeyValue, append(append([]byte(nil), message...), checksumWrapHeader(header)...), context.receiveSealUsage())
-	if err != nil || !hmac.Equal(checksum, expected) {
+	if err != nil {
+		return nil, false, fmt.Errorf("compute RFC 4121 wrap checksum: %w", err)
+	}
+	if !hmac.Equal(checksum, expected) {
 		return nil, false, fmt.Errorf("invalid RFC 4121 wrap checksum")
 	}
 	context.receiveSequence++

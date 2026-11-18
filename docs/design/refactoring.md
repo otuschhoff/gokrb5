@@ -824,6 +824,28 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 47 (2026-11-18, GSSAPI token error contracts; Q-03):
+MIC and wrap token operations now identify the failed enctype lookup,
+checksum, encryption, or decryption operation while preserving its cause.
+Integrity-only unwrap distinguishes a checksum computation failure from a
+mismatch. Mismatch errors no longer include computed or received checksum
+bytes. Token bytes, enctype policy, validation order, and sequence handling
+are unchanged. Regression tests verify that failures do not advance the
+sequence counters and that the same token can be retried after correcting a
+local key error.
+
+Both module suites and changed-line lint gates passed. GSSAPI, SPNEGO, PKU2U,
+NEGOEX, and service packages passed race, build, and vet checks.
+`FuzzSecurityContextUnwrap` and `FuzzSecurityContextVerifyMIC` each passed
+60-second runs (740,831 and 1,496,727 executions). The unwrap seeds now reach
+both integrity and confidentiality validation. Cross-package v8 statement
+coverage was 86.7%, above the 86.0% floor. Live interoperability was not run;
+Docker daemon access was denied.
+
+The canonical v8 total fell from 901 to 888 (`wrapcheck`: 324 to 313).
+All 11 GSSAPI `wrapcheck` reports and two test-helper `unparam` reports were
+resolved, with no new canonical findings and zero v8 gosec findings.
+
 Slice 46 (2026-11-18, password-change error contracts; Q-03):
 The v8 password-change library now identifies the failed encoding, decoding,
 request construction, or decryption operation while retaining the cause.

@@ -3,6 +3,7 @@ package gssapi
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -166,7 +167,7 @@ func TestChecksumVerificationFailure(t *testing.T) {
 
 	// Test a failure with the correct key but wrong keyusage:
 	challengeOk, cErr := wt.Verify(getSessionKey(), initiatorSeal)
-	assert.NotNil(t, cErr, "Expected error did not occur.")
+	assert.EqualError(t, cErr, "checksum mismatch")
 	assert.False(t, challengeOk, "Checksum verification succeeded when it should have failed.")
 
 	wrongKeyVal, _ := hex.DecodeString("14f9bde6b50ec508201a97f74c4effff")
@@ -223,7 +224,9 @@ func TestWrapTokenAdditionalErrorPaths(t *testing.T) {
 	token.CheckSum = []byte{1}
 	assert.Error(t, token.SetCheckSum(getSessionKey(), initiatorSeal))
 	token.CheckSum = nil
-	assert.Error(t, token.SetCheckSum(badKey, initiatorSeal))
+	err := token.SetCheckSum(badKey, initiatorSeal)
+	assert.ErrorContains(t, err, "select wrap checksum enctype:")
+	assert.ErrorContains(t, errors.Unwrap(err), "unsupported EType")
 
 	withoutPayload := WrapToken{CheckSum: []byte{1}}
 	valid, err := withoutPayload.Verify(getSessionKey(), initiatorSeal)
@@ -247,7 +250,9 @@ func TestWrapTokenAdditionalErrorPaths(t *testing.T) {
 	}
 
 	_, err = NewInitiatorWrapToken([]byte("payload"), badKey)
-	assert.Error(t, err)
+	assert.ErrorContains(t, err, "select initiator wrap enctype:")
+	assert.ErrorContains(t, errors.Unwrap(err), "unsupported EType")
 	_, err = NewInitiatorWrapToken([]byte("payload"), types.EncryptionKey{KeyType: sessionKeyType, KeyValue: []byte("short")})
-	assert.Error(t, err)
+	assert.ErrorContains(t, err, "compute wrap token checksum:")
+	assert.ErrorContains(t, errors.Unwrap(err), "incorrect keysize")
 }

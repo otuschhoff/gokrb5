@@ -3,6 +3,7 @@ package gssapi
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -142,16 +143,20 @@ func TestMICChecksumVerificationFailure(t *testing.T) {
 	t.Parallel()
 	challenge, decodeErr := hex.DecodeString(testMICChallengeFromAcceptor)
 	if decodeErr != nil {
-		panic(decodeErr)
+		t.Fatal(decodeErr)
 	}
 	var mt MICToken
 	if err := mt.Unmarshal(challenge, true); err != nil {
 		t.Fatal(err)
 	}
+	mt.Payload, decodeErr = hex.DecodeString(testMICPayload)
+	if decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
 
 	// Test a failure with the correct key but wrong keyusage:
 	challengeOk, cErr := mt.Verify(getSessionKey(), initiatorSign)
-	assert.NotNil(t, cErr, "Expected error did not occur.")
+	assert.EqualError(t, cErr, "checksum mismatch")
 	assert.False(t, challengeOk, "Checksum verification succeeded when it should have failed.")
 
 	wrongKeyVal, _ := hex.DecodeString("14f9bde6b50ec508201a97f74c4effff")
@@ -161,7 +166,7 @@ func TestMICChecksumVerificationFailure(t *testing.T) {
 	}
 	// Test a failure with the wrong key but correct keyusage:
 	wrongKeyOk, wkErr := mt.Verify(badKey, acceptorSign)
-	assert.NotNil(t, wkErr, "Expected error did not occur.")
+	assert.EqualError(t, wkErr, "checksum mismatch")
 	assert.False(t, wrongKeyOk, "Checksum verification succeeded when it should have failed.")
 }
 
@@ -206,7 +211,14 @@ func TestMICTokenErrorPaths(t *testing.T) {
 	token := MICToken{}
 	assert.Error(t, token.SetChecksum(getSessionKey(), initiatorSign))
 	token.Payload = []byte("payload")
-	assert.Error(t, token.SetChecksum(badKey, initiatorSign))
+	err := token.SetChecksum(badKey, initiatorSign)
+	assert.ErrorContains(t, err, "select MIC checksum enctype:")
+	assert.ErrorContains(t, errors.Unwrap(err), "unsupported EType")
+	shortKey := types.EncryptionKey{KeyType: sessionKeyType, KeyValue: []byte("short")}
+	err = token.SetChecksum(shortKey, initiatorSign)
+	assert.ErrorContains(t, err, "compute MIC checksum:")
+	assert.ErrorContains(t, errors.Unwrap(err), "incorrect keysize")
+	assert.Nil(t, token.Checksum)
 	token.Checksum = []byte{1}
 	assert.Error(t, token.SetChecksum(getSessionKey(), initiatorSign))
 

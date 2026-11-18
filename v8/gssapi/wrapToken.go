@@ -101,9 +101,13 @@ func (wt *WrapToken) computeCheckSum(key types.EncryptionKey, keyUsage uint32) (
 
 	encType, err := crypto.GetEtype(key.KeyType)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("select wrap checksum enctype: %w", err)
 	}
-	return encType.GetChecksumHash(key.KeyValue, checksumMe, keyUsage)
+	checksum, err := encType.GetChecksumHash(key.KeyValue, checksumMe, keyUsage)
+	if err != nil {
+		return nil, fmt.Errorf("compute wrap token checksum: %w", err)
+	}
+	return checksum, nil
 }
 
 // Build a header suitable for a checksum computation
@@ -126,9 +130,7 @@ func (wt *WrapToken) Verify(key types.EncryptionKey, keyUsage uint32) (bool, err
 		return false, cErr
 	}
 	if !hmac.Equal(computed, wt.CheckSum) {
-		return false, fmt.Errorf(
-			"checksum mismatch. Computed: %s, Contained in token: %s",
-			hex.EncodeToString(computed), hex.EncodeToString(wt.CheckSum))
+		return false, errors.New("checksum mismatch")
 	}
 	return true, nil
 }
@@ -189,7 +191,7 @@ func (wt *WrapToken) Unmarshal(b []byte, expectFromAcceptor bool) error {
 func NewInitiatorWrapToken(payload []byte, key types.EncryptionKey) (*WrapToken, error) {
 	encType, err := crypto.GetEtype(key.KeyType)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("select initiator wrap enctype: %w", err)
 	}
 
 	checksumLength, err := gssUint16Length("wrap checksum", encType.GetHMACBitLength()/8)

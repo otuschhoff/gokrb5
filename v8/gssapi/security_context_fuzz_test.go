@@ -9,9 +9,12 @@ import (
 
 func FuzzSecurityContextUnwrap(f *testing.F) {
 	key := types.EncryptionKey{KeyType: etypeID.AES256_CTS_HMAC_SHA384_192, KeyValue: []byte("0123456789abcdef0123456789abcdef")}
-	initiator := mustSecurityContext(f, key, true, 0, 0, true)
 	for _, confidential := range []bool{false, true} {
-		token, _ := initiator.Wrap([]byte("seed message"), confidential)
+		initiator := mustSecurityContext(f, key, true, 0, 0, true)
+		token, err := initiator.Wrap([]byte("seed message"), confidential)
+		if err != nil {
+			f.Fatal(err)
+		}
 		f.Add(token)
 	}
 	f.Fuzz(func(t *testing.T, token []byte) {
@@ -19,20 +22,28 @@ func FuzzSecurityContextUnwrap(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, _, _ = acceptor.Unwrap(token)
+		message, confidential, err := acceptor.Unwrap(token)
+		if err != nil && (message != nil || confidential || acceptor.receiveSequence != 0) {
+			t.Fatal("unwrap failure released plaintext or advanced the receive sequence")
+		}
 	})
 }
 
 func FuzzSecurityContextVerifyMIC(f *testing.F) {
 	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
 	initiator := mustSecurityContext(f, key, true, 0, 0, true)
-	token, _ := initiator.GetMIC([]byte("seed message"))
+	token, err := initiator.GetMIC([]byte("seed message"))
+	if err != nil {
+		f.Fatal(err)
+	}
 	f.Add(token, []byte("seed message"))
 	f.Fuzz(func(t *testing.T, token, message []byte) {
 		acceptor, err := NewSecurityContext(key, false, 0, 0, true)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_ = acceptor.VerifyMIC(message, token)
+		if verifyErr := acceptor.VerifyMIC(message, token); verifyErr != nil && acceptor.receiveSequence != 0 {
+			t.Fatal("MIC verification failure advanced the receive sequence")
+		}
 	})
 }
