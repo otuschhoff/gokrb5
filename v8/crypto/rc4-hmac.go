@@ -72,7 +72,7 @@ func (e RC4HMAC) GetCypherBlockBitLength() int {
 // StringToKey returns a key derived from the string provided. RC4-HMAC
 // string-to-key ignores the salt and s2kparams, per RFC 4757.
 func (e RC4HMAC) StringToKey(secret string, _ string, _ string) ([]byte, error) {
-	return rfc4757.StringToKey(secret)
+	return cryptoOperation("rc4-hmac string-to-key").bytes(rfc4757.StringToKey(secret))
 }
 
 // RandomToKey returns a key from the bytes provided.
@@ -87,23 +87,23 @@ func (e RC4HMAC) RandomToKey(b []byte) []byte {
 // EncryptData encrypts the data provided.
 func (e RC4HMAC) EncryptData(key, data []byte) ([]byte, []byte, error) {
 	b, err := rfc4757.EncryptData(key, data, e)
-	return []byte{}, b, err
+	return []byte{}, b, cryptoOperation("rc4-hmac encrypt data").wrap(err)
 }
 
 // EncryptMessage encrypts the message provided and concatenates it with the integrity hash to create an encrypted message.
 func (e RC4HMAC) EncryptMessage(key, message []byte, usage uint32) ([]byte, []byte, error) {
 	b, err := rfc4757.EncryptMessage(key, message, usage, false, e)
-	return []byte{}, b, err
+	return []byte{}, b, cryptoOperation("rc4-hmac encrypt message").wrap(err)
 }
 
 // DecryptData decrypts the data provided.
 func (e RC4HMAC) DecryptData(key, data []byte) ([]byte, error) {
-	return rfc4757.DecryptData(key, data, e)
+	return cryptoOperation("rc4-hmac decrypt data").bytes(rfc4757.DecryptData(key, data, e))
 }
 
 // DecryptMessage decrypts the message provided and verifies the integrity of the message.
 func (e RC4HMAC) DecryptMessage(key, ciphertext []byte, usage uint32) ([]byte, error) {
-	return rfc4757.DecryptMessage(key, ciphertext, usage, false, e)
+	return cryptoOperation("rc4-hmac decrypt message").bytes(rfc4757.DecryptMessage(key, ciphertext, usage, false, e))
 }
 
 // DeriveKey derives a key from the protocol key based on the usage value.
@@ -113,7 +113,7 @@ func (e RC4HMAC) DeriveKey(protocolKey, usage []byte) ([]byte, error) {
 
 // DeriveRandom generates data needed for key generation.
 func (e RC4HMAC) DeriveRandom(protocolKey, usage []byte) ([]byte, error) {
-	return rfc3961.DeriveRandom(protocolKey, usage, e)
+	return cryptoOperation("rc4-hmac derive random").bytes(rfc3961.DeriveRandom(protocolKey, usage, e))
 }
 
 // VerifyIntegrity checks the integrity of the plaintext message.
@@ -123,7 +123,7 @@ func (e RC4HMAC) VerifyIntegrity(protocolKey, ct, pt []byte, _ uint32) bool {
 
 // GetChecksumHash returns a keyed checksum hash of the bytes provided.
 func (e RC4HMAC) GetChecksumHash(protocolKey, data []byte, usage uint32) ([]byte, error) {
-	return rfc4757.Checksum(protocolKey, usage, data)
+	return cryptoOperation("rc4-hmac checksum").bytes(rfc4757.Checksum(protocolKey, usage, data))
 }
 
 // VerifyChecksum compares the checksum of the message bytes is the same as the checksum provided.

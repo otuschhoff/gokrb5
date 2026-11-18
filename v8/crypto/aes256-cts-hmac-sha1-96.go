@@ -70,7 +70,7 @@ func (e Aes256CtsHmacSha96) GetCypherBlockBitLength() int {
 
 // StringToKey returns a key derived from the string provided.
 func (e Aes256CtsHmacSha96) StringToKey(secret string, salt string, s2kparams string) ([]byte, error) {
-	return rfc3962.StringToKey(secret, salt, s2kparams, e)
+	return cryptoOperation("aes256-cts-hmac-sha1-96 string-to-key").bytes(rfc3962.StringToKey(secret, salt, s2kparams, e))
 }
 
 // RandomToKey returns a key from the bytes provided.
@@ -80,32 +80,36 @@ func (e Aes256CtsHmacSha96) RandomToKey(b []byte) []byte {
 
 // EncryptData encrypts the data provided.
 func (e Aes256CtsHmacSha96) EncryptData(key, data []byte) ([]byte, []byte, error) {
-	return rfc3962.EncryptData(key, data, e)
+	return cryptoOperation("aes256-cts-hmac-sha1-96 encrypt data").blocks(rfc3962.EncryptData(key, data, e))
 }
 
 // EncryptMessage encrypts the message provided and concatenates it with the integrity hash to create an encrypted message.
 func (e Aes256CtsHmacSha96) EncryptMessage(key, message []byte, usage uint32) ([]byte, []byte, error) {
-	return rfc3962.EncryptMessage(key, message, usage, e)
+	return cryptoOperation("aes256-cts-hmac-sha1-96 encrypt message").blocks(
+		rfc3962.EncryptMessage(key, message, usage, e),
+	)
 }
 
 // DecryptData decrypts the data provided.
 func (e Aes256CtsHmacSha96) DecryptData(key, data []byte) ([]byte, error) {
-	return rfc3962.DecryptData(key, data, e)
+	return cryptoOperation("aes256-cts-hmac-sha1-96 decrypt data").bytes(rfc3962.DecryptData(key, data, e))
 }
 
 // DecryptMessage decrypts the message provided and verifies the integrity of the message.
 func (e Aes256CtsHmacSha96) DecryptMessage(key, ciphertext []byte, usage uint32) ([]byte, error) {
-	return rfc3962.DecryptMessage(key, ciphertext, usage, e)
+	return cryptoOperation("aes256-cts-hmac-sha1-96 decrypt message").bytes(
+		rfc3962.DecryptMessage(key, ciphertext, usage, e),
+	)
 }
 
 // DeriveKey derives a key from the protocol key based on the usage value.
 func (e Aes256CtsHmacSha96) DeriveKey(protocolKey, usage []byte) ([]byte, error) {
-	return rfc3961.DeriveKey(protocolKey, usage, e)
+	return cryptoOperation("aes256-cts-hmac-sha1-96 derive key").bytes(rfc3961.DeriveKey(protocolKey, usage, e))
 }
 
 // DeriveRandom generates data needed for key generation.
 func (e Aes256CtsHmacSha96) DeriveRandom(protocolKey, usage []byte) ([]byte, error) {
-	return rfc3961.DeriveRandom(protocolKey, usage, e)
+	return cryptoOperation("aes256-cts-hmac-sha1-96 derive random").bytes(rfc3961.DeriveRandom(protocolKey, usage, e))
 }
 
 // VerifyIntegrity checks the integrity of the plaintext message.
@@ -115,7 +119,9 @@ func (e Aes256CtsHmacSha96) VerifyIntegrity(protocolKey, ct, pt []byte, usage ui
 
 // GetChecksumHash returns a keyed checksum hash of the bytes provided.
 func (e Aes256CtsHmacSha96) GetChecksumHash(protocolKey, data []byte, usage uint32) ([]byte, error) {
-	return common.GetHash(data, protocolKey, common.GetUsageKc(usage), e)
+	return cryptoOperation("aes256-cts-hmac-sha1-96 checksum").bytes(
+		common.GetHash(data, protocolKey, common.GetUsageKc(usage), e),
+	)
 }
 
 // VerifyChecksum compares the checksum of the message bytes is the same as the checksum provided.

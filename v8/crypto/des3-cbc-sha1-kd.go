@@ -75,7 +75,7 @@ func (e Des3CbcSha1Kd) StringToKey(secret string, salt string, s2kparams string)
 	if s2kparams != "" {
 		return []byte{}, errors.New("s2kparams must be an empty string")
 	}
-	return rfc3961.DES3StringToKey(secret, salt, e)
+	return cryptoOperation("des3-cbc-sha1-kd string-to-key").bytes(rfc3961.DES3StringToKey(secret, salt, e))
 }
 
 // RandomToKey returns a key from the bytes provided.
@@ -85,8 +85,7 @@ func (e Des3CbcSha1Kd) RandomToKey(b []byte) []byte {
 
 // DeriveRandom generates data needed for key generation.
 func (e Des3CbcSha1Kd) DeriveRandom(protocolKey, usage []byte) ([]byte, error) {
-	r, err := rfc3961.DeriveRandom(protocolKey, usage, e)
-	return r, err
+	return cryptoOperation("des3-cbc-sha1-kd derive random").bytes(rfc3961.DeriveRandom(protocolKey, usage, e))
 }
 
 // DeriveKey derives a key from the protocol key based on the usage value.
@@ -100,22 +99,24 @@ func (e Des3CbcSha1Kd) DeriveKey(protocolKey, usage []byte) ([]byte, error) {
 
 // EncryptData encrypts the data provided.
 func (e Des3CbcSha1Kd) EncryptData(key, data []byte) ([]byte, []byte, error) {
-	return rfc3961.DES3EncryptData(key, data, e)
+	return cryptoOperation("des3-cbc-sha1-kd encrypt data").blocks(rfc3961.DES3EncryptData(key, data, e))
 }
 
 // EncryptMessage encrypts the message provided and concatenates it with the integrity hash to create an encrypted message.
 func (e Des3CbcSha1Kd) EncryptMessage(key, message []byte, usage uint32) ([]byte, []byte, error) {
-	return rfc3961.DES3EncryptMessage(key, message, usage, e)
+	return cryptoOperation("des3-cbc-sha1-kd encrypt message").blocks(rfc3961.DES3EncryptMessage(key, message, usage, e))
 }
 
 // DecryptData decrypts the data provided.
 func (e Des3CbcSha1Kd) DecryptData(key, data []byte) ([]byte, error) {
-	return rfc3961.DES3DecryptData(key, data, e)
+	return cryptoOperation("des3-cbc-sha1-kd decrypt data").bytes(rfc3961.DES3DecryptData(key, data, e))
 }
 
 // DecryptMessage decrypts the message provided and verifies the integrity of the message.
 func (e Des3CbcSha1Kd) DecryptMessage(key, ciphertext []byte, usage uint32) ([]byte, error) {
-	return rfc3961.DES3DecryptMessage(key, ciphertext, usage, e)
+	return cryptoOperation("des3-cbc-sha1-kd decrypt message").bytes(
+		rfc3961.DES3DecryptMessage(key, ciphertext, usage, e),
+	)
 }
 
 // VerifyIntegrity checks the integrity of the plaintext message.
@@ -125,7 +126,9 @@ func (e Des3CbcSha1Kd) VerifyIntegrity(protocolKey, ct, pt []byte, usage uint32)
 
 // GetChecksumHash returns a keyed checksum hash of the bytes provided.
 func (e Des3CbcSha1Kd) GetChecksumHash(protocolKey, data []byte, usage uint32) ([]byte, error) {
-	return common.GetHash(data, protocolKey, common.GetUsageKc(usage), e)
+	return cryptoOperation("des3-cbc-sha1-kd checksum").bytes(
+		common.GetHash(data, protocolKey, common.GetUsageKc(usage), e),
+	)
 }
 
 // VerifyChecksum compares the checksum of the message bytes is the same as the checksum provided.

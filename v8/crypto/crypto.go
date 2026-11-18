@@ -107,9 +107,9 @@ func GetKeyFromPasswordForETypes(passwd string, cname types.PrincipalName, realm
 			if err := entries.Unmarshal(pa.PADataValue); err != nil {
 				return key, nil, fmt.Errorf("error unmarshalling PA Data to PA-ETYPE-INFO2: %w", err)
 			}
-			saltPresent, err := etypeInfo2SaltPresence(pa.PADataValue)
-			if err != nil || len(saltPresent) != len(entries) {
-				return key, nil, fmt.Errorf("error determining PA-ETYPE-INFO2 salt presence")
+			saltPresent, err := etypeInfo2SaltPresence(pa.PADataValue, len(entries))
+			if err != nil {
+				return key, nil, err
 			}
 			for i, entry := range entries {
 				if _, ok := requested[entry.EType]; ok {
@@ -179,14 +179,17 @@ func GetKeyFromPasswordForETypes(passwd string, cname types.PrincipalName, realm
 	return key, et, nil
 }
 
-func etypeInfo2SaltPresence(data []byte) ([]bool, error) {
+func etypeInfo2SaltPresence(data []byte, entryCount int) ([]bool, error) {
 	type rawEntry struct {
 		EType int32         `asn1:"explicit,tag:0"`
 		Salt  asn1.RawValue `asn1:"optional"`
 	}
 	var entries []rawEntry
 	if _, err := asn1.Unmarshal(data, &entries); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode etype-info2 salt fields: %w", err)
+	}
+	if len(entries) != entryCount {
+		return nil, fmt.Errorf("error determining PA-ETYPE-INFO2 salt presence")
 	}
 	present := make([]bool, len(entries))
 	for i, entry := range entries {
@@ -255,9 +258,9 @@ func krbFXPRFPlus(key, pepper []byte, length int, et etype.EType) ([]byte, error
 func krbFXPseudoRandom(key, input []byte, et etype.EType) ([]byte, error) {
 	switch et.GetETypeID() {
 	case etypeID.AES128_CTS_HMAC_SHA256_128, etypeID.AES256_CTS_HMAC_SHA384_192:
-		return rfc8009.DeriveRandom(key, input, et)
+		return cryptoOperation("compute aes-sha2 prf").bytes(rfc8009.DeriveRandom(key, input, et))
 	default:
-		return rfc3961.PseudoRandom(key, input, et)
+		return cryptoOperation("compute rfc3961 prf").bytes(rfc3961.PseudoRandom(key, input, et))
 	}
 }
 
@@ -271,7 +274,7 @@ func GetEncryptedData(plainBytes []byte, key types.EncryptionKey, usage uint32, 
 	}
 	_, b, err := et.EncryptMessage(key.KeyValue, plainBytes, usage)
 	if err != nil {
-		return ed, err
+		return ed, fmt.Errorf("encrypt data with enctype %d: %w", key.KeyType, err)
 	}
 
 	ed = types.EncryptedData{

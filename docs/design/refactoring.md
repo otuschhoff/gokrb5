@@ -824,6 +824,30 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 55 (2026-11-18, encryption profile error contracts; Q-03):
+The top-level v8 crypto package adds operation and profile context to
+key derivation, encryption, decryption, checksum, and FAST PRF failures.
+It preserves the original causes and the profiles' existing return values,
+including empty versus nil slices. PA-ETYPE-INFO2 salt detection retains
+ASN.1 decode errors and still rejects mismatched entry counts. Error context
+does not include key, password, salt, or plaintext bytes. Cryptographic
+primitives, wire formats, and enctype policy are unchanged.
+
+Regression tests cover bad key sizes and short ciphertexts across all six
+profiles, string-to-key parameter errors, partial derivation results, and
+typed ASN.1 failures. Both module suites, focused race/build/vet checks,
+Linux/386 crypto tests, and both changed-line lint gates passed. V8
+cross-package statement coverage remained 87.1%. The 60-second GSSAPI
+unwrap rerun and MIC verification fuzz run passed 692,809 and 1,499,899
+executions, respectively. Live interoperability was not run; Docker daemon
+access was denied.
+
+All 48 top-level crypto `wrapcheck` reports were resolved. Canonical v8
+findings fell from 726 to 678 (`wrapcheck`: 155 to 107); the supplemental
+total remained 3,685. Neither profile introduced findings, and v8
+continued to report zero gosec findings. RFC subpackage findings are
+outside this slice.
+
 Slice 54 (2026-11-18, Kerberos message error contracts; Q-03):
 AS and TGS request builders retain random-source failures with nonce
 context. Ticket, KRB-PRIV, and S4U operations identify encoding, decoding,
