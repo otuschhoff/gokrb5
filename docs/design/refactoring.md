@@ -824,6 +824,19 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 25 (2026-11-18, credential-cache wire ranges): credentials G115
+findings are zero. Cache unmarshalling now decodes signed fields directly and
+marshalling uses checked int32/uint16 helpers for header, principal, key,
+timestamp, address, authorization-data, and payload lengths. Invalid values
+return errors; KDC offset seconds saturate at the signed 32-bit wire boundary
+while preserving the representable microsecond remainder. A regression covers
+both positive and negative duration extremes. The cache version marker is
+compared as a byte, and test fixtures use checked wire encodings with a single
+range-justified annotation. Credentials G115 falls 18 to 0, total G115 falls
+142 to 124, gosec falls 226 to 208 (with credential path/file diagnostics retained as
+intentional caller-selected cache access), and canonical findings fall 1,216
+to 1,196; coverage measures 86.9%.
+
 Slice 24 (2026-11-18, keytab wire-range classification): keytab G115 findings
 are zero. Marshal paths now validate every narrowed signed timestamp, component count,
 string/key length, record length, enctype, and principal-name field before

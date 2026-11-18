@@ -3,6 +3,7 @@ package credentials
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,14 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
+
+func mustCCacheUint32(t *testing.T, name string, value int64) uint32 {
+	t.Helper()
+	if value < 0 || value > math.MaxUint32 {
+		t.Fatalf("%s %d exceeds uint32 range", name, value)
+	}
+	return uint32(value) // #nosec G115 -- value is explicitly bounded to the complete uint32 range above.
+}
 
 // TestCCacheUnmarshalFullTruncationSweep unmarshals every strict prefix of each
 // fixture: a prefix may only parse successfully when it ends exactly on a
@@ -134,11 +143,11 @@ func TestCCacheV1V2NativeByteOrder(t *testing.T) {
 		return b
 	}
 	dataField := func(s string) []byte {
-		return append(uint32Bytes(uint32(len(s))), s...)
+		return append(uint32Bytes(mustCCacheUint32(t, "string length", int64(len(s)))), s...)
 	}
 	principalV1 := func(realm string, components ...string) []byte {
 		// Version 1 omits the name type and counts the realm as a component.
-		b := uint32Bytes(uint32(len(components) + 1))
+		b := uint32Bytes(mustCCacheUint32(t, "principal component count", int64(len(components))+1))
 		b = append(b, dataField(realm)...)
 		for _, c := range components {
 			b = append(b, dataField(c)...)
@@ -146,7 +155,7 @@ func TestCCacheV1V2NativeByteOrder(t *testing.T) {
 		return b
 	}
 	principalV2 := func(realm string, components ...string) []byte {
-		b := append(uint32Bytes(uint32(nametype.KRB_NT_PRINCIPAL)), uint32Bytes(uint32(len(components)))...)
+		b := append(uint32Bytes(uint32(nametype.KRB_NT_PRINCIPAL)), uint32Bytes(mustCCacheUint32(t, "principal component count", int64(len(components))))...)
 		b = append(b, dataField(realm)...)
 		for _, c := range components {
 			b = append(b, dataField(c)...)

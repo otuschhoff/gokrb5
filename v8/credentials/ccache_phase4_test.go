@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -568,7 +569,20 @@ func TestKDCTimeOffsetWireEncoding(t *testing.T) {
 	cache := NewCCache(types.PrincipalName{NameType: 1, NameString: []string{"user"}}, "EXAMPLE.ORG")
 	cache.SetKDCTimeOffset(6*time.Second + 25*time.Microsecond)
 	if assert.Len(t, cache.Header.fields, 1) {
-		assert.Equal(t, int32(6), int32(binary.BigEndian.Uint32(cache.Header.fields[0].value[:4])))
-		assert.Equal(t, int32(25), int32(binary.BigEndian.Uint32(cache.Header.fields[0].value[4:])))
+		assert.Equal(t, uint32(6), binary.BigEndian.Uint32(cache.Header.fields[0].value[:4]))
+		assert.Equal(t, uint32(25), binary.BigEndian.Uint32(cache.Header.fields[0].value[4:]))
+	}
+
+	cache.SetKDCTimeOffset(time.Duration(math.MaxInt64))
+	offset, ok := cache.KDCTimeOffset()
+	positiveWant := time.Duration(math.MaxInt32)*time.Second + 854775*time.Microsecond
+	if !ok || offset != positiveWant {
+		t.Fatalf("positive KDC offset saturation = %v, %t", offset, ok)
+	}
+	cache.SetKDCTimeOffset(time.Duration(math.MinInt64))
+	offset, ok = cache.KDCTimeOffset()
+	negativeWant := time.Duration(math.MinInt32)*time.Second - 854775*time.Microsecond
+	if !ok || offset != negativeWant {
+		t.Fatalf("negative KDC offset saturation = %v, %t", offset, ok)
 	}
 }

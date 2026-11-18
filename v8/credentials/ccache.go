@@ -1,6 +1,7 @@
 package credentials
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -93,7 +94,7 @@ func (c *CCache) Unmarshal(b []byte) error {
 	}
 	p := 0
 	// The first byte of the file always has the value 5
-	if int8(b[p]) != 5 {
+	if b[p] != 5 {
 		return errors.New("Invalid credential cache data. First byte does not equal 5")
 	}
 	p++
@@ -449,9 +450,12 @@ func readInt32(b []byte, p *int, e binary.ByteOrder) (int32, error) {
 	if *p < 0 || len(b)-*p < 4 {
 		return 0, io.ErrUnexpectedEOF
 	}
-	v := int32(e.Uint32(b[*p : *p+4]))
+	var value int32
+	if err := binary.Read(bytes.NewReader(b[*p:*p+4]), e, &value); err != nil {
+		return 0, fmt.Errorf("read credential cache int32: %w", err)
+	}
 	*p += 4
-	return v, nil
+	return value, nil
 }
 
 func readBytes(b []byte, p *int, size int) ([]byte, error) {
