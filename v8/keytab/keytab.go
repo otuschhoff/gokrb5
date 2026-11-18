@@ -382,7 +382,7 @@ func principalMatches(candidate, requested Principal) bool {
 
 // GetEncryptionKey returns the EncryptionKey and KVNO from the best matching keytab entry.
 func (kt *Keytab) GetEncryptionKey(princName types.PrincipalName, realm string, kvno int, etype int32) (types.EncryptionKey, int, error) {
-	if kvno < 0 {
+	if kvno < 0 || uint64(kvno) > uint64(^uint32(0)) {
 		return types.EncryptionKey{}, 0, fmt.Errorf("%w: kvno %d", ErrKVNONotFound, kvno)
 	}
 	entry, err := kt.GetEntry(Principal{
@@ -808,6 +808,9 @@ func readEntryKey(b []byte, p *int, ke *Entry, e *binary.ByteOrder) (uint8, erro
 	if err != nil {
 		return 0, err
 	}
+	if keyType < 0 {
+		return 0, fmt.Errorf("encryption type cannot be negative: %d", keyType)
+	}
 	ke.Key.KeyType = int32(keyType)
 	keyValue, err := readSizedBytes(b, p, e)
 	if err != nil {
@@ -844,11 +847,29 @@ func (e Entry) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
 	}
 	b = append(b, pb...)
 
+	timestamp, err := keytabInt32("timestamp", e.Timestamp.Unix())
+	if err != nil {
+		return b, err
+	}
+	keyType, err := keytabUint16("encryption type", int64(e.Key.KeyType))
+	if err != nil {
+		return b, err
+	}
+	keyLength, err := keytabUint16("key length", int64(len(e.Key.KeyValue)))
+	if err != nil {
+		return b, err
+	}
 	t := make([]byte, 9)
-	endian.PutUint32(t[0:4], uint32(e.Timestamp.Unix()))
-	t[4] = byte(e.KVNO)
-	endian.PutUint16(t[5:7], uint16(e.Key.KeyType))
-	endian.PutUint16(t[7:9], uint16(len(e.Key.KeyValue)))
+	var timestampBytes bytes.Buffer
+	if writeErr := binary.Write(&timestampBytes, endian, timestamp); writeErr != nil {
+		return b, writeErr
+	}
+	copy(t[0:4], timestampBytes.Bytes())
+	var kvno [4]byte
+	binary.BigEndian.PutUint32(kvno[:], e.KVNO)
+	t[4] = kvno[3]
+	endian.PutUint16(t[5:7], keyType)
+	endian.PutUint16(t[7:9], keyLength)
 	b = append(b, t...)
 
 	buf := new(bytes.Buffer)
@@ -865,8 +886,12 @@ func (e Entry) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
 	}
 
 	// Add the length header
+	recordLength, err := keytabUint32("record length", int64(len(b)))
+	if err != nil {
+		return b, err
+	}
 	t = make([]byte, 4)
-	endian.PutUint32(t, uint32(len(b)))
+	endian.PutUint32(t, recordLength)
 	b = append(t, b...)
 	return b, nil
 }
@@ -903,6 +928,9 @@ func parsePrincipal(b []byte, p *int, version uint8, e *binary.ByteOrder) (Princ
 		if err != nil {
 			return Principal{}, err
 		}
+		if principal.NameType < 0 {
+			return Principal{}, fmt.Errorf("principal name type cannot be negative: %d", principal.NameType)
+		}
 	}
 	return principal, nil
 }
@@ -913,7 +941,11 @@ func (p Principal) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
 	if v == 1 {
 		componentCount++
 	}
-	endian.PutUint16(b[0:], uint16(componentCount))
+	count, err := keytabUint16("principal component count", int64(componentCount))
+	if err != nil {
+		return b, err
+	}
+	endian.PutUint16(b[0:], count)
 	realm, err := marshalString(p.Realm, endian)
 	if err != nil {
 		return b, err
@@ -927,19 +959,48 @@ func (p Principal) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
 		b = append(b, cb...)
 	}
 	if v != 1 {
+		nameType, err := keytabUint32("principal name type", int64(p.NameType))
+		if err != nil {
+			return b, err
+		}
 		t := make([]byte, 4)
-		endian.PutUint32(t, uint32(p.NameType))
+		endian.PutUint32(t, nameType)
 		b = append(b, t...)
 	}
 	return b, nil
 }
 
+func keytabInt32(name string, value int64) (int32, error) {
+	if value < -1<<31 || value > 1<<31-1 {
+		return 0, fmt.Errorf("keytab %s %d exceeds int32 range", name, value)
+	}
+	return int32(value), nil
+}
+
+func keytabUint16(name string, value int64) (uint16, error) {
+	if value < 0 || value > int64(^uint16(0)) {
+		return 0, fmt.Errorf("keytab %s %d exceeds uint16 range", name, value)
+	}
+	return uint16(value), nil
+}
+
+func keytabUint32(name string, value int64) (uint32, error) {
+	if value < 0 || value > int64(^uint32(0)) {
+		return 0, fmt.Errorf("keytab %s %d exceeds uint32 range", name, value)
+	}
+	return uint32(value), nil
+}
+
 func marshalString(s string, endian binary.ByteOrder) ([]byte, error) {
 	sb := []byte(s)
+	length, err := keytabUint16("string length", int64(len(sb)))
+	if err != nil {
+		return nil, err
+	}
 	b := make([]byte, 2)
-	endian.PutUint16(b[0:], uint16(len(sb)))
+	endian.PutUint16(b[0:], length)
 	buf := new(bytes.Buffer)
-	err := binary.Write(buf, endian, sb)
+	err = binary.Write(buf, endian, sb)
 	if err != nil {
 		return b, err
 	}
@@ -982,7 +1043,9 @@ func readInt16(b []byte, p *int, e *binary.ByteOrder) (int16, error) {
 		return 0, fmt.Errorf("need 2 bytes at offset %d, input length is %d", *p, len(b))
 	}
 
-	i = int16((*e).Uint16(b[*p : *p+2]))
+	if readErr := binary.Read(bytes.NewReader(b[*p:*p+2]), *e, &i); readErr != nil {
+		return 0, readErr
+	}
 	*p += 2
 	return i, err
 }
@@ -999,7 +1062,9 @@ func readInt32(b []byte, p *int, e *binary.ByteOrder) (int32, error) {
 		return 0, fmt.Errorf("need 4 bytes at offset %d, input length is %d", *p, len(b))
 	}
 
-	i = int32((*e).Uint32(b[*p : *p+4]))
+	if readErr := binary.Read(bytes.NewReader(b[*p:*p+4]), *e, &i); readErr != nil {
+		return 0, readErr
+	}
 	*p += 4
 	return i, err
 }
@@ -1072,7 +1137,10 @@ func nativeByteOrder() binary.ByteOrder {
 }
 
 func validRecordLength(b []byte, endian binary.ByteOrder, remaining int) bool {
-	l := int32(endian.Uint32(b))
+	var l int32
+	if err := binary.Read(bytes.NewReader(b[:4]), endian, &l); err != nil {
+		return false
+	}
 	if l == 0 {
 		return true
 	}

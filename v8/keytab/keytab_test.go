@@ -1,6 +1,7 @@
 package keytab
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +22,38 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
+
+func mustKeytabUint32(t *testing.T, name string, value int) uint32 {
+	t.Helper()
+	result, err := keytabUint32(name, int64(value))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func mustKeytabUint32NoTest(name string, value int) uint32 {
+	result, err := keytabUint32(name, int64(value))
+	if err != nil {
+		panic(err)
+	}
+	return result
+}
+
+func keytabTestByte(value uint32) byte {
+	var encoded [4]byte
+	binary.BigEndian.PutUint32(encoded[:], value)
+	return encoded[3]
+}
+
+func putKeytabTestInt16(t *testing.T, b []byte, endian binary.ByteOrder, value int16) {
+	t.Helper()
+	var encoded bytes.Buffer
+	if err := binary.Write(&encoded, endian, value); err != nil {
+		t.Fatal(err)
+	}
+	copy(b, encoded.Bytes())
+}
 
 func TestUnmarshalAllFixtures(t *testing.T) {
 	type expectedEntry struct {
@@ -170,6 +204,61 @@ func TestMarshal(t *testing.T) {
 	}
 }
 
+func TestMarshalRejectsWireRangeOverflow(t *testing.T) {
+	base := testEntry(1)
+	tests := []struct {
+		name   string
+		mutate func(*Entry)
+	}{
+		{name: "timestamp below int32", mutate: func(entry *Entry) { entry.Timestamp = time.Unix(-1<<31-1, 0) }},
+		{name: "timestamp beyond int32", mutate: func(entry *Entry) { entry.Timestamp = time.Unix(1<<31, 0) }},
+		{name: "negative enctype", mutate: func(entry *Entry) { entry.Key.KeyType = -1 }},
+		{name: "enctype beyond uint16", mutate: func(entry *Entry) { entry.Key.KeyType = 1 << 16 }},
+		{name: "key length beyond uint16", mutate: func(entry *Entry) { entry.Key.KeyValue = make([]byte, 1<<16) }},
+		{name: "negative name type", mutate: func(entry *Entry) { entry.Principal.NameType = -1 }},
+		{name: "realm length beyond uint16", mutate: func(entry *Entry) { entry.Principal.Realm = strings.Repeat("x", 1<<16) }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			entry := base
+			entry.Key.KeyValue = append([]byte(nil), base.Key.KeyValue...)
+			entry.Principal.Components = append([]string(nil), base.Principal.Components...)
+			test.mutate(&entry)
+			if _, err := entry.marshal(2, binary.BigEndian); err == nil {
+				t.Fatal("entry accepted an out-of-range wire field")
+			}
+		})
+	}
+}
+
+func TestMarshalPreservesSignedTimestampBoundary(t *testing.T) {
+	entry := testEntry(1)
+	entry.Timestamp = time.Unix(-1, 0)
+	encoded, err := entry.marshal(2, binary.BigEndian)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keytab := characterizationKeytab(encoded[4:])
+	decoded := New()
+	if err := decoded.Unmarshal(keytab); err != nil {
+		t.Fatal(err)
+	}
+	if !decoded.Entries[0].Timestamp.Equal(entry.Timestamp) {
+		t.Fatalf("timestamp = %v, want %v", decoded.Entries[0].Timestamp, entry.Timestamp)
+	}
+}
+
+func TestGetEncryptionKeyRejectsKVNOOverflow(t *testing.T) {
+	if strconv.IntSize == 32 {
+		t.Skip("int cannot exceed uint32 on this platform")
+	}
+	kt := New()
+	_, _, err := kt.GetEncryptionKey(types.PrincipalName{}, "", int(int64(^uint32(0))+1), 17)
+	if !errors.Is(err, ErrKVNONotFound) {
+		t.Fatalf("GetEncryptionKey overflow error = %v", err)
+	}
+}
+
 func TestMarshalByteExactVsKtutil(t *testing.T) {
 	for name, fixture := range map[string]string{
 		"all etypes": testdata.KEYTAB_KTUTIL_ALL_ETYPES,
@@ -232,7 +321,7 @@ func TestUnmarshalV1KVNO32(t *testing.T) {
 				t.Fatal(err)
 			}
 			kvno := uint32(300)
-			b[36] = byte(kvno)
+			b[36] = keytabTestByte(kvno)
 			recordLength := test.endian.Uint32(b[2:6])
 			test.endian.PutUint32(b[2:6], recordLength+4)
 			trailer := make([]byte, 4)
@@ -334,7 +423,7 @@ func TestUnmarshalRejectsInvalidComponentCount(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			b := []byte{5, test.version, 0, 0, 0, 2, 0, 0}
 			test.endian.PutUint32(b[2:6], 2)
-			test.endian.PutUint16(b[6:8], uint16(test.count))
+			putKeytabTestInt16(t, b[6:8], test.endian, test.count)
 			err := New().Unmarshal(b)
 			if err == nil || !strings.Contains(err.Error(), "component count") {
 				t.Fatalf("expected component count error, got %v", err)
@@ -393,7 +482,7 @@ func TestErrorsDoNotContainKeyMaterial(t *testing.T) {
 		t.Fatal(err)
 	}
 	keyMaterial := b[len(b)-36 : len(b)-4]
-	binary.BigEndian.PutUint32(b[2:6], uint32(len(b)))
+	binary.BigEndian.PutUint32(b[2:6], mustKeytabUint32(t, "record length", len(b)))
 	err = New().Unmarshal(b)
 	if err == nil {
 		t.Fatal("expected malformed record error")

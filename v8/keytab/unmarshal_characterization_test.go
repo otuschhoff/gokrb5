@@ -3,6 +3,7 @@ package keytab
 import (
 	"encoding/binary"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,7 +16,7 @@ func characterizationKeytab(records ...[]byte) []byte {
 	b := []byte{keytabFirstByte, 2}
 	for _, record := range records {
 		l := make([]byte, 4)
-		binary.BigEndian.PutUint32(l, uint32(len(record)))
+		binary.BigEndian.PutUint32(l, mustKeytabUint32NoTest("record length", len(record)))
 		b = append(b, l...)
 		b = append(b, record...)
 	}
@@ -35,6 +36,30 @@ func characterizationV2Record() []byte {
 	body = append(body, 0, 18)      // enctype
 	body = append(body, 0, 1, 0xAA) // key length and key
 	return body
+}
+
+func TestUnmarshalRejectsNegativeProtocolIdentifiers(t *testing.T) {
+	tests := []struct {
+		name   string
+		offset int
+		size   int
+		want   string
+	}{
+		{name: "name type", offset: 8, size: 4, want: "principal name type cannot be negative"},
+		{name: "enctype", offset: 17, size: 2, want: "encryption type cannot be negative"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			record := characterizationV2Record()
+			for i := test.offset; i < test.offset+test.size; i++ {
+				record[i] = 0xff
+			}
+			err := New().Unmarshal(characterizationKeytab(record))
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
 }
 
 // TestUnmarshalHeaderCharacterization pins the header validation order, exact
@@ -96,7 +121,7 @@ func TestUnmarshalHoleCharacterization(t *testing.T) {
 		filler := []byte{0xAA, 0xBB, 0xCC, 0xDD}
 		record := characterizationV2Record()
 		l := make([]byte, 4)
-		binary.BigEndian.PutUint32(l, uint32(len(record)))
+		binary.BigEndian.PutUint32(l, mustKeytabUint32NoTest("record length", len(record)))
 		b := append([]byte{keytabFirstByte, 2}, hole...)
 		b = append(b, filler...)
 		b = append(b, l...)

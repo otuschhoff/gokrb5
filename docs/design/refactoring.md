@@ -824,6 +824,24 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 24 (2026-11-18, keytab wire-range classification): keytab G115 findings
+are zero. Marshal paths now validate every narrowed signed timestamp, component count,
+string/key length, record length, enctype, and principal-name field before
+encoding; invalid values produce errors instead of wrapping. Signed keytab
+fields are decoded directly as signed values with `binary.Read`, preserving
+all valid v1/v2 on-wire representations without unsafe reinterpretation.
+KVNO lookup rejects values outside the uint32 wire range, while the intended
+low-byte KVNO field is encoded through its four-byte representation. Boundary
+regressions cover signed timestamp boundaries, out-of-range enctypes,
+key/string lengths, name types, and lookup KVNOs; decoding rejects negative
+protocol identifiers and a 60-second fuzz run remains round-trip clean. All
+existing byte-exact fixtures remain
+unchanged. Keytab G115 falls 18 to 0, total G115 falls 160 to 142, gosec falls
+244 to 226, and canonical findings fall 1,231 to 1,216. Aggregate coverage
+measures 87.0%. The remaining keytab
+gosec findings are intentional user-selected file access and the documented
+native-byte-order probe, not unchecked wire narrowing.
+
 Slice 23 (2026-11-18, PAC and PKU2U nil invariants): all v8 NilAway
 findings are zero. NDR dimension parsing handles invalid and nil reflect values
 without method dispatch on missing types, fixed-array decoding checks for an

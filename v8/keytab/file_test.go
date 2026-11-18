@@ -24,7 +24,7 @@ func testEntry(kvno uint32) Entry {
 		Principal: Principal{Realm: "EXAMPLE.ORG", Components: []string{"user"}, NameType: 1},
 		Timestamp: time.Unix(1700000000+int64(kvno), 0),
 		KVNO:      kvno,
-		Key:       types.EncryptionKey{KeyType: 17, KeyValue: bytes.Repeat([]byte{byte(kvno)}, 16)},
+		Key:       types.EncryptionKey{KeyType: 17, KeyValue: bytes.Repeat([]byte{keytabTestByte(kvno)}, 16)},
 	}
 }
 
