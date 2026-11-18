@@ -76,12 +76,16 @@ func sliceDimensions(t reflect.Type) (int, reflect.Type) {
 // makeSubSlices is a deep recursive creation/initialisation of multi-dimensional slices.
 // Takes the reflect.Value of the 1st dimension and a slice of the lengths of the sub dimensions
 func makeSubSlices(v reflect.Value, l []int) {
+	if len(l) == 0 {
+		return
+	}
 	ty := v.Type().Elem()
 	if ty.Kind() != reflect.Slice {
 		return
 	}
+	nextLength := l[0]
 	for i := 0; i < v.Len(); i++ {
-		s := reflect.MakeSlice(ty, l[0], l[0])
+		s := reflect.MakeSlice(ty, nextLength, nextLength)
 		v.Index(i).Set(s)
 		// Are there more sub dimensions?
 		if len(l) > 1 {

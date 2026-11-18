@@ -824,6 +824,15 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 33 (2026-11-18, bounded slice traversal): all v8 G602 findings are
+zero. Multidimensional NDR allocation snapshots the next dimension only after
+an explicit nonempty check, and PKINIT SID formatting walks fixed four-byte
+fields with an explicit remaining-length condition. The SID's declared
+subauthority count is converted to an expected total length before indexing.
+The existing malformed-SID regression and a zero-dimension NDR helper
+regression cover the new guards. G602 falls 5 to 0, gosec falls 85 to 80, and
+canonical findings fall 1,071 to 1,066; coverage remains 86.5%.
+
 Slice 32 (2026-11-18, final protocol wire ranges): all v8 G115 findings are
 zero. Kadmin message/AP_REQ lengths and KKDCP payload framing use checked
 uint16/uint32 encoders; PKINIT padding and KDF counters are bounded before

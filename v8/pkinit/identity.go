@@ -311,8 +311,20 @@ func certificateSID(certificate *x509.Certificate) (string, error) {
 	return "", nil
 }
 
+func sidByteLength(subAuthorityCount byte) (int, error) {
+	count := int(subAuthorityCount)
+	if count > (int(^uint(0)>>1)-8)/4 {
+		return 0, fmt.Errorf("SID is too large")
+	}
+	return 8 + 4*count, nil
+}
+
 func formatSID(sid []byte) (string, error) {
-	if len(sid) < 8 || len(sid) != 8+4*int(sid[1]) {
+	if len(sid) < 8 {
+		return "", fmt.Errorf("invalid binary SID")
+	}
+	expectedLength, err := sidByteLength(sid[1])
+	if err != nil || len(sid) != expectedLength {
 		return "", fmt.Errorf("invalid binary SID")
 	}
 	authority := uint64(0)
@@ -320,8 +332,9 @@ func formatSID(sid []byte) (string, error) {
 		authority = authority<<8 | uint64(value)
 	}
 	parts := []string{fmt.Sprintf("S-%d-%d", sid[0], authority)}
-	for offset := 8; offset < len(sid); offset += 4 {
-		subAuthority := uint32(sid[offset]) | uint32(sid[offset+1])<<8 | uint32(sid[offset+2])<<16 | uint32(sid[offset+3])<<24
+	for offset := 8; offset+4 <= len(sid); offset += 4 {
+		field := sid[offset : offset+4]
+		subAuthority := uint32(field[0]) | uint32(field[1])<<8 | uint32(field[2])<<16 | uint32(field[3])<<24
 		parts = append(parts, fmt.Sprintf("%d", subAuthority))
 	}
 	return strings.Join(parts, "-"), nil

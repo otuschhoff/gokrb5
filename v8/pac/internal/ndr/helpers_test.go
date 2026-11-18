@@ -65,6 +65,7 @@ func TestDimensionHelpers(t *testing.T) {
 		t.Fatalf("slice dimensions = %d, %v", dimensions, base)
 	}
 
+	makeSubSlices(reflect.Value{}, nil)
 	value := reflect.MakeSlice(reflect.TypeOf([][]uint8{}), 2, 2)
 	makeSubSlices(value, []int{3})
 	if value.Index(0).Len() != 3 || value.Index(1).Len() != 3 {
