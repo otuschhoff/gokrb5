@@ -268,7 +268,7 @@ func TestNegotiatingClientHTTPExchange(t *testing.T) {
 }
 
 func TestNegotiatingClientProtocolGuards(t *testing.T) {
-	request, _ := http.NewRequest(http.MethodGet, "http://server.example", nil)
+	request := mustHTTPRequest(t, http.MethodGet, "http://server.example", nil)
 	unexpectedResponse, err := NewNegotiatingClient(nil, "service", nil).Do(request)
 	if unexpectedResponse != nil {
 		_ = unexpectedResponse.Body.Close()
@@ -366,7 +366,7 @@ func TestSPNEGOContextHTTPExchange(t *testing.T) {
 	client := NewNegotiatingClient(server.Client(), "HTTP/server.example", func() gssapi.ContextMechanism {
 		return newTestContextMechanism(1, "context-http")
 	})
-	request, _ := http.NewRequest(http.MethodGet, server.URL, nil)
+	request := mustHTTPRequest(t, http.MethodGet, server.URL, nil)
 	response, err := client.Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -445,7 +445,7 @@ func (closer failingReadCloser) Read([]byte) (int, error) {
 func (closer failingReadCloser) Close() error { return closer.closeErr }
 
 func TestNegotiatingClientErrors(t *testing.T) {
-	request, _ := http.NewRequest(http.MethodGet, "http://example.test", nil)
+	request := mustHTTPRequest(t, http.MethodGet, "http://example.test", nil)
 	client := NewNegotiatingClient(nil, "target", nil)
 	unexpectedResponse, err := client.Do(request)
 	if unexpectedResponse != nil {
@@ -499,7 +499,7 @@ func TestNegotiatingClientErrors(t *testing.T) {
 }
 
 func TestNegotiatingClientTransportAndRoundLimit(t *testing.T) {
-	request, _ := http.NewRequest(http.MethodGet, "http://example.test", nil)
+	request := mustHTTPRequest(t, http.MethodGet, "http://example.test", nil)
 	transportErr := errors.New("transport failed")
 	client := NewNegotiatingClient(&http.Client{Transport: negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, transportErr
@@ -547,7 +547,7 @@ func TestNegotiatingClientTransportAndRoundLimit(t *testing.T) {
 }
 
 func TestNegotiationRequestAndHeaderHelpers(t *testing.T) {
-	request, _ := http.NewRequest(http.MethodPost, "http://example.test", io.NopCloser(strings.NewReader("body")))
+	request := mustHTTPRequest(t, http.MethodPost, "http://example.test", io.NopCloser(strings.NewReader("body")))
 	if _, err := cloneNegotiationRequest(request, 1); err == nil || !strings.Contains(err.Error(), "cannot be replayed") {
 		t.Fatalf("non-replayable body error = %v", err)
 	}
@@ -655,7 +655,7 @@ func TestLegacyHTTPHelpers(t *testing.T) {
 		t.Fatal("successful response treated as an authentication challenge")
 	}
 
-	request, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:8080/path", nil)
+	request := mustHTTPRequest(t, http.MethodGet, "http://127.0.0.1:8080/path", nil)
 	principal, err := setRequestSPN(request)
 	if err != nil || !strings.HasPrefix(principal.PrincipalNameString(), "HTTP/") || request.Host == "" {
 		t.Fatalf("SPN/host/error = %q/%q/%v", principal.PrincipalNameString(), request.Host, err)
@@ -676,7 +676,7 @@ func TestLegacyHTTPHelpers(t *testing.T) {
 }
 
 func TestLegacyHTTPClientChallengeAndRedirectGuards(t *testing.T) {
-	request, _ := http.NewRequest(http.MethodPost, "http://example.test/start", strings.NewReader("body"))
+	request := mustHTTPRequest(t, http.MethodPost, "http://example.test/start", strings.NewReader("body"))
 	httpClient := &http.Client{Transport: negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		header := make(http.Header)
 		header.Set(HTTPHeaderAuthResponse, HTTPHeaderAuthResponseValueKey)

@@ -30,6 +30,27 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 )
 
+func mustHTTPRequest(t testing.TB, method, url string, body io.Reader) *http.Request {
+	t.Helper()
+	request, err := http.NewRequest(method, url, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return request
+}
+
+func mustSPNEGOTestConfig(t testing.TB, content string) *config.Config {
+	t.Helper()
+	cfg, err := config.NewFromString(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg == nil {
+		t.Fatal("NewFromString returned nil config without error")
+	}
+	return cfg
+}
+
 func TestClient_SetSPNEGOHeader(t *testing.T) {
 	test.Integration(t)
 	b, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER1_TEST_GOKRB5)
@@ -38,7 +59,7 @@ func TestClient_SetSPNEGOHeader(t *testing.T) {
 		panic(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustSPNEGOTestConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -61,7 +82,7 @@ func TestClient_SetSPNEGOHeader(t *testing.T) {
 	}
 	for _, url := range urls {
 		for _, p := range paths {
-			r, _ := http.NewRequest("GET", url+p, nil)
+			r := mustHTTPRequest(t, "GET", url+p, nil)
 			httpResp, err := http.DefaultClient.Do(r)
 			if httpResp != nil {
 				defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
@@ -96,7 +117,7 @@ func TestSPNEGOHTTPClient(t *testing.T) {
 		panic(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustSPNEGOTestConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -121,7 +142,7 @@ func TestSPNEGOHTTPClient(t *testing.T) {
 	}
 	for _, url := range urls {
 		for _, p := range paths {
-			r, _ := http.NewRequest("GET", url+p, nil)
+			r := mustHTTPRequest(t, "GET", url+p, nil)
 			httpCl := http.DefaultClient
 			httpCl.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
 				t.Logf("http client redirect: %+v", *req)
@@ -143,7 +164,7 @@ func TestSPNEGOHTTPClient(t *testing.T) {
 func TestService_SPNEGOKRB_NoAuthHeader(t *testing.T) {
 	s := httpServer()
 	defer s.Close()
-	r, _ := http.NewRequest("GET", s.URL, nil)
+	r := mustHTTPRequest(t, "GET", s.URL, nil)
 	httpResp, err := http.DefaultClient.Do(r)
 	if httpResp != nil {
 		defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
@@ -160,7 +181,7 @@ func TestService_SPNEGOKRB_ValidUser(t *testing.T) {
 
 	s := httpServer()
 	defer s.Close()
-	r, _ := http.NewRequest("GET", s.URL, nil)
+	r := mustHTTPRequest(t, "GET", s.URL, nil)
 
 	cl := getClient()
 	err := SetSPNEGOHeader(cl, r, "HTTP/host.test.gokrb5")
@@ -183,7 +204,7 @@ func TestService_SPNEGOKRB_ValidUser_RawKRB5Token(t *testing.T) {
 
 	s := httpServer()
 	defer s.Close()
-	r, _ := http.NewRequest("GET", s.URL, nil)
+	r := mustHTTPRequest(t, "GET", s.URL, nil)
 
 	cl := getClient()
 	sc := SPNEGOClient(cl, "HTTP/host.test.gokrb5")
@@ -216,7 +237,7 @@ func TestService_SPNEGOKRB_Replay(t *testing.T) {
 
 	s := httpServerWithoutSessionManager()
 	defer s.Close()
-	r1, _ := http.NewRequest("GET", s.URL, nil)
+	r1 := mustHTTPRequest(t, "GET", s.URL, nil)
 
 	cl := getClient()
 	err := SetSPNEGOHeader(cl, r1, "HTTP/host.test.gokrb5")
@@ -245,7 +266,7 @@ func TestService_SPNEGOKRB_Replay(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, httpResp.StatusCode, "Status code in response to client with no SPNEGO not as expected. Expected a replay to be detected.")
 
 	// Form a 2nd ticket
-	r2, _ := http.NewRequest("GET", s.URL, nil)
+	r2 := mustHTTPRequest(t, "GET", s.URL, nil)
 
 	err = SetSPNEGOHeader(cl, r2, "HTTP/host.test.gokrb5")
 	if err != nil {
@@ -288,7 +309,7 @@ func TestService_SPNEGOKRB_ReplayCache_Concurrency(t *testing.T) {
 
 	s := httpServerWithoutSessionManager()
 	defer s.Close()
-	r1, _ := http.NewRequest("GET", s.URL, nil)
+	r1 := mustHTTPRequest(t, "GET", s.URL, nil)
 
 	cl := getClient()
 	err := SetSPNEGOHeader(cl, r1, "HTTP/host.test.gokrb5")
@@ -297,7 +318,7 @@ func TestService_SPNEGOKRB_ReplayCache_Concurrency(t *testing.T) {
 	}
 	r1h := r1.Header.Get(HTTPHeaderAuthRequest)
 
-	r2, _ := http.NewRequest("GET", s.URL, nil)
+	r2 := mustHTTPRequest(t, "GET", s.URL, nil)
 
 	err = SetSPNEGOHeader(cl, r2, "HTTP/host.test.gokrb5")
 	if err != nil {
@@ -317,9 +338,9 @@ func TestService_SPNEGOKRB_ReplayCache_Concurrency(t *testing.T) {
 	noReq := 10
 	wg2.Add(noReq * 2)
 	for i := 0; i < noReq; i++ {
-		rr1, _ := http.NewRequest("GET", s.URL, nil)
+		rr1 := mustHTTPRequest(t, "GET", s.URL, nil)
 		rr1.Header.Set(HTTPHeaderAuthRequest, r1h)
-		rr2, _ := http.NewRequest("GET", s.URL, nil)
+		rr2 := mustHTTPRequest(t, "GET", s.URL, nil)
 		rr2.Header.Set(HTTPHeaderAuthRequest, r2h)
 		go httpGet(rr1, &wg2)
 		go httpGet(rr2, &wg2)
@@ -352,7 +373,7 @@ func TestService_SPNEGOKRB_Upload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, _ := http.NewRequest("POST", s.URL, bodyBuf)
+	r := mustHTTPRequest(t, "POST", s.URL, bodyBuf)
 	r.Header.Set("Content-Type", bodyWriter.FormDataContentType())
 
 	cl := getClient()
@@ -386,6 +407,9 @@ func TestDiscardAndCloseReportsReadAndCloseErrors(t *testing.T) {
 	readErr := errors.New("read failed")
 	closeErr := errors.New("close failed")
 	err := discardAndClose(&failingResponseBody{readErr: readErr, closeErr: closeErr})
+	if err == nil {
+		t.Fatal("discardAndClose returned nil error")
+	}
 	if !errors.Is(err, readErr) {
 		t.Fatalf("error %v does not wrap read failure", err)
 	}
@@ -465,7 +489,10 @@ func getClient() *client.Client {
 		panic(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c, err := config.NewFromString(testdata.KRB5_CONF)
+	if err != nil || c == nil {
+		panic("invalid test KRB5 config")
+	}
 	c.LibDefaults.NoAddresses = true
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {

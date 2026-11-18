@@ -2,7 +2,7 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-17 done (formatter normalization,
+(floor raised to 86.0%), and Phase 5 slices 1-18 done (formatter normalization,
 keytab complexity, dead code, mechanical clarity, shadow elimination,
 errorlint, revive mechanical, exported documentation, the NDR carry-over,
 I/O/body-ownership cleanup, checked type assertions, and named-return clarity).
@@ -34,7 +34,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,335 canonical lint findings after Phase 5 slices 1-17 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,293 canonical lint findings after Phase 5 slices 1-18 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -823,6 +823,17 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 18 (2026-11-18, SPNEGO nil invariants): production and test SPNEGO
+NilAway is zero. `cloneNegotiationRequest`, `setRequestSPN`, header-setting,
+and response-token parsing reject nil request/URL/response inputs. Acceptor
+state validation rejects typed-nil SPNEGO/KRB5 tokens and a verified but
+missing Kerberos mechanism token. HTTP and protocol tests now use checked
+request/config fixture helpers and guard expected-error values before method
+calls. A new regression covers nil request, nil URL, nil header input, and
+nil response cases. SPNEGO NilAway falls 39 to 0; full NilAway falls 107 to 65,
+and canonical findings fall 1,335 to 1,293. Full and focused race suites pass;
+coverage remains 86.9%.
 
 Slice 17 (2026-11-18, client nil invariants): client NilAway is zero. Session
 store `get` now considers a nil map entry a miss; destroy skips nil entries,

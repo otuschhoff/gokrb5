@@ -164,6 +164,9 @@ func (client *NegotiatingClient) Do(request *http.Request) (*http.Response, erro
 }
 
 func cloneNegotiationRequest(request *http.Request, attempt int) (*http.Request, error) {
+	if request == nil {
+		return nil, errors.New("HTTP request is nil")
+	}
 	clone := request.Clone(request.Context())
 	clone.Header = request.Header.Clone()
 	if clone.Header == nil {
@@ -420,6 +423,9 @@ func respUnauthorizedNegotiate(resp *http.Response) bool {
 }
 
 func setRequestSPN(r *http.Request) (types.PrincipalName, error) {
+	if r == nil || r.URL == nil {
+		return types.PrincipalName{}, errors.New("HTTP request or URL is nil")
+	}
 	h := strings.TrimSuffix(r.URL.Host, ".")
 	// This if statement checks if the host includes a port number
 	if strings.LastIndex(r.URL.Host, ":") > strings.LastIndex(r.URL.Host, "]") {
@@ -463,6 +469,9 @@ func SetSPNEGOHeaderWithOptions(cl *client.Client, r *http.Request, spn string, 
 }
 
 func setSPNEGOHeaderWithOptions(cl *client.Client, r *http.Request, spn string, options KRB5TokenAPREQOptions) (*SPNEGO, error) {
+	if r == nil {
+		return nil, errors.New("HTTP request is nil")
+	}
 	if cl == nil {
 		return nil, errors.New("kerberos client is nil")
 	}
@@ -499,6 +508,9 @@ func setSPNEGOHeaderWithOptions(cl *client.Client, r *http.Request, spn string, 
 }
 
 func responseSPNEGOToken(resp *http.Response) (*SPNEGOToken, error) {
+	if resp == nil {
+		return nil, errors.New("HTTP response is nil")
+	}
 	parts := strings.SplitN(resp.Header.Get(HTTPHeaderAuthResponse), " ", 2)
 	if len(parts) != 2 || parts[0] != HTTPHeaderAuthResponseValueKey {
 		return nil, nil

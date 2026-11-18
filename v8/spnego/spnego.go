@@ -147,6 +147,9 @@ func (s *SPNEGO) AcceptSecContext(ct gssapi.ContextToken) (bool, context.Context
 	var status gssapi.Status
 	switch token := ct.(type) {
 	case *SPNEGOToken:
+		if token == nil {
+			return false, ctx, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: "SPNEGO context token is nil"}
+		}
 		token.settings = s.serviceSettings
 		var oid asn1.ObjectIdentifier
 		if token.Init && len(token.NegTokenInit.MechTypes) > 0 {
@@ -168,6 +171,9 @@ func (s *SPNEGO) AcceptSecContext(ct gssapi.ContextToken) (bool, context.Context
 			}
 		}
 	case *KRB5Token:
+		if token == nil {
+			return false, ctx, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: "Kerberos context token is nil"}
+		}
 		if !token.raw || !token.IsAPReq() {
 			return false, ctx, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: "raw context token is not a DCE AP_REQ"}
 		}
@@ -180,6 +186,9 @@ func (s *SPNEGO) AcceptSecContext(ct gssapi.ContextToken) (bool, context.Context
 	}
 	if !ok {
 		return ok, ctx, status
+	}
+	if mechanismToken == nil {
+		return false, ctx, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: "verified SPNEGO token has no Kerberos mechanism token"}
 	}
 	var offeredMechTypes []asn1.ObjectIdentifier
 	selectedMech := gssapi.OIDKRB5.OID()

@@ -395,3 +395,22 @@ func TestHTTPBodyReplayContract(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.NoBody, clone.Body)
 }
+
+func TestSPNEGOHTTPNilRequestAndResponseGuards(t *testing.T) {
+	if _, err := cloneNegotiationRequest(nil, 0); err == nil {
+		t.Fatal("nil negotiation request was accepted")
+	}
+	if _, err := setRequestSPN(nil); err == nil {
+		t.Fatal("nil request SPN was accepted")
+	}
+	request := new(http.Request)
+	if _, err := setRequestSPN(request); err == nil {
+		t.Fatal("request with nil URL was accepted")
+	}
+	if err := SetSPNEGOHeader(nil, nil, "HTTP/server.example"); err == nil {
+		t.Fatal("nil request/header input was accepted")
+	}
+	if _, err := responseSPNEGOToken(nil); err == nil {
+		t.Fatal("nil response was accepted")
+	}
+}
