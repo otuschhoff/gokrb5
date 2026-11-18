@@ -292,7 +292,8 @@ func parseRealms(lines []string) (realms []Realm, err error) {
 				var r Realm
 				e := r.parseLines(name, lines[start+1:i])
 				if e != nil {
-					if _, ok := e.(UnsupportedDirective); !ok {
+					var ud UnsupportedDirective
+					if !errors.As(e, &ud) {
 						err = e
 						return realms, err
 					}
@@ -431,16 +432,18 @@ func NewFromScanner(scanner *bufio.Scanner) (*Config, error) {
 		case "libdefaults":
 			err := c.LibDefaults.parseLines(lines[start:end])
 			if err != nil {
-				if _, ok := err.(UnsupportedDirective); !ok {
-					return nil, fmt.Errorf("error processing libdefaults section: %v", err)
+				var ud UnsupportedDirective
+				if !errors.As(err, &ud) {
+					return nil, fmt.Errorf("error processing libdefaults section: %w", err)
 				}
 				e = err
 			}
 		case "realms":
 			realms, err := parseRealms(lines[start:end])
 			if err != nil {
-				if _, ok := err.(UnsupportedDirective); !ok {
-					return nil, fmt.Errorf("error processing realms section: %v", err)
+				var ud UnsupportedDirective
+				if !errors.As(err, &ud) {
+					return nil, fmt.Errorf("error processing realms section: %w", err)
 				}
 				e = err
 			}
@@ -448,8 +451,9 @@ func NewFromScanner(scanner *bufio.Scanner) (*Config, error) {
 		case "domain_realm":
 			err := c.DomainRealm.parseLines(lines[start:end])
 			if err != nil {
-				if _, ok := err.(UnsupportedDirective); !ok {
-					return nil, fmt.Errorf("error processing domaain_realm section: %v", err)
+				var ud UnsupportedDirective
+				if !errors.As(err, &ud) {
+					return nil, fmt.Errorf("error processing domaain_realm section: %w", err)
 				}
 				e = err
 			}

@@ -1,3 +1,4 @@
+// Command gokdestroy removes Kerberos credential caches.
 package main
 
 import (
@@ -28,9 +29,8 @@ func run(args []string, stderr io.Writer) int {
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
-		} else {
-			fmt.Fprintf(stderr, "gokdestroy: %v\n", err)
 		}
+		fmt.Fprintf(stderr, "gokdestroy: %v\n", err)
 		return 1
 	}
 	if opts.all {

@@ -10,10 +10,14 @@ import (
 	"github.com/jcmturner/gofork/encoding/asn1"
 )
 
+// OIDDHPublicNumber is the ASN.1 object identifier for DH public numbers (1.2.840.10046.2.1).
 var OIDDHPublicNumber = asn1.ObjectIdentifier{1, 2, 840, 10046, 2, 1}
 
+// MODP group identifiers for PKINIT Diffie-Hellman key exchange.
 const (
-	MODPGroup2  = 2
+	// MODPGroup2 is the 1024-bit MODP group (RFC 2412, RFC 4556 mandated).
+	MODPGroup2 = 2
+	// MODPGroup14 is the 2048-bit MODP group (RFC 3526).
 	MODPGroup14 = 14
 	MODPGroup16 = 16
 )

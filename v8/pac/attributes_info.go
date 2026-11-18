@@ -6,7 +6,9 @@ import (
 )
 
 const (
-	PACWasRequested       uint32 = 1 << 0
+	// PACWasRequested indicates the PAC was requested when the ticket was issued (MS-PAC 2.10).
+	PACWasRequested uint32 = 1 << 0
+	// PACWasGivenImplicitly indicates the PAC was included without being requested (MS-PAC 2.10).
 	PACWasGivenImplicitly uint32 = 1 << 1
 	pacAttributesFlagBits uint32 = 2
 )

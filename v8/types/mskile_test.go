@@ -618,7 +618,7 @@ func FuzzMSKILEUnmarshal(f *testing.F) {
 	for _, seed := range seeds {
 		f.Add(mustHexForFuzz(seed))
 	}
-	f.Fuzz(func(t *testing.T, b []byte) {
+	f.Fuzz(func(_ *testing.T, b []byte) {
 		decoders := []func([]byte) error{
 			(&KerbPAPACRequest{}).Unmarshal,
 			(&PAPACOptions{}).Unmarshal,
@@ -659,7 +659,7 @@ func FuzzFASTUnmarshal(f *testing.F) {
 	for _, seed := range seeds {
 		f.Add(mustHexForFuzz(seed))
 	}
-	f.Fuzz(func(t *testing.T, b []byte) {
+	f.Fuzz(func(_ *testing.T, b []byte) {
 		decoders := []func([]byte) error{
 			(&KrbFastArmor{}).Unmarshal,
 			(&KrbFastArmoredReq{}).Unmarshal,

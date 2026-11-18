@@ -303,7 +303,7 @@ func TestSecurityContextRejectsMalformedMIC(t *testing.T) {
 	assert.Error(t, acceptor.VerifyMIC([]byte("message"), token))
 }
 
-func TestRotateRightEmpty(t *testing.T) {
+func TestRotateRightEmpty(_ *testing.T) {
 	rotateRight(nil, 42)
 }
 

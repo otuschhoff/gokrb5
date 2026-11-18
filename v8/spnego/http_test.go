@@ -111,7 +111,7 @@ func TestSPNEGOHTTPClient(t *testing.T) {
 		for _, p := range paths {
 			r, _ := http.NewRequest("GET", url+p, nil)
 			httpCl := http.DefaultClient
-			httpCl.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			httpCl.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
 				t.Logf("http client redirect: %+v", *req)
 				return nil
 			}
@@ -454,7 +454,7 @@ func (smgr SessionMgr) Get(r *http.Request, k string) ([]byte, error) {
 func (smgr SessionMgr) New(w http.ResponseWriter, r *http.Request, k string, v []byte) error {
 	s, err := smgr.store.New(r, smgr.cookieName)
 	if err != nil {
-		return fmt.Errorf("could not get new session from session manager: %v", err)
+		return fmt.Errorf("could not get new session from session manager: %w", err)
 	}
 	s.Values[k] = v
 	return s.Save(r, w)

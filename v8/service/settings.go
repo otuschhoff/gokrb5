@@ -13,8 +13,11 @@ import (
 // ExtendedProtectionPolicy controls channel-binding enforcement.
 type ExtendedProtectionPolicy int
 
+// ExtendedProtectionPolicy levels for the service.
 const (
+	// ExtendedProtectionDisabled disables extended protection (channel binding) checks.
 	ExtendedProtectionDisabled ExtendedProtectionPolicy = iota
+	// ExtendedProtectionAllowed enables extended protection when the client supports it.
 	ExtendedProtectionAllowed
 	ExtendedProtectionRequired
 )

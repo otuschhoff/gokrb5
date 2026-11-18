@@ -31,7 +31,9 @@ var (
 type Mode int
 
 const (
+	// ModeDH is Diffie-Hellman key exchange mode (RFC 4556).
 	ModeDH Mode = iota
+	// ModeRSA is RSA encryption key transport mode (RFC 4556).
 	ModeRSA
 )
 

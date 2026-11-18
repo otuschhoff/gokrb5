@@ -1272,7 +1272,7 @@ func FuzzMessageUnmarshal(f *testing.F) {
 		}
 		f.Add(len(names)-1, b)
 	}
-	f.Fuzz(func(t *testing.T, index int, b []byte) {
+	f.Fuzz(func(_ *testing.T, index int, b []byte) {
 		i := index % len(names)
 		if i < 0 {
 			i += len(names)

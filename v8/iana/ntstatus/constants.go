@@ -6,8 +6,11 @@ import "fmt"
 // Code is a 32-bit NTSTATUS value.
 type Code uint32
 
+// NTSTATUS codes carried in KERB-ERROR-DATA extended errors (MS-ERREF).
 const (
-	STATUS_NO_LOGON_SERVERS       Code = 0xC000005E
+	// STATUS_NO_LOGON_SERVERS indicates that no logon servers are available to service the logon request.
+	STATUS_NO_LOGON_SERVERS Code = 0xC000005E
+	// STATUS_LOGON_FAILURE indicates the logon attempt failed due to invalid credentials.
 	STATUS_LOGON_FAILURE          Code = 0xC000006D
 	STATUS_ACCOUNT_RESTRICTION    Code = 0xC000006E
 	STATUS_INVALID_LOGON_HOURS    Code = 0xC000006F

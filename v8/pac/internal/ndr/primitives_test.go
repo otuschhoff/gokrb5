@@ -80,7 +80,7 @@ func TestDecodeArraysAndString(t *testing.T) {
 			name:  "fixed array",
 			body:  []byte{1, 2, 3, 4},
 			value: new(struct{ Value [4]uint8 }),
-			check: func(t *testing.T) {},
+			check: func(_ *testing.T) {},
 		},
 		{
 			name: "conformant array",
@@ -88,7 +88,7 @@ func TestDecodeArraysAndString(t *testing.T) {
 			value: new(struct {
 				Value []uint32 `ndr:"conformant"`
 			}),
-			check: func(t *testing.T) {},
+			check: func(_ *testing.T) {},
 		},
 		{
 			name: "varying array",
@@ -96,7 +96,7 @@ func TestDecodeArraysAndString(t *testing.T) {
 			value: new(struct {
 				Value []uint32 `ndr:"varying"`
 			}),
-			check: func(t *testing.T) {},
+			check: func(_ *testing.T) {},
 		},
 		{
 			name: "conformant varying array",
@@ -104,13 +104,13 @@ func TestDecodeArraysAndString(t *testing.T) {
 			value: new(struct {
 				Value []uint32 `ndr:"conformant,varying"`
 			}),
-			check: func(t *testing.T) {},
+			check: func(_ *testing.T) {},
 		},
 		{
 			name:  "varying string",
 			body:  append(littleEndianWords(0, 3), 'O', 0, 'K', 0, 0, 0),
 			value: new(struct{ Value string }),
-			check: func(t *testing.T) {},
+			check: func(_ *testing.T) {},
 		},
 	}
 

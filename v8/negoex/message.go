@@ -9,10 +9,14 @@ import (
 	"fmt"
 )
 
+// MessageSignature is the fixed NEGOEX message signature ("NEGOEXTS").
 const MessageSignature uint64 = 0x535458454f47454e
 
+// NEGOEX message types (MS-NEGOEX 2.2.1).
 const (
+	// MessageTypeInitiatorNego is the NEGO message type sent by the initiator.
 	MessageTypeInitiatorNego uint32 = iota
+	// MessageTypeAcceptorNego is the NEGO message type sent by the acceptor.
 	MessageTypeAcceptorNego
 	MessageTypeInitiatorMetaData
 	MessageTypeAcceptorMetaData
@@ -22,6 +26,7 @@ const (
 	MessageTypeAlert
 )
 
+// NEGOEX extension and alert type constants (MS-NEGOEX 2.2.3).
 const (
 	messageHeaderLength  = 40
 	negoHeaderLength     = 96
@@ -32,14 +37,19 @@ const (
 	alertLength          = 12
 	alertPulseLength     = 8
 
+	// ChecksumSchemeRFC3961 identifies the RFC 3961 checksum scheme.
 	ChecksumSchemeRFC3961 uint32 = 1
+	// ExtensionFlagCritical marks a NEGOEX extension as critical.
 	ExtensionFlagCritical uint32 = 0x80000000
 	AlertTypePulse        uint32 = 1
 	AlertVerifyNoKey      uint32 = 1
 )
 
+// NEGOEX message validation errors.
 var (
-	ErrInvalidSignature          = errors.New("invalid NEGOEX message signature")
+	// ErrInvalidSignature indicates a NEGOEX message signature mismatch.
+	ErrInvalidSignature = errors.New("invalid NEGOEX message signature")
+	// ErrInvalidMessageType indicates a NEGOEX message with an unexpected type.
 	ErrInvalidMessageType        = errors.New("invalid NEGOEX message type")
 	ErrInvalidMessageSize        = errors.New("invalid NEGOEX message size")
 	ErrUnsupportedVersion        = errors.New("unsupported NEGOEX protocol version")

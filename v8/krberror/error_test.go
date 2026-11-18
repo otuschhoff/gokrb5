@@ -72,7 +72,7 @@ func TestPolicyErrorContracts(t *testing.T) {
 	if !ok || status != ntstatus.STATUS_ACCOUNT_DISABLED {
 		t.Fatalf("policy NTStatus = %v, %v", status, ok)
 	}
-	withoutStatus := NewPolicyError(ErrProtocolTransitionNotPermitted, errors.New("denied")).(PolicyError)
+	withoutStatus := NewPolicyError(ErrProtocolTransitionNotPermitted, errors.New("denied")).(PolicyError) //nolint:errorlint // The test verifies exact wrapper identity; errors.As would accept wrapped forms.
 	if status, ok := withoutStatus.NTStatus(); ok || status != 0 {
 		t.Fatalf("missing NTStatus = %v, %v", status, ok)
 	}

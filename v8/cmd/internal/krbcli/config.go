@@ -1,3 +1,4 @@
+// Package krbcli provides shared helpers for the gokrb5 command-line tools.
 package krbcli
 
 import (

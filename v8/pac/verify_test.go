@@ -35,14 +35,14 @@ func TestPACVerifyOptions(t *testing.T) {
 		mutate func(*PACType, *VerifyOptions)
 		want   string
 	}{
-		{"client name", func(p *PACType, o *VerifyOptions) { o.ExpectedClientName = "other" }, "client name"},
-		{"client time", func(p *PACType, o *VerifyOptions) { later := authTime.Add(time.Second); o.ExpectedAuthTime = &later }, "authentication time"},
-		{"requestor SID", func(p *PACType, o *VerifyOptions) { p.Requestor.SID.SubAuthority[3]++ }, "requestor SID"},
-		{"UPN SID", func(p *PACType, o *VerifyOptions) { p.UPNDNSInfo.ObjectSID.SubAuthority[3]++ }, "UPN/DNS SID"},
-		{"SAM name", func(p *PACType, o *VerifyOptions) { p.UPNDNSInfo.SAMAccountName = "other" }, "SAM account name"},
-		{"KDC checksum", func(p *PACType, o *VerifyOptions) { p.KDCChecksum.Signature[0] ^= 0xff }, "KDC checksum"},
-		{"full checksum", func(p *PACType, o *VerifyOptions) { p.FullChecksum.Signature[0] ^= 0xff }, "full KDC checksum"},
-		{"ticket checksum", func(p *PACType, o *VerifyOptions) { o.TicketData = []byte("wrong") }, "ticket checksum"},
+		{"client name", func(_ *PACType, o *VerifyOptions) { o.ExpectedClientName = "other" }, "client name"},
+		{"client time", func(_ *PACType, o *VerifyOptions) { later := authTime.Add(time.Second); o.ExpectedAuthTime = &later }, "authentication time"},
+		{"requestor SID", func(p *PACType, _ *VerifyOptions) { p.Requestor.SID.SubAuthority[3]++ }, "requestor SID"},
+		{"UPN SID", func(p *PACType, _ *VerifyOptions) { p.UPNDNSInfo.ObjectSID.SubAuthority[3]++ }, "UPN/DNS SID"},
+		{"SAM name", func(p *PACType, _ *VerifyOptions) { p.UPNDNSInfo.SAMAccountName = "other" }, "SAM account name"},
+		{"KDC checksum", func(p *PACType, _ *VerifyOptions) { p.KDCChecksum.Signature[0] ^= 0xff }, "KDC checksum"},
+		{"full checksum", func(p *PACType, _ *VerifyOptions) { p.FullChecksum.Signature[0] ^= 0xff }, "full KDC checksum"},
+		{"ticket checksum", func(_ *PACType, o *VerifyOptions) { o.TicketData = []byte("wrong") }, "ticket checksum"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

@@ -1,6 +1,8 @@
+// Command goklist lists the contents of a Kerberos keytab (klist -k).
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -34,7 +36,7 @@ func main() {
 func run(args []string, stdout, stderr io.Writer) int {
 	opts, err := parseArgs(args, stderr)
 	if err != nil {
-		if err == flag.ErrHelp {
+		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		if !opts.silent {

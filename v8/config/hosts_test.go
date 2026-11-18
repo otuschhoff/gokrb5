@@ -73,7 +73,7 @@ func TestGetKpasswdServersFallsBackAfterLookupError(t *testing.T) {
 	original := orderedSRV
 	defer func() { orderedSRV = original }()
 	var services []string
-	orderedSRV = func(service, proto, name string) (int, map[int]*net.SRV, error) {
+	orderedSRV = func(service string, _, _ string) (int, map[int]*net.SRV, error) {
 		services = append(services, service)
 		if service == "kpasswd" {
 			return 0, nil, errors.New("not found")

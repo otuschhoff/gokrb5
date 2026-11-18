@@ -43,7 +43,7 @@ func FuzzPACUnmarshal(f *testing.F) {
 	f.Add(generated)
 
 	logger := log.New(io.Discard, "", 0)
-	f.Fuzz(func(t *testing.T, b []byte) {
+	f.Fuzz(func(_ *testing.T, b []byte) {
 		var value PACType
 		if err := value.Unmarshal(b); err != nil {
 			return

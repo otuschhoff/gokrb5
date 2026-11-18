@@ -81,7 +81,7 @@ func FuzzKDCProxyMessage(f *testing.F) {
 	}
 	f.Add(fixture)
 	f.Add(encoded)
-	f.Fuzz(func(t *testing.T, b []byte) {
+	f.Fuzz(func(_ *testing.T, b []byte) {
 		var message KDCProxyMessage
 		if message.Unmarshal(b) == nil {
 			_, _ = message.KerberosMessage()

@@ -109,9 +109,9 @@ func (e Aes256CtsHmacSha384192) DeriveRandom(protocolKey, usage []byte) ([]byte,
 }
 
 // VerifyIntegrity checks the integrity of the ciphertext message.
-// As the hash is calculated over the iv concatenated with the AES cipher output not the plaintext the pt value to this
-// interface method is not use. Pass any []byte.
-func (e Aes256CtsHmacSha384192) VerifyIntegrity(protocolKey, ct, pt []byte, usage uint32) bool {
+// As the hash is calculated over the iv concatenated with the AES cipher output not the plaintext the plaintext
+// parameter of this interface method is not used. Pass any []byte.
+func (e Aes256CtsHmacSha384192) VerifyIntegrity(protocolKey, ct, _ []byte, usage uint32) bool {
 	// We don't need ib just there for the interface
 	return rfc8009.VerifyIntegrity(protocolKey, ct, usage, e)
 }

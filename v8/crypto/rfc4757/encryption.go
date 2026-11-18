@@ -34,7 +34,7 @@ func DecryptData(key, data []byte, e etype.EType) ([]byte, error) {
 
 // EncryptMessage encrypts the message provided using the methods specific to the etype provided as defined in RFC 4757.
 // The encrypted data is concatenated with its RC4 header containing integrity checksum and confounder to create an encrypted message.
-func EncryptMessage(key, data []byte, usage uint32, export bool, e etype.EType) ([]byte, error) {
+func EncryptMessage(key, data []byte, usage uint32, _ bool, e etype.EType) ([]byte, error) {
 	confounder := make([]byte, e.GetConfounderByteSize()) // size = 8
 	_, err := rand.Read(confounder)
 	if err != nil {
@@ -57,7 +57,8 @@ func EncryptMessage(key, data []byte, usage uint32, export bool, e etype.EType) 
 
 // DecryptMessage decrypts the message provided using the methods specific to the etype provided as defined in RFC 4757.
 // The integrity of the message is also verified.
-func DecryptMessage(key, data []byte, usage uint32, export bool, e etype.EType) ([]byte, error) {
+// The export-weakened RC4-HMAC-EXP variant is not implemented; the flag is retained for compatibility and ignored.
+func DecryptMessage(key, data []byte, usage uint32, _ bool, e etype.EType) ([]byte, error) {
 	checksumSize := e.GetHMACBitLength() / 8
 	if checksumSize <= 0 || len(data) < checksumSize+e.GetConfounderByteSize() {
 		return nil, errors.New("ciphertext is too short")

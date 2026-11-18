@@ -38,7 +38,9 @@ const (
 type Kind string
 
 const (
-	KindSamba   Kind = "samba"
+	// KindSamba identifies a Samba AD DC test environment.
+	KindSamba Kind = "samba"
+	// KindWindows identifies a Windows AD DC test environment.
 	KindWindows Kind = "windows"
 )
 
@@ -119,7 +121,7 @@ func Discover() (*Env, error) {
 	}
 	kt, err := keytab.Load(keytabPath)
 	if err != nil {
-		return nil, fmt.Errorf("load keytab %s: %v", keytabPath, err)
+		return nil, fmt.Errorf("load keytab %s: %w", keytabPath, err)
 	}
 	userLine, err := readTrimmedFile(userPath)
 	if err != nil {
@@ -216,10 +218,10 @@ func scoreOf(p keytab.Principal, e *Env) int {
 	if len(p.Components) == 2 && strings.EqualFold(p.Components[0], "host") {
 		score += 2
 		if strings.EqualFold(p.Components[1], e.HostFQDN) {
-			score += 1
+			score++
 		}
 		if p.Components[0] == "host" && strings.Contains(p.Components[1], ".") {
-			score += 1
+			score++
 		}
 	}
 	return score
@@ -281,7 +283,7 @@ func (e *Env) MachineAccountPrincipal() (keytab.Principal, bool) {
 func hostFQDN() (string, error) {
 	name, err := os.Hostname()
 	if err != nil {
-		return "", fmt.Errorf("hostname: %v", err)
+		return "", fmt.Errorf("hostname: %w", err)
 	}
 	if strings.Contains(name, ".") {
 		return strings.TrimSuffix(name, "."), nil
@@ -343,7 +345,7 @@ func credentialPaths() (keytabPath, userPath, passwordPath string, err error) {
 	passwordPath = envOr(PasswordFileEnvVar, filepath.Join(dir, PasswordFile))
 	for _, p := range []string{keytabPath, userPath, passwordPath} {
 		if _, statErr := os.Stat(p); statErr != nil {
-			return "", "", "", fmt.Errorf("AD credential file %s: %v", p, statErr)
+			return "", "", "", fmt.Errorf("AD credential file %s: %w", p, statErr)
 		}
 	}
 	return keytabPath, userPath, passwordPath, nil

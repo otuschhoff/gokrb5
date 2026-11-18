@@ -499,18 +499,18 @@ func (s *SPNEGO) continueInitiator(ct gssapi.ContextToken) (bool, context.Contex
 }
 
 func (s *SPNEGO) verifyInitiatorAPRep(reply *messages.APRep) (types.EncryptionKey, error) {
-	if err := reply.Verify(s.authenticator, s.replyKey); err == nil {
+	subkeyErr := reply.Verify(s.authenticator, s.replyKey)
+	if subkeyErr == nil {
 		return s.replyKey, nil
-	} else if len(s.ticketKey.KeyValue) == 0 {
-		return types.EncryptionKey{}, err
-	} else {
-		subkeyErr := err
-		if err := reply.Verify(s.authenticator, s.ticketKey); err == nil {
-			return s.ticketKey, nil
-		} else {
-			return types.EncryptionKey{}, fmt.Errorf("verify AP_REP with authenticator subkey: %w; verify with ticket session key: %w", subkeyErr, err)
-		}
 	}
+	if len(s.ticketKey.KeyValue) == 0 {
+		return types.EncryptionKey{}, subkeyErr
+	}
+	ticketErr := reply.Verify(s.authenticator, s.ticketKey)
+	if ticketErr == nil {
+		return s.ticketKey, nil
+	}
+	return types.EncryptionKey{}, fmt.Errorf("verify AP_REP with authenticator subkey: %w; verify with ticket session key: %w", subkeyErr, ticketErr)
 }
 
 func containsMech(mechTypes []asn1.ObjectIdentifier, candidate asn1.ObjectIdentifier) bool {

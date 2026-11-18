@@ -219,7 +219,7 @@ type testContext struct {
 	verifyAvailable bool
 }
 
-func (c *testContext) Wrap(message []byte, confidential bool) ([]byte, error) {
+func (c *testContext) Wrap(message []byte, _ bool) ([]byte, error) {
 	return append([]byte(nil), message...), nil
 }
 

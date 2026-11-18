@@ -529,7 +529,7 @@ func TestUnmarshalPotentialPanics(t *testing.T) {
 }
 
 // cxf testing stuff
-func TestBadKeytabs(t *testing.T) {
+func TestBadKeytabs(_ *testing.T) {
 	badPayloads := make([]string, 3)
 	badPayloads = append(badPayloads, "BQIwMDAwMDA=")
 	badPayloads = append(badPayloads, "BQIAAAAwAAEACjAwMDAwMDAwMDAAIDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw")

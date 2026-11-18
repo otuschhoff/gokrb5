@@ -10,7 +10,7 @@ type EType interface {
 	GetKeyByteSize() int
 	GetKeySeedBitLength() int
 	GetDefaultStringToKeyParams() string
-	StringToKey(string, salt, s2kparams string) ([]byte, error)
+	StringToKey(secret string, salt, s2kparams string) ([]byte, error)
 	RandomToKey(b []byte) []byte
 	GetHMACBitLength() int
 	GetMessageBlockByteSize() int

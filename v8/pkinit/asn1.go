@@ -1,3 +1,4 @@
+// Package pkinit implements PKINIT (RFC 4556) certificate-based pre-authentication.
 package pkinit
 
 import (
@@ -11,6 +12,7 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+// PKINIT and CMS object identifiers.
 var (
 	OIDPKINITAuthData   = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 2, 3, 1}
 	OIDPKINITDHKeyData  = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 2, 3, 2}
@@ -105,9 +107,14 @@ type KRB5PrincipalName struct {
 	PrincipalName types.PrincipalName `asn1:"explicit,tag:1"`
 }
 
+// TDCMSDigestAlgorithms lists trusted CMS digest algorithms (TD-CMS-DIGEST-ALGORITHMS).
+// TD (trusted data) ASN.1 type aliases for PKINIT (RFC 4556 section 5.2.2).
 type (
-	TDDHParameters        []AlgorithmIdentifier
-	TDTrustedCertifiers   []ExternalPrincipalIdentifier
+	// TDDHParameters lists trusted Diffie-Hellman parameters (TD-DH-PARAMETERS).
+	TDDHParameters []AlgorithmIdentifier
+	// TDTrustedCertifiers lists trusted certification authorities (TD-TRUSTED-CERTIFIERS).
+	TDTrustedCertifiers []ExternalPrincipalIdentifier
+	// TDInvalidCertificates lists invalid certificates (TD-INVALID-CERTIFICATES).
 	TDInvalidCertificates []ExternalPrincipalIdentifier
 	TDCMSDigestAlgorithms []AlgorithmIdentifier
 )
@@ -145,7 +152,10 @@ func strictUnmarshal(b []byte, value interface{}) error {
 	return nil
 }
 
-func (m PAPKAsReq) Marshal() ([]byte, error)  { return asn1.Marshal(m) }
+// Marshal marshals PAPKAsReq to its DER encoding.
+func (m PAPKAsReq) Marshal() ([]byte, error) { return asn1.Marshal(m) }
+
+// Unmarshal unmarshals DER bytes into PAPKAsReq.
 func (m *PAPKAsReq) Unmarshal(b []byte) error { return strictUnmarshal(b, m) }
 func marshalExplicit(tag int, value interface{}) ([]byte, error) {
 	inner, err := asn1.Marshal(value)
@@ -199,6 +209,7 @@ func unmarshalExplicit(field asn1.RawValue, value interface{}) error {
 	return strictUnmarshal(field.Bytes, value)
 }
 
+// Marshal marshals AuthPack to its DER encoding.
 func (m AuthPack) Marshal() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -240,6 +251,7 @@ func (m AuthPack) Marshal() ([]byte, error) {
 	return marshalSequence(fields...)
 }
 
+// Unmarshal unmarshals DER bytes into AuthPack.
 func (m *AuthPack) Unmarshal(b []byte) error {
 	fields, err := sequenceFields(b)
 	if err != nil {
@@ -399,6 +411,7 @@ func (m *DHRepInfo) Unmarshal(b []byte) error {
 	return nil
 }
 
+// Marshal marshals KDCDHKeyInfo to its DER encoding.
 func (m KDCDHKeyInfo) Marshal() ([]byte, error) {
 	if m.Nonce < 0 || uint64(m.Nonce) > math.MaxUint32 {
 		return nil, fmt.Errorf("PKINIT nonce %d is outside uint32", m.Nonce)
@@ -406,6 +419,7 @@ func (m KDCDHKeyInfo) Marshal() ([]byte, error) {
 	return asn1.Marshal(m)
 }
 
+// Unmarshal unmarshals DER bytes into KDCDHKeyInfo.
 func (m *KDCDHKeyInfo) Unmarshal(b []byte) error {
 	if err := strictUnmarshal(b, m); err != nil {
 		return err
@@ -416,5 +430,8 @@ func (m *KDCDHKeyInfo) Unmarshal(b []byte) error {
 	return nil
 }
 
-func (m ReplyKeyPack) Marshal() ([]byte, error)  { return asn1.Marshal(m) }
+// Marshal marshals ReplyKeyPack to its DER encoding.
+func (m ReplyKeyPack) Marshal() ([]byte, error) { return asn1.Marshal(m) }
+
+// Unmarshal unmarshals DER bytes into ReplyKeyPack.
 func (m *ReplyKeyPack) Unmarshal(b []byte) error { return strictUnmarshal(b, m) }

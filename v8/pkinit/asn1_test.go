@@ -103,7 +103,7 @@ func FuzzPKASRep(f *testing.F) {
 		}
 		f.Add(encoded)
 	}
-	f.Fuzz(func(t *testing.T, b []byte) {
+	f.Fuzz(func(_ *testing.T, b []byte) {
 		var reply PAPKAsRep
 		if reply.Unmarshal(b) == nil {
 			_, _ = reply.Marshal()

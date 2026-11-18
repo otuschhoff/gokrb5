@@ -1,3 +1,4 @@
+// Command gokinit obtains and caches an initial Kerberos ticket (kinit).
 package main
 
 import (
@@ -82,9 +83,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
-		} else {
-			fmt.Fprintf(stderr, "gokinit: %v\n", err)
 		}
+		fmt.Fprintf(stderr, "gokinit: %v\n", err)
 		return 1
 	}
 	if opts.validate {
@@ -391,7 +391,7 @@ func asRequestOptions(opts initOptions, cfg *config.Config) (messages.ASReqOptio
 	if opts.service != "" {
 		service, err := keytab.ParsePrincipal(opts.service)
 		if err != nil {
-			return result, fmt.Errorf("invalid service principal: %v", err)
+			return result, fmt.Errorf("invalid service principal: %w", err)
 		}
 		name := types.PrincipalName{NameType: service.NameType, NameString: append([]string(nil), service.Components...)}
 		result.ServicePrincipal = &name

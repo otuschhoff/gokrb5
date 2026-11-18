@@ -28,8 +28,11 @@ var (
 // ContentEncryptionAlgorithm is a supported PKINIT CMS content cipher.
 type ContentEncryptionAlgorithm int
 
+// Content encryption algorithms for the CMS enveloped-data reply key pack.
 const (
+	// AES128CBC is AES-128 in CBC mode for CMS content encryption.
 	AES128CBC ContentEncryptionAlgorithm = iota
+	// AES256CBC is AES-256 in CBC mode for CMS content encryption.
 	AES256CBC
 	TripleDESCBC
 )

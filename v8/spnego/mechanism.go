@@ -9,8 +9,11 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
 )
 
+// SPNEGO mechanism negotiation errors.
 var (
-	ErrNoMechanisms       = errors.New("SPNEGO has no configured mechanisms")
+	// ErrNoMechanisms indicates SPNEGO has no configured mechanisms.
+	ErrNoMechanisms = errors.New("SPNEGO has no configured mechanisms")
+	// ErrNoCommonMechanism indicates SPNEGO peers share no mechanism.
 	ErrNoCommonMechanism  = errors.New("SPNEGO has no mutually supported mechanism")
 	ErrUnexpectedSPNEGO   = errors.New("unexpected SPNEGO token")
 	ErrMissingMechListMIC = errors.New("SPNEGO mechListMIC is missing")

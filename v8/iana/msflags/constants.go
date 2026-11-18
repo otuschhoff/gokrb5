@@ -5,15 +5,20 @@ package msflags
 type APOptions uint32
 
 const (
-	KERB_AP_OPTIONS_CBT                    APOptions = 0x00004000
+	// KERB_AP_OPTIONS_CBT is the channel-bindings AP-OPTIONS bit (MS-KILE 2.2.6).
+	KERB_AP_OPTIONS_CBT APOptions = 0x00004000
+	// KERB_AP_OPTIONS_UNVERIFIED_TARGET_NAME permits an unverified target name in AP-OPTIONS (MS-KILE 2.2.6).
 	KERB_AP_OPTIONS_UNVERIFIED_TARGET_NAME APOptions = 0x00008000
 )
 
 // SupportedEncTypes is the little-endian MS-KILE supported encryption types mask.
 type SupportedEncTypes uint32
 
+// SupportedEncTypes bits of the msDS-SupportedEncryptionTypes bitmask (MS-ADA2 2.324).
 const (
-	SupportedEncTypeDESCBCRC                  SupportedEncTypes = 0x00000001
+	// SupportedEncTypeDESCBCRC is the DES-CBC-CRC bit of the msDS-SupportedEncryptionTypes bitmask.
+	SupportedEncTypeDESCBCRC SupportedEncTypes = 0x00000001
+	// SupportedEncTypeDESCBCMD5 is the DES-CBC-MD5 bit of the msDS-SupportedEncryptionTypes bitmask.
 	SupportedEncTypeDESCBCMD5                 SupportedEncTypes = 0x00000002
 	SupportedEncTypeRC4HMAC                   SupportedEncTypes = 0x00000004
 	SupportedEncTypeAES128CTSHMACSHA196       SupportedEncTypes = 0x00000008
@@ -47,15 +52,20 @@ const (
 type KerbErrorDataType int32
 
 const (
+	// KERB_AP_ERR_TYPE_SKEW_RECOVERY identifies KERB-ERROR-DATA carrying clock-skew recovery information.
 	KERB_AP_ERR_TYPE_SKEW_RECOVERY KerbErrorDataType = 2
-	KERB_ERR_TYPE_EXTENDED         KerbErrorDataType = 3
+	// KERB_ERR_TYPE_EXTENDED identifies KERB-ERROR-DATA carrying an extended error.
+	KERB_ERR_TYPE_EXTENDED KerbErrorDataType = 3
 )
 
 // TokenInfoFlags identify the kind of LSAP token information.
 type TokenInfoFlags uint32
 
+// TokenInfoFlags selecting LSAP_TOKEN_INFO_INTEGRITY content (MS-KILE 2.2.4).
 const (
-	TokenInfoFull          TokenInfoFlags = 0
+	// TokenInfoFull requests full token information without filtering (LSAP_TOKEN_INFO_INTEGRITY).
+	TokenInfoFull TokenInfoFlags = 0
+	// TokenInfoUACRestricted requests UAC-restricted token information (LSAP_TOKEN_INFO_INTEGRITY).
 	TokenInfoUACRestricted TokenInfoFlags = 1
 	UAC_RESTRICTED         TokenInfoFlags = TokenInfoUACRestricted
 )
@@ -63,8 +73,11 @@ const (
 // TokenIntegrityLevel identifies a Windows process integrity level.
 type TokenIntegrityLevel uint32
 
+// TokenIntegrityLevel values for LSAP_TOKEN_INFO_INTEGRITY (MS-KILE 2.2.4).
 const (
+	// TokenILUntrusted is the untrusted token integrity level (LSAP_TOKEN_INFO_INTEGRITY).
 	TokenILUntrusted TokenIntegrityLevel = 0x00000000
+	// TokenILLow is the low token integrity level (LSAP_TOKEN_INFO_INTEGRITY).
 	TokenILLow       TokenIntegrityLevel = 0x00001000
 	TokenILMedium    TokenIntegrityLevel = 0x00002000
 	TokenILHigh      TokenIntegrityLevel = 0x00003000
@@ -72,6 +85,7 @@ const (
 	TokenILProtected TokenIntegrityLevel = 0x00005000
 )
 
+// KerbExtErrorFlagStrongCredentials marks the KERB-EXT-ERROR as supporting strong credentials.
 // KERB-EXT-ERROR flags.
 const KerbExtErrorFlagStrongCredentials uint32 = 0x00000001
 

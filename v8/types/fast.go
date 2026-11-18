@@ -76,15 +76,31 @@ type PAEncryptedChallenge EncryptedData
 // PAFXError is a complete DER-encoded KRB-ERROR carried inside FAST.
 type PAFXError []byte
 
-func (v *KrbFastArmor) Marshal() ([]byte, error)      { return marshalMSKILE(*v) }
-func (v *KrbFastArmor) Unmarshal(b []byte) error      { return unmarshalMSKILE(b, v) }
-func (v *KrbFastArmoredReq) Marshal() ([]byte, error) { return marshalMSKILE(*v) }
-func (v *KrbFastArmoredReq) Unmarshal(b []byte) error { return unmarshalMSKILE(b, v) }
-func (v *KrbFastArmoredRep) Marshal() ([]byte, error) { return marshalMSKILE(*v) }
-func (v *KrbFastArmoredRep) Unmarshal(b []byte) error { return unmarshalMSKILE(b, v) }
-func (v *KrbFastFinished) Marshal() ([]byte, error)   { return marshalMSKILE(*v) }
-func (v *KrbFastFinished) Unmarshal(b []byte) error   { return unmarshalMSKILE(b, v) }
+// Marshal marshals KrbFastArmor to its DER encoding.
+func (v *KrbFastArmor) Marshal() ([]byte, error) { return marshalMSKILE(*v) }
 
+// Unmarshal unmarshals DER bytes into KrbFastArmor.
+func (v *KrbFastArmor) Unmarshal(b []byte) error { return unmarshalMSKILE(b, v) }
+
+// Marshal marshals KrbFastArmoredReq to its DER encoding.
+func (v *KrbFastArmoredReq) Marshal() ([]byte, error) { return marshalMSKILE(*v) }
+
+// Unmarshal unmarshals DER bytes into KrbFastArmoredReq.
+func (v *KrbFastArmoredReq) Unmarshal(b []byte) error { return unmarshalMSKILE(b, v) }
+
+// Marshal marshals KrbFastArmoredRep to its DER encoding.
+func (v *KrbFastArmoredRep) Marshal() ([]byte, error) { return marshalMSKILE(*v) }
+
+// Unmarshal unmarshals DER bytes into KrbFastArmoredRep.
+func (v *KrbFastArmoredRep) Unmarshal(b []byte) error { return unmarshalMSKILE(b, v) }
+
+// Marshal marshals KrbFastFinished to its DER encoding.
+func (v *KrbFastFinished) Marshal() ([]byte, error) { return marshalMSKILE(*v) }
+
+// Unmarshal unmarshals DER bytes into KrbFastFinished.
+func (v *KrbFastFinished) Unmarshal(b []byte) error { return unmarshalMSKILE(b, v) }
+
+// NewKrbFastReq assembles a KRB-FAST-REQ from its components.
 func NewKrbFastReq(options asn1.BitString, paData PADataSequence, reqBody []byte) KrbFastReq {
 	return KrbFastReq{
 		FastOptions: options,
@@ -98,6 +114,7 @@ func NewKrbFastReq(options asn1.BitString, paData PADataSequence, reqBody []byte
 	}
 }
 
+// Marshal marshals KrbFastReq to its DER encoding.
 func (v *KrbFastReq) Marshal() ([]byte, error) {
 	if v.FastOptions.BitLength < 32 {
 		return nil, fmt.Errorf("KrbFastReq fast-options must contain at least 32 bits")
@@ -108,6 +125,7 @@ func (v *KrbFastReq) Marshal() ([]byte, error) {
 	return marshalMSKILE(*v)
 }
 
+// Unmarshal unmarshals DER bytes into KrbFastReq.
 func (v *KrbFastReq) Unmarshal(b []byte) error {
 	if err := unmarshalMSKILE(b, v); err != nil {
 		return err
@@ -121,6 +139,7 @@ func (v *KrbFastReq) Unmarshal(b []byte) error {
 	return nil
 }
 
+// Marshal marshals PAFXFastRequest to its DER encoding.
 func (v *PAFXFastRequest) Marshal() ([]byte, error) {
 	b, err := v.ArmoredData.Marshal()
 	if err != nil {
@@ -134,6 +153,7 @@ func (v *PAFXFastRequest) Marshal() ([]byte, error) {
 	})
 }
 
+// Unmarshal unmarshals DER bytes into PAFXFastRequest.
 func (v *PAFXFastRequest) Unmarshal(b []byte) error {
 	var raw asn1.RawValue
 	rest, err := asn1.Unmarshal(b, &raw)
@@ -149,6 +169,7 @@ func (v *PAFXFastRequest) Unmarshal(b []byte) error {
 	return v.ArmoredData.Unmarshal(raw.Bytes)
 }
 
+// Marshal marshals PAFXFastReply to its DER encoding.
 func (v *PAFXFastReply) Marshal() ([]byte, error) {
 	b, err := v.ArmoredData.Marshal()
 	if err != nil {
@@ -162,6 +183,7 @@ func (v *PAFXFastReply) Marshal() ([]byte, error) {
 	})
 }
 
+// Unmarshal unmarshals DER bytes into PAFXFastReply.
 func (v *PAFXFastReply) Unmarshal(b []byte) error {
 	var raw asn1.RawValue
 	rest, err := asn1.Unmarshal(b, &raw)
@@ -177,6 +199,7 @@ func (v *PAFXFastReply) Unmarshal(b []byte) error {
 	return v.ArmoredData.Unmarshal(raw.Bytes)
 }
 
+// Marshal marshals KrbFastResponse to its DER encoding.
 func (v *KrbFastResponse) Marshal() ([]byte, error) {
 	w := krbFastResponseWire{
 		PAData:        v.PAData,
@@ -187,6 +210,7 @@ func (v *KrbFastResponse) Marshal() ([]byte, error) {
 	return marshalMSKILE(w)
 }
 
+// Unmarshal unmarshals DER bytes into KrbFastResponse.
 func (v *KrbFastResponse) Unmarshal(b []byte) error {
 	var w krbFastResponseWire
 	if err := unmarshalMSKILE(b, &w); err != nil {
@@ -202,11 +226,13 @@ func (v *KrbFastResponse) Unmarshal(b []byte) error {
 	return nil
 }
 
+// Marshal marshals PAEncryptedChallenge to its DER encoding.
 func (v *PAEncryptedChallenge) Marshal() ([]byte, error) {
 	ed := EncryptedData(*v)
 	return ed.Marshal()
 }
 
+// Unmarshal unmarshals DER bytes into PAEncryptedChallenge.
 func (v *PAEncryptedChallenge) Unmarshal(b []byte) error {
 	var ed EncryptedData
 	if err := unmarshalMSKILE(b, &ed); err != nil {
@@ -216,6 +242,7 @@ func (v *PAEncryptedChallenge) Unmarshal(b []byte) error {
 	return nil
 }
 
+// Marshal marshals PAFXError to its DER encoding.
 func (v PAFXError) Marshal() ([]byte, error) {
 	var decoded PAFXError
 	if err := decoded.Unmarshal(v); err != nil {
@@ -224,6 +251,7 @@ func (v PAFXError) Marshal() ([]byte, error) {
 	return append([]byte(nil), v...), nil
 }
 
+// Unmarshal unmarshals DER bytes into PAFXError.
 func (v *PAFXError) Unmarshal(b []byte) error {
 	var raw asn1.RawValue
 	rest, err := asn1.Unmarshal(b, &raw)
@@ -240,11 +268,13 @@ func (v *PAFXError) Unmarshal(b []byte) error {
 	return nil
 }
 
+// NewPAFXErrorPAData wraps PAFXError in a PA-DATA entry of its assigned type.
 func NewPAFXErrorPAData(v PAFXError) (PAData, error) {
 	b, err := v.Marshal()
 	return PAData{PADataType: patype.PA_FX_ERROR, PADataValue: b}, err
 }
 
+// GetPAFXError decodes the PAFXError carried by the value.
 func (pa *PAData) GetPAFXError() (v PAFXError, err error) {
 	if pa.PADataType != patype.PA_FX_ERROR {
 		return v, fmt.Errorf("PAData type mismatch: expected %d, got %d", patype.PA_FX_ERROR, pa.PADataType)
@@ -253,11 +283,13 @@ func (pa *PAData) GetPAFXError() (v PAFXError, err error) {
 	return
 }
 
+// NewPAFXFastRequestPAData wraps PAFXFastRequest in a PA-DATA entry of its assigned type.
 func NewPAFXFastRequestPAData(v PAFXFastRequest) (PAData, error) {
 	b, err := v.Marshal()
 	return PAData{PADataType: patype.PA_FX_FAST, PADataValue: b}, err
 }
 
+// GetPAFXFastRequest decodes the PAFXFastRequest carried by the value.
 func (pa *PAData) GetPAFXFastRequest() (v PAFXFastRequest, err error) {
 	if pa.PADataType != patype.PA_FX_FAST {
 		return v, fmt.Errorf("PAData type mismatch: expected %d, got %d", patype.PA_FX_FAST, pa.PADataType)
@@ -266,11 +298,13 @@ func (pa *PAData) GetPAFXFastRequest() (v PAFXFastRequest, err error) {
 	return
 }
 
+// NewPAFXFastReplyPAData wraps PAFXFastReply in a PA-DATA entry of its assigned type.
 func NewPAFXFastReplyPAData(v PAFXFastReply) (PAData, error) {
 	b, err := v.Marshal()
 	return PAData{PADataType: patype.PA_FX_FAST, PADataValue: b}, err
 }
 
+// GetPAFXFastReply decodes the PAFXFastReply carried by the value.
 func (pa *PAData) GetPAFXFastReply() (v PAFXFastReply, err error) {
 	if pa.PADataType != patype.PA_FX_FAST {
 		return v, fmt.Errorf("PAData type mismatch: expected %d, got %d", patype.PA_FX_FAST, pa.PADataType)
@@ -279,11 +313,13 @@ func (pa *PAData) GetPAFXFastReply() (v PAFXFastReply, err error) {
 	return
 }
 
+// NewPAEncryptedChallengePAData wraps PAEncryptedChallenge in a PA-DATA entry of its assigned type.
 func NewPAEncryptedChallengePAData(v PAEncryptedChallenge) (PAData, error) {
 	b, err := v.Marshal()
 	return PAData{PADataType: patype.PA_ENCRYPTED_CHALLENGE, PADataValue: b}, err
 }
 
+// GetPAEncryptedChallenge decodes the PAEncryptedChallenge carried by the value.
 func (pa *PAData) GetPAEncryptedChallenge() (v PAEncryptedChallenge, err error) {
 	if pa.PADataType != patype.PA_ENCRYPTED_CHALLENGE {
 		return v, fmt.Errorf("PAData type mismatch: expected %d, got %d", patype.PA_ENCRYPTED_CHALLENGE, pa.PADataType)

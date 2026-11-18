@@ -144,7 +144,7 @@ func TestLegacyHTTPMiddlewareUsesAuthenticatedSession(t *testing.T) {
 		t.Run(remoteAddress, func(t *testing.T) {
 			manager := &coverageSessionManager{value: encoded}
 			called := false
-			handler := SPNEGOKRB5Authenticate(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			handler := SPNEGOKRB5Authenticate(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 				called = true
 				writer.WriteHeader(http.StatusNoContent)
 			}), keytab.New(), service.SessionManager(manager))
@@ -342,7 +342,7 @@ func TestNegotiatingClientProtocolGuards(t *testing.T) {
 
 func TestSPNEGOContextHTTPExchange(t *testing.T) {
 	innerCalls := 0
-	handler := SPNEGOContextAuthenticate(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	handler := SPNEGOContextAuthenticate(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		innerCalls++
 		writer.WriteHeader(http.StatusNoContent)
 	}), func() gssapi.ContextMechanism {

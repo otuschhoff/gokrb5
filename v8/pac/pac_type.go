@@ -163,7 +163,7 @@ func (pac *PACType) ProcessPACInfoBuffers(key types.EncryptionKey, l *log.Logger
 
 // ProcessPACInfoBuffersWithCredentialKey processes PAC buffers and decrypts
 // PAC_CREDENTIAL_INFO with the PKINIT AS reply key when one is provided.
-func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey types.EncryptionKey, l *log.Logger) error {
+func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey types.EncryptionKey, _ *log.Logger) error {
 	if err := pac.validateInfoBuffers(); err != nil {
 		return err
 	}

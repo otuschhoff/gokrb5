@@ -6,6 +6,7 @@ import (
 	"math"
 )
 
+// MarshalBinary marshals the NegoMessage message to bytes.
 func (m *NegoMessage) MarshalBinary() ([]byte, error) {
 	if len(m.AuthSchemes) > math.MaxUint16 || len(m.Extensions) > math.MaxUint16 {
 		return nil, ErrInvalidMessageSize
@@ -86,6 +87,7 @@ func unmarshalNego(header MessageHeader, data []byte) (*NegoMessage, error) {
 	return message, nil
 }
 
+// MarshalBinary marshals the ExchangeMessage message to bytes.
 func (m *ExchangeMessage) MarshalBinary() ([]byte, error) {
 	if uint64(len(m.Exchange)) > math.MaxUint32-exchangeHeaderLength || len(m.Exchange) > int(^uint(0)>>1)-exchangeHeaderLength {
 		return nil, ErrInvalidMessageSize
@@ -113,6 +115,7 @@ func unmarshalExchange(header MessageHeader, data []byte) (*ExchangeMessage, err
 	return message, nil
 }
 
+// MarshalBinary marshals the VerifyMessage message to bytes.
 func (m *VerifyMessage) MarshalBinary() ([]byte, error) {
 	if uint64(len(m.Checksum.Value)) > math.MaxUint32-verifyHeaderLength || len(m.Checksum.Value) > int(^uint(0)>>1)-verifyHeaderLength {
 		return nil, ErrInvalidMessageSize
@@ -152,6 +155,7 @@ func unmarshalVerify(header MessageHeader, data []byte) (*VerifyMessage, error) 
 	return message, nil
 }
 
+// MarshalBinary marshals the AlertMessage message to bytes.
 func (m *AlertMessage) MarshalBinary() ([]byte, error) {
 	if len(m.Alerts) > math.MaxUint16 {
 		return nil, ErrInvalidMessageSize

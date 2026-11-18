@@ -10,7 +10,9 @@ import (
 )
 
 var (
-	ErrNoVerifyKey     = errors.New("no NEGOEX verification key")
+	// ErrNoVerifyKey indicates no NEGOEX verification key is available.
+	ErrNoVerifyKey = errors.New("no NEGOEX verification key")
+	// ErrInvalidChecksum indicates a NEGOEX checksum verification failure.
 	ErrInvalidChecksum = errors.New("invalid NEGOEX checksum")
 )
 
@@ -39,7 +41,7 @@ func VerifyChecksum(key types.EncryptionKey, usage uint32, transcript []byte, ch
 	}
 	checksumType, err := krbcrypto.GetChksumEtype(int32(checksum.Type))
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrUnsupportedChecksumScheme, err)
+		return fmt.Errorf("%w: %w", ErrUnsupportedChecksumScheme, err)
 	}
 	if checksumType.GetETypeID() != key.KeyType {
 		return ErrInvalidChecksum

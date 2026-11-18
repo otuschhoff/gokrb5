@@ -68,8 +68,9 @@ func (e RC4HMAC) GetCypherBlockBitLength() int {
 	return 8 // doesn't really apply
 }
 
-// StringToKey returns a key derived from the string provided.
-func (e RC4HMAC) StringToKey(secret string, salt string, s2kparams string) ([]byte, error) {
+// StringToKey returns a key derived from the string provided. RC4-HMAC
+// string-to-key ignores the salt and s2kparams, per RFC 4757.
+func (e RC4HMAC) StringToKey(secret string, _ string, _ string) ([]byte, error) {
 	return rfc4757.StringToKey(secret)
 }
 
@@ -114,7 +115,7 @@ func (e RC4HMAC) DeriveRandom(protocolKey, usage []byte) ([]byte, error) {
 }
 
 // VerifyIntegrity checks the integrity of the plaintext message.
-func (e RC4HMAC) VerifyIntegrity(protocolKey, ct, pt []byte, usage uint32) bool {
+func (e RC4HMAC) VerifyIntegrity(protocolKey, ct, pt []byte, _ uint32) bool {
 	return rfc4757.VerifyIntegrity(protocolKey, pt, ct, e)
 }
 

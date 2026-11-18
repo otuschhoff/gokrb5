@@ -27,8 +27,10 @@ type UPNDNSInfo struct {
 }
 
 const (
+	// UPNDNSInfoFlagNoUPNAttribute indicates the UPN_DNS_INFO buffer carries no UPN attribute (MS-KILE 2.2.4).
 	UPNDNSInfoFlagNoUPNAttribute uint32 = 1 << 0
-	UPNDNSInfoFlagExtended       uint32 = 1 << 1
+	// UPNDNSInfoFlagExtended indicates the UPN_DNS_INFO buffer carries the extended form (MS-KILE 2.2.4).
+	UPNDNSInfoFlagExtended uint32 = 1 << 1
 )
 
 // Unmarshal bytes into the UPN_DNSInfo struct

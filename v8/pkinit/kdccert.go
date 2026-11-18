@@ -18,10 +18,13 @@ var oidServerAuth = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 1}
 // KDCEKUChecking selects the accepted KDC certificate EKU profile.
 type KDCEKUChecking string
 
+// KDCEKUChecking policies for the KDC certificate EKU.
 const (
+	// KDCEKUKDCAuthentication requires the KDC certificate to carry the KDC authentication EKU.
 	KDCEKUKDCAuthentication KDCEKUChecking = "kdc"
-	KDCEKUServerAuth        KDCEKUChecking = "kpServerAuth"
-	KDCEKUDisabled          KDCEKUChecking = "none"
+	// KDCEKUServerAuth requires only the server authentication EKU on the KDC certificate.
+	KDCEKUServerAuth KDCEKUChecking = "kpServerAuth"
+	KDCEKUDisabled   KDCEKUChecking = "none"
 )
 
 // KDCCertificatePolicy controls PKINIT KDC certificate validation.

@@ -531,18 +531,18 @@ func spnegoGet(cl *client.Client) error {
 	r, _ := http.NewRequest("GET", url+"/modgssapi/index.html", nil)
 	httpResp, err := http.DefaultClient.Do(r)
 	if err != nil {
-		return fmt.Errorf("request error: %v\n", err)
+		return fmt.Errorf("request error: %w\n", err)
 	}
 	if httpResp.StatusCode != http.StatusUnauthorized {
 		return errors.New("did not get unauthorized code when no SPNEGO header set")
 	}
 	err = spnego.SetSPNEGOHeader(cl, r, "HTTP/host.test.gokrb5")
 	if err != nil {
-		return fmt.Errorf("error setting client SPNEGO header: %v", err)
+		return fmt.Errorf("error setting client SPNEGO header: %w", err)
 	}
 	httpResp, err = http.DefaultClient.Do(r)
 	if err != nil {
-		return fmt.Errorf("request error: %v\n", err)
+		return fmt.Errorf("request error: %w\n", err)
 	}
 	if httpResp.StatusCode != http.StatusOK {
 		return errors.New("did not get OK code when SPNEGO header set")
@@ -637,7 +637,7 @@ const (
 func login() error {
 	file, err := os.Create("/etc/krb5.conf")
 	if err != nil {
-		return fmt.Errorf("cannot open krb5.conf: %v", err)
+		return fmt.Errorf("cannot open krb5.conf: %w", err)
 	}
 	defer file.Close()
 	fmt.Fprintf(file, testdata.KRB5_CONF)
@@ -651,7 +651,7 @@ func login() error {
 
 	err = cmd.Start()
 	if err != nil {
-		return fmt.Errorf("could not start %s command: %v", kinitCmd, err)
+		return fmt.Errorf("could not start %s command: %w", kinitCmd, err)
 	}
 
 	go func() {
@@ -666,7 +666,7 @@ func login() error {
 
 	err = cmd.Wait()
 	if err != nil {
-		return fmt.Errorf("%s did not run successfully: %v stderr: %s", kinitCmd, err, errBuf.String())
+		return fmt.Errorf("%s did not run successfully: %w stderr: %s", kinitCmd, err, errBuf.String())
 	}
 	return nil
 }
@@ -675,11 +675,11 @@ func getServiceTkt() error {
 	cmd := exec.Command(kvnoCmd, spn)
 	err := cmd.Start()
 	if err != nil {
-		return fmt.Errorf("could not start %s command: %v", kvnoCmd, err)
+		return fmt.Errorf("could not start %s command: %w", kvnoCmd, err)
 	}
 	err = cmd.Wait()
 	if err != nil {
-		return fmt.Errorf("%s did not run successfully: %v", kvnoCmd, err)
+		return fmt.Errorf("%s did not run successfully: %w", kvnoCmd, err)
 	}
 	return nil
 }

@@ -12,8 +12,11 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/ntstatus"
 )
 
+// NEGOEX conversation state errors.
 var (
-	ErrInvalidConversation  = errors.New("invalid NEGOEX conversation ID")
+	// ErrInvalidConversation indicates a NEGOEX message with an unexpected conversation ID.
+	ErrInvalidConversation = errors.New("invalid NEGOEX conversation ID")
+	// ErrMessageOutOfSequence indicates a NEGOEX message arrived out of sequence.
 	ErrMessageOutOfSequence = errors.New("NEGOEX message out of sequence")
 	ErrNoAvailableSchemes   = errors.New("no mutually supported NEGOEX authentication schemes")
 	ErrMissingNegoMessage   = errors.New("missing NEGOEX negotiate message")

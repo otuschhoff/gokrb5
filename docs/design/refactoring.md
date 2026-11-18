@@ -2,12 +2,15 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-5 done (formatter normalization,
-keytab complexity, dead code, mechanical clarity, shadow elimination).
+(floor raised to 86.0%), and Phase 5 slices 1-8 done (formatter normalization,
+keytab complexity, dead code, mechanical clarity, shadow elimination,
+errorlint, revive mechanical and exported documentation).
 Remaining canonical debt is concentrated in the classification-heavy
-categories (gosec, NilAway, wrapcheck, errcheck, revive, errorlint,
-nonamedreturns, forcetypeassert). Phase 3/4 interoperability and Windows exit
-evidence remains an external CI obligation.
+categories (gosec, NilAway, wrapcheck, errcheck, gocognit/nestif, ireturn,
+nonamedreturns, bodyclose) plus documented intentional categories (iana
+protocol-table naming, public API name stutters, contract error texts).
+Phase 3/4 interoperability and Windows exit evidence remains an external CI
+obligation.
 Assessment date: 2026-11-17.
 Scope: `v8` module (`github.com/otuschhoff/gokrb5/v8`) only. Root-module v7
 refactoring is out of scope; whole-project lint automation remains unchanged.
@@ -30,7 +33,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 2,103 canonical lint findings after Phase 5 slices 1-5 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,872 canonical lint findings after Phase 5 slices 1-8 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -763,6 +766,44 @@ staticcheck 24 (all documented deferral categories above). Full v8 unit and
 race suites, the changed-line lint gate (0 issues, both modules), and 45-60
 second seeded fuzz runs of the touched decoders (NDR arrays, SPNEGO negtoken,
 GSS wrap/MIC) pass.
+
+Slice 6 (2026-11-18, errorlint; zero remain): non-wrapping `%v` verbs on errors
+became `%w` in test support and production formatters (message text unchanged,
+wrapping strictly additive), error type assertions became errors.As in config
+parsing and service tests, and `err == flag.ErrHelp` became errors.Is in
+goklist. The krberror wrapper-identity test's deliberate exact-type assertion
+retains a narrow, reasoned `//nolint:errorlint` matching the existing Phase 2
+exception style.
+
+Slice 7 (2026-11-18, revive mechanical subset): unused parameters renamed to
+`_`, including the interface-required but intentionally unused crypto
+parameters (AES-SHA2 `VerifyIntegrity` plaintext, RC4-HMAC salt/s2kparams
+ignored per RFC 4757, and the never-implemented RC4-HMAC-EXP `export` flag,
+now documented as retained-for-compatibility in both directions), plus the
+PAC logger parameter that was already unused before Phase 3 (forwarding
+wrapper retains its named parameter). Package comments added to the command
+packages, krbcli, and pkinit; else-after-return flattened, including the
+SPNEGO AP-REP subkey/ticket-key fallback with its exact error text preserved;
+`score += 1` became `score++`; and the etype interface's `string` parameter
+renamed to `secret` (redefines-builtin-id). Deliberately retained as explained
+debt: var-naming findings in the iana protocol constant tables (names are
+public API and follow the protocol documents), revive "stutters" reports for
+established public names (SPNEGOClient/SPNEGOService/SPNEGOToken et al.), and
+error-strings findings pinned by error contracts and characterization tests.
+
+Slice 8 (2026-11-18, exported documentation): added accurate doc comments to
+all 144 previously undocumented exported symbols and constant/variable blocks
+across types (MS-KILE, FAST), pkinit, negoex, pac, iana, service, spnego, and
+test/ad, with protocol references (RFC 4556, MS-KILE, MS-PAC, MS-NEGOEX,
+MS-ADA2, MS-ERREF) where applicable. No code changes.
+
+The v8 canonical total is now 1,872. Remaining debt concentrates in gosec
+(Q-05 classification), NilAway (Q-02 invariants), wrapcheck/errcheck (Q-03),
+gocognit/nestif on remaining complex functions, ireturn/gochecknoglobals
+(API design decisions), nonamedreturns (Phase 2 defer-join patterns), and
+bodyclose (Q-06 helper ownership). Full v8 unit and race suites pass; the
+changed-line lint gate is clean for both modules; cross-package coverage
+remains 86.9%, so the 86.0% floor holds.
 
 Preserve v8's Go 1.26.0 floor. Validate proposed modernizations on the supported
 module toolchain and retain tagged/platform code. Measure optimizations before

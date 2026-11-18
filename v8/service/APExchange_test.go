@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/hex"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -206,8 +207,9 @@ func TestVerifyAPREQ_KRB_AP_ERR_BADMATCH(t *testing.T) {
 	if ok || err == nil {
 		t.Fatal("Validation of AP_REQ passed when it should not have")
 	}
-	if _, ok := err.(messages.KRBError); ok {
-		assert.Equal(t, errorcode.KRB_AP_ERR_BADMATCH, err.(messages.KRBError).ErrorCode, "Error code not as expected")
+	var krbErr messages.KRBError
+	if errors.As(err, &krbErr) {
+		assert.Equal(t, errorcode.KRB_AP_ERR_BADMATCH, krbErr.ErrorCode, "Error code not as expected")
 	} else {
 		t.Fatalf("Error is not a KRBError: %v", err)
 	}
@@ -255,8 +257,9 @@ func TestVerifyAPREQ_LargeClockSkew(t *testing.T) {
 	if ok || err == nil {
 		t.Fatal("Validation of AP_REQ passed when it should not have")
 	}
-	if _, ok := err.(messages.KRBError); ok {
-		assert.Equal(t, errorcode.KRB_AP_ERR_SKEW, err.(messages.KRBError).ErrorCode, "Error code not as expected")
+	var krbErr messages.KRBError
+	if errors.As(err, &krbErr) {
+		assert.Equal(t, errorcode.KRB_AP_ERR_SKEW, krbErr.ErrorCode, "Error code not as expected")
 	} else {
 		t.Fatalf("Error is not a KRBError: %v", err)
 	}
@@ -307,8 +310,11 @@ func TestVerifyAPREQ_Replay(t *testing.T) {
 	if ok || err == nil {
 		t.Fatal("Validation of AP_REQ passed when it should not have")
 	}
-	assert.IsType(t, messages.KRBError{}, err, "Error is not a KRBError")
-	assert.Equal(t, errorcode.KRB_AP_ERR_REPEAT, err.(messages.KRBError).ErrorCode, "Error code not as expected")
+	var krbErr messages.KRBError
+	if !errors.As(err, &krbErr) {
+		t.Fatal("Error is not a KRBError")
+	}
+	assert.Equal(t, errorcode.KRB_AP_ERR_REPEAT, krbErr.ErrorCode, "Error code not as expected")
 }
 
 func TestVerifyAPREQ_FutureTicket(t *testing.T) {
@@ -352,8 +358,9 @@ func TestVerifyAPREQ_FutureTicket(t *testing.T) {
 	if ok || err == nil {
 		t.Fatal("Validation of AP_REQ passed when it should not have")
 	}
-	if _, ok := err.(messages.KRBError); ok {
-		assert.Equal(t, errorcode.KRB_AP_ERR_TKT_NYV, err.(messages.KRBError).ErrorCode, "Error code not as expected")
+	var krbErr messages.KRBError
+	if errors.As(err, &krbErr) {
+		assert.Equal(t, errorcode.KRB_AP_ERR_TKT_NYV, krbErr.ErrorCode, "Error code not as expected")
 	} else {
 		t.Fatalf("Error is not a KRBError: %v", err)
 	}
@@ -401,8 +408,9 @@ func TestVerifyAPREQ_InvalidTicket(t *testing.T) {
 	if ok || err == nil {
 		t.Fatal("Validation of AP_REQ passed when it should not have")
 	}
-	if _, ok := err.(messages.KRBError); ok {
-		assert.Equal(t, errorcode.KRB_AP_ERR_TKT_NYV, err.(messages.KRBError).ErrorCode, "Error code not as expected")
+	var krbErr messages.KRBError
+	if errors.As(err, &krbErr) {
+		assert.Equal(t, errorcode.KRB_AP_ERR_TKT_NYV, krbErr.ErrorCode, "Error code not as expected")
 	} else {
 		t.Fatalf("Error is not a KRBError: %v", err)
 	}
@@ -449,8 +457,9 @@ func TestVerifyAPREQ_ExpiredTicket(t *testing.T) {
 	if ok || err == nil {
 		t.Fatal("Validation of AP_REQ passed when it should not have")
 	}
-	if _, ok := err.(messages.KRBError); ok {
-		assert.Equal(t, errorcode.KRB_AP_ERR_TKT_EXPIRED, err.(messages.KRBError).ErrorCode, "Error code not as expected")
+	var krbErr messages.KRBError
+	if errors.As(err, &krbErr) {
+		assert.Equal(t, errorcode.KRB_AP_ERR_TKT_EXPIRED, krbErr.ErrorCode, "Error code not as expected")
 	} else {
 		t.Fatalf("Error is not a KRBError: %v", err)
 	}

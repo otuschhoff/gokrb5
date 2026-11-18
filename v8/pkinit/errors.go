@@ -11,8 +11,11 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+// PKINIT validation errors.
 var (
-	ErrClientNotTrusted               = errors.New("PKINIT client certificate is not trusted")
+	// ErrClientNotTrusted indicates the PKINIT client certificate is not trusted by the KDC.
+	ErrClientNotTrusted = errors.New("PKINIT client certificate is not trusted")
+	// ErrKDCNotTrusted indicates the KDC certificate is not trusted.
 	ErrKDCNotTrusted                  = errors.New("PKINIT KDC certificate is not trusted")
 	ErrInvalidSignature               = errors.New("PKINIT signature is invalid")
 	ErrDHParametersNotAccepted        = errors.New("PKINIT DH parameters are not accepted")

@@ -503,7 +503,8 @@ func TestLoadWithV4Lines(t *testing.T) {
 	if err == nil {
 		t.Fatalf("error should not be nil for config that includes v4 lines")
 	}
-	if _, ok := err.(UnsupportedDirective); !ok {
+	var ud UnsupportedDirective
+	if !errors.As(err, &ud) {
 		t.Fatalf("error should be of type UnsupportedDirective: %v", err)
 	}
 
