@@ -824,6 +824,16 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 21 (2026-11-18, command configuration nil invariants): command NilAway
+is zero. `LoadConfig` rejects a nil configuration returned without an error,
+and `gokinit`'s PKINIT and AS request-option helpers reject nil configuration
+inputs before dereferencing defaults. A direct regression exercises both
+helpers, while the shared config loader test now verifies a successful load
+never returns a nil configuration. This closes the config-to-command flow
+that NilAway could not prove from the loader's error return alone. Command
+NilAway falls 9 to 0, total NilAway falls 27 to 18, and canonical findings
+fall 1,256 to 1,250; aggregate coverage remains 86.9%.
+
 Slice 20 (2026-11-18, crypto nil and derivation invariants): crypto NilAway
 is zero. Password-derived-key selection now explicitly rejects an unavailable
 encryption implementation before method dispatch. N-fold rejects empty input

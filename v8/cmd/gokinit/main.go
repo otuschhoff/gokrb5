@@ -202,6 +202,9 @@ func parseArgs(args []string, stderr io.Writer) (initOptions, error) {
 }
 
 func loadPKINITSettings(opts initOptions, cfg *config.Config, stdin io.Reader, stderr io.Writer) ([]func(*client.Settings), bool, error) {
+	if cfg == nil {
+		return nil, false, errors.New("Kerberos configuration is nil")
+	}
 	identities := append([]string(nil), cfg.LibDefaults.PKINITIdentities...)
 	anchors := append([]string(nil), cfg.LibDefaults.PKINITAnchors...)
 	if len(opts.pkinitOptions) != 0 {
@@ -350,6 +353,9 @@ func expandKeytabArgs(args []string) []string {
 
 func asRequestOptions(opts initOptions, cfg *config.Config) (messages.ASReqOptions, error) {
 	var result messages.ASReqOptions
+	if cfg == nil {
+		return result, errors.New("Kerberos configuration is nil")
+	}
 	if opts.lifetime != "" {
 		value, err := krbcli.ParseDuration(opts.lifetime)
 		if err != nil {

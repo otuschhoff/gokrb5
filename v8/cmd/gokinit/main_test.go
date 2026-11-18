@@ -213,6 +213,15 @@ func TestLoadPKINITSettings(t *testing.T) {
 	}
 }
 
+func TestInitConfigConsumersRejectNil(t *testing.T) {
+	if _, _, err := loadPKINITSettings(initOptions{}, nil, bytes.NewReader(nil), io.Discard); err == nil {
+		t.Fatal("loadPKINITSettings accepted nil configuration")
+	}
+	if _, err := asRequestOptions(initOptions{addresses: boolChoice{set: true, value: true}}, nil); err == nil {
+		t.Fatal("asRequestOptions accepted nil configuration")
+	}
+}
+
 func TestLoadPKINITSettingsRejectsInvalidConfiguration(t *testing.T) {
 	directory := t.TempDir()
 	certificatePath, keyPath := writePKINITIdentity(t, directory)

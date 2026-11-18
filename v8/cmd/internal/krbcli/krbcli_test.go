@@ -36,6 +36,9 @@ func TestLoadConfigFromEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if cfg == nil {
+		t.Fatal("LoadConfig returned nil configuration without error")
+	}
 	assert.Equal(t, "EXAMPLE.ORG", cfg.LibDefaults.DefaultRealm)
 }
 

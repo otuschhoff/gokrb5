@@ -20,6 +20,10 @@ func LoadConfig() (*config.Config, error) {
 	for _, path := range paths {
 		cfg, err := config.Load(path)
 		if err == nil {
+			if cfg == nil {
+				lastErr = errors.New("Kerberos configuration loader returned nil configuration")
+				continue
+			}
 			return cfg, nil
 		}
 		lastErr = err
