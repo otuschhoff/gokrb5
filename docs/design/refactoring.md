@@ -824,6 +824,15 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 31 (2026-11-18, ASN.1 and crypto wire ranges): ASN.1 tools and crypto
+G115 findings are zero. ASN.1 length octets and n-fold bit values use proven
+0..255 bounds, PKCS7 padding rejects block sizes above the byte representation,
+RFC 8009 rejects invalid key-bit lengths before uint32 encoding, and crypto test
+iterations use checked conversions. Oversized RFC 8009 derivation requests now
+return an empty byte slice instead of truncating the key length or propagating a nil value. ASN.1/crypto G115 falls 7 to 0,
+total G115 falls 20 to 13, gosec falls 105 to 98, and canonical findings fall
+1,091 to 1,084; coverage remains 86.6%.
+
 Slice 30 (2026-11-18, GSS token wire ranges): GSSAPI G115 findings are zero.
 Authenticator extension, channel-binding, delegation, checksum, rotation,
 and wrap-token lengths use checked uint16/uint32 helpers. Context flags are

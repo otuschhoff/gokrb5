@@ -39,7 +39,10 @@ func PKCS7Pad(b []byte, m int) ([]byte, error) {
 	n := m - (len(b) % m)
 	pb := make([]byte, len(b)+n)
 	copy(pb, b)
-	copy(pb[len(b):], bytes.Repeat([]byte{byte(n)}, n))
+	if n > 255 {
+		return nil, fmt.Errorf("PKCS7 padding size %d exceeds byte range", n)
+	}
+	copy(pb[len(b):], bytes.Repeat([]byte{byte(n)}, n)) // #nosec G115 -- bounded by 255 above.
 	return pb, nil
 }
 

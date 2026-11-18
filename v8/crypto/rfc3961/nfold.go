@@ -109,6 +109,6 @@ func setBit(b *[]byte, p, v int) {
 	pByte := p / 8
 	pBit := uint(p % 8)
 	oldByte := (*b)[pByte]
-	newByte := byte(v<<(8-(pBit+1))) | oldByte
+	newByte := byte(v<<(8-(pBit+1))) | oldByte // #nosec G115 -- v is a one-bit value and the shift is 0..7.
 	(*b)[pByte] = newByte
 }

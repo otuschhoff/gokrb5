@@ -17,19 +17,20 @@ func MarshalLengthBytes(l int) []byte {
 		return nil
 	}
 	if l <= 127 {
-		return []byte{byte(l)}
+		return []byte{byte(l)} // #nosec G115 -- bounded to [0,127].
 	}
 	var b []byte
 	p := 1
 	for i := 1; i < 127; {
-		b = append([]byte{byte((l % (p * 256)) / p)}, b...)
+		value := (l % (p * 256)) / p
+		b = append([]byte{byte(value)}, b...) // #nosec G115 -- value is exactly 0..255.
 		p *= 256
 		l -= l % p
 		if l <= 0 {
 			break
 		}
 	}
-	return append([]byte{byte(128 + len(b))}, b...)
+	return append([]byte{byte(128 + len(b))}, b...) // #nosec G115 -- ASN.1 limits long-form length to 126 octets; b is shorter.
 }
 
 // GetLengthFromASN returns the length of a slice of ASN1 encoded bytes from the ASN1 length header it contains.

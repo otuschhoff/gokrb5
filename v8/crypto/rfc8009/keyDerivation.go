@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"math"
 
 	"golang.org/x/crypto/pbkdf2"
 
@@ -70,7 +71,10 @@ func StringToPBKDF2(secret, salt string, iterations int, e etype.EType) []byte {
 func KDF_HMAC_SHA2(protocolKey, label, context []byte, kl int, e etype.EType) []byte {
 	// k: Length in bits of the key to be outputted, expressed in big-endian binary representation in 4 bytes.
 	k := make([]byte, 4)
-	binary.BigEndian.PutUint32(k, uint32(kl))
+	if kl < 0 || uint64(kl) > math.MaxUint32 {
+		return []byte{}
+	}
+	binary.BigEndian.PutUint32(k, uint32(kl)) // #nosec G115 -- bounded by uint32 range above.
 
 	c := make([]byte, 4)
 	binary.BigEndian.PutUint32(c, uint32(1))

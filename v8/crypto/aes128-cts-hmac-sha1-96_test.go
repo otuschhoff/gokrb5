@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"encoding/hex"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,6 +10,14 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/crypto/common"
 	"github.com/otuschhoff/gokrb5/v8/crypto/rfc3962"
 )
+
+func mustCryptoUint32(t *testing.T, value int64) uint32 {
+	t.Helper()
+	if value < 0 || uint64(value) > uint64(math.MaxUint32) { // #nosec G115 -- negative branch checked before conversion.
+		t.Fatalf("iteration count %d exceeds uint32 range", value)
+	}
+	return uint32(value) // #nosec G115 -- bounded above.
+}
 
 func TestAes128CtsHmacSha196_StringToKey(t *testing.T) {
 	t.Parallel()
@@ -36,7 +45,7 @@ func TestAes128CtsHmacSha196_StringToKey(t *testing.T) {
 	for i, test := range tests {
 
 		assert.Equal(t, test.pbkdf2, hex.EncodeToString(rfc3962.StringToPBKDF2(test.phrase, test.salt, test.iterations, e)), "PBKDF2 not as expected")
-		k, err := e.StringToKey(test.phrase, test.salt, common.IterationsToS2Kparams(uint32(test.iterations)))
+		k, err := e.StringToKey(test.phrase, test.salt, common.IterationsToS2Kparams(mustCryptoUint32(t, test.iterations)))
 		if err != nil {
 			t.Errorf("error in processing string to key for test %d: %v", i, err)
 		}
