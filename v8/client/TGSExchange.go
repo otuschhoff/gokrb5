@@ -13,7 +13,10 @@ import (
 )
 
 // TGSREQGenerateAndExchange generates the TGS_REQ and performs a TGS exchange to retrieve a ticket to the specified SPN.
-func (cl *Client) TGSREQGenerateAndExchange(spn types.PrincipalName, kdcRealm string, tgt messages.Ticket, sessionKey types.EncryptionKey, renewal bool) (tgsReq messages.TGSReq, tgsRep messages.TGSRep, err error) {
+func (cl *Client) TGSREQGenerateAndExchange(spn types.PrincipalName, kdcRealm string, tgt messages.Ticket, sessionKey types.EncryptionKey, renewal bool) (messages.TGSReq, messages.TGSRep, error) {
+	var tgsReq messages.TGSReq
+	var tgsRep messages.TGSRep
+	var err error
 	options := cl.tgsReqOptions(kdcRealm)
 	tgsReq, err = messages.NewTGSReqWithOptions(cl.Credentials.CName(), kdcRealm, cl.Config, tgt, sessionKey, spn, renewal, options)
 	if err != nil {

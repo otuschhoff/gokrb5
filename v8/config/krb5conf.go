@@ -173,7 +173,8 @@ type Realm struct {
 }
 
 // Parse the lines of a [realms] entry into the Realm struct.
-func (r *Realm) parseLines(name string, lines []string) (err error) {
+func (r *Realm) parseLines(name string, lines []string) error {
+	var err error
 	r.Realm = name
 	var adminServerFinal bool
 	var KDCFinal bool
@@ -255,7 +256,9 @@ func (r *Realm) parseLines(name string, lines []string) (err error) {
 }
 
 // Parse the lines of the [realms] section of the configuration into an slice of Realm structs.
-func parseRealms(lines []string) (realms []Realm, err error) {
+func parseRealms(lines []string) ([]Realm, error) {
+	var realms []Realm
+	var err error
 	var name string
 	var start int
 	var c int

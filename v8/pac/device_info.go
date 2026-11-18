@@ -23,11 +23,12 @@ type DeviceInfo struct {
 }
 
 // Unmarshal bytes into the DeviceInfo struct
-func (k *DeviceInfo) Unmarshal(b []byte) (err error) {
+func (k *DeviceInfo) Unmarshal(b []byte) error {
+	var err error
 	dec := ndr.NewDecoder(bytes.NewReader(b))
 	err = dec.Decode(k)
 	if err != nil {
 		err = fmt.Errorf("error unmarshaling DeviceInfo: %w", err)
 	}
-	return
+	return err
 }

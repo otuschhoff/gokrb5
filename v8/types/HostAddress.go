@@ -56,7 +56,9 @@ func (h *HostAddress) GetAddress() (string, error) {
 }
 
 // LocalHostAddresses returns a HostAddresses struct for the local machines interface IP addresses.
-func LocalHostAddresses() (ha HostAddresses, err error) {
+func LocalHostAddresses() (HostAddresses, error) {
+	var ha HostAddresses
+	var err error
 	ifs, err := net.Interfaces()
 	if err != nil {
 		return ha, err
@@ -98,7 +100,8 @@ func LocalHostAddresses() (ha HostAddresses, err error) {
 }
 
 // HostAddressesFromNetIPs returns a HostAddresses type from a slice of net.IP
-func HostAddressesFromNetIPs(ips []net.IP) (ha HostAddresses) {
+func HostAddressesFromNetIPs(ips []net.IP) HostAddresses {
+	var ha HostAddresses
 	for _, ip := range ips {
 		ha = append(ha, HostAddressFromNetIP(ip))
 	}

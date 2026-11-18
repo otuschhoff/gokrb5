@@ -24,34 +24,37 @@ type CredentialsInfo struct {
 }
 
 // Unmarshal bytes into the CredentialsInfo struct
-func (c *CredentialsInfo) Unmarshal(b []byte, k types.EncryptionKey) (err error) {
+func (c *CredentialsInfo) Unmarshal(b []byte, k types.EncryptionKey) error {
+	var
 	// The CredentialsInfo structure is a simple structure that is not NDR-encoded.
+	err error
+
 	r := mstypes.NewReader(bytes.NewReader(b))
 
 	c.Version, err = r.Uint32()
 	if err != nil {
-		return
+		return err
 	}
 	if c.Version != 0 {
 		err = errors.New("credentials info version is not zero")
-		return
+		return err
 	}
 	c.EType, err = r.Uint32()
 	if err != nil {
-		return
+		return err
 	}
 	c.PACCredentialDataEncrypted, err = r.ReadBytes(len(b) - 8)
 	if err != nil {
 		err = fmt.Errorf("error reading PAC Credetials Data: %w", err)
-		return
+		return err
 	}
 
 	err = c.DecryptEncPart(k)
 	if err != nil {
 		err = fmt.Errorf("error decrypting PAC Credentials Data: %w", err)
-		return
+		return err
 	}
-	return
+	return err
 }
 
 // DecryptEncPart decrypts the encrypted part of the CredentialsInfo.
@@ -77,11 +80,12 @@ type CredentialData struct {
 }
 
 // Unmarshal converts the bytes provided into a CredentialData type.
-func (c *CredentialData) Unmarshal(b []byte) (err error) {
+func (c *CredentialData) Unmarshal(b []byte) error {
+	var err error
 	dec := ndr.NewDecoder(bytes.NewReader(b))
 	err = dec.Decode(c)
 	if err != nil {
 		err = fmt.Errorf("error unmarshaling KerbValidationInfo: %w", err)
 	}
-	return
+	return err
 }

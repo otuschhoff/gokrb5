@@ -34,7 +34,8 @@ const (
 )
 
 // Unmarshal bytes into the UPN_DNSInfo struct
-func (k *UPNDNSInfo) Unmarshal(b []byte) (err error) {
+func (k *UPNDNSInfo) Unmarshal(b []byte) error {
+	var err error
 	if len(b) < 12 {
 		return fmt.Errorf("%w: UPN_DNS_INFO is %d bytes, want at least 12", ErrPACMalformed, len(b))
 	}

@@ -68,7 +68,9 @@ func (k SignatureData) Marshal() ([]byte, error) {
 }
 
 // Unmarshal bytes into the SignatureData struct
-func (k *SignatureData) Unmarshal(b []byte) (rb []byte, err error) {
+func (k *SignatureData) Unmarshal(b []byte) ([]byte, error) {
+	var rb []byte
+	var err error
 	r := mstypes.NewReader(bytes.NewReader(b))
 
 	k.SignatureType, err = r.Uint32()

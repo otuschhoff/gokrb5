@@ -240,12 +240,14 @@ func NewKerbExtErrorData(v KerbExtError) (KerbErrorData, error) {
 }
 
 // GetKerbExtError decodes the KerbExtError carried by the value.
-func (v *KerbErrorData) GetKerbExtError() (ext KerbExtError, err error) {
+func (v *KerbErrorData) GetKerbExtError() (KerbExtError, error) {
+	var ext KerbExtError
+	var err error
 	if v.DataType != int32(msflags.KERB_ERR_TYPE_EXTENDED) {
 		return ext, fmt.Errorf("KERB-ERROR-DATA type mismatch: expected %d, got %d", msflags.KERB_ERR_TYPE_EXTENDED, v.DataType)
 	}
 	err = ext.Unmarshal(v.DataValue)
-	return
+	return ext, err
 }
 
 // Marshal marshals LSAPTokenInfoIntegrity to its DER encoding.
@@ -277,12 +279,14 @@ func NewKerbADRestrictionEntryForToken(v LSAPTokenInfoIntegrity) (KerbADRestrict
 }
 
 // GetLSAPTokenInfoIntegrity decodes the LSAPTokenInfoIntegrity carried by the value.
-func (v *KerbADRestrictionEntry) GetLSAPTokenInfoIntegrity() (info LSAPTokenInfoIntegrity, err error) {
+func (v *KerbADRestrictionEntry) GetLSAPTokenInfoIntegrity() (LSAPTokenInfoIntegrity, error) {
+	var info LSAPTokenInfoIntegrity
+	var err error
 	if v.RestrictionType != msflags.KerbADRestrictionTypeTokenIntegrity {
 		return info, fmt.Errorf("unsupported KERB-AD-RESTRICTION-ENTRY type %d", v.RestrictionType)
 	}
 	err = info.Unmarshal(v.Restriction)
-	return
+	return info, err
 }
 
 // Marshal marshals ADAuthDataAPOptions to its DER encoding.
@@ -383,9 +387,11 @@ func NewKerbPAPACRequestPAData(include bool) (PAData, error) {
 }
 
 // GetKerbPAPACRequest decodes the KerbPAPACRequest carried by the value.
-func (pa *PAData) GetKerbPAPACRequest() (v KerbPAPACRequest, err error) {
+func (pa *PAData) GetKerbPAPACRequest() (KerbPAPACRequest, error) {
+	var v KerbPAPACRequest
+	var err error
 	err = getPAData(pa, patype.PA_PAC_REQUEST, &v)
-	return
+	return v, err
 }
 
 // NewPAPACOptionsPAData wraps PAPACOptions in a PA-DATA entry of its assigned type.
@@ -401,9 +407,11 @@ func NewPAPACOptionsPAData(bits ...int) (PAData, error) {
 }
 
 // GetPAPACOptions decodes the PAPACOptions carried by the value.
-func (pa *PAData) GetPAPACOptions() (v PAPACOptions, err error) {
+func (pa *PAData) GetPAPACOptions() (PAPACOptions, error) {
+	var v PAPACOptions
+	var err error
 	err = getPAData(pa, patype.PA_PAC_OPTIONS, &v)
-	return
+	return v, err
 }
 
 // NewPAForUserPAData wraps PAForUser in a PA-DATA entry of its assigned type.
@@ -412,9 +420,11 @@ func NewPAForUserPAData(v PAForUser) (PAData, error) {
 }
 
 // GetPAForUser decodes the PAForUser carried by the value.
-func (pa *PAData) GetPAForUser() (v PAForUser, err error) {
+func (pa *PAData) GetPAForUser() (PAForUser, error) {
+	var v PAForUser
+	var err error
 	err = getPAData(pa, patype.PA_FOR_USER, &v)
-	return
+	return v, err
 }
 
 // NewPAS4UX509UserPAData wraps PAS4UX509User in a PA-DATA entry of its assigned type.
@@ -423,9 +433,11 @@ func NewPAS4UX509UserPAData(v PAS4UX509User) (PAData, error) {
 }
 
 // GetPAS4UX509User decodes the PAS4UX509User carried by the value.
-func (pa *PAData) GetPAS4UX509User() (v PAS4UX509User, err error) {
+func (pa *PAData) GetPAS4UX509User() (PAS4UX509User, error) {
+	var v PAS4UX509User
+	var err error
 	err = getPAData(pa, patype.PA_S4U_X509_USER, &v)
-	return
+	return v, err
 }
 
 // NewPASupportedEncTypesPAData wraps PASupportedEncTypes in a PA-DATA entry of its assigned type.
@@ -435,12 +447,14 @@ func NewPASupportedEncTypesPAData(v PASupportedEncTypes) (PAData, error) {
 }
 
 // GetPASupportedEncTypes decodes the PASupportedEncTypes carried by the value.
-func (pa *PAData) GetPASupportedEncTypes() (v PASupportedEncTypes, err error) {
+func (pa *PAData) GetPASupportedEncTypes() (PASupportedEncTypes, error) {
+	var v PASupportedEncTypes
+	var err error
 	if pa.PADataType != patype.PA_SUPPORTED_ETYPES {
 		return v, fmt.Errorf("PAData type mismatch: expected %d, got %d", patype.PA_SUPPORTED_ETYPES, pa.PADataType)
 	}
 	err = v.Unmarshal(pa.PADataValue)
-	return
+	return v, err
 }
 
 // NewKerbKeyListReqPAData wraps KerbKeyListReq in a PA-DATA entry of its assigned type.
@@ -449,9 +463,11 @@ func NewKerbKeyListReqPAData(v KerbKeyListReq) (PAData, error) {
 }
 
 // GetKerbKeyListReq decodes the KerbKeyListReq carried by the value.
-func (pa *PAData) GetKerbKeyListReq() (v KerbKeyListReq, err error) {
+func (pa *PAData) GetKerbKeyListReq() (KerbKeyListReq, error) {
+	var v KerbKeyListReq
+	var err error
 	err = getPAData(pa, patype.PA_KERB_KEY_LIST_REQ, &v)
-	return
+	return v, err
 }
 
 // NewKerbKeyListRepPAData wraps KerbKeyListRep in a PA-DATA entry of its assigned type.
@@ -460,9 +476,11 @@ func NewKerbKeyListRepPAData(v KerbKeyListRep) (PAData, error) {
 }
 
 // GetKerbKeyListRep decodes the KerbKeyListRep carried by the value.
-func (pa *PAData) GetKerbKeyListRep() (v KerbKeyListRep, err error) {
+func (pa *PAData) GetKerbKeyListRep() (KerbKeyListRep, error) {
+	var v KerbKeyListRep
+	var err error
 	err = getPAData(pa, patype.PA_KERB_KEY_LIST_REP, &v)
-	return
+	return v, err
 }
 
 // NewPASvrReferralInfoPAData wraps PASvrReferralInfo in a PA-DATA entry of its assigned type.
@@ -471,9 +489,11 @@ func NewPASvrReferralInfoPAData(v PASvrReferralData) (PAData, error) {
 }
 
 // GetPASvrReferralInfo decodes the PASvrReferralInfo carried by the value.
-func (pa *PAData) GetPASvrReferralInfo() (v PASvrReferralData, err error) {
+func (pa *PAData) GetPASvrReferralInfo() (PASvrReferralData, error) {
+	var v PASvrReferralData
+	var err error
 	err = getPAData(pa, patype.PA_SVR_REFERRAL_INFO, &v)
-	return
+	return v, err
 }
 
 // NewKerbSupersededByUserPAData wraps KerbSupersededByUser in a PA-DATA entry of its assigned type.
@@ -482,9 +502,11 @@ func NewKerbSupersededByUserPAData(v KerbSupersededByUser) (PAData, error) {
 }
 
 // GetKerbSupersededByUser decodes the KerbSupersededByUser carried by the value.
-func (pa *PAData) GetKerbSupersededByUser() (v KerbSupersededByUser, err error) {
+func (pa *PAData) GetKerbSupersededByUser() (KerbSupersededByUser, error) {
+	var v KerbSupersededByUser
+	var err error
 	err = getPAData(pa, patype.PA_SUPERSEDED_BY_USER, &v)
-	return
+	return v, err
 }
 
 // NewKerbDMSAKeyPackagePAData wraps KerbDMSAKeyPackage in a PA-DATA entry of its assigned type.
@@ -493,9 +515,11 @@ func NewKerbDMSAKeyPackagePAData(v KerbDMSAKeyPackage) (PAData, error) {
 }
 
 // GetKerbDMSAKeyPackage decodes the KerbDMSAKeyPackage carried by the value.
-func (pa *PAData) GetKerbDMSAKeyPackage() (v KerbDMSAKeyPackage, err error) {
+func (pa *PAData) GetKerbDMSAKeyPackage() (KerbDMSAKeyPackage, error) {
+	var v KerbDMSAKeyPackage
+	var err error
 	err = getPAData(pa, patype.PA_DMSA_KEY_PACKAGE, &v)
-	return
+	return v, err
 }
 
 // NewKerbADRestrictionEntry wraps KerbADRestriction in an authorization-data entry of its assigned type.
@@ -505,12 +529,14 @@ func NewKerbADRestrictionEntry(v KerbADRestrictionEntry) (AuthorizationDataEntry
 }
 
 // GetKerbADRestrictionEntry decodes the KerbADRestrictionEntry carried by the value.
-func (a *AuthorizationDataEntry) GetKerbADRestrictionEntry() (v KerbADRestrictionEntry, err error) {
+func (a *AuthorizationDataEntry) GetKerbADRestrictionEntry() (KerbADRestrictionEntry, error) {
+	var v KerbADRestrictionEntry
+	var err error
 	if a.ADType != adtype.KerbAdRestrictionEntry {
 		return v, fmt.Errorf("authorization-data type mismatch: expected %d, got %d", adtype.KerbAdRestrictionEntry, a.ADType)
 	}
 	err = v.Unmarshal(a.ADData)
-	return
+	return v, err
 }
 
 // NewKerbLocalEntry wraps KerbLocal in an authorization-data entry of its assigned type.
@@ -531,12 +557,14 @@ func NewADAuthDataAPOptionsEntry(options msflags.APOptions) (AuthorizationDataEn
 }
 
 // GetADAuthDataAPOptions decodes the ADAuthDataAPOptions carried by the value.
-func (a *AuthorizationDataEntry) GetADAuthDataAPOptions() (v ADAuthDataAPOptions, err error) {
+func (a *AuthorizationDataEntry) GetADAuthDataAPOptions() (ADAuthDataAPOptions, error) {
+	var v ADAuthDataAPOptions
+	var err error
 	if a.ADType != adtype.ADAuthDataAPOptions {
 		return v, fmt.Errorf("authorization-data type mismatch: expected %d, got %d", adtype.ADAuthDataAPOptions, a.ADType)
 	}
 	err = v.Unmarshal(a.ADData)
-	return
+	return v, err
 }
 
 // NewKerbDMSAKeyPackageEntry wraps KerbDMSAKeyPackage in an authorization-data entry of its assigned type.
@@ -546,10 +574,12 @@ func NewKerbDMSAKeyPackageEntry(v KerbDMSAKeyPackage) (AuthorizationDataEntry, e
 }
 
 // GetKerbDMSAKeyPackage decodes the KerbDMSAKeyPackage carried by the value.
-func (a *AuthorizationDataEntry) GetKerbDMSAKeyPackage() (v KerbDMSAKeyPackage, err error) {
+func (a *AuthorizationDataEntry) GetKerbDMSAKeyPackage() (KerbDMSAKeyPackage, error) {
+	var v KerbDMSAKeyPackage
+	var err error
 	if a.ADType != adtype.KerbDMSAKeyPackage {
 		return v, fmt.Errorf("authorization-data type mismatch: expected %d, got %d", adtype.KerbDMSAKeyPackage, a.ADType)
 	}
 	err = v.Unmarshal(a.ADData)
-	return
+	return v, err
 }

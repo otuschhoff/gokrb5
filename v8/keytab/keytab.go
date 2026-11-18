@@ -971,7 +971,9 @@ func readUint8(b []byte, p *int) (uint8, error) {
 }
 
 // Read bytes representing a sixteen bit integer.
-func readInt16(b []byte, p *int, e *binary.ByteOrder) (i int16, err error) {
+func readInt16(b []byte, p *int, e *binary.ByteOrder) (int16, error) {
+	var i int16
+	var err error
 	if *p < 0 {
 		return 0, fmt.Errorf("%d cannot be less than zero", *p)
 	}
@@ -982,11 +984,13 @@ func readInt16(b []byte, p *int, e *binary.ByteOrder) (i int16, err error) {
 
 	i = int16((*e).Uint16(b[*p : *p+2]))
 	*p += 2
-	return
+	return i, err
 }
 
 // Read bytes representing a thirty two bit integer.
-func readInt32(b []byte, p *int, e *binary.ByteOrder) (i int32, err error) {
+func readInt32(b []byte, p *int, e *binary.ByteOrder) (int32, error) {
+	var i int32
+	var err error
 	if *p < 0 {
 		return 0, fmt.Errorf("%d cannot be less than zero", *p)
 	}
@@ -997,7 +1001,7 @@ func readInt32(b []byte, p *int, e *binary.ByteOrder) (i int32, err error) {
 
 	i = int32((*e).Uint32(b[*p : *p+4]))
 	*p += 4
-	return
+	return i, err
 }
 
 // Read bytes representing a thirty two bit unsigned integer.

@@ -177,26 +177,30 @@ func (dec *Decoder) readInt64() (int64, error) {
 }
 
 // https://en.wikipedia.org/wiki/IEEE_754-1985
-func (dec *Decoder) readFloat32() (f float32, err error) {
+func (dec *Decoder) readFloat32() (float32, error) {
+	var f float32
+	var err error
 	dec.ensureAlignment(SizeSingle)
 	b, err := dec.readBytes(SizeSingle)
 	if err != nil {
-		return
+		return f, err
 	}
 	bits := dec.ch.Endianness.Uint32(b)
 	f = math.Float32frombits(bits)
-	return
+	return f, err
 }
 
-func (dec *Decoder) readFloat64() (f float64, err error) {
+func (dec *Decoder) readFloat64() (float64, error) {
+	var f float64
+	var err error
 	dec.ensureAlignment(SizeDouble)
 	b, err := dec.readBytes(SizeDouble)
 	if err != nil {
-		return
+		return f, err
 	}
 	bits := dec.ch.Endianness.Uint64(b)
 	f = math.Float64frombits(bits)
-	return
+	return f, err
 }
 
 // NDR enforces NDR alignment of primitive data; that is, any primitive of size n octets is aligned at a octet stream

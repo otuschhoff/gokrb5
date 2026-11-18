@@ -49,27 +49,29 @@ func (cl *Client) ChangePasswd(newPasswd string) (bool, error) {
 	return true, nil
 }
 
-func (cl *Client) sendToKPasswd(msg kadmin.Request) (r kadmin.Reply, err error) {
+func (cl *Client) sendToKPasswd(msg kadmin.Request) (kadmin.Reply, error) {
+	var r kadmin.Reply
+	var err error
 	_, kps, err := cl.Config.GetKpasswdServers(cl.Credentials.Domain(), true)
 	if err != nil {
-		return
+		return r, err
 	}
 	b, err := msg.Marshal()
 	if err != nil {
-		return
+		return r, err
 	}
 	var rb []byte
 	if len(b) <= cl.Config.LibDefaults.UDPPreferenceLimit {
 		rb, err = cl.sendToServers(kps, cl.Credentials.Domain(), b, false)
 		if err != nil {
-			return
+			return r, err
 		}
 	} else {
 		rb, err = cl.sendToServers(kps, cl.Credentials.Domain(), b, true)
 		if err != nil {
-			return
+			return r, err
 		}
 	}
 	err = r.Unmarshal(rb)
-	return
+	return r, err
 }

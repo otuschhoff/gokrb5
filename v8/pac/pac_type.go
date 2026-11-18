@@ -73,7 +73,8 @@ type InfoBuffer struct {
 }
 
 // Unmarshal bytes into the PACType struct
-func (pac *PACType) Unmarshal(b []byte) (err error) {
+func (pac *PACType) Unmarshal(b []byte) error {
+	var err error
 	if len(b) < 8 {
 		return fmt.Errorf("%w: header is %d bytes, want at least 8", ErrPACMalformed, len(b))
 	}

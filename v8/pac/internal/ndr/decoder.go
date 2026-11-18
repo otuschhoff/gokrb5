@@ -180,13 +180,14 @@ func (dec *Decoder) isPointer(v reflect.Value, tag reflect.StructTag, def *[]def
 	return false, nil
 }
 
-func getReflectValue(s interface{}) (v reflect.Value) {
+func getReflectValue(s interface{}) reflect.Value {
+	var v reflect.Value
 	if r, ok := s.(reflect.Value); ok {
 		v = r
 	} else if reflect.ValueOf(s).Kind() == reflect.Ptr {
 		v = reflect.ValueOf(s).Elem()
 	}
-	return
+	return v
 }
 
 // fill populates fields with values from the NDR byte stream.

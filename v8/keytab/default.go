@@ -23,7 +23,10 @@ var defaultClientKeytabNames = []string{
 
 // ResolveName resolves a FILE or WRFILE keytab name to a filesystem path.
 // The writable result reports whether the WRFILE type was requested.
-func ResolveName(name string, cfg *config.Config) (path string, writable bool, err error) {
+func ResolveName(name string, cfg *config.Config) (string, bool, error) {
+
+	var writable bool
+
 	if name == "" {
 		name = defaultKeytabName
 		if cfg != nil && cfg.LibDefaults.DefaultKeytabName != "" {

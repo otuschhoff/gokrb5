@@ -264,7 +264,8 @@ func (e *Env) DelegationPrincipal() (keytab.Principal, bool) {
 }
 
 // DisabledAccount returns credentials for the account-policy error test.
-func (e *Env) DisabledAccount() (user, password string, ok bool) {
+func (e *Env) DisabledAccount() (string, string, bool) {
+
 	return e.disabledUser, e.disabledPassword, e.disabledUser != "" && e.disabledPassword != ""
 }
 
@@ -332,7 +333,11 @@ func resolvConfDomain() string {
 	return search
 }
 
-func credentialPaths() (keytabPath, userPath, passwordPath string, err error) {
+func credentialPaths() (string, string, string, error) {
+	var keytabPath string
+	var userPath string
+	var passwordPath string
+	var err error
 	dir := os.Getenv(DirEnvVar)
 	if dir == "" {
 		dir, err = findRepoRoot()

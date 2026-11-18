@@ -23,10 +23,11 @@ const (
 	TagUnionField          = "unionField"
 )
 
-func (dec *Decoder) isUnion(field reflect.Value, tag reflect.StructTag) (r reflect.Value) {
+func (dec *Decoder) isUnion(field reflect.Value, tag reflect.StructTag) reflect.Value {
+	var r reflect.Value
 	ndrTag := parseTags(tag)
 	if !ndrTag.HasValue(TagUnionTag) {
-		return
+		return r
 	}
 	r = field
 	// For a non-encapsulated union, the discriminant is marshalled into the transmitted data stream twice: once as the
@@ -37,7 +38,7 @@ func (dec *Decoder) isUnion(field reflect.Value, tag reflect.StructTag) (r refle
 			dec.resourceErr = fmt.Errorf("read NDR union discriminant: %w", err)
 		}
 	}
-	return
+	return r
 }
 
 // unionSelectedField returns the field name of which of the union values to fill

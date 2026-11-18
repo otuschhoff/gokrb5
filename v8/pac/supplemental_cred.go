@@ -27,33 +27,34 @@ type NTLMSupplementalCred struct {
 }
 
 // Unmarshal converts the bytes provided into a NTLMSupplementalCred.
-func (c *NTLMSupplementalCred) Unmarshal(b []byte) (err error) {
+func (c *NTLMSupplementalCred) Unmarshal(b []byte) error {
+	var err error
 	r := mstypes.NewReader(bytes.NewReader(b))
 	c.Version, err = r.Uint32()
 	if err != nil {
-		return
+		return err
 	}
 	if c.Version != 0 {
 		err = errors.New("NTLMSupplementalCred version is not zero")
-		return
+		return err
 	}
 	c.Flags, err = r.Uint32()
 	if err != nil {
-		return
+		return err
 	}
 	if isFlagSet(c.Flags, NTLMSupCredLMOWF) {
 		c.LMPassword, err = r.ReadBytes(16)
 		if err != nil {
-			return
+			return err
 		}
 	}
 	if isFlagSet(c.Flags, NTLMSupCredNTOWF) {
 		c.NTPassword, err = r.ReadBytes(16)
 		if err != nil {
-			return
+			return err
 		}
 	}
-	return
+	return err
 }
 
 // isFlagSet tests if a flag is set in the uint32 little endian flag
@@ -75,11 +76,12 @@ type SECPKGSupplementalCred struct {
 }
 
 // Unmarshal converts the bytes provided into a SECPKGSupplementalCred.
-func (c *SECPKGSupplementalCred) Unmarshal(b []byte) (err error) {
+func (c *SECPKGSupplementalCred) Unmarshal(b []byte) error {
+	var err error
 	dec := ndr.NewDecoder(bytes.NewReader(b))
 	err = dec.Decode(c)
 	if err != nil {
 		err = fmt.Errorf("error unmarshaling SECPKGSupplementalCred: %w", err)
 	}
-	return
+	return err
 }

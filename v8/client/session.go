@@ -316,29 +316,37 @@ func (cl *Client) ensureValidSession(realm string) error {
 }
 
 // sessionTGTDetails is a thread safe way to get the TGT and session key values for a realm
-func (cl *Client) sessionTGT(realm string) (tgt messages.Ticket, sessionKey types.EncryptionKey, err error) {
+func (cl *Client) sessionTGT(realm string) (messages.Ticket, types.EncryptionKey, error) {
+	var tgt messages.Ticket
+	var sessionKey types.EncryptionKey
+	var err error
 	err = cl.ensureValidSession(realm)
 	if err != nil {
-		return
+		return tgt, sessionKey, err
 	}
 	s, ok := cl.sessions.get(realm)
 	if !ok {
 		err = fmt.Errorf("could not find TGT session for %s", realm)
-		return
+		return tgt, sessionKey, err
 	}
 	_, tgt, sessionKey = s.tgtDetails()
-	return
+	return tgt, sessionKey, err
 }
 
 // sessionTimes provides the timing information with regards to a session for the realm specified.
-func (cl *Client) sessionTimes(realm string) (authTime, endTime, renewTime, sessionExp time.Time, err error) {
+func (cl *Client) sessionTimes(realm string) (time.Time, time.Time, time.Time, time.Time, error) {
+	var authTime time.Time
+	var endTime time.Time
+	var renewTime time.Time
+	var sessionExp time.Time
+	var err error
 	s, ok := cl.sessions.get(realm)
 	if !ok {
 		err = fmt.Errorf("could not find TGT session for %s", realm)
-		return
+		return authTime, endTime, renewTime, sessionExp, err
 	}
 	_, authTime, endTime, renewTime, sessionExp = s.timeDetails()
-	return
+	return authTime, endTime, renewTime, sessionExp, err
 }
 
 // spnRealm resolves the realm name of a service principal name

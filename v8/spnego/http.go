@@ -258,7 +258,8 @@ func (c *Client) setContext(context gssapi.Context) {
 }
 
 // Do is the SPNEGO enabled HTTP client's equivalent of the http.Client's Do method.
-func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
+func (c *Client) Do(req *http.Request) (*http.Response, error) {
+
 	if req == nil {
 		return nil, errors.New("HTTP request is nil")
 	}
@@ -377,7 +378,7 @@ func (c *Client) verifyMutualResponse(req *http.Request, resp *http.Response) er
 }
 
 // Get is the SPNEGO enabled HTTP client's equivalent of the http.Client's Get method.
-func (c *Client) Get(url string) (resp *http.Response, err error) {
+func (c *Client) Get(url string) (*http.Response, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -386,7 +387,7 @@ func (c *Client) Get(url string) (resp *http.Response, err error) {
 }
 
 // Post is the SPNEGO enabled HTTP client's equivalent of the http.Client's Post method.
-func (c *Client) Post(url, contentType string, body io.Reader) (resp *http.Response, err error) {
+func (c *Client) Post(url, contentType string, body io.Reader) (*http.Response, error) {
 	req, err := http.NewRequest("POST", url, body)
 	if err != nil {
 		return nil, err
@@ -396,12 +397,12 @@ func (c *Client) Post(url, contentType string, body io.Reader) (resp *http.Respo
 }
 
 // PostForm is the SPNEGO enabled HTTP client's equivalent of the http.Client's PostForm method.
-func (c *Client) PostForm(url string, data url.Values) (resp *http.Response, err error) {
+func (c *Client) PostForm(url string, data url.Values) (*http.Response, error) {
 	return c.Post(url, "application/x-www-form-urlencoded", strings.NewReader(data.Encode()))
 }
 
 // Head is the SPNEGO enabled HTTP client's equivalent of the http.Client's Head method.
-func (c *Client) Head(url string) (resp *http.Response, err error) {
+func (c *Client) Head(url string) (*http.Response, error) {
 	req, err := http.NewRequest("HEAD", url, nil)
 	if err != nil {
 		return nil, err

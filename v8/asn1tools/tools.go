@@ -50,7 +50,9 @@ func GetNumberBytesInLengthHeader(b []byte) int {
 	return headerBytes
 }
 
-func parseLengthHeader(b []byte) (length, headerBytes int, ok bool) {
+func parseLengthHeader(b []byte) (int, int, bool) {
+	var length int
+
 	if len(b) < 2 {
 		return 0, 0, false
 	}

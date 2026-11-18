@@ -66,13 +66,14 @@ type KerbValidationInfo struct {
 }
 
 // Unmarshal bytes into the DeviceInfo struct
-func (k *KerbValidationInfo) Unmarshal(b []byte) (err error) {
+func (k *KerbValidationInfo) Unmarshal(b []byte) error {
+	var err error
 	dec := ndr.NewDecoder(bytes.NewReader(b))
 	err = dec.Decode(k)
 	if err != nil {
 		err = fmt.Errorf("error unmarshaling KerbValidationInfo: %w", err)
 	}
-	return
+	return err
 }
 
 // GetGroupMembershipSIDs returns a slice of strings containing the group membership SIDs found in the PAC.

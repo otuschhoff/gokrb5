@@ -129,9 +129,11 @@ func (t *EncTicketPart) Unmarshal(b []byte) error {
 }
 
 // unmarshalTicket returns a ticket from the bytes provided.
-func unmarshalTicket(b []byte) (t Ticket, err error) {
+func unmarshalTicket(b []byte) (Ticket, error) {
+	var t Ticket
+	var err error
 	err = t.Unmarshal(b)
-	return
+	return t, err
 }
 
 // UnmarshalTicketsSequence returns a slice of Tickets from a raw ASN1 value.

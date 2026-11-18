@@ -9,8 +9,13 @@ import (
 )
 
 // ChangePasswdMsg generate a change password request and also return the key needed to decrypt the reply.
-func ChangePasswdMsg(cname types.PrincipalName, realm, password string, tkt messages.Ticket, sessionKey types.EncryptionKey) (r Request, k types.EncryptionKey, err error) {
+func ChangePasswdMsg(cname types.PrincipalName, realm, password string, tkt messages.Ticket, sessionKey types.EncryptionKey) (Request, types.EncryptionKey, error) {
+	var
 	// Create change password data struct and marshal to bytes
+	r Request
+	var k types.EncryptionKey
+	var err error
+
 	chgpasswd := ChangePasswdData{
 		NewPasswd: []byte(password),
 		TargName:  cname,

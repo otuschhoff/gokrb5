@@ -17,7 +17,8 @@ type ClientInfo struct {
 }
 
 // Unmarshal bytes into the ClientInfo struct
-func (k *ClientInfo) Unmarshal(b []byte) (err error) {
+func (k *ClientInfo) Unmarshal(b []byte) error {
+
 	if len(b) < 10 {
 		return fmt.Errorf("%w: PAC_CLIENT_INFO is %d bytes, want at least 10", ErrPACMalformed, len(b))
 	}

@@ -206,7 +206,9 @@ func parsePrincipal(b []byte, p *int, c *CCache, e *binary.ByteOrder) (Principal
 	return princ, nil
 }
 
-func parseCredential(b []byte, p *int, c *CCache, e *binary.ByteOrder) (cred *Credential, err error) {
+func parseCredential(b []byte, p *int, c *CCache, e *binary.ByteOrder) (*Credential, error) {
+	var cred *Credential
+	var err error
 	cred = new(Credential)
 	cred.Client, err = parsePrincipal(b, p, c, e)
 	if err != nil {

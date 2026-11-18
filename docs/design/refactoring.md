@@ -2,10 +2,10 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-11 done (formatter normalization,
+(floor raised to 86.0%), and Phase 5 slices 1-12 done (formatter normalization,
 keytab complexity, dead code, mechanical clarity, shadow elimination,
 errorlint, revive mechanical, exported documentation, the NDR carry-over,
-I/O/body-ownership cleanup, and checked type assertions).
+I/O/body-ownership cleanup, checked type assertions, and named-return clarity).
 Remaining canonical debt is concentrated in the classification-heavy
 categories (gosec, NilAway, wrapcheck, errcheck, gocognit/nestif, ireturn,
 nonamedreturns, bodyclose) plus documented intentional categories (iana
@@ -34,7 +34,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,658 canonical lint findings after Phase 5 slices 1-11 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,552 canonical lint findings after Phase 5 slices 1-12 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -823,6 +823,18 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 12 (2026-11-18, return clarity): all 68 functions carrying 134 named
+result diagnostics now use unnamed signatures while preserving the original
+locals and explicit return order. Bare returns that were below the nakedret
+length threshold were expanded into explicit value lists; local declarations
+were retained only where used. The transform intentionally left no public
+signature type change and no behavior change: named result identifiers are
+not part of Go's public API. Review caught and repaired four doc-comment
+attachments exposed by the AST transform (session timing/SPN realm, basic
+credential parser format, and ADAuthDataAPOptions Marshal). The canonical scan
+reports zero nonamedreturns; total findings are 1,552. Full unit/race suites
+and 87.0% coverage remain green.
 
 Slice 11 (2026-11-18, checked type assertions): all 41 forcetypeassert
 findings are cleared. Seven production SPNEGO assertions now fail closed or

@@ -42,16 +42,18 @@ type PasswordPolicy struct {
 }
 
 // Marshal a Request into a byte slice.
-func (m *Request) Marshal() (b []byte, err error) {
+func (m *Request) Marshal() ([]byte, error) {
+	var b []byte
+	var err error
 	b = []byte{255, 128} // protocol version number: contains the hex constant 0xff80 (big-endian integer).
 	ab, e := m.APREQ.Marshal()
 	if e != nil {
 		err = fmt.Errorf("error marshaling AP_REQ: %w", e)
-		return
+		return b, err
 	}
 	if len(ab) > math.MaxUint16 {
 		err = errors.New("length of AP_REQ greater then max Uint16 size")
-		return
+		return b, err
 	}
 	al := make([]byte, 2)
 	binary.BigEndian.PutUint16(al, uint16(len(ab)))
@@ -60,17 +62,17 @@ func (m *Request) Marshal() (b []byte, err error) {
 	pb, e := m.KRBPriv.Marshal()
 	if e != nil {
 		err = fmt.Errorf("error marshaling KRB_Priv: %w", e)
-		return
+		return b, err
 	}
 	b = append(b, pb...)
 	if len(b)+2 > math.MaxUint16 {
 		err = errors.New("length of message greater then max Uint16 size")
-		return
+		return b, err
 	}
 	ml := make([]byte, 2)
 	binary.BigEndian.PutUint16(ml, uint16(len(b)+2))
 	b = append(ml, b...)
-	return
+	return b, err
 }
 
 // Unmarshal a byte slice into a Reply.

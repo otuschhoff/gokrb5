@@ -35,7 +35,10 @@ type KRB5BasicAuthenticator struct {
 }
 
 // Authenticate and return the identity. The boolean indicates if the authentication was successful.
-func (a KRB5BasicAuthenticator) Authenticate() (i goidentity.Identity, ok bool, err error) {
+func (a KRB5BasicAuthenticator) Authenticate() (goidentity.Identity, bool, error) {
+	var i goidentity.Identity
+	var ok bool
+	var err error
 	a.realm, a.username, a.password, err = parseBasicHeaderValue(a.BasicHeaderValue)
 	if err != nil {
 		err = fmt.Errorf("could not parse basic authentication header: %w", err)
@@ -79,16 +82,20 @@ func (a KRB5BasicAuthenticator) Mechanism() string {
 	return "Kerberos Basic"
 }
 
-func parseBasicHeaderValue(s string) (domain, username, password string, err error) {
+func parseBasicHeaderValue(s string) (string, string, string, error) {
+	var domain string
+	var username string
+	var password string
+	var err error
 	b, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
-		return
+		return domain, username, password, err
 	}
 	v := string(b)
 	vc := strings.SplitN(v, ":", 2)
 	if len(vc) != 2 {
 		err = fmt.Errorf("basic authentication value does not contain a password separator")
-		return
+		return domain, username, password, err
 	}
 	password = vc[1]
 	// Domain and username can be specified in 2 formats:
@@ -107,5 +114,5 @@ func parseBasicHeaderValue(s string) (domain, username, password string, err err
 	default:
 		username = vc[0]
 	}
-	return
+	return domain, username, password, err
 }

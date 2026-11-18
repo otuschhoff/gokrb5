@@ -275,12 +275,14 @@ func NewPAFXErrorPAData(v PAFXError) (PAData, error) {
 }
 
 // GetPAFXError decodes the PAFXError carried by the value.
-func (pa *PAData) GetPAFXError() (v PAFXError, err error) {
+func (pa *PAData) GetPAFXError() (PAFXError, error) {
+	var v PAFXError
+	var err error
 	if pa.PADataType != patype.PA_FX_ERROR {
 		return v, fmt.Errorf("PAData type mismatch: expected %d, got %d", patype.PA_FX_ERROR, pa.PADataType)
 	}
 	err = v.Unmarshal(pa.PADataValue)
-	return
+	return v, err
 }
 
 // NewPAFXFastRequestPAData wraps PAFXFastRequest in a PA-DATA entry of its assigned type.
@@ -290,12 +292,14 @@ func NewPAFXFastRequestPAData(v PAFXFastRequest) (PAData, error) {
 }
 
 // GetPAFXFastRequest decodes the PAFXFastRequest carried by the value.
-func (pa *PAData) GetPAFXFastRequest() (v PAFXFastRequest, err error) {
+func (pa *PAData) GetPAFXFastRequest() (PAFXFastRequest, error) {
+	var v PAFXFastRequest
+	var err error
 	if pa.PADataType != patype.PA_FX_FAST {
 		return v, fmt.Errorf("PAData type mismatch: expected %d, got %d", patype.PA_FX_FAST, pa.PADataType)
 	}
 	err = v.Unmarshal(pa.PADataValue)
-	return
+	return v, err
 }
 
 // NewPAFXFastReplyPAData wraps PAFXFastReply in a PA-DATA entry of its assigned type.
@@ -305,12 +309,14 @@ func NewPAFXFastReplyPAData(v PAFXFastReply) (PAData, error) {
 }
 
 // GetPAFXFastReply decodes the PAFXFastReply carried by the value.
-func (pa *PAData) GetPAFXFastReply() (v PAFXFastReply, err error) {
+func (pa *PAData) GetPAFXFastReply() (PAFXFastReply, error) {
+	var v PAFXFastReply
+	var err error
 	if pa.PADataType != patype.PA_FX_FAST {
 		return v, fmt.Errorf("PAData type mismatch: expected %d, got %d", patype.PA_FX_FAST, pa.PADataType)
 	}
 	err = v.Unmarshal(pa.PADataValue)
-	return
+	return v, err
 }
 
 // NewPAEncryptedChallengePAData wraps PAEncryptedChallenge in a PA-DATA entry of its assigned type.
@@ -320,10 +326,12 @@ func NewPAEncryptedChallengePAData(v PAEncryptedChallenge) (PAData, error) {
 }
 
 // GetPAEncryptedChallenge decodes the PAEncryptedChallenge carried by the value.
-func (pa *PAData) GetPAEncryptedChallenge() (v PAEncryptedChallenge, err error) {
+func (pa *PAData) GetPAEncryptedChallenge() (PAEncryptedChallenge, error) {
+	var v PAEncryptedChallenge
+	var err error
 	if pa.PADataType != patype.PA_ENCRYPTED_CHALLENGE {
 		return v, fmt.Errorf("PAData type mismatch: expected %d, got %d", patype.PA_ENCRYPTED_CHALLENGE, pa.PADataType)
 	}
 	err = v.Unmarshal(pa.PADataValue)
-	return
+	return v, err
 }

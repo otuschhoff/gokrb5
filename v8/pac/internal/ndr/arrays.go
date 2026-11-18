@@ -22,7 +22,9 @@ func intFromTag(tag reflect.StructTag, key string) (int, error) {
 }
 
 // parseDimensions returns the a slice of the size of each dimension and type of the member at the deepest level.
-func parseDimensions(v reflect.Value) (l []int, tb reflect.Type) {
+func parseDimensions(v reflect.Value) ([]int, reflect.Type) {
+	var l []int
+	var tb reflect.Type
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
 	}
@@ -31,7 +33,7 @@ func parseDimensions(v reflect.Value) (l []int, tb reflect.Type) {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Array && t.Kind() != reflect.Slice {
-		return
+		return l, tb
 	}
 	l = append(l, v.Len())
 	if t.Elem().Kind() == reflect.Array || t.Elem().Kind() == reflect.Slice {
@@ -46,11 +48,13 @@ func parseDimensions(v reflect.Value) (l []int, tb reflect.Type) {
 	} else {
 		tb = t.Elem()
 	}
-	return
+	return l, tb
 }
 
 // sliceDimensions returns the count of dimensions a slice has.
-func sliceDimensions(t reflect.Type) (d int, tb reflect.Type) {
+func sliceDimensions(t reflect.Type) (int, reflect.Type) {
+	var d int
+	var tb reflect.Type
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
@@ -62,7 +66,7 @@ func sliceDimensions(t reflect.Type) (d int, tb reflect.Type) {
 	} else {
 		tb = t
 	}
-	return
+	return d, tb
 }
 
 // makeSubSlices is a deep recursive creation/initialisation of multi-dimensional slices.
@@ -84,7 +88,8 @@ func makeSubSlices(v reflect.Value, l []int) {
 
 // multiDimensionalIndexPermutations returns all the permutations of the indexes of a multi-dimensional slice.
 // The input is a slice of integers that indicates the max size/length of each dimension
-func multiDimensionalIndexPermutations(l []int) (ps [][]int) {
+func multiDimensionalIndexPermutations(l []int) [][]int {
+	var ps [][]int
 	for _, length := range l {
 		if length <= 0 {
 			return nil
@@ -107,7 +112,7 @@ func multiDimensionalIndexPermutations(l []int) (ps [][]int) {
 			}
 		}
 	}
-	return
+	return ps
 }
 
 // precedingMax reads off the next conformant max value

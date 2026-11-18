@@ -56,12 +56,14 @@ func (pn PrincipalName) PrincipalNameString() string {
 // a PrincipalName type will be returned with the name type set to KRB_NT_PRINCIPAL(1)
 // and the realm will be returned as a string. If the "@<realm>" suffix
 // is not included in the SPN then the value of realm string returned will be ""
-func ParseSPNString(spn string) (pn PrincipalName, realm string) {
+func ParseSPNString(spn string) (PrincipalName, string) {
+	var pn PrincipalName
+	var realm string
 	if strings.Contains(spn, "@") {
 		s := strings.Split(spn, "@")
 		realm = s[len(s)-1]
 		spn = strings.TrimSuffix(spn, "@"+realm)
 	}
 	pn = NewPrincipalName(nametype.KRB_NT_PRINCIPAL, spn)
-	return
+	return pn, realm
 }

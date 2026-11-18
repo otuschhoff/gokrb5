@@ -17,13 +17,14 @@ type S4UDelegationInfo struct {
 }
 
 // Unmarshal bytes into the S4UDelegationInfo struct
-func (k *S4UDelegationInfo) Unmarshal(b []byte) (err error) {
+func (k *S4UDelegationInfo) Unmarshal(b []byte) error {
+	var err error
 	dec := ndr.NewDecoder(bytes.NewReader(b))
 	err = dec.Decode(k)
 	if err != nil {
 		err = fmt.Errorf("error unmarshaling S4UDelegationInfo: %w", err)
 	}
-	return
+	return err
 }
 
 // ProxyTarget returns the service to which the ticket may be forwarded.
