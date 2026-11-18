@@ -3,9 +3,60 @@ package config
 import (
 	"net"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 )
+
+func TestLibDefaultsLegacyEnctypePolicy(t *testing.T) {
+	t.Parallel()
+
+	const names = "rc4-hmac arcfour-hmac aes128-sha1 arcfour-hmac-md5 des3-cbc-sha1-kd des3-cbc-sha1 rc4-hmac-exp"
+	lists := "default_tgs_enctypes=" + names + "\n" +
+		"default_tkt_enctypes=" + names + "\npermitted_enctypes=" + names + "\n"
+	aesDefaults := []int32{etypeID.AES256_CTS_HMAC_SHA1_96, etypeID.AES128_CTS_HMAC_SHA1_96}
+	aes128 := etypeID.AES128_CTS_HMAC_SHA1_96
+	rc4 := etypeID.RC4_HMAC
+	for _, tc := range []struct {
+		name string
+		body string
+		want []int32
+	}{
+		{name: "defaults", want: aesDefaults},
+		{name: "opt-in without lists", body: "allow_weak_crypto=true\n", want: aesDefaults},
+		{name: "lists without opt-in", body: lists, want: []int32{aes128}},
+		{
+			name: "explicit opt-in", body: lists + "allow_weak_crypto=true\n",
+			want: []int32{rc4, rc4, aes128, rc4, etypeID.DES3_CBC_SHA1_KD},
+		},
+		{
+			name: "opt-in overridden", body: "allow_weak_crypto=true\n" + lists + "allow_weak_crypto=false\n",
+			want: []int32{aes128},
+		},
+		{
+			name: "legacy-only lists have no fallback",
+			body: "default_tkt_enctypes=rc4-hmac\ndefault_tgs_enctypes=arcfour-hmac\npermitted_enctypes=des3-cbc-sha1-kd\n",
+			want: []int32{},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := NewFromString("[libdefaults]\n" + tc.body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := cfg.LibDefaults
+			if !slices.Equal(d.DefaultTktEnctypeIDs, tc.want) ||
+				!slices.Equal(d.DefaultTGSEnctypeIDs, tc.want) ||
+				!slices.Equal(d.PermittedEnctypeIDs, tc.want) {
+				t.Fatalf("AS/TGS/permitted = %v/%v/%v; want %v in each",
+					d.DefaultTktEnctypeIDs, d.DefaultTGSEnctypeIDs, d.PermittedEnctypeIDs, tc.want)
+			}
+		})
+	}
+}
 
 func TestLibDefaultsLineAndCollectionSemantics(t *testing.T) {
 	l := newLibDefaults()

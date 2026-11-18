@@ -32,7 +32,11 @@ type Config struct {
 }
 
 // WeakETypeList is a list of encryption types that have been deemed weak.
-const WeakETypeList = "des-cbc-crc des-cbc-md4 des-cbc-md5 des-cbc-raw des3-cbc-raw des-hmac-sha1 arcfour-hmac-exp rc4-hmac-exp arcfour-hmac-md5-exp des"
+const WeakETypeList = "des-cbc-crc des-cbc-md4 des-cbc-md5 des-cbc-raw des3-cbc-raw des-hmac-sha1 " +
+	"arcfour-hmac-exp rc4-hmac-exp arcfour-hmac-md5-exp des " +
+	"des3-cbc-md5 des3-cbc-sha1 des3-cbc-sha1-kd arcfour-hmac rc4-hmac arcfour-hmac-md5"
+
+const defaultEnctypes = "aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96"
 
 // New creates a new config struct instance.
 func New() *Config {
@@ -46,7 +50,7 @@ func New() *Config {
 // LibDefaults represents the [libdefaults] section of the configuration.
 type LibDefaults struct {
 	ADSite          string
-	AllowWeakCrypto bool // default false
+	AllowWeakCrypto bool // allows explicitly configured legacy enctypes; default false
 	// ap_req_checksum_type int //unlikely to support this
 	Canonicalize            bool          // default false
 	CCacheType              int           // default is 4. unlikely to implement older
@@ -55,12 +59,12 @@ type LibDefaults struct {
 	DefaultClientKeytabName string        // default is build-time configurable in MIT krb5
 	DefaultKeytabName       string        // default /etc/krb5.keytab
 	DefaultRealm            string
-	DefaultTGSEnctypes      []string // default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4
-	DefaultTktEnctypes      []string // default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4
-	DefaultTGSEnctypeIDs    []int32  // default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4
-	DefaultTktEnctypeIDs    []int32  // default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4
-	DNSCanonicalizeHostname bool     // default true
-	DNSLookupKDC            bool     // default false
+	DefaultTGSEnctypes      []string // default AES256 then AES128 (RFC 3962)
+	DefaultTktEnctypes      []string // default AES256 then AES128 (RFC 3962)
+	DefaultTGSEnctypeIDs    []int32
+	DefaultTktEnctypeIDs    []int32
+	DNSCanonicalizeHostname bool // default true
+	DNSLookupKDC            bool // default false
 	DNSLookupRealm          bool
 	ExtraAddresses          []net.IP       // Not implementing yet
 	Forwardable             bool           // default false
@@ -71,7 +75,7 @@ type LibDefaults struct {
 	KDCTimeSync             int            // default 1
 	// kdc_req_checksum_type int //unlikely to implement as for very old KDCs
 	NoAddresses         bool     // default true
-	PermittedEnctypes   []string // default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4
+	PermittedEnctypes   []string // default AES256 then AES128 (RFC 3962)
 	PermittedEnctypeIDs []int32
 	// plugin_base_dir string //not supporting plugins
 	PreferredPreauthTypes []int         // default “17, 16, 15, 14”, which forces libkrb5 to attempt to use PKINIT if it is supported
@@ -109,14 +113,14 @@ func newLibDefaults() LibDefaults {
 		DefaultCCacheName:       "FILE:/tmp/krb5cc_%{uid}",
 		DefaultClientKeytabName: "FILE:/var/kerberos/krb5/user/%{euid}/client.keytab",
 		DefaultKeytabName:       "/etc/krb5.keytab",
-		DefaultTGSEnctypes:      []string{"aes256-cts-hmac-sha1-96", "aes128-cts-hmac-sha1-96", "des3-cbc-sha1", "arcfour-hmac-md5", "camellia256-cts-cmac", "camellia128-cts-cmac", "des-cbc-crc", "des-cbc-md5", "des-cbc-md4"},
-		DefaultTktEnctypes:      []string{"aes256-cts-hmac-sha1-96", "aes128-cts-hmac-sha1-96", "des3-cbc-sha1", "arcfour-hmac-md5", "camellia256-cts-cmac", "camellia128-cts-cmac", "des-cbc-crc", "des-cbc-md5", "des-cbc-md4"},
+		DefaultTGSEnctypes:      strings.Fields(defaultEnctypes),
+		DefaultTktEnctypes:      strings.Fields(defaultEnctypes),
 		DNSCanonicalizeHostname: true,
 		K5LoginDirectory:        hdir,
 		KDCDefaultOptions:       opts,
 		KDCTimeSync:             1,
 		NoAddresses:             true,
-		PermittedEnctypes:       []string{"aes256-cts-hmac-sha1-96", "aes128-cts-hmac-sha1-96", "des3-cbc-sha1", "arcfour-hmac-md5", "camellia256-cts-cmac", "camellia128-cts-cmac", "des-cbc-crc", "des-cbc-md5", "des-cbc-md4"},
+		PermittedEnctypes:       strings.Fields(defaultEnctypes),
 		PKINITEKUChecking:       "kdc",
 		PKINITDHMinBits:         2048,
 		RDNS:                    true,
@@ -468,26 +472,17 @@ func NewFromScanner(scanner *bufio.Scanner) (*Config, error) {
 	return c, e
 }
 
-// Parse a space delimited list of ETypes into a list of EType numbers optionally filtering out weak ETypes.
-func parseETypes(s []string, w bool) []int32 {
+// parseETypes resolves supported names before applying policy so aliases cannot bypass it.
+func parseETypes(names []string, allowWeak bool) []int32 {
 	var eti []int32
-	for _, et := range s {
-		if !w {
-			var weak bool
-			for _, wet := range strings.Fields(WeakETypeList) {
-				if et == wet {
-					weak = true
-					break
-				}
-			}
-			if weak {
-				continue
-			}
+	for _, name := range names {
+		id := etypeID.EtypeSupported(name)
+		// These are the only supported enctypes deprecated by RFC 8429.
+		weak := id == etypeID.RC4_HMAC || id == etypeID.DES3_CBC_SHA1_KD
+		if id == 0 || (weak && !allowWeak) {
+			continue
 		}
-		i := etypeID.EtypeSupported(et)
-		if i != 0 {
-			eti = append(eti, i)
-		}
+		eti = append(eti, id)
 	}
 	return eti
 }

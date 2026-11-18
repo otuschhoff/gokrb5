@@ -55,12 +55,14 @@ It has been reported that gokrb5 also works with the [gollvm](https://go.googles
 
 [RFC 8429](https://www.rfc-editor.org/rfc/rfc8429) deprecates Triple-DES and
 RC4 for Kerberos. Use AES for new deployments and migrate existing principals
-and keytabs to AES. The v8 client can still advertise RC4 with its built-in
-defaults, even when `allow_weak_crypto` is false. To omit RC4 from the
-configured enctype lists, explicitly list the AES enctypes your KDC supports in
-`default_tkt_enctypes`, `default_tgs_enctypes`, and `permitted_enctypes`.
-These settings do not disable direct library use of legacy enctypes or the
-separate PKINIT CMS compatibility algorithms.
+and keytabs to AES. The v8 client defaults to AES256 and AES128 (RFC 3962)
+for AS and TGS requests. If a legacy deployment still requires RC4 or
+Triple-DES, set `allow_weak_crypto = true` in `[libdefaults]` and explicitly
+include `rc4-hmac` or `des3-cbc-sha1-kd` in the relevant
+`default_tkt_enctypes`, `default_tgs_enctypes`, and `permitted_enctypes` lists.
+Setting the flag alone does not change the default lists. These settings are
+not a blanket ban on legacy crypto: they do not change direct library use,
+acceptor key selection, or the separate PKINIT CMS compatibility algorithms.
 
 The following is working/tested:
 * Tested against MIT KDC (1.6.3 is the oldest version tested against) and Microsoft Active Directory (Windows 2008 R2)

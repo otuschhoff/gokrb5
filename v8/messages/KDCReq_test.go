@@ -143,6 +143,70 @@ func TestASRequestConvenienceConstructors(t *testing.T) {
 	}
 }
 
+func TestKDCRequestsAdvertiseConfiguredEnctypes(t *testing.T) {
+	t.Parallel()
+
+	const explicitLists = "default_tkt_enctypes=rc4-hmac aes128-sha1 des3-cbc-sha1-kd\n" +
+		"default_tgs_enctypes=rc4-hmac aes128-sha1 des3-cbc-sha1-kd\n"
+	for _, tc := range []struct {
+		name string
+		body string
+		want []int32
+	}{
+		{name: "defaults", want: []int32{etypeID.AES256_CTS_HMAC_SHA1_96, etypeID.AES128_CTS_HMAC_SHA1_96}},
+		{name: "legacy filtered", body: explicitLists, want: []int32{etypeID.AES128_CTS_HMAC_SHA1_96}},
+		{
+			name: "legacy opted in", body: explicitLists + "allow_weak_crypto=true\n",
+			want: []int32{etypeID.RC4_HMAC, etypeID.AES128_CTS_HMAC_SHA1_96, etypeID.DES3_CBC_SHA1_KD},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := config.NewFromString("[libdefaults]\n" + tc.body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
+			as, err := NewASReqForTGT("EXAMPLE.COM", cfg, cname)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sname := types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "HTTP/server.example.org")
+			key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
+			tgs, err := NewTGSReq(
+				cname,
+				"EXAMPLE.COM",
+				cfg,
+				s4uTestTicket(),
+				key,
+				sname,
+				false,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			asDER, err := as.Marshal()
+			if err != nil {
+				t.Fatal(err)
+			}
+			tgsDER, err := tgs.Marshal()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var decodedAS ASReq
+			if err := decodedAS.Unmarshal(asDER); err != nil {
+				t.Fatal(err)
+			}
+			var decodedTGS TGSReq
+			if err := decodedTGS.Unmarshal(tgsDER); err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, tc.want, decodedAS.ReqBody.EType, "AS-REQ enctype offer")
+			assert.Equal(t, tc.want, decodedTGS.ReqBody.EType, "TGS-REQ enctype offer")
+		})
+	}
+}
+
 func TestTGSReqMSKILEOptions(t *testing.T) {
 	cfg := config.New()
 	cfg.LibDefaults.NoAddresses = true

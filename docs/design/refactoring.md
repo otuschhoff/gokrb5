@@ -824,6 +824,24 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 40 (2026-11-18, retire deprecated client enctype defaults): v8 now
+defaults to the same two RFC 3962 AES enctypes, in their original order, for
+AS requests, TGS requests, and the configured permitted list. RC4 and
+Triple-DES require both `allow_weak_crypto = true` and explicit names in
+the relevant lists. Configuration resolves names before filtering by enctype
+ID, so RC4 aliases cannot bypass the policy. Unsupported names remain
+unsupported, and a filtered list does not fall back to a weaker enctype.
+Directly supplied IDs, low-level primitives, acceptor behavior, and PKINIT
+CMS algorithms are unchanged. The v8 README documents migration and opt-in.
+
+Config regressions failed against the old defaults and now pass; DER
+round-trip tests verify the AS and TGS offers for default, filtered, and
+opted-in configurations. Both module suites, the v8 race suite, and four
+MIT command-line keytab interoperability tests pass. Live KDC exchanges
+were not run locally. CI-style coverage remains 86.5%; changed-line lint
+passes for both modules and the canonical v8 counts remain 983 total,
+zero gosec.
+
 Slice 39 (2026-11-18, cryptography compatibility review): all 30 remaining
 v8 gosec reports have a rule-specific disposition at the flagged import or
 call. The exceptions retain RFC 3962 AES/HMAC-SHA1 enctypes, RFC 3961 Triple-DES
@@ -833,9 +851,9 @@ and its zero initial cipher state, RFC 4757 RC4-HMAC, the historical
 oracles keep their specified hashes. This is classification, not a claim that
 the primitives are safe: no algorithm, API, or negotiation policy changed.
 The [v8 README](../../v8/README.md) records the current RC4 default exposure
-and how to omit it from the configured enctype lists. Retiring deprecated
-negotiation defaults requires a separate policy change and interoperability
-verification; it is not covered by the analyzer exceptions.
+and how to omit it from the configured enctype lists at the time of this
+slice. Slice 40 separately retires the deprecated negotiation defaults;
+that policy is not implemented by the analyzer exceptions.
 
 The canonical v8 scan drops from 1,013 to 983 findings, with zero gosec
 findings and no additions. Focused protocol tests, both module unit suites,

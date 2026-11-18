@@ -106,14 +106,7 @@ const (
     "DefaultRealm": "TEST.GOKRB5",
     "DefaultTGSEnctypes": [
       "aes256-cts-hmac-sha1-96",
-      "aes128-cts-hmac-sha1-96",
-      "des3-cbc-sha1",
-      "arcfour-hmac-md5",
-      "camellia256-cts-cmac",
-      "camellia128-cts-cmac",
-      "des-cbc-crc",
-      "des-cbc-md5",
-      "des-cbc-md4"
+      "aes128-cts-hmac-sha1-96"
     ],
     "DefaultTktEnctypes": [
       "aes256-cts-hmac-sha1-96",
@@ -121,8 +114,7 @@ const (
     ],
     "DefaultTGSEnctypeIDs": [
       18,
-      17,
-      23
+      17
     ],
     "DefaultTktEnctypeIDs": [
       18,
@@ -144,19 +136,11 @@ const (
     "NoAddresses": true,
     "PermittedEnctypes": [
       "aes256-cts-hmac-sha1-96",
-      "aes128-cts-hmac-sha1-96",
-      "des3-cbc-sha1",
-      "arcfour-hmac-md5",
-      "camellia256-cts-cmac",
-      "camellia128-cts-cmac",
-      "des-cbc-crc",
-      "des-cbc-md5",
-      "des-cbc-md4"
+      "aes128-cts-hmac-sha1-96"
     ],
     "PermittedEnctypeIDs": [
       18,
-      17,
-      23
+      17
     ],
     "PreferredPreauthTypes": [
       17,
