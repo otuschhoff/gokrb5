@@ -106,7 +106,8 @@ func (client *NegotiatingClient) Do(request *http.Request) (*http.Response, erro
 		if exchangeCookie != nil {
 			current.AddCookie(exchangeCookie)
 		}
-		response, err := client.Client.Do(current)
+		// The caller deliberately supplies the destination and HTTP transport; this client retries only its cloned request URL.
+		response, err := client.Client.Do(current) //nolint:gosec // outbound destination is an explicit client API input, not request-supplied server routing.
 		if err != nil {
 			return response, err
 		}

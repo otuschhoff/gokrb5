@@ -824,6 +824,16 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 36 (2026-11-18, HTTP trust-boundary hardening): HTTP G704/G705/G120
+findings are zero. The SPNEGO negotiating client documents and suppresses its
+deliberate caller-selected outbound destination at the single transport
+boundary, while integration tests mark their explicitly configured endpoints.
+The test upload handler bounds the request body before multipart parsing, and
+identity values rendered in HTTP test responses are HTML-escaped. No production
+response rendering or server routing semantics change. G704 falls 8 to 0,
+G705/G120 fall 3 to 0, gosec falls 72 to 61, and canonical findings fall 1,056
+to 1,044; coverage remains 86.5%.
+
 Slice 35 (2026-11-18, security hygiene): crypto-backed KDC ordering and
 safe fixture permissions. KDC service ordering now uses unbiased `crypto/rand`
 shuffle choices and falls back to the original ordering if the secure source

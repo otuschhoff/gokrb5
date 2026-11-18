@@ -1,12 +1,13 @@
 package spnego
 
 import (
-	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -30,7 +31,7 @@ func TestSPNEGO_AD_EndToEnd(t *testing.T) {
 	l := log.New(os.Stderr, "SPNEGO AD: ", log.LstdFlags)
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := goidentity.FromHTTPRequestContext(r)
-		_, _ = fmt.Fprintf(w, "%s@%s|%d", id.UserName(), id.Domain(), len(id.AuthzAttributes()))
+		_, _ = io.WriteString(w, html.EscapeString(id.UserName())+"@"+html.EscapeString(id.Domain())+"|"+strconv.Itoa(len(id.AuthzAttributes())))
 	})
 	srv := httptest.NewServer(SPNEGOKRB5Authenticate(inner, env.Keytab, service.Logger(l)))
 	defer srv.Close()

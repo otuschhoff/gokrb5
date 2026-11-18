@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"mime/multipart"
@@ -369,8 +370,8 @@ func TestService_SPNEGOKRB_Upload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error copying bytes: %v", err)
 	}
-	if err := bodyWriter.Close(); err != nil {
-		t.Fatal(err)
+	if closeErr := bodyWriter.Close(); closeErr != nil {
+		t.Fatal(closeErr)
 	}
 
 	r := mustHTTPRequest(t, "POST", s.URL, bodyBuf)
@@ -456,11 +457,11 @@ func httpServer() *httptest.Server {
 func testAppHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		maxUploadSize := int64(11240)
-		if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+		if err := r.ParseMultipartForm(maxUploadSize); err != nil { //nolint:gosec // body is capped by MaxBytesReader immediately before multipart parsing.
 			http.Error(w, fmt.Sprintf("cannot parse multipart form: %v", err), http.StatusBadRequest)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
 		file, _, err := r.FormFile("uploadfile")
 		if err != nil {
 			http.Error(w, "INVALID_FILE", http.StatusBadRequest)
@@ -478,8 +479,8 @@ func testAppHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	id := goidentity.FromHTTPRequestContext(r)
 	_, _ = fmt.Fprintf(w, "<html>\nTEST.GOKRB5 Handler\nAuthenticed user: %s\nUser's realm: %s\n</html>",
-		id.UserName(),
-		id.Domain())
+		html.EscapeString(id.UserName()),
+		html.EscapeString(id.Domain()))
 }
 
 func getClient() *client.Client {

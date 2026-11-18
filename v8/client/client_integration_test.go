@@ -579,8 +579,8 @@ func spnegoGet(cl *client.Client) error {
 	if url == "" {
 		url = testdata.TEST_HTTP_URL
 	}
-	r, _ := http.NewRequest("GET", url+"/modgssapi/index.html", nil)
-	httpResp, err := http.DefaultClient.Do(r)
+	r, _ := http.NewRequest("GET", url+"/modgssapi/index.html", nil) // #nosec G704 -- integration-test URL is explicitly configured by the environment. // #nosec G704 -- integration-test URL is explicitly configured by the environment.
+	httpResp, err := http.DefaultClient.Do(r)                        // #nosec G704 -- integration-test URL is explicitly configured by the test environment.
 	if httpResp != nil {
 		defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
 	}
@@ -594,7 +594,7 @@ func spnegoGet(cl *client.Client) error {
 	if err != nil {
 		return fmt.Errorf("error setting client SPNEGO header: %w", err)
 	}
-	httpResp, err = http.DefaultClient.Do(r)
+	httpResp, err = http.DefaultClient.Do(r) // #nosec G704 -- integration-test URL is explicitly configured by the test environment.
 	if httpResp != nil {
 		defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
 	}
@@ -802,12 +802,12 @@ func TestGetServiceTicketFromCCacheTGT(t *testing.T) {
 	if url == "" {
 		url = testdata.TEST_HTTP_URL
 	}
-	r, _ := http.NewRequest("GET", url+"/modgssapi/index.html", nil)
+	r, _ := http.NewRequest("GET", url+"/modgssapi/index.html", nil) // #nosec G704 -- integration-test URL is explicitly configured by the environment.
 	err = spnego.SetSPNEGOHeader(cl, r, "HTTP/host.test.gokrb5")
 	if err != nil {
 		t.Fatalf("error setting client SPNEGO header: %v", err)
 	}
-	httpResp, err := http.DefaultClient.Do(r)
+	httpResp, err := http.DefaultClient.Do(r) // #nosec G704 -- integration-test URL is explicitly configured by the test environment.
 	if httpResp != nil {
 		defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
 	}
@@ -841,12 +841,12 @@ func TestGetServiceTicketFromCCacheWithoutKDC(t *testing.T) {
 	if url == "" {
 		url = testdata.TEST_HTTP_URL
 	}
-	r, _ := http.NewRequest("GET", url+"/modgssapi/index.html", nil)
+	r, _ := http.NewRequest("GET", url+"/modgssapi/index.html", nil) // #nosec G704 -- integration-test URL is explicitly configured by the environment.
 	err = spnego.SetSPNEGOHeader(cl, r, "HTTP/host.test.gokrb5")
 	if err != nil {
 		t.Fatalf("error setting client SPNEGO header: %v", err)
 	}
-	httpResp, err := http.DefaultClient.Do(r)
+	httpResp, err := http.DefaultClient.Do(r) // #nosec G704 -- integration-test URL is explicitly configured by the test environment.
 	if httpResp != nil {
 		defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
 	}
