@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/asn1tools"
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/credentials"
@@ -316,7 +317,7 @@ func krb5TokenAuthenticator(creds *credentials.Credentials, flags []int) (types.
 }
 
 func krb5TokenAuthenticatorWithChecksum(creds *credentials.Credentials, checksum gssapi.AuthenticatorChecksum) (types.Authenticator, error) {
-	//RFC 4121 Section 4.1.1
+	// RFC 4121 Section 4.1.1
 	auth, err := types.NewAuthenticator(creds.Domain(), creds.CName())
 	if err != nil {
 		return auth, krberror.Errorf(err, krberror.KRBMsgError, "error generating new authenticator")

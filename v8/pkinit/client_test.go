@@ -13,6 +13,8 @@ import (
 	"time"
 
 	goforkasn1 "github.com/jcmturner/gofork/encoding/asn1"
+	"github.com/stretchr/testify/require"
+
 	"github.com/otuschhoff/gokrb5/v8/config"
 	krbcrypto "github.com/otuschhoff/gokrb5/v8/crypto"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
@@ -21,7 +23,6 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/types"
-	"github.com/stretchr/testify/require"
 )
 
 func TestBeginExchangeBuildsBoundAuthPack(t *testing.T) {

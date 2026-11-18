@@ -4,13 +4,12 @@ import (
 	"errors"
 	"net"
 	"reflect"
-
 	"testing"
 
-	"github.com/otuschhoff/gokrb5/v8/test"
-
-	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/otuschhoff/gokrb5/v8/test"
+	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 )
 
 func TestConfig_GetKDCsUsesConfiguredKDC(t *testing.T) {

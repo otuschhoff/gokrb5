@@ -14,6 +14,7 @@ import (
 	"os"
 
 	"github.com/jcmturner/goidentity/v6"
+
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/keytab"

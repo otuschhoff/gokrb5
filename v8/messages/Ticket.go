@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/asn1tools"
 	"github.com/otuschhoff/gokrb5/v8/crypto"
 	"github.com/otuschhoff/gokrb5/v8/iana"
@@ -135,14 +136,14 @@ func unmarshalTicket(b []byte) (t Ticket, err error) {
 
 // UnmarshalTicketsSequence returns a slice of Tickets from a raw ASN1 value.
 func unmarshalTicketsSequence(in asn1.RawValue) ([]Ticket, error) {
-	//This is a workaround to a asn1 decoding issue in golang - https://github.com/golang/go/issues/17321. It's not pretty I'm afraid
-	//We pull out raw values from the larger raw value (that is actually the data of the sequence of raw values) and track our position moving along the data.
+	// This is a workaround to a asn1 decoding issue in golang - https://github.com/golang/go/issues/17321. It's not pretty I'm afraid
+	// We pull out raw values from the larger raw value (that is actually the data of the sequence of raw values) and track our position moving along the data.
 	b := in.Bytes
 	// Ignore the head of the asn1 stream (1 byte for tag and those for the length) as this is what tells us its a sequence but we're handling it ourselves
 	p := 1 + asn1tools.GetNumberBytesInLengthHeader(in.Bytes)
 	var tkts []Ticket
 	var raw asn1.RawValue
-	for p < (len(b)) {
+	for p < len(b) {
 		_, err := asn1.UnmarshalWithParams(b[p:], &raw, fmt.Sprintf("application,tag:%d", asnAppTag.Ticket))
 		if err != nil {
 			return nil, fmt.Errorf("unmarshaling sequence of tickets failed getting length of ticket: %w", err)
@@ -186,7 +187,7 @@ func MarshalTicketSequence(tkts []Ticket) (asn1.RawValue, error) {
 	btkts = append([]byte{byte(32 + asn1.TagSequence)}, btkts...)
 	raw.Bytes = btkts
 	// If we need to create the full bytes then identifier octet is "context-specific" = 128 + "constructed" + 32 + the wrapping explicit tag (11)
-	//fmt.Fprintf(os.Stderr, "mRaw fb: %v\n", raw.FullBytes)
+	// fmt.Fprintf(os.Stderr, "mRaw fb: %v\n", raw.FullBytes)
 	return raw, nil
 }
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/asn1tools"
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/crypto"
@@ -672,7 +673,7 @@ func (k *KDCReqBody) Marshal() ([]byte, error) {
 	if err != nil {
 		return b, krberror.Errorf(err, krberror.EncodingError, "error in marshaling KDC request body additional tickets")
 	}
-	//The asn1.rawValue needs the tag setting on it for where it is in the KDCReqBody
+	// The asn1.rawValue needs the tag setting on it for where it is in the KDCReqBody
 	rawtkts.Tag = 11
 	if len(rawtkts.Bytes) > 0 {
 		m.AdditionalTickets = rawtkts

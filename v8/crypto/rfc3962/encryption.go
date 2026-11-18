@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/jcmturner/aescts/v2"
+
 	"github.com/otuschhoff/gokrb5/v8/crypto/common"
 	"github.com/otuschhoff/gokrb5/v8/crypto/etype"
 )
@@ -26,7 +27,7 @@ func EncryptMessage(key, message []byte, usage uint32, e etype.EType) ([]byte, [
 	if len(key) != e.GetKeyByteSize() {
 		return []byte{}, []byte{}, fmt.Errorf("incorrect keysize: expected: %v actual: %v", e.GetKeyByteSize(), len(key))
 	}
-	//confounder
+	// confounder
 	c := make([]byte, e.GetConfounderByteSize())
 	_, err := rand.Read(c)
 	if err != nil {
@@ -74,7 +75,7 @@ func DecryptMessage(key, ciphertext []byte, usage uint32, e etype.EType) ([]byte
 	if checksumSize <= 0 || len(ciphertext) < checksumSize+e.GetConfounderByteSize() {
 		return nil, errors.New("ciphertext is too short")
 	}
-	//Derive the key
+	// Derive the key
 	k, err := e.DeriveKey(key, common.GetUsageKe(usage))
 	if err != nil {
 		return nil, fmt.Errorf("error deriving key: %w", err)
@@ -84,11 +85,11 @@ func DecryptMessage(key, ciphertext []byte, usage uint32, e etype.EType) ([]byte
 	if err != nil {
 		return nil, err
 	}
-	//Verify checksum
+	// Verify checksum
 	if !e.VerifyIntegrity(key, ciphertext, b, usage) {
 		return nil, errors.New("integrity verification failed")
 	}
-	//Remove the confounder bytes
+	// Remove the confounder bytes
 	if len(b) < e.GetConfounderByteSize() {
 		return nil, errors.New("decrypted plaintext is shorter than the confounder")
 	}

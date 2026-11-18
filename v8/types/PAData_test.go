@@ -7,9 +7,10 @@ import (
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestUnmarshalPADataSequence(t *testing.T) {
@@ -46,7 +47,7 @@ func TestUnmarshalPADataSequence_empty(t *testing.T) {
 
 func TestUnmarshalPAEncTSEnc(t *testing.T) {
 	t.Parallel()
-	//Parse the test time value into a time.Time type
+	// Parse the test time value into a time.Time type
 	tt, _ := time.Parse(testdata.TEST_TIME_FORMAT, testdata.TEST_TIME)
 
 	var a PAEncTSEnc
@@ -64,7 +65,7 @@ func TestUnmarshalPAEncTSEnc(t *testing.T) {
 
 func TestUnmarshalPAEncTSEnc_nousec(t *testing.T) {
 	t.Parallel()
-	//Parse the test time value into a time.Time type
+	// Parse the test time value into a time.Time type
 	tt, _ := time.Parse(testdata.TEST_TIME_FORMAT, testdata.TEST_TIME)
 
 	var a PAEncTSEnc

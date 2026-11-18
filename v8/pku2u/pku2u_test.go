@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jcmturner/goidentity/v6"
+
 	"github.com/otuschhoff/gokrb5/v8/credentials"
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
 	"github.com/otuschhoff/gokrb5/v8/iana/chksumtype"

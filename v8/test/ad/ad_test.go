@@ -6,10 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
 	"github.com/otuschhoff/gokrb5/v8/types"
-	"github.com/stretchr/testify/assert"
 )
 
 func time0() time.Time { return time.Unix(1700000000, 0) }
@@ -64,10 +65,10 @@ func TestDiscoverADEnvironmentFromFiles(t *testing.T) {
 	if err := kt.WriteFile(filepath.Join(dir, KeytabFile)); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, UserFile), []byte("alice@AD.EXAMPLE.COM\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, UserFile), []byte("alice@AD.EXAMPLE.COM\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, PasswordFile), []byte("secret\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, PasswordFile), []byte("secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(DirEnvVar, dir)
@@ -177,7 +178,7 @@ func TestADLocalDiscoveryHelpers(t *testing.T) {
 		t.Fatal("environment fallback failed")
 	}
 	path := filepath.Join(t.TempDir(), "value")
-	if err := os.WriteFile(path, []byte("value\r\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("value\r\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if value, err := readTrimmedFile(path); err != nil || value != "value" {

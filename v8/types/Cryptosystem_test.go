@@ -5,9 +5,10 @@ import (
 	"testing"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/otuschhoff/gokrb5/v8/iana"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestUnmarshalEncryptedData(t *testing.T) {

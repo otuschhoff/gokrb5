@@ -8,10 +8,11 @@ import (
 	"testing"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/otuschhoff/gokrb5/v8/iana/adtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
-	"github.com/stretchr/testify/assert"
 )
 
 func mustMarshalAuthorizationData(t *testing.T, a AuthorizationData) []byte {

@@ -11,10 +11,11 @@ import (
 	"testing"
 
 	"github.com/jcmturner/goidentity/v6"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/service"
 	"github.com/otuschhoff/gokrb5/v8/test/ad"
-	"github.com/stretchr/testify/assert"
 )
 
 // TestSPNEGO_AD_EndToEnd authenticates the discovered AD user against a gokrb5

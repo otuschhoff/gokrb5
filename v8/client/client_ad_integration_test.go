@@ -6,8 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/otuschhoff/gokrb5/v8/test/ad"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/otuschhoff/gokrb5/v8/test/ad"
 )
 
 // The AD integration tests discover the domain from the host's FQDN and read

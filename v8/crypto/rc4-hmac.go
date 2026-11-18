@@ -7,16 +7,16 @@ import (
 	"hash"
 	"io"
 
+	"golang.org/x/crypto/md4"
+
 	"github.com/otuschhoff/gokrb5/v8/crypto/rfc3961"
 	"github.com/otuschhoff/gokrb5/v8/crypto/rfc4757"
 	"github.com/otuschhoff/gokrb5/v8/iana/chksumtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
-	"golang.org/x/crypto/md4"
 )
 
 // RC4HMAC implements Kerberos encryption type rc4-hmac
-type RC4HMAC struct {
-}
+type RC4HMAC struct{}
 
 // GetETypeID returns the EType ID number.
 func (e RC4HMAC) GetETypeID() int32 {

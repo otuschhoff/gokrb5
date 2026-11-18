@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/otuschhoff/gokrb5/v8/iana/ntstatus"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/otuschhoff/gokrb5/v8/iana/ntstatus"
 )
 
 func TestErrorf(t *testing.T) {

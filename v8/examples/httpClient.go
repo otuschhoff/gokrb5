@@ -45,7 +45,7 @@ const (
 func main() {
 	l := log.New(os.Stderr, "GOKRB5 Client: ", log.LstdFlags)
 
-	//defer profile.Start(profile.TraceProfile).Stop()
+	// defer profile.Start(profile.TraceProfile).Stop()
 	// Load the keytab
 	kb, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER2_TEST_GOKRB5)
 	kt := keytab.New()

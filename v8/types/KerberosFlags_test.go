@@ -4,8 +4,9 @@ import (
 	"testing"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
-	"github.com/otuschhoff/gokrb5/v8/iana/flags"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/otuschhoff/gokrb5/v8/iana/flags"
 )
 
 func TestNewKrbFlags(t *testing.T) {

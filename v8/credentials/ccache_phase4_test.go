@@ -11,11 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/otuschhoff/gokrb5/v8/types"
-	"github.com/stretchr/testify/assert"
 )
 
 func ccacheFixtures() map[string]string {
@@ -461,7 +462,7 @@ func TestCCacheWriteFileAtomicAndMode0600(t *testing.T) {
 		t.Fatal(err)
 	}
 	if runtime.GOOS != "windows" {
-		assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 	}
 	assert.Equal(t, path, cache.Path)
 	loaded, err := LoadCCache("FILE:" + path)
@@ -472,7 +473,7 @@ func TestCCacheWriteFileAtomicAndMode0600(t *testing.T) {
 	assert.Equal(t, cache.DefaultPrincipal, loaded.DefaultPrincipal)
 
 	original := []byte("existing cache remains intact")
-	if err := os.WriteFile(path, original, 0600); err != nil {
+	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cache.Credentials = append(cache.Credentials, nil)

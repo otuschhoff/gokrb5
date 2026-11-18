@@ -10,6 +10,7 @@ import (
 	"math"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+
 	krbcrypto "github.com/otuschhoff/gokrb5/v8/crypto"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )

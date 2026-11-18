@@ -6,8 +6,9 @@ import (
 	"time"
 
 	"github.com/jcmturner/rpc/v2/mstypes"
-	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 )
 
 func TestKerbValidationInfo_Unmarshal(t *testing.T) {
@@ -88,7 +89,7 @@ func TestKerbValidationInfo_Unmarshal(t *testing.T) {
 	assert.Equal(t, uint32(13), k.SIDCount, "SIDCount not as expected")
 	assert.Equal(t, int(k.SIDCount), len(k.ExtraSIDs), "SIDCount and size of ExtraSIDs list are not the same")
 
-	var es = []struct {
+	es := []struct {
 		sid  string
 		attr uint32
 	}{
@@ -169,7 +170,7 @@ func TestKerbValidationInfo_Unmarshal(t *testing.T) {
 	assert.Equal(t, uint32(2), k2.SIDCount, "SIDCount not as expected")
 	assert.Equal(t, int(k2.SIDCount), len(k2.ExtraSIDs), "SIDCount and size of ExtraSIDs list are not the same")
 
-	var es2 = []struct {
+	es2 := []struct {
 		sid  string
 		attr uint32
 	}{
@@ -195,7 +196,7 @@ func TestKerbValidationInfo_Unmarshal_DomainTrust(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error unmarshaling KerbValidationInfo: %v", err)
 	}
-	assert.Equal(t, time.Date(2017, 10, 14, 12, 03, 41, 52409900, time.UTC), k.LogOnTime.Time(), "LogOnTime not as expected")
+	assert.Equal(t, time.Date(2017, 10, 14, 12, 0o3, 41, 52409900, time.UTC), k.LogOnTime.Time(), "LogOnTime not as expected")
 	assert.Equal(t, time.Date(2185, 7, 21, 23, 34, 33, 709551516, time.UTC), k.LogOffTime.Time(), "LogOffTime not as expected")
 	assert.Equal(t, time.Date(2185, 7, 21, 23, 34, 33, 709551516, time.UTC), k.KickOffTime.Time(), "KickOffTime not as expected")
 	assert.Equal(t, time.Date(2017, 10, 10, 20, 42, 56, 220282300, time.UTC), k.PasswordLastSet.Time(), "PasswordLastSet not as expected")
@@ -239,7 +240,7 @@ func TestKerbValidationInfo_Unmarshal_DomainTrust(t *testing.T) {
 	assert.Equal(t, uint32(1), k.SIDCount, "SIDCount not as expected")
 	assert.Equal(t, int(k.SIDCount), len(k.ExtraSIDs), "SIDCount and size of ExtraSIDs list are not the same")
 
-	var es = []struct {
+	es := []struct {
 		sid  string
 		attr uint32
 	}{
@@ -258,11 +259,13 @@ func TestKerbValidationInfo_Unmarshal_DomainTrust(t *testing.T) {
 		{RelativeID: 1108, Attributes: 536870919},
 	}
 	assert.Equal(t, rgids, k.ResourceGroupIDs, "ResourceGroupIDs not as expected")
-	groupSids := []string{"S-1-5-21-2284869408-3503417140-1141177250-1110",
+	groupSids := []string{
+		"S-1-5-21-2284869408-3503417140-1141177250-1110",
 		"S-1-5-21-2284869408-3503417140-1141177250-513",
 		"S-1-5-21-2284869408-3503417140-1141177250-1109",
 		"S-1-18-1",
 		"S-1-5-21-3062750306-1230139592-1973306805-1107",
-		"S-1-5-21-3062750306-1230139592-1973306805-1108"}
+		"S-1-5-21-3062750306-1230139592-1973306805-1108",
+	}
 	assert.Equal(t, groupSids, k.GetGroupMembershipSIDs(), "GroupMembershipSIDs not as expected")
 }

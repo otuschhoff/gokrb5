@@ -10,7 +10,7 @@ import (
 // Checksum returns a hash of the data in accordance with RFC 4757
 func Checksum(key []byte, usage uint32, data []byte) ([]byte, error) {
 	// Create hashing key
-	s := append([]byte(`signaturekey`), byte(0x00)) //includes zero octet at end
+	s := append([]byte(`signaturekey`), byte(0x00)) // includes zero octet at end
 	mac := hmac.New(md5.New, key)
 	mac.Write(s)
 	Ksign := mac.Sum(nil)

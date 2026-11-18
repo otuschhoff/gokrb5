@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jcmturner/dnsutils/v2"
+
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 

@@ -6,9 +6,10 @@ import (
 	"testing"
 
 	"github.com/jcmturner/goidentity/v6"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/config"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestImplementsInterface(t *testing.T) {

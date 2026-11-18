@@ -255,5 +255,4 @@ func (s *Settings) JSON() (string, error) {
 		return "", err
 	}
 	return string(b), nil
-
 }

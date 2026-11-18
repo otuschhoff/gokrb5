@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/crypto"
 	"github.com/otuschhoff/gokrb5/v8/iana"
@@ -357,8 +358,10 @@ func TestFASTVerifyASReplyStrengthensKey(t *testing.T) {
 	}
 	response := types.KrbFastResponse{
 		PAData: challengePASequence(challengePA), StrengthenKey: strengthen, Nonce: uint32(request.ReqBody.Nonce),
-		Finished: types.KrbFastFinished{Timestamp: now, Usec: now.Nanosecond() / int(time.Microsecond), CRealm: reply.CRealm, CName: reply.CName,
-			TicketChecksum: types.Checksum{CksumType: chksumtype.HMAC_SHA1_96_AES128, Checksum: ticketChecksum}},
+		Finished: types.KrbFastFinished{
+			Timestamp: now, Usec: now.Nanosecond() / int(time.Microsecond), CRealm: reply.CRealm, CName: reply.CName,
+			TicketChecksum: types.Checksum{CksumType: chksumtype.HMAC_SHA1_96_AES128, Checksum: ticketChecksum},
+		},
 	}
 	responseBytes, err := response.Marshal()
 	if err != nil {
@@ -478,8 +481,10 @@ func TestFASTVerifyTGSReplyUsesStrengthenedSubkey(t *testing.T) {
 	}
 	response := types.KrbFastResponse{
 		PAData: types.PADataSequence{}, StrengthenKey: strengthen, Nonce: uint32(request.ReqBody.Nonce),
-		Finished: types.KrbFastFinished{Timestamp: now, Usec: now.Nanosecond() / int(time.Microsecond), CRealm: reply.CRealm, CName: reply.CName,
-			TicketChecksum: types.Checksum{CksumType: chksumtype.HMAC_SHA1_96_AES128, Checksum: checksum}},
+		Finished: types.KrbFastFinished{
+			Timestamp: now, Usec: now.Nanosecond() / int(time.Microsecond), CRealm: reply.CRealm, CName: reply.CName,
+			TicketChecksum: types.Checksum{CksumType: chksumtype.HMAC_SHA1_96_AES128, Checksum: checksum},
+		},
 	}
 	responseBytes, err := response.Marshal()
 	if err != nil {

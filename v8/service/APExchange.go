@@ -78,7 +78,7 @@ func VerifyAPREQWithResult(APReq *messages.APReq, s *Settings) (APREQResult, err
 		c.SetDelegatedCredentials(delegated)
 	}
 
-	//PAC decoding
+	// PAC decoding
 	if !s.disablePACDecoding {
 		isPAC, pac, err := APReq.Ticket.GetPACType(s.Keytab, s.KeytabPrincipal(), s.Logger())
 		if isPAC && err != nil {

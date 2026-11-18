@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/iana/adtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/msflags"
 	"github.com/otuschhoff/gokrb5/v8/iana/ntstatus"
@@ -147,6 +148,7 @@ func (v *PAPACOptions) Marshal() ([]byte, error) {
 	}
 	return marshalMSKILE(*v)
 }
+
 func (v *PAPACOptions) Unmarshal(b []byte) error {
 	if err := unmarshalMSKILE(b, v); err != nil {
 		return err

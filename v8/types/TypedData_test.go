@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestUnmarshalTypedData(t *testing.T) {

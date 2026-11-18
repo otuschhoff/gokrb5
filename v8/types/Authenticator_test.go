@@ -6,11 +6,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/otuschhoff/gokrb5/v8/iana"
 	"github.com/otuschhoff/gokrb5/v8/iana/adtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
-	"github.com/stretchr/testify/assert"
 )
 
 func unmarshalAuthenticatorTest(t *testing.T, v string) Authenticator {
@@ -26,10 +27,11 @@ func unmarshalAuthenticatorTest(t *testing.T, v string) Authenticator {
 	}
 	return a
 }
+
 func TestUnmarshalAuthenticator(t *testing.T) {
 	t.Parallel()
 	a := unmarshalAuthenticatorTest(t, testdata.MarshaledKRB5authenticator)
-	//Parse the test time value into a time.Time type
+	// Parse the test time value into a time.Time type
 	tt, _ := time.Parse(testdata.TEST_TIME_FORMAT, testdata.TEST_TIME)
 
 	assert.Equal(t, iana.PVNO, a.AVNO, "Authenticator version number not as expected")
@@ -53,7 +55,7 @@ func TestUnmarshalAuthenticator(t *testing.T) {
 func TestUnmarshalAuthenticator_optionalsempty(t *testing.T) {
 	t.Parallel()
 	a := unmarshalAuthenticatorTest(t, testdata.MarshaledKRB5authenticatorOptionalsEmpty)
-	//Parse the test time value into a time.Time type
+	// Parse the test time value into a time.Time type
 	tt, _ := time.Parse(testdata.TEST_TIME_FORMAT, testdata.TEST_TIME)
 
 	assert.Equal(t, iana.PVNO, a.AVNO, "Authenticator version number not as expected")
@@ -68,7 +70,7 @@ func TestUnmarshalAuthenticator_optionalsempty(t *testing.T) {
 func TestUnmarshalAuthenticator_optionalsNULL(t *testing.T) {
 	t.Parallel()
 	a := unmarshalAuthenticatorTest(t, testdata.MarshaledKRB5authenticatorOptionalsNULL)
-	//Parse the test time value into a time.Time type
+	// Parse the test time value into a time.Time type
 	tt, _ := time.Parse(testdata.TEST_TIME_FORMAT, testdata.TEST_TIME)
 
 	assert.Equal(t, iana.PVNO, a.AVNO, "Authenticator version number not as expected")

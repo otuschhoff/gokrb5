@@ -3,7 +3,7 @@ package rfc3961
 import "testing"
 
 func TestFixWeakKey(t *testing.T) {
-	var weakKeys = []struct {
+	weakKeys := []struct {
 		key      []byte
 		lastbyte byte
 	}{

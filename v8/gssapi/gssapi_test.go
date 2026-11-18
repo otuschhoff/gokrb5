@@ -9,7 +9,7 @@ import (
 )
 
 func TestOID(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		name OIDName
 		oid  []int
 	}{

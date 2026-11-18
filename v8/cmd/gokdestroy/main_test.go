@@ -14,10 +14,10 @@ func TestDestroyExplicitFileCache(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "krb5.conf")
 	cachePath := filepath.Join(dir, "ccache")
-	if err := os.WriteFile(configPath, []byte("[libdefaults]\n default_realm = EXAMPLE.ORG\n"), 0600); err != nil {
+	if err := os.WriteFile(configPath, []byte("[libdefaults]\n default_realm = EXAMPLE.ORG\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(cachePath, []byte("cache"), 0600); err != nil {
+	if err := os.WriteFile(cachePath, []byte("cache"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("KRB5_CONFIG", configPath)
@@ -30,7 +30,7 @@ func TestDestroyExplicitFileCache(t *testing.T) {
 func TestDestroyQuietSuppressesErrors(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "krb5.conf")
-	if err := os.WriteFile(configPath, []byte("[libdefaults]\n default_realm = EXAMPLE.ORG\n"), 0600); err != nil {
+	if err := os.WriteFile(configPath, []byte("[libdefaults]\n default_realm = EXAMPLE.ORG\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("KRB5_CONFIG", configPath)
@@ -48,10 +48,10 @@ func TestDestroyRejectsAllWithExplicitCache(t *testing.T) {
 func TestDestroyAllRemovesDefaultFileCache(t *testing.T) {
 	cachePath := filepath.Join(t.TempDir(), "ccache")
 	configPath := filepath.Join(t.TempDir(), "krb5.conf")
-	if err := os.WriteFile(cachePath, []byte("cache"), 0600); err != nil {
+	if err := os.WriteFile(cachePath, []byte("cache"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(configPath, []byte("[libdefaults]\n default_ccache_name = FILE:"+cachePath+"\n"), 0600); err != nil {
+	if err := os.WriteFile(configPath, []byte("[libdefaults]\n default_ccache_name = FILE:"+cachePath+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("KRB5_CONFIG", configPath)
@@ -78,7 +78,7 @@ func TestDestroyMissingCacheIsIdempotent(t *testing.T) {
 
 func TestDestroyReportsRemovalAndConfigurationErrors(t *testing.T) {
 	directory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(directory, "child"), []byte("occupied"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(directory, "child"), []byte("occupied"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var stderr bytes.Buffer
@@ -101,10 +101,10 @@ func TestDestroyDefaultCacheAndUnsupportedDefault(t *testing.T) {
 	directory := t.TempDir()
 	cachePath := filepath.Join(directory, "default.ccache")
 	configPath := filepath.Join(directory, "krb5.conf")
-	if err := os.WriteFile(cachePath, []byte("cache"), 0600); err != nil {
+	if err := os.WriteFile(cachePath, []byte("cache"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(configPath, []byte("[libdefaults]\n default_ccache_name = FILE:"+cachePath+"\n"), 0600); err != nil {
+	if err := os.WriteFile(configPath, []byte("[libdefaults]\n default_ccache_name = FILE:"+cachePath+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("KRB5_CONFIG", configPath)

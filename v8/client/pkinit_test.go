@@ -4,12 +4,13 @@ import (
 	"testing"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+	"github.com/stretchr/testify/require"
+
 	"github.com/otuschhoff/gokrb5/v8/iana/errorcode"
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/pac"
 	"github.com/otuschhoff/gokrb5/v8/types"
-	"github.com/stretchr/testify/require"
 )
 
 func TestPKINITFreshnessTokenAbsent(t *testing.T) {

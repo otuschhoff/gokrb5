@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/iana/asnAppTag"
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 )

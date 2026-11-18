@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 )
 
@@ -25,9 +26,9 @@ type Config struct {
 	LibDefaults LibDefaults
 	Realms      []Realm
 	DomainRealm DomainRealm
-	//CaPaths
-	//AppDefaults
-	//Plugins
+	// CaPaths
+	// AppDefaults
+	// Plugins
 }
 
 // WeakETypeList is a list of encryption types that have been deemed weak.
@@ -45,35 +46,35 @@ func New() *Config {
 // LibDefaults represents the [libdefaults] section of the configuration.
 type LibDefaults struct {
 	ADSite          string
-	AllowWeakCrypto bool //default false
+	AllowWeakCrypto bool // default false
 	// ap_req_checksum_type int //unlikely to support this
-	Canonicalize            bool          //default false
-	CCacheType              int           //default is 4. unlikely to implement older
-	Clockskew               time.Duration //max allowed skew in seconds, default 300
-	DefaultCCacheName       string        //default FILE:/tmp/krb5cc_%{uid}
-	DefaultClientKeytabName string        //default is build-time configurable in MIT krb5
-	DefaultKeytabName       string        //default /etc/krb5.keytab
+	Canonicalize            bool          // default false
+	CCacheType              int           // default is 4. unlikely to implement older
+	Clockskew               time.Duration // max allowed skew in seconds, default 300
+	DefaultCCacheName       string        // default FILE:/tmp/krb5cc_%{uid}
+	DefaultClientKeytabName string        // default is build-time configurable in MIT krb5
+	DefaultKeytabName       string        // default /etc/krb5.keytab
 	DefaultRealm            string
-	DefaultTGSEnctypes      []string //default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4
-	DefaultTktEnctypes      []string //default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4
-	DefaultTGSEnctypeIDs    []int32  //default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4
-	DefaultTktEnctypeIDs    []int32  //default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4
-	DNSCanonicalizeHostname bool     //default true
-	DNSLookupKDC            bool     //default false
+	DefaultTGSEnctypes      []string // default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4
+	DefaultTktEnctypes      []string // default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4
+	DefaultTGSEnctypeIDs    []int32  // default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4
+	DefaultTktEnctypeIDs    []int32  // default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4
+	DNSCanonicalizeHostname bool     // default true
+	DNSLookupKDC            bool     // default false
 	DNSLookupRealm          bool
-	ExtraAddresses          []net.IP       //Not implementing yet
-	Forwardable             bool           //default false
-	IgnoreAcceptorHostname  bool           //default false
-	K5LoginAuthoritative    bool           //default false
-	K5LoginDirectory        string         //default user's home directory. Must be owned by the user or root
-	KDCDefaultOptions       asn1.BitString //default 0x00000010 (KDC_OPT_RENEWABLE_OK)
-	KDCTimeSync             int            //default 1
-	//kdc_req_checksum_type int //unlikely to implement as for very old KDCs
-	NoAddresses         bool     //default true
-	PermittedEnctypes   []string //default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4
+	ExtraAddresses          []net.IP       // Not implementing yet
+	Forwardable             bool           // default false
+	IgnoreAcceptorHostname  bool           // default false
+	K5LoginAuthoritative    bool           // default false
+	K5LoginDirectory        string         // default user's home directory. Must be owned by the user or root
+	KDCDefaultOptions       asn1.BitString // default 0x00000010 (KDC_OPT_RENEWABLE_OK)
+	KDCTimeSync             int            // default 1
+	// kdc_req_checksum_type int //unlikely to implement as for very old KDCs
+	NoAddresses         bool     // default true
+	PermittedEnctypes   []string // default aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 des3-cbc-sha1 arcfour-hmac-md5 camellia256-cts-cmac camellia128-cts-cmac des-cbc-crc des-cbc-md5 des-cbc-md4
 	PermittedEnctypeIDs []int32
-	//plugin_base_dir string //not supporting plugins
-	PreferredPreauthTypes []int         //default “17, 16, 15, 14”, which forces libkrb5 to attempt to use PKINIT if it is supported
+	// plugin_base_dir string //not supporting plugins
+	PreferredPreauthTypes []int         // default “17, 16, 15, 14”, which forces libkrb5 to attempt to use PKINIT if it is supported
 	PKINITAnchors         []string      `json:"-"`
 	PKINITIdentities      []string      `json:"-"`
 	PKINITKDCHostname     string        `json:"-"`
@@ -81,15 +82,15 @@ type LibDefaults struct {
 	PKINITRequireCRLCheck bool          `json:"-"`
 	PKINITDHMinBits       int           `json:"-"`
 	PKINITPool            []string      `json:"-"`
-	Proxiable             bool          //default false
-	RDNS                  bool          //default true
-	RealmTryDomains       int           //default -1
-	RequestPAC            bool          //default true
-	RenewLifetime         time.Duration //default 0
-	SafeChecksumType      int           //default 8
-	TicketLifetime        time.Duration //default 1 day
+	Proxiable             bool          // default false
+	RDNS                  bool          // default true
+	RealmTryDomains       int           // default -1
+	RequestPAC            bool          // default true
+	RenewLifetime         time.Duration // default 0
+	SafeChecksumType      int           // default 8
+	TicketLifetime        time.Duration // default 1 day
 	UDPPreferenceLimit    int           // 1 means to always use tcp. MIT krb5 has a default value of 1465, and it prevents user setting more than 32700.
-	VerifyAPReqNofail     bool          //default false
+	VerifyAPReqNofail     bool          // default false
 }
 
 // Create a new LibDefaults struct.
@@ -163,11 +164,11 @@ func (l *LibDefaults) parseLines(lines []string) error {
 type Realm struct {
 	Realm       string
 	AdminServer []string
-	//auth_to_local //Not implementing for now
-	//auth_to_local_names //Not implementing for now
+	// auth_to_local //Not implementing for now
+	// auth_to_local_names //Not implementing for now
 	DefaultDomain string
 	KDC           []string
-	KPasswdServer []string //default admin_server:464
+	KPasswdServer []string // default admin_server:464
 	MasterKDC     []string
 }
 
@@ -184,7 +185,7 @@ func (r *Realm) parseLines(name string, lines []string) (err error) {
 		if ignore && c > 0 && !strings.Contains(line, "{") && !strings.Contains(line, "}") {
 			continue
 		}
-		//Remove comments after the values
+		// Remove comments after the values
 		if idx := strings.IndexAny(line, "#;"); idx != -1 {
 			line = line[:idx]
 		}
@@ -243,7 +244,7 @@ func (r *Realm) parseLines(name string, lines []string) (err error) {
 			appendUntilFinal(&r.MasterKDC, v, &masterKDCFinal)
 		}
 	}
-	//default for Kpasswd_server = admin_server:464
+	// default for Kpasswd_server = admin_server:464
 	if len(r.KPasswdServer) < 1 {
 		for _, a := range r.AdminServer {
 			s := strings.Split(a, ":")
@@ -259,7 +260,7 @@ func parseRealms(lines []string) (realms []Realm, err error) {
 	var start int
 	var c int
 	for i, l := range lines {
-		//Remove comments after the values
+		// Remove comments after the values
 		if idx := strings.IndexAny(l, "#;"); idx != -1 {
 			l = l[:idx]
 		}
@@ -310,7 +311,7 @@ type DomainRealm map[string]string
 // Parse the lines of the [domain_realm] section of the configuration and add to the mapping.
 func (d *DomainRealm) parseLines(lines []string) error {
 	for _, line := range lines {
-		//Remove comments after the values
+		// Remove comments after the values
 		if idx := strings.IndexAny(line, "#;"); idx != -1 {
 			line = line[:idx]
 		}

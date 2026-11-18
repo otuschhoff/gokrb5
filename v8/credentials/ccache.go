@@ -11,6 +11,7 @@ import (
 	"unsafe"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
@@ -91,19 +92,19 @@ func (c *CCache) Unmarshal(b []byte) error {
 		return fmt.Errorf("credential cache is shorter than the 2-byte version header: %d", len(b))
 	}
 	p := 0
-	//The first byte of the file always has the value 5
+	// The first byte of the file always has the value 5
 	if int8(b[p]) != 5 {
 		return errors.New("Invalid credential cache data. First byte does not equal 5")
 	}
 	p++
-	//Get credential cache version
-	//The second byte contains the version number (1 to 4)
+	// Get credential cache version
+	// The second byte contains the version number (1 to 4)
 	c.Version = b[p]
 	if c.Version < 1 || c.Version > 4 {
 		return errors.New("Invalid credential cache data. Keytab version is not within 1 to 4")
 	}
 	p++
-	//Version 1 or 2 of the file format uses native byte order for integer representations. Versions 3 & 4 always uses big-endian byte order
+	// Version 1 or 2 of the file format uses native byte order for integer representations. Versions 3 & 4 always uses big-endian byte order
 	var endian binary.ByteOrder
 	endian = binary.BigEndian
 	if (c.Version == 1 || c.Version == 2) && isNativeEndianLittle() {
@@ -172,7 +173,7 @@ func parsePrincipal(b []byte, p *int, c *CCache, e *binary.ByteOrder) (Principal
 	var princ Principal
 	var err error
 	if c.Version != 1 {
-		//Name Type is omitted in version 1
+		// Name Type is omitted in version 1
 		princ.PrincipalName.NameType, err = readInt32(b, p, *e)
 		if err != nil {
 			return Principal{}, err
@@ -184,7 +185,7 @@ func parsePrincipal(b []byte, p *int, c *CCache, e *binary.ByteOrder) (Principal
 	}
 	nc := int(componentCount)
 	if c.Version == 1 {
-		//In version 1 the number of components includes the realm. Minus 1 to make consistent with version 2
+		// In version 1 the number of components includes the realm. Minus 1 to make consistent with version 2
 		nc--
 	}
 	if nc < 0 || nc > (len(b)-*p)/4 {
@@ -222,7 +223,7 @@ func parseCredential(b []byte, p *int, c *CCache, e *binary.ByteOrder) (cred *Cr
 	}
 	key.KeyType = int32(keyType)
 	if c.Version == 3 {
-		//repeated twice in version 3
+		// repeated twice in version 3
 		repeatedKeyType, err := readUint16(b, p, *e)
 		if err != nil {
 			return nil, err
@@ -444,9 +445,9 @@ func readBytes(b []byte, p *int, size int) ([]byte, error) {
 }
 
 func isNativeEndianLittle() bool {
-	var x = 0x012345678
-	var p = unsafe.Pointer(&x)
-	var bp = (*[4]byte)(p)
+	x := 0x012345678
+	p := unsafe.Pointer(&x)
+	bp := (*[4]byte)(p)
 
 	var endian bool
 	if 0x01 == bp[0] {

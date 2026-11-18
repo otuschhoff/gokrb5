@@ -6,9 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 
+	"golang.org/x/crypto/pbkdf2"
+
 	"github.com/otuschhoff/gokrb5/v8/crypto/etype"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
-	"golang.org/x/crypto/pbkdf2"
 )
 
 const (
@@ -67,7 +68,7 @@ func StringToPBKDF2(secret, salt string, iterations int, e etype.EType) []byte {
 
 // KDF_HMAC_SHA2 key derivation: https://tools.ietf.org/html/rfc8009#section-3
 func KDF_HMAC_SHA2(protocolKey, label, context []byte, kl int, e etype.EType) []byte {
-	//k: Length in bits of the key to be outputted, expressed in big-endian binary representation in 4 bytes.
+	// k: Length in bits of the key to be outputted, expressed in big-endian binary representation in 4 bytes.
 	k := make([]byte, 4, 4)
 	binary.BigEndian.PutUint32(k, uint32(kl))
 

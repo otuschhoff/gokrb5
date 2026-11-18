@@ -12,10 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/otuschhoff/gokrb5/v8/types"
-	"github.com/stretchr/testify/assert"
 )
 
 func testEntry(kvno uint32) Entry {
@@ -45,7 +46,7 @@ func setEnv(t *testing.T, key, value string) {
 func TestWriteFileAtomicAndMode0600(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "service.keytab")
-	if err := os.WriteFile(path, []byte("old"), 0644); err != nil {
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	kt := New()
@@ -58,7 +59,7 @@ func TestWriteFileAtomicAndMode0600(t *testing.T) {
 		t.Fatal(err)
 	}
 	if runtime.GOOS != "windows" {
-		assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 	}
 	loaded, err := Load("FILE:" + path)
 	if err != nil {
@@ -137,7 +138,7 @@ func TestAppendToFileCreatesHeaderAndAppendsConcurrently(t *testing.T) {
 func TestAppendToFileRejectsInvalidExistingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "invalid.keytab")
 	original := []byte("not a keytab")
-	if err := os.WriteFile(path, original, 0600); err != nil {
+	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	assert.Error(t, AppendToFile(path, testEntry(1)))
@@ -154,7 +155,7 @@ func TestAppendToFilePreservesV1AndHighKVNO(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "v1.keytab")
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := AppendToFile(path, testEntry(300)); err != nil {
@@ -250,7 +251,7 @@ func TestFirstExistingClientKeytabName(t *testing.T) {
 	dir := t.TempDir()
 	missing := "FILE:" + filepath.Join(dir, "missing")
 	existing := "FILE:" + filepath.Join(dir, "client.keytab")
-	if err := os.WriteFile(strings.TrimPrefix(existing, "FILE:"), nil, 0600); err != nil {
+	if err := os.WriteFile(strings.TrimPrefix(existing, "FILE:"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 

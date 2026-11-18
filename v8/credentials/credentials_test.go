@@ -4,10 +4,11 @@ import (
 	"testing"
 
 	"github.com/jcmturner/goidentity/v6"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
 	"github.com/otuschhoff/gokrb5/v8/types"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestImplementsInterface(t *testing.T) {

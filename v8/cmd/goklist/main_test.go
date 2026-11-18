@@ -10,18 +10,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/otuschhoff/gokrb5/v8/credentials"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/otuschhoff/gokrb5/v8/types"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestListCacheAndSilentStatus(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "krb5.conf")
 	cachePath := filepath.Join(dir, "ccache")
-	if err := os.WriteFile(configPath, []byte("[libdefaults]\n default_realm = EXAMPLE.ORG\n"), 0600); err != nil {
+	if err := os.WriteFile(configPath, []byte("[libdefaults]\n default_realm = EXAMPLE.ORG\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("KRB5_CONFIG", configPath)
@@ -73,7 +74,7 @@ func TestListKeytabModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "client.keytab")
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
@@ -118,7 +119,7 @@ func TestListCacheFixtureWithEtypesAndPositionalName(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "fixture.ccache")
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
@@ -149,7 +150,7 @@ func TestListDefaultKeytabAndCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	keytabPath := filepath.Join(directory, "default.keytab")
-	if err := os.WriteFile(keytabPath, keytabData, 0600); err != nil {
+	if err := os.WriteFile(keytabPath, keytabData, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("KRB5_KTNAME", "FILE:"+keytabPath)
@@ -163,11 +164,11 @@ func TestListDefaultKeytabAndCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	cachePath := filepath.Join(directory, "default.ccache")
-	if err := os.WriteFile(cachePath, cacheData, 0600); err != nil {
+	if err := os.WriteFile(cachePath, cacheData, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(directory, "krb5.conf")
-	if err := os.WriteFile(configPath, []byte("[libdefaults]\n default_ccache_name = FILE:"+cachePath+"\n"), 0600); err != nil {
+	if err := os.WriteFile(configPath, []byte("[libdefaults]\n default_ccache_name = FILE:"+cachePath+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("KRB5_CONFIG", configPath)

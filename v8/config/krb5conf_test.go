@@ -491,7 +491,6 @@ func TestLoad(t *testing.T) {
 
 	assert.Equal(t, "TEST.GOKRB5", c.DomainRealm[".test.gokrb5"], "Domain to realm mapping not as expected")
 	assert.Equal(t, "TEST.GOKRB5", c.DomainRealm["test.gokrb5"], "Domain to realm mapping not as expected")
-
 }
 
 func TestLoadWithV4Lines(t *testing.T) {
@@ -528,7 +527,6 @@ func TestLoadWithV4Lines(t *testing.T) {
 
 	assert.Equal(t, "TEST.GOKRB5", c.DomainRealm[".test.gokrb5"], "Domain to realm mapping not as expected")
 	assert.Equal(t, "TEST.GOKRB5", c.DomainRealm["test.gokrb5"], "Domain to realm mapping not as expected")
-
 }
 
 func TestLoad2(t *testing.T) {
@@ -588,7 +586,6 @@ func TestLoadNoBlankLines(t *testing.T) {
 
 	assert.Equal(t, "TEST.GOKRB5", c.DomainRealm[".test.gokrb5"], "Domain to realm mapping not as expected")
 	assert.Equal(t, "TEST.GOKRB5", c.DomainRealm["test.gokrb5"], "Domain to realm mapping not as expected")
-
 }
 
 func TestLoadTabs(t *testing.T) {
@@ -622,7 +619,6 @@ func TestLoadTabs(t *testing.T) {
 
 	assert.Equal(t, "TEST.GOKRB5", c.DomainRealm[".test.gokrb5"], "Domain to realm mapping not as expected")
 	assert.Equal(t, "TEST.GOKRB5", c.DomainRealm["test.gokrb5"], "Domain to realm mapping not as expected")
-
 }
 
 func TestParseDuration(t *testing.T) {
@@ -631,7 +627,7 @@ func TestParseDuration(t *testing.T) {
 	hms, _ := time.ParseDuration("12h30m15s")
 	hm, _ := time.ParseDuration("12h30m")
 	h, _ := time.ParseDuration("12h")
-	var tests = []struct {
+	tests := []struct {
 		timeStr  string
 		duration time.Duration
 	}{
@@ -651,7 +647,6 @@ func TestParseDuration(t *testing.T) {
 		assert.Equal(t, test.duration, d, "Duration not as expected for: "+test.timeStr)
 
 	}
-
 }
 
 func TestResolveRealm(t *testing.T) {

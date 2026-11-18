@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/asn1tools"
 	"github.com/otuschhoff/gokrb5/v8/client"
 	krbcrypto "github.com/otuschhoff/gokrb5/v8/crypto"
@@ -178,7 +179,7 @@ func (s *SPNEGO) AcceptSecContext(ct gssapi.ContextToken) (bool, context.Context
 		return ok, ctx, status
 	}
 	var offeredMechTypes []asn1.ObjectIdentifier
-	var selectedMech = gssapi.OIDKRB5.OID()
+	selectedMech := gssapi.OIDKRB5.OID()
 	var includeMechMIC bool
 	if token, isSPNEGO := ct.(*SPNEGOToken); isSPNEGO && token.Init {
 		offeredMechTypes = token.NegTokenInit.MechTypes

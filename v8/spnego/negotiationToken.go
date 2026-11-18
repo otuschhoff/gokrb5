@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
 	"github.com/otuschhoff/gokrb5/v8/iana/keyusage"
@@ -399,7 +400,6 @@ func UnmarshalNegToken(b []byte) (bool, interface{}, error) {
 	default:
 		return false, nil, errors.New("unknown choice type for NegotiationToken")
 	}
-
 }
 
 func isNegTokenInit2(encoded []byte) bool {

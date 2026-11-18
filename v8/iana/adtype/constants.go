@@ -25,5 +25,5 @@ const (
 	KerbLocal                     int32 = 142
 	ADAuthDataAPOptions           int32 = 143
 	KerbDMSAKeyPackage            int32 = 171
-	//Reserved values                   9-63
+	// Reserved values                   9-63
 )

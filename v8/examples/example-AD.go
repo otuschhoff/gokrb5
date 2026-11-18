@@ -15,6 +15,7 @@ import (
 
 	"github.com/gorilla/sessions"
 	"github.com/jcmturner/goidentity/v6"
+
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/credentials"
@@ -99,8 +100,8 @@ func testAppHandler(w http.ResponseWriter, r *http.Request) {
 		if ADCredsJSON, ok := creds.Attributes()[credentials.AttributeKeyADCredentials]; ok {
 			//ADCreds := new(credentials.ADCredentials)
 			ADCreds := ADCredsJSON.(credentials.ADCredentials)
-			//err := json.Unmarshal(aj, ADCreds)
-			//if err == nil {
+			// err := json.Unmarshal(aj, ADCreds)
+			// if err == nil {
 			// Now access the fields of the ADCredentials struct. For example:
 			fmt.Fprintf(w, "<li>EffectiveName: %v</li>\n", ADCreds.EffectiveName)
 			fmt.Fprintf(w, "<li>FullName: %v</li>\n", ADCreds.FullName)

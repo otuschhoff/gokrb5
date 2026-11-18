@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/credentials"
@@ -108,7 +109,7 @@ func liveEnvironment(t *testing.T, port string) []string {
  test.gokrb5 = TEST.GOKRB5
 `, host, port, host)
 	path := filepath.Join(t.TempDir(), "krb5.conf")
-	if err := os.WriteFile(path, []byte(configuration), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(configuration), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return []string{"KRB5_CONFIG=" + path, "LC_ALL=C", "TZ=UTC"}
@@ -158,7 +159,7 @@ func TestGokinitToMIT(t *testing.T) {
 		t.Fatal(err)
 	}
 	keytabPath := filepath.Join(t.TempDir(), "client.keytab")
-	if err := os.WriteFile(keytabPath, keytabBytes, 0600); err != nil {
+	if err := os.WriteFile(keytabPath, keytabBytes, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for name, port := range map[string]string{
@@ -255,7 +256,7 @@ func TestKeytabLoginParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	keytabPath := filepath.Join(t.TempDir(), "client.keytab")
-	if err := os.WriteFile(keytabPath, keytabBytes, 0600); err != nil {
+	if err := os.WriteFile(keytabPath, keytabBytes, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, scenario := range []struct {
@@ -455,7 +456,7 @@ func withKrb5Setting(t *testing.T, env []string, setting string) []string {
 	}
 	data = bytes.Replace(data, []byte("[libdefaults]\n"), []byte("[libdefaults]\n"+setting), 1)
 	path := filepath.Join(t.TempDir(), "krb5.conf")
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return append(env, "KRB5_CONFIG="+path)
@@ -499,7 +500,7 @@ func liveEnvironmentFile(t *testing.T, host, port string) []string {
 	t.Helper()
 	configuration := fmt.Sprintf("[libdefaults]\n default_realm = TEST.GOKRB5\n dns_lookup_kdc = false\n udp_preference_limit = 1\n[realms]\n TEST.GOKRB5 = {\n  kdc = %s:%s\n }\n", host, port)
 	path := filepath.Join(t.TempDir(), "krb5.conf")
-	if err := os.WriteFile(path, []byte(configuration), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(configuration), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return []string{"KRB5_CONFIG=" + path, "LC_ALL=C", "TZ=UTC"}

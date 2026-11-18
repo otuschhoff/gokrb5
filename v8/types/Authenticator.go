@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/asn1tools"
 	"github.com/otuschhoff/gokrb5/v8/iana"
 	"github.com/otuschhoff/gokrb5/v8/iana/asnAppTag"
@@ -54,7 +55,7 @@ func (a *Authenticator) GenerateSeqNumberAndSubKey(keyType int32, keySize int) e
 		return err
 	}
 	a.SeqNumber = seq.Int64() & 0x3fffffff
-	//Generate subkey value
+	// Generate subkey value
 	sk := make([]byte, keySize, keySize)
 	if _, err := rand.Read(sk); err != nil {
 		return fmt.Errorf("generate authenticator subkey: %w", err)

@@ -13,9 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/types"
-	"github.com/stretchr/testify/require"
 )
 
 func TestPEMIdentityAndUPNSelection(t *testing.T) {

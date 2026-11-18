@@ -13,6 +13,7 @@ import (
 
 	"github.com/gorilla/sessions"
 	"github.com/jcmturner/goidentity/v6"
+
 	"github.com/otuschhoff/gokrb5/v8/keytab"
 	"github.com/otuschhoff/gokrb5/v8/service"
 	"github.com/otuschhoff/gokrb5/v8/spnego"
@@ -24,7 +25,7 @@ const (
 )
 
 func main() {
-	//defer profile.Start(profile.TraceProfile).Stop()
+	// defer profile.Start(profile.TraceProfile).Stop()
 	// Create logger
 	l := log.New(os.Stderr, "GOKRB5 Service: ", log.Ldate|log.Ltime|log.Lshortfile)
 

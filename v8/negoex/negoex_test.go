@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/iana/ntstatus"
@@ -221,12 +222,15 @@ type testContext struct {
 func (c *testContext) Wrap(message []byte, confidential bool) ([]byte, error) {
 	return append([]byte(nil), message...), nil
 }
+
 func (c *testContext) Unwrap(token []byte) ([]byte, bool, error) {
 	return append([]byte(nil), token...), false, nil
 }
+
 func (c *testContext) GetMIC(message []byte) ([]byte, error) {
 	return append([]byte(nil), message...), nil
 }
+
 func (c *testContext) VerifyMIC(message, token []byte) error {
 	if !reflect.DeepEqual(message, token) {
 		return errors.New("bad MIC")
@@ -283,6 +287,7 @@ func (m *testSchemeMechanism) InitSecContext(_ string, input []byte) ([]byte, gs
 		return nil, m.context, false, errors.New("unexpected initiator input")
 	}
 }
+
 func (m *testSchemeMechanism) AcceptSecContext(input []byte) ([]byte, gssapi.Context, bool, error) {
 	switch string(input) {
 	case "request-1":

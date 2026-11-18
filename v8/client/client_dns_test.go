@@ -2,11 +2,12 @@ package client
 
 import (
 	"encoding/hex"
+	"testing"
+
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
 	"github.com/otuschhoff/gokrb5/v8/test"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
-	"testing"
 )
 
 func TestClient_Login_DNSKDCs(t *testing.T) {
@@ -19,7 +20,7 @@ func TestClient_Login_DNSKDCs(t *testing.T) {
 	c, _ := config.NewFromString(testdata.KRB5_CONF)
 	// Set to lookup KDCs in DNS
 	c.LibDefaults.DNSLookupKDC = true
-	//Blank out the KDCs to ensure they are not being used
+	// Blank out the KDCs to ensure they are not being used
 	c.Realms = []config.Realm{}
 
 	b, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER1_TEST_GOKRB5)

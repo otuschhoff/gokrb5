@@ -17,17 +17,18 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/iana/errorcode"
 	"github.com/otuschhoff/gokrb5/v8/krberror"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestLoadConfigFromEnvironment(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "krb5.conf")
-	if err := os.WriteFile(path, []byte("[libdefaults]\n default_realm = EXAMPLE.ORG\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("[libdefaults]\n default_realm = EXAMPLE.ORG\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("KRB5_CONFIG", filepath.Join(t.TempDir(), "missing")+string(os.PathListSeparator)+path)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
@@ -104,10 +105,12 @@ type KRB5PrincipalName struct {
 	PrincipalName types.PrincipalName `asn1:"explicit,tag:1"`
 }
 
-type TDDHParameters []AlgorithmIdentifier
-type TDTrustedCertifiers []ExternalPrincipalIdentifier
-type TDInvalidCertificates []ExternalPrincipalIdentifier
-type TDCMSDigestAlgorithms []AlgorithmIdentifier
+type (
+	TDDHParameters        []AlgorithmIdentifier
+	TDTrustedCertifiers   []ExternalPrincipalIdentifier
+	TDInvalidCertificates []ExternalPrincipalIdentifier
+	TDCMSDigestAlgorithms []AlgorithmIdentifier
+)
 
 // TDCertDigestAlgorithms carries acceptable and rejected certificate digests.
 type TDCertDigestAlgorithms struct {

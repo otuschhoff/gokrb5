@@ -4,9 +4,10 @@ import (
 	"encoding/hex"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/otuschhoff/gokrb5/v8/crypto/common"
 	"github.com/otuschhoff/gokrb5/v8/crypto/rfc3962"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestAes128CtsHmacSha196_StringToKey(t *testing.T) {
@@ -16,7 +17,7 @@ func TestAes128CtsHmacSha196_StringToKey(t *testing.T) {
 	s := string(b)
 	b, _ = hex.DecodeString("f09d849e")
 	s2 := string(b)
-	var tests = []struct {
+	tests := []struct {
 		iterations int64
 		phrase     string
 		salt       string

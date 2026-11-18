@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/otuschhoff/gokrb5/v8/iana"
 	"github.com/otuschhoff/gokrb5/v8/iana/addrtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
@@ -13,8 +16,6 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/otuschhoff/gokrb5/v8/types"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestUnmarshalKRBCred(t *testing.T) {
@@ -57,7 +58,7 @@ func TestUnmarshalEncCredPart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unmarshal error: %v", err)
 	}
-	//Parse the test time value into a time.Time type
+	// Parse the test time value into a time.Time type
 	tt, _ := time.Parse(testdata.TEST_TIME_FORMAT, testdata.TEST_TIME)
 
 	assert.Equal(t, 2, len(a.TicketInfo), "Number of ticket info items not as expected")
@@ -102,16 +103,16 @@ func TestUnmarshalEncCredPart_optionalsNULL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unmarshal error: %v", err)
 	}
-	//Parse the test time value into a time.Time type
+	// Parse the test time value into a time.Time type
 	tt, _ := time.Parse(testdata.TEST_TIME_FORMAT, testdata.TEST_TIME)
 
 	assert.Equal(t, 2, len(a.TicketInfo), "Number of ticket info items not as expected")
-	//1st Ticket
+	// 1st Ticket
 	i := 0
 	assert.Equal(t, int32(1), a.TicketInfo[i].Key.KeyType, fmt.Sprintf("Key type not as expected in ticket info item %d", i+1))
 	assert.Equal(t, []byte("12345678"), a.TicketInfo[i].Key.KeyValue, fmt.Sprintf("Key value not as expected in ticket info item %d", i+1))
 
-	//2nd Ticket
+	// 2nd Ticket
 	i = 1
 	assert.Equal(t, int32(1), a.TicketInfo[i].Key.KeyType, fmt.Sprintf("Key type not as expected in ticket info item %d", i+1))
 	assert.Equal(t, []byte("12345678"), a.TicketInfo[i].Key.KeyValue, fmt.Sprintf("Key value not as expected in ticket info item %d", i+1))

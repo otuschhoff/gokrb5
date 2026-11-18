@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/iana/flags"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/types"
@@ -131,7 +132,7 @@ func (c *Cache) RemoveEntry(spn string) {
 // Only a ticket that is currently valid will be returned.
 func (cl *Client) GetCachedTicket(spn string) (messages.Ticket, types.EncryptionKey, bool) {
 	if e, ok := cl.cache.getEntry(spn); ok {
-		//If within time window of ticket return it
+		// If within time window of ticket return it
 		if time.Now().UTC().After(e.StartTime) && time.Now().UTC().Before(e.EndTime) {
 			cl.Log("ticket received from cache for %s", spn)
 			return e.Ticket, e.SessionKey, true

@@ -5,14 +5,15 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/otuschhoff/gokrb5/v8/iana/chksumtype"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/otuschhoff/gokrb5/v8/iana/chksumtype"
 )
 
 func TestDes3CbcSha1Kd_DR_DK(t *testing.T) {
 	t.Parallel()
 	// Test vectors from RFC 3961 Appendix A3
-	var tests = []struct {
+	tests := []struct {
 		key   string
 		usage string
 		dr    string
@@ -47,7 +48,7 @@ func TestDes3CbcSha1Kd_DR_DK(t *testing.T) {
 
 func TestDes3CbcSha1Kd_StringToKey(t *testing.T) {
 	t.Parallel()
-	var tests = []struct {
+	tests := []struct {
 		salt   string
 		secret string
 		key    string

@@ -17,11 +17,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/credentials"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestParseArgsMapsMITFlags(t *testing.T) {
@@ -136,7 +137,7 @@ func TestRunCredentialAcquisitionFailures(t *testing.T) {
   kdc = 127.0.0.1:1
  }
 `
-	if err := os.WriteFile(configPath, []byte(configText), 0600); err != nil {
+	if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("KRB5_CONFIG", configPath)
@@ -240,7 +241,7 @@ func TestLoadPKINITSettingsRejectsInvalidConfiguration(t *testing.T) {
 		}, wantErr: "unsupported PKINIT anchor"},
 		{name: "malformed anchor", setup: func(config *config.Config) {
 			path := filepath.Join(directory, "malformed.pem")
-			if err := os.WriteFile(path, []byte("not a certificate"), 0600); err != nil {
+			if err := os.WriteFile(path, []byte("not a certificate"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			config.LibDefaults.PKINITIdentities = []string{identity}
@@ -297,7 +298,7 @@ func TestLoadKeytabAndVerboseCacheOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "client.keytab")
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := loadKeytab(initOptions{keytabName: path}, config.New())
@@ -343,7 +344,7 @@ func TestLoadPKINITIdentityIOFailures(t *testing.T) {
 		{"missing PKCS12", "PKCS12:" + missing, "read PKINIT PKCS#12 identity"},
 		{"unsupported", "PKCS11:token", "unsupported PKINIT identity"},
 	}
-	if err := os.WriteFile(filepath.Join(directory, "certificate"), []byte("certificate"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(directory, "certificate"), []byte("certificate"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, test := range tests {
@@ -363,10 +364,10 @@ func TestLoadDefaultKeytabVariants(t *testing.T) {
 	directory := t.TempDir()
 	acceptorPath := filepath.Join(directory, "acceptor.keytab")
 	clientPath := filepath.Join(directory, "client.keytab")
-	if err := os.WriteFile(acceptorPath, data, 0600); err != nil {
+	if err := os.WriteFile(acceptorPath, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(clientPath, data, 0600); err != nil {
+	if err := os.WriteFile(clientPath, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("KRB5_KTNAME", "FILE:"+acceptorPath)
@@ -390,7 +391,7 @@ func TestRenewAndPasswordChangeFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	cachePath := filepath.Join(t.TempDir(), "ccache")
-	if err := os.WriteFile(cachePath, data, 0600); err != nil {
+	if err := os.WriteFile(cachePath, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	stderr.Reset()
@@ -443,10 +444,10 @@ func writePKINITIdentity(t *testing.T, directory string) (string, string) {
 	}
 	certificatePath := filepath.Join(directory, "identity.pem")
 	keyPath := filepath.Join(directory, "identity.key")
-	if err := os.WriteFile(certificatePath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificateDER}), 0600); err != nil {
+	if err := os.WriteFile(certificatePath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificateDER}), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0600); err != nil {
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return certificatePath, keyPath

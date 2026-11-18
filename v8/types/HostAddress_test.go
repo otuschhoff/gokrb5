@@ -6,8 +6,9 @@ import (
 	"testing"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
-	"github.com/otuschhoff/gokrb5/v8/iana/addrtype"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/otuschhoff/gokrb5/v8/iana/addrtype"
 )
 
 func TestGetHostAddress(t *testing.T) {

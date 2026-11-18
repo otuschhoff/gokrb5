@@ -10,8 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/otuschhoff/gokrb5/v8/types"
 	"golang.org/x/crypto/pkcs12"
+
+	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
 var (

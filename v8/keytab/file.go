@@ -35,7 +35,7 @@ func AppendToFile(name string, entries ...Entry) (err error) {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0600)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o600)
 	if err != nil {
 		return err
 	}
@@ -62,7 +62,7 @@ func AppendToFile(name string, entries ...Entry) (err error) {
 	var endian binary.ByteOrder = binary.BigEndian
 	writeHeader := info.Size() == 0
 	if writeHeader {
-		if err := f.Chmod(0600); err != nil {
+		if err := f.Chmod(0o600); err != nil {
 			return err
 		}
 	} else {

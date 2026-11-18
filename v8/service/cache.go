@@ -50,8 +50,10 @@ func replayCacheKeys(sname types.PrincipalName, a types.Authenticator) (replayCa
 }
 
 // Instance of the ServiceCache. This needs to be a singleton.
-var replayCache Cache
-var once sync.Once
+var (
+	replayCache Cache
+	once        sync.Once
+)
 
 // GetReplayCache returns a pointer to the Cache singleton.
 func GetReplayCache(d time.Duration) *Cache {

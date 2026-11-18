@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/jcmturner/rpc/v2/mstypes"
+
 	"github.com/otuschhoff/gokrb5/v8/pac/internal/ndr"
 )
 
@@ -57,9 +58,9 @@ func (c *NTLMSupplementalCred) Unmarshal(b []byte) (err error) {
 
 // isFlagSet tests if a flag is set in the uint32 little endian flag
 func isFlagSet(f uint32, i uint32) bool {
-	//Which byte?
+	// Which byte?
 	b := int(i / 8)
-	//Which bit in byte
+	// Which bit in byte
 	p := uint(7 - (int(i) - 8*b))
 	fb := make([]byte, 4)
 	binary.LittleEndian.PutUint32(fb, f)

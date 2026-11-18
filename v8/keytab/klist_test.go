@@ -5,8 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 )
 
 func TestKlistMatchesCapturedOutput(t *testing.T) {

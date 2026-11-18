@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/negoex"
@@ -20,21 +21,26 @@ type testMechanismContext struct {
 func (*testMechanismContext) Wrap(message []byte, _ bool) ([]byte, error) {
 	return append([]byte(nil), message...), nil
 }
+
 func (*testMechanismContext) Unwrap(token []byte) ([]byte, bool, error) {
 	return append([]byte(nil), token...), false, nil
 }
+
 func (*testMechanismContext) GetMIC(message []byte) ([]byte, error) {
 	return append([]byte("MIC:"), message...), nil
 }
+
 func (*testMechanismContext) VerifyMIC(message, token []byte) error {
 	if !bytes.Equal(token, append([]byte("MIC:"), message...)) {
 		return errors.New("invalid test MIC")
 	}
 	return nil
 }
+
 func (c *testMechanismContext) NegoExKey() (types.EncryptionKey, bool) {
 	return c.negoExKey, len(c.negoExKey.KeyValue) > 0
 }
+
 func (c *testMechanismContext) NegoExVerifyKey() (types.EncryptionKey, bool) {
 	return c.negoExKey, len(c.negoExKey.KeyValue) > 0
 }

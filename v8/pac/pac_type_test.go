@@ -11,10 +11,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/otuschhoff/gokrb5/v8/keytab"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/otuschhoff/gokrb5/v8/types"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestPACBoundsChecks(t *testing.T) {
@@ -183,7 +184,7 @@ func TestPACTypeVerify(t *testing.T) {
 	pacInvalidClientInfo := pac
 	pacInvalidClientInfo.ClientInfo = nil
 
-	var pacs = []struct {
+	pacs := []struct {
 		pac PACType
 	}{
 		{pacInvalidServerSig},
@@ -196,5 +197,4 @@ func TestPACTypeVerify(t *testing.T) {
 		v, _ := s.pac.verify(key)
 		assert.False(t, v, fmt.Sprintf("Validation should have failed for test %v", i))
 	}
-
 }

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/asn1tools"
 	"github.com/otuschhoff/gokrb5/v8/crypto"
 	"github.com/otuschhoff/gokrb5/v8/iana"
@@ -181,8 +182,8 @@ func (a *APReq) Verify(kt *keytab.Keytab, d time.Duration, cAddr types.HostAddre
 
 	// Check client's address is listed in the client addresses in the ticket
 	if len(a.Ticket.DecryptedEncPart.CAddr) > 0 {
-		//If client addresses are present check if any of them match the source IP that sent the APReq
-		//If there is no match return KRB_AP_ERR_BADADDR error.
+		// If client addresses are present check if any of them match the source IP that sent the APReq
+		// If there is no match return KRB_AP_ERR_BADADDR error.
 		if !types.HostAddressesContains(a.Ticket.DecryptedEncPart.CAddr, cAddr) {
 			return false, NewKRBError(a.Ticket.SName, a.Ticket.Realm, errorcode.KRB_AP_ERR_BADADDR, "client address not within the list contained in the service ticket")
 		}

@@ -92,7 +92,7 @@ func GetIntegrityHash(b, key []byte, usage uint32, etype etype.EType) ([]byte, e
 
 // VerifyChecksum compares the checksum of the msg bytes is the same as the checksum provided.
 func VerifyChecksum(key, chksum, msg []byte, usage uint32, etype etype.EType) bool {
-	//The encrypted message is a concatenation of the encrypted output and the hash HMAC.
+	// The encrypted message is a concatenation of the encrypted output and the hash HMAC.
 	expectedMAC, _ := GetChecksumHash(msg, key, usage, etype)
 	return hmac.Equal(chksum, expectedMAC)
 }

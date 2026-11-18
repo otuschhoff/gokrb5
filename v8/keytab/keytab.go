@@ -982,9 +982,9 @@ func readSizedBytes(b []byte, p *int, e *binary.ByteOrder) ([]byte, error) {
 }
 
 func isNativeEndianLittle() bool {
-	var x = 0x012345678
-	var p = unsafe.Pointer(&x)
-	var bp = (*[4]byte)(p)
+	x := 0x012345678
+	p := unsafe.Pointer(&x)
+	bp := (*[4]byte)(p)
 
 	var endian bool
 	if 0x01 == bp[0] {

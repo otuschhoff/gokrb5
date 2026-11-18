@@ -57,7 +57,7 @@ func (dec *Decoder) readStringsArray(v reflect.Value, tag reflect.StructTag, def
 		for i := 0; i < d; i++ {
 			m = append(m, int(dec.precedingMax()))
 		}
-		//common max size
+		// common max size
 		_ = dec.precedingMax()
 		//ms = int(n)
 	}

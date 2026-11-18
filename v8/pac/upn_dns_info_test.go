@@ -7,8 +7,9 @@ import (
 	"testing"
 
 	"github.com/jcmturner/rpc/v2/mstypes"
-	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 )
 
 func TestUPN_DNSInfo_Unmarshal(t *testing.T) {

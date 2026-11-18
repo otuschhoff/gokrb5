@@ -16,8 +16,7 @@ import (
 // RFC 3962
 
 // Aes256CtsHmacSha96 implements Kerberos encryption type aes256-cts-hmac-sha1-96
-type Aes256CtsHmacSha96 struct {
-}
+type Aes256CtsHmacSha96 struct{}
 
 // GetETypeID returns the EType ID number.
 func (e Aes256CtsHmacSha96) GetETypeID() int32 {
