@@ -5,8 +5,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -21,6 +23,7 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
 	"github.com/otuschhoff/gokrb5/v8/messages"
+	"github.com/otuschhoff/gokrb5/v8/service"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
@@ -91,13 +94,18 @@ func TestHTTPClientsPreserveCancellationAndRejectNilRequests(t *testing.T) {
 		})}
 	}
 	for _, tt := range []struct {
-		name string
-		do   func(*http.Request) (*http.Response, error)
+		name        string
+		wantContext string
+		do          func(*http.Request) (*http.Response, error)
 	}{
-		{name: "legacy", do: NewClient(nil, transport(), "").Do},
-		{name: "generic", do: NewNegotiatingClient(transport(), "target", func() gssapi.ContextMechanism {
-			return newTestContextMechanism(1, "http")
-		}).Do},
+		{name: "legacy", wantContext: "send SPNEGO HTTP request:", do: NewClient(nil, transport(), "").Do},
+		{
+			name:        "generic",
+			wantContext: "send Negotiate HTTP request:",
+			do: NewNegotiatingClient(transport(), "target", func() gssapi.ContextMechanism {
+				return newTestContextMechanism(1, "http")
+			}).Do,
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			response, err := tt.do(nil)
@@ -118,6 +126,8 @@ func TestHTTPClientsPreserveCancellationAndRejectNilRequests(t *testing.T) {
 			if !errors.Is(err, context.Canceled) {
 				t.Fatalf("cancelled request = %v", err)
 			}
+			require.ErrorContains(t, err, tt.wantContext)
+			require.ErrorAs(t, err, new(*url.Error))
 		})
 	}
 }
@@ -379,6 +389,10 @@ func TestHTTPBodyReplayContract(t *testing.T) {
 		t.Fatal(closeErr)
 	}
 	request.GetBody = func() (io.ReadCloser, error) { return nil, cause }
+	failedClone, cloneErr := cloneNegotiationRequest(request, 1)
+	require.Nil(t, failedClone)
+	require.ErrorIs(t, cloneErr, cause)
+	require.ErrorContains(t, cloneErr, "replay HTTP request body:")
 	if replayErr := replayRequestBody(request, request); !errors.Is(replayErr, cause) {
 		t.Fatal(replayErr)
 	}
@@ -394,6 +408,92 @@ func TestHTTPBodyReplayContract(t *testing.T) {
 	clone, err = cloneNegotiationRequest(request, 1)
 	require.NoError(t, err)
 	require.Equal(t, http.NoBody, clone.Body)
+}
+
+func TestLegacyHTTPNewRequestErrors(t *testing.T) {
+	t.Parallel()
+
+	transport := new(http.Client)
+	transport.Transport = negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("unexpected transport call")
+	})
+	client := NewClient(nil, transport, "")
+	for _, tt := range []struct {
+		name   string
+		method string
+		send   func(string) (*http.Response, error)
+	}{
+		{name: "get", method: http.MethodGet, send: client.Get},
+		{name: "head", method: http.MethodHead, send: client.Head},
+		{name: "post", method: http.MethodPost, send: func(u string) (*http.Response, error) {
+			return client.Post(u, "", nil)
+		}},
+		{name: "post form", method: http.MethodPost, send: func(u string) (*http.Response, error) {
+			return client.PostForm(u, url.Values{})
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			response, err := tt.send("http://example.test/%")
+			if response != nil && response.Body != nil {
+				require.NoError(t, response.Body.Close())
+			}
+			require.Nil(t, response)
+			require.ErrorContains(t, err, "create HTTP "+tt.method+" request:")
+			require.ErrorAs(t, err, new(*url.Error))
+			require.ErrorAs(t, err, new(url.EscapeError))
+		})
+	}
+}
+
+func TestRequestSPNRetainsInvalidHostError(t *testing.T) {
+	t.Parallel()
+
+	request := httptest.NewRequest(http.MethodGet, "http://example.test", nil)
+	request.URL.Host = "[::1"
+	principal, err := setRequestSPN(request)
+	require.Empty(t, principal.NameString)
+	require.Equal(t, "example.test", request.Host)
+	require.ErrorContains(t, err, "split HTTP host and port:")
+	require.ErrorAs(t, err, new(*net.AddrError))
+}
+
+func TestLegacyHTTPSessionFailureContexts(t *testing.T) {
+	t.Parallel()
+
+	request := httptest.NewRequest(http.MethodGet, "http://example.test", nil)
+	t.Run("empty session", func(t *testing.T) {
+		manager := new(coverageSessionManager)
+		mechanism := SPNEGOService(keytab.New(), service.SessionManager(manager))
+		identity, err := getSessionCredentials(mechanism, request)
+		require.False(t, identity.Authenticated())
+		require.EqualError(t, err, "no credentials in HTTP session")
+	})
+	t.Run("encode credentials", func(t *testing.T) {
+		manager := new(coverageSessionManager)
+		mechanism := SPNEGOService(keytab.New(), service.SessionManager(manager))
+		identity := credentials.New("user", "EXAMPLE.COM")
+		identity.SetAttribute("unregistered", struct{ Enabled bool }{Enabled: true})
+		response := httptest.NewRecorder()
+		err := newSession(mechanism, request, response, identity)
+		require.ErrorContains(t, err, "encode HTTP session credentials:")
+		require.ErrorContains(t, errors.Unwrap(err), "encode credentials gob:")
+		require.Empty(t, manager.saved)
+		require.Equal(t, http.StatusInternalServerError, response.Code)
+		require.Equal(t, "Internal Server Error\n", response.Body.String())
+	})
+	t.Run("save credentials", func(t *testing.T) {
+		manager := new(coverageSessionManager)
+		manager.newErr = errors.New("injected session store failure")
+		mechanism := SPNEGOService(keytab.New(), service.SessionManager(manager))
+		identity := credentials.New("user", "EXAMPLE.COM")
+		response := httptest.NewRecorder()
+		err := newSession(mechanism, request, response, identity)
+		require.ErrorContains(t, err, "create HTTP session:")
+		require.ErrorIs(t, err, manager.newErr)
+		require.Equal(t, http.StatusInternalServerError, response.Code)
+		require.Equal(t, "Internal Server Error\n", response.Body.String())
+	})
 }
 
 func TestSPNEGOHTTPNilRequestAndResponseGuards(t *testing.T) {

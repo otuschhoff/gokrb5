@@ -824,6 +824,30 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 58 (2026-11-19, SPNEGO HTTP error contracts; Q-03):
+The HTTP clients preserve typed transport, URL, and host/port errors with
+operation context. Both clients use the same request-body replay helper.
+The first request still uses the original body, redirect handling and
+authentication limits are unchanged, and response ownership is preserved.
+Session reads distinguish missing credentials from store errors. Encoding
+and session-creation failures retain their causes while the HTTP response
+remains a generic 500.
+
+Regression tests cover cancellation, malformed URLs and hosts, replay
+failures, empty sessions, and credential encoding and storage failures.
+Both module suites and changed-line lint gates passed, along with focused
+SPNEGO, service, and client race/build/vet checks and five shuffled HTTP
+race runs. V8 cross-package statement coverage reached 87.2%. Linux/386
+SPNEGO tests could not compile because of an existing PKINIT KDF constant
+overflow, reproduced at the unmodified baseline. Live interoperability
+was not run; Docker access was unavailable.
+
+All ten HTTP `wrapcheck` reports were resolved without suppressions.
+Canonical v8 findings fell from 657 to 647 (`wrapcheck`: 88 to 78),
+and supplemental findings remained at 3,685. Neither profile introduced
+findings, and v8 continued to report zero gosec findings. Non-HTTP SPNEGO
+mechanism and token findings were outside this slice.
+
 Slice 57 (2026-11-19, AD fixture discovery; Q-03/Q-05):
 AD discovery now identifies working-directory and credential-read failures
 while preserving the underlying OS errors. The portable discovery tests use

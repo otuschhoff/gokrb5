@@ -109,7 +109,7 @@ func (client *NegotiatingClient) Do(request *http.Request) (*http.Response, erro
 		// The caller deliberately supplies the destination and HTTP transport; this client retries only its cloned request URL.
 		response, err := client.Client.Do(current) //nolint:gosec // outbound destination is an explicit client API input, not request-supplied server routing.
 		if err != nil {
-			return response, err
+			return response, fmt.Errorf("send Negotiate HTTP request: %w", err)
 		}
 		for _, cookie := range response.Cookies() {
 			if cookie.Name == contextHTTPExchangeCookie && cookie.MaxAge >= 0 {
@@ -173,21 +173,12 @@ func cloneNegotiationRequest(request *http.Request, attempt int) (*http.Request,
 	if clone.Header == nil {
 		clone.Header = make(http.Header)
 	}
-	if request.Body == nil || request.Body == http.NoBody {
-		return clone, nil
-	}
 	if attempt == 0 {
-		clone.Body = request.Body
 		return clone, nil
 	}
-	if request.GetBody == nil {
-		return nil, errors.New("HTTP request body cannot be replayed during SPNEGO authentication")
-	}
-	body, err := request.GetBody()
-	if err != nil {
+	if err := replayRequestBody(request, clone); err != nil {
 		return nil, err
 	}
-	clone.Body = body
 	return clone, nil
 }
 
@@ -276,7 +267,7 @@ func (c *Client) do(req *http.Request, redirects, challenges int) (*http.Respons
 		if redirect, ok := errors.AsType[redirectErr](err); ok {
 			return c.followRedirect(req, resp, redirect.reqTarget, redirects)
 		}
-		return resp, err
+		return resp, fmt.Errorf("send SPNEGO HTTP request: %w", err)
 	}
 	if respUnauthorizedNegotiate(resp) {
 		return c.retryUnauthorized(req, resp, redirects, challenges)
@@ -284,7 +275,7 @@ func (c *Client) do(req *http.Request, redirects, challenges int) (*http.Respons
 	if ierr := c.verifyMutualResponse(req, resp); ierr != nil {
 		return resp, ierr
 	}
-	return resp, err
+	return resp, nil
 }
 
 func (c *Client) followRedirect(req *http.Request, resp *http.Response, target *http.Request, redirects int) (*http.Response, error) {
@@ -385,7 +376,7 @@ func (c *Client) verifyMutualResponse(req *http.Request, resp *http.Response) er
 func (c *Client) Get(url string) (*http.Response, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create HTTP GET request: %w", err)
 	}
 	return c.Do(req)
 }
@@ -394,7 +385,7 @@ func (c *Client) Get(url string) (*http.Response, error) {
 func (c *Client) Post(url, contentType string, body io.Reader) (*http.Response, error) {
 	req, err := http.NewRequest("POST", url, body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create HTTP POST request: %w", err)
 	}
 	req.Header.Set("Content-Type", contentType)
 	return c.Do(req)
@@ -409,7 +400,7 @@ func (c *Client) PostForm(url string, data url.Values) (*http.Response, error) {
 func (c *Client) Head(url string) (*http.Response, error) {
 	req, err := http.NewRequest("HEAD", url, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create HTTP HEAD request: %w", err)
 	}
 	return c.Do(req)
 }
@@ -433,7 +424,7 @@ func setRequestSPN(r *http.Request) (types.PrincipalName, error) {
 		// There is a port number in the URL
 		host, p, err := net.SplitHostPort(h)
 		if err != nil {
-			return types.PrincipalName{}, err
+			return types.PrincipalName{}, fmt.Errorf("split HTTP host and port: %w", err)
 		}
 		name, err := net.LookupCNAME(host)
 		if name != "" && err == nil {
@@ -765,8 +756,11 @@ func getSessionCredentials(spnego *SPNEGO, r *http.Request) (credentials.Credent
 	// Check if there is a session manager and if there is an already established session for this client
 	if sm := spnego.serviceSettings.SessionManager(); sm != nil {
 		cb, err := sm.Get(r, sessionCredentials)
-		if err != nil || cb == nil || len(cb) < 1 {
+		if err != nil {
 			return creds, fmt.Errorf("%s - SPNEGO error getting session and credentials for request: %w", r.RemoteAddr, err)
+		}
+		if len(cb) == 0 {
+			return creds, errors.New("no credentials in HTTP session")
 		}
 		err = creds.Unmarshal(cb)
 		if err != nil {
@@ -783,12 +777,12 @@ func newSession(spnego *SPNEGO, r *http.Request, w http.ResponseWriter, id *cred
 		idb, err := id.Marshal()
 		if err != nil {
 			spnegoInternalServerError(spnego, w, "SPNEGO could not marshal credentials to add to the session: %v", err)
-			return err
+			return fmt.Errorf("encode HTTP session credentials: %w", err)
 		}
 		err = sm.New(w, r, sessionCredentials, idb)
 		if err != nil {
 			spnegoInternalServerError(spnego, w, "SPNEGO could not create new session: %v", err)
-			return err
+			return fmt.Errorf("create HTTP session: %w", err)
 		}
 		spnego.Log("%s %s@%s - SPNEGO new session (%s) created", r.RemoteAddr, id.UserName(), id.Domain(), id.SessionID())
 	}
