@@ -824,6 +824,28 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 49 (2026-11-18, PKU2U error contracts; Q-03):
+PKU2U now identifies the failed operation while preserving causes from AS and
+AP message processing, key and context setup, certificate name mapping, and
+metadata encoding. An acceptor without a local identity returns a
+configuration error instead of panicking. Malformed PA-PAC-REQUEST data
+retains its decode error; the requirement to suppress PAC issuance is
+unchanged. Valid wire encodings, certificate trust rules, and handshake
+ordering are unchanged.
+
+Regression tests cover typed ASN.1 and certificate trust errors, ticket and
+authenticator decryption failures, and retrying the handshake after malformed
+AS and AP messages. Both module suites and changed-line lint gates passed.
+PKU2U, PKINIT, NEGOEX, and SPNEGO passed focused race, build, and vet checks.
+`FuzzTrustedCertifiersUnmarshal` passed a 60-second run (782,791 executions)
+with re-encoding checks. Cross-package v8 statement coverage was 86.8%,
+above the 86.0% floor. Live interoperability was not run; Docker daemon
+access was denied.
+
+The canonical v8 total fell from 874 to 838 (`wrapcheck`: 300 to 265).
+All 35 PKU2U `wrapcheck` reports and the AS acceptor complexity report were
+resolved, with no new canonical findings and zero v8 gosec findings.
+
 Slice 48 (2026-11-18, NEGOEX error contracts; Q-03):
 NEGOEX now identifies failures in negotiation random generation, mechanism
 initialization and continuation, message encoding, and VERIFY checksum

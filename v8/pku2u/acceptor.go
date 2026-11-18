@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"time"
 
@@ -82,7 +83,7 @@ func (acceptor *Acceptor) AcceptSecContext(input []byte, _ ...gssapi.MechanismOp
 func (acceptor *Acceptor) acceptAPRequest(encoded []byte) ([]byte, gssapi.Context, error) {
 	var request messages.APReq
 	if err := request.Unmarshal(encoded); err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("decode PKU2U AP request: %w", err)
 	}
 	if !types.IsFlagSet(&request.APOptions, flags.APOptionMutualRequired) {
 		return nil, nil, fmt.Errorf("PKU2U requires mutual AP authentication")
@@ -91,14 +92,17 @@ func (acceptor *Acceptor) acceptAPRequest(encoded []byte) ([]byte, gssapi.Contex
 		return nil, nil, fmt.Errorf("PKU2U AP request ticket is for the wrong service")
 	}
 	if err := request.Ticket.Decrypt(acceptor.asResult.ticketKey); err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("decrypt PKU2U ticket: %w", err)
 	}
 	valid, err := request.Ticket.ValidAt(acceptor.settings.currentTime(), acceptor.settings.clockSkew)
-	if err != nil || !valid {
+	if err != nil {
 		return nil, nil, fmt.Errorf("validate PKU2U ticket: %w", err)
 	}
+	if !valid {
+		return nil, nil, errors.New("PKU2U ticket is not valid")
+	}
 	if ierr := request.DecryptAuthenticator(request.Ticket.DecryptedEncPart.Key); ierr != nil {
-		return nil, nil, ierr
+		return nil, nil, fmt.Errorf("decrypt PKU2U authenticator: %w", ierr)
 	}
 	if request.Authenticator.CRealm != Realm || !request.Authenticator.CName.Equal(request.Ticket.DecryptedEncPart.CName) {
 		return nil, nil, fmt.Errorf("PKU2U authenticator identity does not match ticket")
@@ -116,7 +120,7 @@ func (acceptor *Acceptor) acceptAPRequest(encoded []byte) ([]byte, gssapi.Contex
 	}
 	var checksum gssapi.AuthenticatorChecksum
 	if ierr := checksum.Unmarshal(request.Authenticator.Cksum.Checksum); ierr != nil {
-		return nil, nil, ierr
+		return nil, nil, fmt.Errorf("decode PKU2U authenticator checksum: %w", ierr)
 	}
 	required := uint32(gssapi.ContextFlagMutual | gssapi.ContextFlagInteg)
 	if checksum.Flags&required != required {
@@ -130,11 +134,11 @@ func (acceptor *Acceptor) acceptAPRequest(encoded []byte) ([]byte, gssapi.Contex
 	}
 	etype, err := crypto.GetEtype(request.Authenticator.SubKey.KeyType)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("select PKU2U acceptor subkey enctype: %w", err)
 	}
 	acceptorSubkey, err := types.GenerateEncryptionKey(etype)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("generate PKU2U acceptor subkey: %w", err)
 	}
 	sequence, err := randomSequence()
 	if err != nil {
@@ -150,7 +154,7 @@ func (acceptor *Acceptor) acceptAPRequest(encoded []byte) ([]byte, gssapi.Contex
 	}
 	context, err := gssapi.NewSecurityContext(acceptorSubkey, false, sequence, peerSequence, true)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("create PKU2U acceptor security context: %w", err)
 	}
 	peerCredentials, err := credentialsFromCertificate(acceptor.asResult.peer.Signer, acceptor.asResult.peerChain)
 	if err != nil {
@@ -185,15 +189,19 @@ func marshalPKU2UReply(request *messages.APReq, key types.EncryptionKey, sequenc
 	}
 	reply, err := messages.NewAPRepFromAuthenticator(request.Authenticator, request.Authenticator.SubKey, key, sequenceInt)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build PKU2U AP reply: %w", err)
 	}
-	return reply.Marshal()
+	encoded, err := reply.Marshal()
+	if err != nil {
+		return encoded, fmt.Errorf("marshal PKU2U AP reply: %w", err)
+	}
+	return encoded, nil
 }
 
 func randomSequence() (uint64, error) {
 	var encoded [8]byte
 	if _, err := rand.Read(encoded[:]); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("generate PKU2U acceptor sequence number: %w", err)
 	}
 	return binary.BigEndian.Uint64(encoded[:]) & 0x3fffffff, nil
 }
@@ -208,7 +216,7 @@ func credentialsFromCertificate(certificate *x509.Certificate, chain []*x509.Cer
 	result.SetAuthTime(time.Now().UTC())
 	names, err := pkinit.CertificatePrincipalNames(certificate)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read PKU2U peer certificate principal names: %w", err)
 	}
 	upn := ""
 	if len(names) > 0 {

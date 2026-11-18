@@ -48,6 +48,23 @@ func TestPrincipalFromCertificateRejectsMissingIdentity(t *testing.T) {
 	}
 }
 
+func TestPrincipalFromCertificatePreservesSANError(t *testing.T) {
+	t.Parallel()
+
+	var certificate x509.Certificate
+	certificate.Subject.CommonName = "Malformed SAN fixture"
+	certificate.Extensions = []pkix.Extension{{
+		Id:       oidSubjectAlternativeName,
+		Critical: false,
+		Value:    []byte{0x30, 0x01, 0xa0}, // A sequence containing an incomplete GeneralName.
+	}}
+	principal, err := PrincipalFromCertificate(&certificate)
+	requirePKU2UError[asn1.SyntaxError](t, err, "read PKU2U certificate principal names:")
+	if len(principal.NameString) != 0 {
+		t.Fatal("invalid SAN fell back to the subject")
+	}
+}
+
 func testCertificate(t *testing.T, subject pkix.Name, san []byte) *x509.Certificate {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

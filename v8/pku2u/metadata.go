@@ -16,7 +16,11 @@ type TrustedCertifiers []pkinit.ExternalPrincipalIdentifier
 
 // Marshal encodes trusted-certifier metadata as DER.
 func (m TrustedCertifiers) Marshal() ([]byte, error) {
-	return asn1.Marshal([]pkinit.ExternalPrincipalIdentifier(m))
+	encoded, err := asn1.Marshal([]pkinit.ExternalPrincipalIdentifier(m))
+	if err != nil {
+		return nil, fmt.Errorf("marshal PKU2U trusted certifiers: %w", err)
+	}
+	return encoded, nil
 }
 
 // Unmarshal decodes trusted-certifier metadata and rejects trailing data or

@@ -74,38 +74,38 @@ func (initiator *Initiator) InitSecContext(target string, input []byte, _ ...gss
 		}
 		authenticator, err := types.NewAuthenticator(Realm, initiator.as.request.ReqBody.CName)
 		if err != nil {
-			return nil, nil, false, err
+			return nil, nil, false, fmt.Errorf("build PKU2U authenticator: %w", err)
 		}
 		checksum, err := gssapi.NewAuthenticatorChecksum(nil, gssapi.ContextFlagMutual, gssapi.ContextFlagInteg, gssapi.ContextFlagConf).Marshal()
 		if err != nil {
-			return nil, nil, false, err
+			return nil, nil, false, fmt.Errorf("marshal PKU2U authenticator checksum: %w", err)
 		}
 		authenticator.Cksum = types.Checksum{CksumType: chksumtype.GSSAPI, Checksum: checksum}
 		etype, err := crypto.GetEtype(result.sessionKey.KeyType)
 		if err != nil {
-			return nil, nil, false, err
+			return nil, nil, false, fmt.Errorf("select PKU2U initiator subkey enctype: %w", err)
 		}
 		if ierr := authenticator.GenerateSeqNumberAndSubKey(result.sessionKey.KeyType, etype.GetKeyByteSize()); ierr != nil {
-			return nil, nil, false, ierr
+			return nil, nil, false, fmt.Errorf("generate PKU2U initiator sequence and subkey: %w", ierr)
 		}
 		request, err := messages.NewAPReq(result.ticket, result.sessionKey, authenticator)
 		if err != nil {
-			return nil, nil, false, err
+			return nil, nil, false, fmt.Errorf("build PKU2U AP request: %w", err)
 		}
 		types.SetFlag(&request.APOptions, flags.APOptionMutualRequired)
 		output, err := request.Marshal()
 		if err != nil {
-			return nil, nil, false, err
+			return nil, nil, false, fmt.Errorf("marshal PKU2U AP request: %w", err)
 		}
 		initiator.asResult, initiator.authenticator, initiator.step = result, authenticator, 2
 		return output, nil, false, nil
 	case 2:
 		var reply messages.APRep
 		if err := reply.Unmarshal(input); err != nil {
-			return nil, nil, false, err
+			return nil, nil, false, fmt.Errorf("decode PKU2U AP reply: %w", err)
 		}
 		if err := reply.Verify(initiator.authenticator, initiator.authenticator.SubKey); err != nil {
-			return nil, nil, false, err
+			return nil, nil, false, fmt.Errorf("verify PKU2U AP reply: %w", err)
 		}
 		if len(reply.DecryptedEncPart.Subkey.KeyValue) == 0 {
 			return nil, nil, false, fmt.Errorf("PKU2U AP reply does not contain an acceptor subkey")
@@ -142,5 +142,9 @@ func newPKU2UInitiatorContext(initiatorSequence, acceptorSequence int64, key typ
 	if err != nil {
 		return nil, err
 	}
-	return gssapi.NewSecurityContext(key, true, send, receive, true)
+	context, err := gssapi.NewSecurityContext(key, true, send, receive, true)
+	if err != nil {
+		return nil, fmt.Errorf("create PKU2U initiator security context: %w", err)
+	}
+	return context, nil
 }

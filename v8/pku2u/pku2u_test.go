@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/jcmturner/goidentity/v6"
 
 	"github.com/otuschhoff/gokrb5/v8/credentials"
@@ -38,6 +40,15 @@ func mustPKU2UTestType[T any](t *testing.T, value any) T {
 		t.Fatalf("unexpected type %T", value)
 	}
 	return result
+}
+
+func requirePKU2UError[E error](t *testing.T, err error, prefix string) {
+	t.Helper()
+	_, hasCause := errors.AsType[E](err)
+	if err == nil || !hasCause || !strings.HasPrefix(err.Error(), prefix) {
+		var cause E
+		t.Fatalf("want error prefixed by %q with cause %T, got %v", prefix, cause, err)
+	}
 }
 
 func TestASExchangeIssuesSelfTicket(t *testing.T) {
@@ -141,6 +152,29 @@ func TestASExchangeRejectsPolicyViolations(t *testing.T) {
 			t.Fatal("accepted a request targeting another service")
 		}
 	})
+	t.Run("missing acceptor identity", func(t *testing.T) {
+		encoded, _ := request(t, "host/server.example.com")
+		acceptor := NewAcceptor(nil, anchors)
+		output, context, done, err := acceptor.AcceptSecContext(encoded)
+		if err == nil || !strings.Contains(err.Error(), "PKU2U acceptor identity is required") {
+			t.Fatalf("want missing acceptor identity error, got %v", err)
+		}
+		if output != nil || context != nil || done || acceptor.step != 0 {
+			t.Fatal("acceptor advanced without a local identity")
+		}
+	})
+	t.Run("malformed PAC request", func(t *testing.T) {
+		encoded, _ := request(t, "host/server.example.com")
+		encoded = mutate(t, encoded, func(request *messages.ASReq) {
+			for index := range request.PAData {
+				if request.PAData[index].PADataType == patype.PA_PAC_REQUEST {
+					request.PAData[index].PADataValue = []byte{0x30}
+				}
+			}
+		})
+		_, _, err := acceptASExchange(encoded, serverSettings)
+		requirePKU2UError[asn1.SyntaxError](t, err, "decode PKU2U PA-PAC-REQUEST:")
+	})
 	t.Run("missing PAC suppression", func(t *testing.T) {
 		encoded, _ := request(t, "host/server.example.com")
 		encoded = mutate(t, encoded, func(request *messages.ASReq) {
@@ -195,9 +229,8 @@ func TestASExchangeRejectsPolicyViolations(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := acceptASExchange(encoded, serverSettings); err == nil {
-			t.Fatal("accepted an untrusted initiator")
-		}
+		_, _, err = acceptASExchange(encoded, serverSettings)
+		requirePKU2UError[x509.UnknownAuthorityError](t, err, "accept PKU2U PKINIT exchange:")
 	})
 	t.Run("untrusted acceptor", func(t *testing.T) {
 		otherRoot, _ := newPKU2URoot(t)
@@ -211,9 +244,8 @@ func TestASExchangeRejectsPolicyViolations(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := finishASExchange(state, reply, newSettings(clientIdentity, otherAnchors, nil)); err == nil {
-			t.Fatal("accepted an untrusted acceptor")
-		}
+		_, err = finishASExchange(state, reply, newSettings(clientIdentity, otherAnchors, nil))
+		requirePKU2UError[x509.UnknownAuthorityError](t, err, "process PKU2U PKINIT reply:")
 	})
 }
 
@@ -247,18 +279,26 @@ func TestEndToEndContext(t *testing.T) {
 	if err != nil || done {
 		t.Fatalf("init AS request: done=%t err=%v", done, err)
 	}
+	_, _, _, decodeErr := acceptor.AcceptSecContext([]byte{0x6a})
+	requirePKU2UError[asn1.SyntaxError](t, decodeErr, "decode PKU2U AS request:")
 	asReply, _, done, err := acceptor.AcceptSecContext(asRequest)
 	if err != nil || done {
 		t.Fatalf("accept AS request: done=%t err=%v", done, err)
 	}
+	_, _, _, decodeErr = initiator.InitSecContext("host/server.example.com", []byte{0x6b})
+	requirePKU2UError[asn1.SyntaxError](t, decodeErr, "decode PKU2U AS reply:")
 	apRequest, _, done, err := initiator.InitSecContext("host/server.example.com", asReply)
 	if err != nil || done {
 		t.Fatalf("init AP request: done=%t err=%v", done, err)
 	}
+	_, _, _, decodeErr = acceptor.AcceptSecContext([]byte{0x6e})
+	requirePKU2UError[asn1.SyntaxError](t, decodeErr, "decode PKU2U AP request:")
 	apReply, acceptorContext, done, err := acceptor.AcceptSecContext(apRequest)
 	if err != nil || !done || acceptorContext == nil {
 		t.Fatalf("accept AP request: done=%t err=%v", done, err)
 	}
+	_, _, _, decodeErr = initiator.InitSecContext("host/server.example.com", []byte{0x6f})
+	requirePKU2UError[asn1.SyntaxError](t, decodeErr, "decode PKU2U AP reply:")
 	output, initiatorContext, done, err := initiator.InitSecContext("host/server.example.com", apReply)
 	if err != nil || !done || initiatorContext == nil || len(output) != 0 {
 		t.Fatalf("init AP reply: output=%x done=%t err=%v", output, done, err)
@@ -409,15 +449,17 @@ func TestAPExchangeRejectsInvalidRequests(t *testing.T) {
 	t.Run("tampered authenticator", func(t *testing.T) {
 		request := makeRequest(t, nil)
 		request.EncryptedAuthenticator.Cipher[len(request.EncryptedAuthenticator.Cipher)-1] ^= 1
-		if err := accept(request); err == nil {
-			t.Fatal("accepted tampered authenticator")
+		err := accept(request)
+		if err == nil || !strings.HasPrefix(err.Error(), "decrypt PKU2U authenticator:") || errors.Unwrap(err) == nil {
+			t.Fatalf("want contextual authenticator decryption error, got %v", err)
 		}
 	})
 	t.Run("tampered ticket", func(t *testing.T) {
 		request := makeRequest(t, nil)
 		request.Ticket.EncPart.Cipher[len(request.Ticket.EncPart.Cipher)-1] ^= 1
-		if err := accept(request); err == nil {
-			t.Fatal("accepted tampered ticket")
+		err := accept(request)
+		if err == nil || !strings.HasPrefix(err.Error(), "decrypt PKU2U ticket:") || errors.Unwrap(err) == nil {
+			t.Fatalf("want contextual ticket decryption error, got %v", err)
 		}
 	})
 }

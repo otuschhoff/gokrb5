@@ -19,7 +19,7 @@ const Realm = "WELLKNOWN:PKU2U"
 func PrincipalFromCertificate(certificate *x509.Certificate) (types.PrincipalName, error) {
 	names, err := pkinit.CertificatePrincipalNames(certificate)
 	if err != nil {
-		return types.PrincipalName{}, err
+		return types.PrincipalName{}, fmt.Errorf("read PKU2U certificate principal names: %w", err)
 	}
 	if len(names) > 0 {
 		return types.NewPrincipalName(nametype.KRB_NT_ENTERPRISE, names[0]), nil
