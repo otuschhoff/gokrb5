@@ -1,12 +1,16 @@
 package ad
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
@@ -171,81 +175,84 @@ func TestServicePrincipalSelectionAndFallbacks(t *testing.T) {
 
 func TestADLocalDiscoveryHelpers(t *testing.T) {
 	repoRoot := t.TempDir()
-	if err := os.Mkdir(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.Mkdir(filepath.Join(repoRoot, ".git"), 0o700))
 	nested := filepath.Join(repoRoot, "v8", "test", "ad")
-	if err := os.MkdirAll(nested, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.Chdir(wd) }()
-	if err := os.Chdir(nested); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.MkdirAll(nested, 0o700))
+	t.Chdir(nested)
 	t.Setenv("GITHUB_WORKSPACE", "")
-	expectedRoot, err := filepath.EvalSymlinks(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
 	root, err := findRepoRoot()
-	if err != nil {
-		t.Fatalf("findRepoRoot() error = %v", err)
-	}
+	require.NoError(t, err)
 	rootInfo, err := os.Stat(root)
-	if err != nil {
-		t.Fatalf("stat discovered repository root %q: %v", root, err)
-	}
-	expectedInfo, err := os.Stat(expectedRoot)
-	if err != nil {
-		t.Fatalf("stat expected repository root %q: %v", expectedRoot, err)
-	}
-	if !os.SameFile(rootInfo, expectedInfo) {
-		t.Fatalf("repository root = %q, want %q", root, expectedRoot)
-	}
+	require.NoError(t, err)
+	expectedInfo, err := os.Stat(repoRoot)
+	require.NoError(t, err)
+	assert.True(t, os.SameFile(rootInfo, expectedInfo), "repository root = %q, want %q", root, repoRoot)
+
 	t.Setenv("AD_TEST_OVERRIDE", "override")
-	if envOr("AD_TEST_OVERRIDE", "fallback") != "override" || envOr("AD_TEST_MISSING", "fallback") != "fallback" {
-		t.Fatal("environment fallback failed")
-	}
-	path := filepath.Join(t.TempDir(), "value")
-	if err := os.WriteFile(path, []byte("value\r\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if value, err := readTrimmedFile(path); err != nil || value != "value" {
-		t.Fatalf("trimmed file = %q, %v", value, err)
-	}
-	if _, err := readTrimmedFile(path + ".missing"); err == nil {
-		t.Fatal("missing file returned no error")
-	}
+	t.Setenv("AD_TEST_MISSING", "")
+	assert.Equal(t, "override", envOr("AD_TEST_OVERRIDE", "fallback"))
+	assert.Equal(t, "fallback", envOr("AD_TEST_MISSING", "fallback"))
 	_ = resolvConfDomain()
+}
+
+func TestReadTrimmedFilePreservesSpaces(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "credential")
+	require.NoError(t, os.WriteFile(path, []byte(" test value \r\n"), 0o600))
+	value, err := readTrimmedFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, " test value ", value)
+}
+
+func TestReadTrimmedFileErrorContext(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "missing")
+	value, err := readTrimmedFile(path)
+	assert.Empty(t, value)
+	assert.ErrorIs(t, err, fs.ErrNotExist)
+	assert.ErrorContains(t, err, "read AD credential file:")
+
+	pathErr, ok := errors.AsType[*fs.PathError](err)
+	if !ok || pathErr == nil {
+		t.Fatalf("readTrimmedFile() error = %v, want a file path error", err)
+	}
+	assert.Equal(t, path, pathErr.Path)
+}
+
+func TestFindRepoRootWorkingDirectoryError(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("requires Linux semantics for removing the current directory")
+	}
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("GITHUB_WORKSPACE", "")
+	require.NoError(t, os.Remove(dir))
+
+	root, err := findRepoRoot()
+	assert.Empty(t, root)
+	assert.ErrorIs(t, err, fs.ErrNotExist)
+	assert.ErrorContains(t, err, "get working directory:")
 }
 
 func TestFindRepoRootFromGitHubWorkspace(t *testing.T) {
 	root := t.TempDir()
-	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.Chdir(wd) }()
-	other := filepath.Join(t.TempDir(), "outside")
-	if ierr := os.MkdirAll(other, 0o700); ierr != nil {
-		t.Fatal(ierr)
-	}
-	if ierr := os.Chdir(other); ierr != nil {
-		t.Fatal(ierr)
-	}
+	require.NoError(t, os.Mkdir(filepath.Join(root, ".git"), 0o700))
+	other := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(other, KeytabFile), nil, 0o600))
+	t.Chdir(other)
 	t.Setenv("GITHUB_WORKSPACE", root)
 	got, err := findRepoRoot()
-	if err != nil {
-		t.Fatalf("findRepoRoot() error = %v", err)
-	}
-	if got != root {
-		t.Fatalf("findRepoRoot() = %q, want %q", got, root)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, root, got)
+
+	t.Setenv("GITHUB_WORKSPACE", filepath.Join(root, "missing"))
+	got, err = findRepoRoot()
+	require.NoError(t, err)
+	gotInfo, err := os.Stat(got)
+	require.NoError(t, err)
+	otherInfo, err := os.Stat(other)
+	require.NoError(t, err)
+	assert.True(t, os.SameFile(gotInfo, otherInfo), "fallback root = %q, want %q", got, other)
 }

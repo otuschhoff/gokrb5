@@ -824,6 +824,28 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 57 (2026-11-19, AD fixture discovery; Q-03/Q-05):
+AD discovery now identifies working-directory and credential-read failures
+while preserving the underlying OS errors. The portable discovery tests use
+private fixture directories, restore the working directory through test
+cleanup, and compare filesystem identity rather than path spelling.
+Tests confirm that a valid `GITHUB_WORKSPACE` wins over a local fixture,
+an invalid override falls back, and credential reads preserve spaces while
+trimming trailing line endings.
+
+Both module suites and changed-line lint gates passed, along with ten
+shuffled AD package race runs, build and vet checks, and Linux/386 tests.
+The AD test binaries cross-compiled for Windows amd64 and macOS arm64 but
+were not run on those platforms. V8 cross-package statement coverage
+remained 87.1%. Live AD interoperability was not run; Docker access was
+unavailable.
+
+All six AD canonical findings were resolved without suppressions, including
+the permissions and shadowing diagnostics from the rebased tests. Canonical
+v8 findings fell from 663 to 657 (`wrapcheck`: 90 to 88), and supplemental
+findings fell from 3,688 to 3,685. Neither profile introduced findings, and
+v8 returned to zero gosec findings.
+
 Slice 56 (2026-11-19, RFC crypto error contracts; Q-03):
 The RFC 3961, 3962, and 8009 helpers preserve causes from key derivation,
 AES-CTS operations, and integrity hashing. Invalid hex string-to-key

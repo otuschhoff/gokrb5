@@ -265,7 +265,6 @@ func (e *Env) DelegationPrincipal() (keytab.Principal, bool) {
 
 // DisabledAccount returns credentials for the account-policy error test.
 func (e *Env) DisabledAccount() (string, string, bool) {
-
 	return e.disabledUser, e.disabledPassword, e.disabledUser != "" && e.disabledPassword != ""
 }
 
@@ -373,7 +372,7 @@ func findRepoRoot() (string, error) {
 
 	dir, err := os.Getwd()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("get working directory: %w", err)
 	}
 	for {
 		if _, err := os.Stat(filepath.Join(dir, KeytabFile)); err == nil { // #nosec G703 -- path search is confined to working-directory ancestors.
@@ -400,7 +399,7 @@ func envOr(key, fallback string) string {
 func readTrimmedFile(path string) (string, error) {
 	b, err := os.ReadFile(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("read AD credential file: %w", err)
 	}
 	return strings.TrimRight(string(b), "\r\n"), nil
 }
