@@ -156,7 +156,10 @@ func firstServiceSRV(services []string, proto, name string) (int, map[int]*net.S
 }
 
 func randServOrder(ks []string) map[int]string {
-	kdcs := make(map[int]string)
+	kdcs := make(map[int]string, len(ks))
+	if len(ks) == 0 {
+		return kdcs
+	}
 	for i, index := range rand.Perm(len(ks)) {
 		kdcs[i+1] = ks[index]
 	}

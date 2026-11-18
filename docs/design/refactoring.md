@@ -2,7 +2,7 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-15 done (formatter normalization,
+(floor raised to 86.0%), and Phase 5 slices 1-16 done (formatter normalization,
 keytab complexity, dead code, mechanical clarity, shadow elimination,
 errorlint, revive mechanical, exported documentation, the NDR carry-over,
 I/O/body-ownership cleanup, checked type assertions, and named-return clarity).
@@ -34,7 +34,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,501 canonical lint findings after Phase 5 slices 1-15 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,441 canonical lint findings after Phase 5 slices 1-16 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -823,6 +823,18 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 16 (2026-11-18, config nil invariants): config NilAway is zero. The
+section line buffer is initialized, duration colon fields are parsed into a
+length-checked allocated array, and empty server-order input returns the empty
+result before indexing. These are zero-value/analysis-proof invariants; valid
+config parsing and random ordering are unchanged. Tests now make the
+partial-config contract explicit: fatal load errors cannot be followed by
+access, while the intentional UnsupportedDirective path proves the returned
+config is non-nil before field and realm assertions. Config NilAway falls 60
+to 0; full NilAway falls 275 to 215 and canonical findings from 1,501 to 1,441.
+Full v8 and config/client/credentials/keytab race suites pass; coverage remains
+87.0%.
 
 Slice 15 (2026-11-18, credentials/PKINIT/PKU2U nil invariants): the three
 remaining small NilAway package slices are clean. `CCache` accessors now

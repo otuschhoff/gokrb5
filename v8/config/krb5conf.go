@@ -391,7 +391,7 @@ func NewFromScanner(scanner *bufio.Scanner) (*Config, error) {
 	var e error
 	sections := make(map[int]string)
 	var sectionLineNum []int
-	var lines []string
+	lines := make([]string, 0)
 	commentLine := regexp.MustCompile(`^\s*(#|;|\n)`)
 	libdefaultsSection := regexp.MustCompile(`^\s*\[libdefaults\]\s*`)
 	realmsSection := regexp.MustCompile(`^\s*\[realms\]\s*`)
@@ -532,13 +532,13 @@ func parseDuration(s string) (time.Duration, error) {
 		if 2 > len(t) || len(t) > 3 {
 			return time.Duration(0), errors.New("invalid time duration value")
 		}
-		var i []int
-		for _, n := range t {
+		i := make([]int, len(t))
+		for index, n := range t {
 			j, err := strconv.ParseInt(n, 10, 16)
 			if err != nil {
 				return time.Duration(0), errors.New("invalid time duration value")
 			}
-			i = append(i, int(j))
+			i[index] = int(j)
 		}
 		d := time.Duration(i[0])*time.Hour + time.Duration(i[1])*time.Minute
 		if len(i) == 3 {

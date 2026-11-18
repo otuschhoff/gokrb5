@@ -472,6 +472,9 @@ func TestLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error loading config: %v", err)
 	}
+	if c == nil {
+		t.Fatal("Load returned a nil config without an error")
+	}
 
 	assert.Equal(t, "TEST.GOKRB5", c.LibDefaults.DefaultRealm, "[libdefaults] default_realm not as expected")
 	assert.Equal(t, false, c.LibDefaults.DNSLookupRealm, "[libdefaults] dns_lookup_realm not as expected")
@@ -511,6 +514,9 @@ func TestLoadWithV4Lines(t *testing.T) {
 	if !errors.As(err, &ud) {
 		t.Fatalf("error should be of type UnsupportedDirective: %v", err)
 	}
+	if c == nil {
+		t.Fatal("Load returned nil config with only an UnsupportedDirective error")
+	}
 
 	assert.Equal(t, "TEST.GOKRB5", c.LibDefaults.DefaultRealm, "[libdefaults] default_realm not as expected")
 	assert.Equal(t, false, c.LibDefaults.DNSLookupRealm, "[libdefaults] dns_lookup_realm not as expected")
@@ -539,6 +545,9 @@ func TestLoad2(t *testing.T) {
 	c, err := NewFromString(krb5Conf2)
 	if err != nil {
 		t.Fatalf("Error loading config: %v", err)
+	}
+	if c == nil {
+		t.Fatal("Load returned a nil config without an error")
 	}
 
 	assert.Equal(t, "TEST.GOKRB5", c.LibDefaults.DefaultRealm, "[libdefaults] default_realm not as expected")
@@ -569,6 +578,9 @@ func TestLoadNoBlankLines(t *testing.T) {
 	c, err := NewFromString(krb5ConfNoBlankLines)
 	if err != nil {
 		t.Fatalf("Error loading config: %v", err)
+	}
+	if c == nil {
+		t.Fatal("Load returned a nil config without an error")
 	}
 
 	assert.Equal(t, "TEST.GOKRB5", c.LibDefaults.DefaultRealm, "[libdefaults] default_realm not as expected")
@@ -604,6 +616,9 @@ func TestLoadTabs(t *testing.T) {
 	c, err := Load(cf.Name())
 	if err != nil {
 		t.Fatalf("Error loading config: %v", err)
+	}
+	if c == nil {
+		t.Fatal("Load returned a nil config without an error")
 	}
 
 	assert.Equal(t, "TEST.GOKRB5", c.LibDefaults.DefaultRealm, "[libdefaults] default_realm not as expected")
