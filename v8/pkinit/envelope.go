@@ -5,7 +5,7 @@ import (
 	"crypto"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/des"
+	"crypto/des" // #nosec G502 -- legacy RFC 4556 CMS TripleDES-CBC content algorithm.
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -198,6 +198,7 @@ func contentCipher(algorithm asn1.ObjectIdentifier, key []byte) (cipher.Block, e
 	case algorithm.Equal(oidAES128CBC) && len(key) == 16, algorithm.Equal(oidAES256CBC) && len(key) == 32:
 		return aes.NewCipher(key)
 	case algorithm.Equal(oidTripleDESCBC) && len(key) == 24:
+		// #nosec G405 -- used only for the legacy CMS TripleDES-CBC OID.
 		return des.NewTripleDESCipher(key)
 	default:
 		return nil, fmt.Errorf("unsupported PKINIT CMS content encryption algorithm or key size")

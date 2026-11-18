@@ -3,7 +3,7 @@ package crypto
 import (
 	"crypto/aes"
 	"crypto/hmac"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- RFC 3962 fixes SHA-1 for this AES enctype.
 	"hash"
 
 	"github.com/otuschhoff/gokrb5/v8/crypto/common"

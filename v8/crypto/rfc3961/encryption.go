@@ -3,7 +3,7 @@ package rfc3961
 
 import (
 	"crypto/cipher"
-	"crypto/des"
+	"crypto/des" // #nosec G502 -- RFC 3961 DES3 compatibility; RFC 8429 deprecates the enctype.
 	"crypto/hmac"
 	"crypto/rand"
 	"errors"
@@ -23,15 +23,16 @@ func DES3EncryptData(key, data []byte, e etype.EType) ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("error padding plaintext: %w", err)
 	}
 
-	block, err := des.NewTripleDESCipher(key)
+	block, err := des.NewTripleDESCipher(key) // #nosec G405 -- RFC 3961 DES3 wire cipher.
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating cipher: %w", err)
 	}
 
-	// RFC 3961: initial cipher state      All bits zero
+	// RFC 3961 sections 5.3 and 6.3 require an all-zero initial cipher state.
 	ivz := make([]byte, des.BlockSize)
 
 	ct := make([]byte, len(data))
+	// #nosec G407 -- protocol-defined initial state; message encryption adds a random confounder.
 	mode := cipher.NewCBCEncrypter(block, ivz)
 	mode.CryptBlocks(ct, data)
 	return ct[len(ct)-e.GetMessageBlockByteSize():], ct, nil
@@ -84,7 +85,7 @@ func DES3DecryptData(key, data []byte, e etype.EType) ([]byte, error) {
 	if len(data) < des.BlockSize || len(data)%des.BlockSize != 0 {
 		return []byte{}, errors.New("ciphertext is not a multiple of the block size")
 	}
-	block, err := des.NewTripleDESCipher(key)
+	block, err := des.NewTripleDESCipher(key) // #nosec G405 -- RFC 3961 DES3 wire cipher.
 	if err != nil {
 		return []byte{}, fmt.Errorf("error creating cipher: %w", err)
 	}

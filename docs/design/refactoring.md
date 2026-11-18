@@ -824,6 +824,25 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 39 (2026-11-18, cryptography compatibility review): all 30 remaining
+v8 gosec reports have a rule-specific disposition at the flagged import or
+call. The exceptions retain RFC 3962 AES/HMAC-SHA1 enctypes, RFC 3961 Triple-DES
+and its zero initial cipher state, RFC 4757 RC4-HMAC, the historical
+`RC4HMAC.RandomToKey` result, RFC 4121 channel-binding MD5, and the RFC
+4556/8636 PKINIT digest, KDF, and CMS compatibility paths. Independent test
+oracles keep their specified hashes. This is classification, not a claim that
+the primitives are safe: no algorithm, API, or negotiation policy changed.
+The [v8 README](../../v8/README.md) records the current RC4 default exposure
+and how to omit it from the configured enctype lists. Retiring deprecated
+negotiation defaults requires a separate policy change and interoperability
+verification; it is not covered by the analyzer exceptions.
+
+The canonical v8 scan drops from 1,013 to 983 findings, with zero gosec
+findings and no additions. Focused protocol tests, both module unit suites,
+the v8 race suite, and both changed-line lint gates pass. CI-style atomic
+coverage is 86.5% on a serial rerun after an existing client clock-skew test
+exceeded its one-second tolerance during the concurrent run.
+
 Slice 38 (2026-11-18, native byte order and credential false positives):
 ccache v1/v2 and keytab v1 now use `binary.NativeEndian` instead of unsafe
 pointer probes. The fixed big-endian formats and keytab v1's opposite-endian

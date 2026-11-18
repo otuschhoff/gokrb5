@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 
+	// #nosec G506 -- RFC 4757 specifies MD4 for legacy string-to-key.
 	"golang.org/x/crypto/md4"
 )
 
@@ -24,7 +25,7 @@ func StringToKey(secret string) ([]byte, error) {
 		b[2*i+1] = c[0]
 	}
 	r := bytes.NewReader(b)
-	h := md4.New()
+	h := md4.New() // #nosec G406 -- RFC 4757 section 2 fixes the password-to-key digest.
 	_, err := io.Copy(h, r)
 	if err != nil {
 		return []byte{}, err

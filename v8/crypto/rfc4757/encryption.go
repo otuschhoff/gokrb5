@@ -4,7 +4,7 @@ package rfc4757
 import (
 	"crypto/hmac"
 	"crypto/rand"
-	"crypto/rc4"
+	"crypto/rc4" // #nosec G503 -- RFC 4757 compatibility; RFC 8429 deprecates the enctype.
 	"errors"
 	"fmt"
 
@@ -16,7 +16,7 @@ func EncryptData(key, data []byte, e etype.EType) ([]byte, error) {
 	if len(key) != e.GetKeyByteSize() {
 		return []byte{}, fmt.Errorf("incorrect keysize: expected: %v actual: %v", e.GetKeyByteSize(), len(key))
 	}
-	rc4Cipher, err := rc4.NewCipher(key)
+	rc4Cipher, err := rc4.NewCipher(key) // #nosec G405 -- RFC 4757 wire cipher, not a general-purpose default.
 	if err != nil {
 		return []byte{}, fmt.Errorf("error creating RC4 cipher: %w", err)
 	}

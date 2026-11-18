@@ -1,9 +1,9 @@
 package crypto
 
 import (
-	"crypto/des"
+	"crypto/des" // #nosec G502 -- RFC 3961 DES3 enctype support, deprecated by RFC 8429.
 	"crypto/hmac"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- RFC 3961 fixes HMAC-SHA1 for this deprecated enctype.
 	"errors"
 	"hash"
 

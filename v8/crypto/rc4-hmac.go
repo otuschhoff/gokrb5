@@ -3,10 +3,11 @@ package crypto
 import (
 	"bytes"
 	"crypto/hmac"
-	"crypto/md5"
+	"crypto/md5" // #nosec G501 -- RFC 4757 fixes HMAC-MD5 for this deprecated enctype.
 	"hash"
 	"io"
 
+	// #nosec G506 -- retained for the legacy RC4HMAC.RandomToKey contract.
 	"golang.org/x/crypto/md4"
 
 	"github.com/otuschhoff/gokrb5/v8/crypto/rfc3961"
@@ -77,6 +78,7 @@ func (e RC4HMAC) StringToKey(secret string, _ string, _ string) ([]byte, error) 
 // RandomToKey returns a key from the bytes provided.
 func (e RC4HMAC) RandomToKey(b []byte) []byte {
 	r := bytes.NewReader(b)
+	// #nosec G406 -- preserves the historical RC4HMAC.RandomToKey result.
 	h := md4.New()
 	_, _ = io.Copy(h, r) // hash.Hash writes are infallible by contract.
 	return h.Sum(nil)

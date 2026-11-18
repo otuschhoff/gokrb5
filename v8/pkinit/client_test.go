@@ -3,7 +3,7 @@ package pkinit
 import (
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- independent check of the SHA-1 wire field defined by RFC 4556.
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
@@ -57,7 +57,7 @@ func TestBeginExchangeBuildsBoundAuthPack(t *testing.T) {
 	require.NoError(t, err)
 	var authPack AuthPack
 	require.NoError(t, authPack.Unmarshal(verified.Content))
-	wantChecksum := sha1.Sum(bodyDER)
+	wantChecksum := sha1.Sum(bodyDER) // #nosec G401 -- RFC 4556 requires this expected wire digest.
 	require.Equal(t, wantChecksum[:], authPack.PKAuthenticator.PAChecksum)
 	require.Equal(t, int64(req.ReqBody.Nonce), authPack.PKAuthenticator.Nonce)
 	require.Len(t, authPack.ClientDHNonce, 32)

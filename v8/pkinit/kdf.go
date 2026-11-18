@@ -1,7 +1,7 @@
 package pkinit
 
 import (
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- RFC 4556 legacy KDF and RFC 8636 SHA-1 KDF OID.
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/binary"
@@ -79,7 +79,7 @@ func DeriveLegacyReplyKey(sharedSecret, clientNonce, serverNonce []byte, etypeID
 		if counter > math.MaxUint8 {
 			return types.EncryptionKey{}, fmt.Errorf("PKINIT legacy KDF output is too long")
 		}
-		digest := sha1.Sum(append([]byte{byte(counter)}, input...))
+		digest := sha1.Sum(append([]byte{byte(counter)}, input...)) // #nosec G401 -- RFC 4556 octetstring2key.
 		seed = append(seed, digest[:]...)
 	}
 	seed = seed[:seedBytes]

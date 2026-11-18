@@ -1,7 +1,7 @@
 package gssapi
 
 import (
-	"crypto/md5"
+	"crypto/md5" // #nosec G501 -- independent check of the RFC 4121 channel-binding field.
 	"encoding/binary"
 	"encoding/hex"
 	"testing"

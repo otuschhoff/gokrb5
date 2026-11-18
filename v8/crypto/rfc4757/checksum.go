@@ -3,7 +3,7 @@ package rfc4757
 import (
 	"bytes"
 	"crypto/hmac"
-	"crypto/md5"
+	"crypto/md5" // #nosec G501 -- RFC 4757 defines the legacy RC4-HMAC checksums with MD5.
 	"io"
 )
 
@@ -18,7 +18,7 @@ func Checksum(key []byte, usage uint32, data []byte) ([]byte, error) {
 	// Format data
 	p := UsageToMSMsgType(usage)
 	p = append(p, data...)
-	h := md5.New()
+	h := md5.New() // #nosec G401 -- RFC 4757 section 4 fixes this digest inside the keyed checksum.
 	rb := bytes.NewReader(p)
 	_, err := io.Copy(h, rb)
 	if err != nil {

@@ -1,7 +1,7 @@
 package gssapi
 
 import (
-	"crypto/md5"
+	"crypto/md5" // #nosec G501 -- RFC 4121 section 4.1.1.2 fixes the channel-binding digest.
 	"crypto/sha256"
 	"crypto/sha512"
 	"crypto/tls"
@@ -48,11 +48,11 @@ func (c ChannelBindings) MD5Hash() [md5.Size]byte {
 	b = appendChannelBindingAddress(b, c.AcceptorAddress)
 	applicationLength, err := gssUint32Length("application data", len(c.ApplicationData))
 	if err != nil {
-		return md5.Sum(nil)
+		return md5.Sum(nil) // #nosec G401 -- preserves the existing MD5Hash fallback value.
 	}
 	b = appendUint32LE(b, applicationLength)
 	b = append(b, c.ApplicationData...)
-	return md5.Sum(b)
+	return md5.Sum(b) // #nosec G401 -- RFC 4121 specifies this field inside the authenticated checksum.
 }
 
 func appendChannelBindingAddress(b []byte, address ChannelBindingAddress) []byte {

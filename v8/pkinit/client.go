@@ -6,7 +6,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- RFC 4556 fixes the PKAuthenticator request-body digest.
 	"crypto/x509"
 	"fmt"
 	"io"
@@ -117,7 +117,7 @@ func BeginExchange(req *messages.ASReq, options ExchangeOptions) (*Exchange, err
 	if err != nil {
 		return nil, fmt.Errorf("marshal PKINIT KDC request body: %w", err)
 	}
-	checksum := sha1.Sum(bodyDER)
+	checksum := sha1.Sum(bodyDER) // #nosec G401 -- RFC 4556 paChecksum inside the signed AuthPack.
 	exchange := &Exchange{
 		options: options, requestBody: bodyDER, nonce: int64(req.ReqBody.Nonce),
 		client: KRB5PrincipalName{Realm: req.ReqBody.Realm, PrincipalName: req.ReqBody.CName},
@@ -252,7 +252,7 @@ func AcceptExchange(req *messages.ASReq, options AcceptorOptions) (*AcceptorResu
 	if err != nil {
 		return nil, fmt.Errorf("marshal PKINIT KDC request body: %w", err)
 	}
-	checksum := sha1.Sum(bodyDER)
+	checksum := sha1.Sum(bodyDER) // #nosec G401 -- verify the RFC 4556 paChecksum in the signed AuthPack.
 	if !bytes.Equal(checksum[:], authPack.PKAuthenticator.PAChecksum) || authPack.PKAuthenticator.Nonce != int64(req.ReqBody.Nonce) {
 		return nil, fmt.Errorf("PKINIT AuthPack does not bind the KDC request")
 	}
