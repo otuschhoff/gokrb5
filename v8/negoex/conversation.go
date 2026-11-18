@@ -142,7 +142,7 @@ func (c *Conversation) initialInitiatorToken() ([]byte, bool, error) {
 	}
 	nego := &NegoMessage{Header: MessageHeader{MessageType: MessageTypeInitiatorNego}, AuthSchemes: schemeIDs(c.schemes)}
 	if _, err := rand.Read(nego.Random[:]); err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("generate initiator NEGOEX random value: %w", err)
 	}
 	var outgoing []Message
 	outgoing = append(outgoing, nego)
@@ -155,7 +155,7 @@ func (c *Conversation) initialInitiatorToken() ([]byte, bool, error) {
 	c.selected = c.schemes[0]
 	mechanismToken, context, done, err := c.selected.InitSecContext(c.target, nil)
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("initialize NEGOEX mechanism: %w", err)
 	}
 	c.context, c.mechanismDone = context, done
 	if len(mechanismToken) > 0 {
@@ -202,7 +202,7 @@ func (c *Conversation) firstAcceptorStep(input []byte, messages []Message) ([]by
 
 	response := &NegoMessage{Header: MessageHeader{MessageType: MessageTypeAcceptorNego}, AuthSchemes: schemeIDs(c.schemes)}
 	if _, err := rand.Read(response.Random[:]); err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("generate acceptor NEGOEX random value: %w", err)
 	}
 	var outgoing []Message
 	outgoing = append(outgoing, response)
@@ -277,7 +277,7 @@ func (c *Conversation) continueStep(input []byte, messages []Message) ([]byte, b
 		mechanismToken, context, done, err = c.selected.AcceptSecContext(mechanismInput)
 	}
 	if err != nil && len(mechanismToken) == 0 {
-		return nil, false, err
+		return nil, false, fmt.Errorf("continue NEGOEX mechanism: %w", err)
 	}
 	if context != nil {
 		c.context = context
@@ -307,7 +307,7 @@ func (c *Conversation) emit(messages []Message, sendAlert bool) ([]byte, bool, e
 	var output []byte
 	for _, message := range messages {
 		setMessageHeader(message, c.sequence, c.conversation)
-		encoded, err := message.MarshalBinary()
+		encoded, err := marshalMessage(message)
 		if err != nil {
 			return nil, false, err
 		}
@@ -328,7 +328,7 @@ func (c *Conversation) emit(messages []Message, sendAlert bool) ([]byte, bool, e
 				}
 				verify := &VerifyMessage{Header: MessageHeader{MessageType: MessageTypeVerify}, AuthScheme: c.selected.AuthScheme(), Checksum: checksum}
 				setMessageHeader(verify, c.sequence, c.conversation)
-				encoded, err := verify.MarshalBinary()
+				encoded, err := marshalMessage(verify)
 				if err != nil {
 					return nil, false, err
 				}

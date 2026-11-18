@@ -53,6 +53,13 @@ func mustNEGOEXUint32(t *testing.T, value int) uint32 {
 	return result
 }
 
+func requireWrappedError(t *testing.T, err, cause error, prefix string) {
+	t.Helper()
+	if err == nil || !errors.Is(err, cause) || !strings.HasPrefix(err.Error(), prefix) {
+		t.Fatalf("want error prefixed by %q and wrapping %v, got %v", prefix, cause, err)
+	}
+}
+
 func TestNEGOEXConversionBounds(t *testing.T) {
 	tests := []struct {
 		name string
@@ -310,13 +317,17 @@ func (c *testContext) NegoExVerifyKey() (types.EncryptionKey, bool) {
 }
 
 type testSchemeMechanism struct {
-	id      AuthScheme
-	context *testContext
+	id               AuthScheme
+	context          *testContext
+	initErr          error
+	acceptErr        error
+	acceptErrorToken []byte
 }
 
 type testPKU2UMechanism struct {
 	*testSchemeMechanism
-	metadata []byte
+	metadata    []byte
+	metadataErr error
 }
 
 func (*testPKU2UMechanism) OID() asn1.ObjectIdentifier { return gssapi.OIDPKU2U.OID() }
@@ -333,29 +344,32 @@ func (m *testPKU2UMechanism) QueryMetadata(target string, initiator bool) ([]byt
 	if target != "host/server" || !initiator {
 		return nil, errors.New("unexpected metadata query")
 	}
-	return append([]byte(nil), m.metadata...), nil
+	return append([]byte(nil), m.metadata...), m.metadataErr
 }
 
 func (m *testPKU2UMechanism) ExchangeMetadata(metadata []byte, initiator bool) error {
 	if !reflect.DeepEqual(metadata, m.metadata) || initiator {
 		return errors.New("unexpected metadata exchange")
 	}
-	return nil
+	return m.metadataErr
 }
 
 func (m *testSchemeMechanism) AuthScheme() AuthScheme { return m.id }
 func (m *testSchemeMechanism) InitSecContext(_ string, input []byte) ([]byte, gssapi.Context, bool, error) {
 	switch string(input) {
 	case "":
-		return []byte("request-1"), m.context, false, nil
+		return []byte("request-1"), m.context, false, m.initErr
 	case "challenge":
-		return []byte("request-2"), m.context, true, nil
+		return []byte("request-2"), m.context, true, m.initErr
 	default:
 		return nil, m.context, false, errors.New("unexpected initiator input")
 	}
 }
 
 func (m *testSchemeMechanism) AcceptSecContext(input []byte) ([]byte, gssapi.Context, bool, error) {
+	if m.acceptErr != nil {
+		return m.acceptErrorToken, nil, false, m.acceptErr
+	}
 	switch string(input) {
 	case "request-1":
 		return []byte("challenge"), m.context, false, nil
@@ -367,17 +381,25 @@ func (m *testSchemeMechanism) AcceptSecContext(input []byte) ([]byte, gssapi.Con
 }
 
 func newTestScheme(id AuthScheme) *testSchemeMechanism {
-	return &testSchemeMechanism{
-		id: id,
-		context: &testContext{available: true, key: types.EncryptionKey{
+	var scheme testSchemeMechanism
+	scheme.id = id
+	scheme.context = &testContext{
+		available: true,
+		key: types.EncryptionKey{
 			KeyType:  etypeID.AES256_CTS_HMAC_SHA1_96,
 			KeyValue: []byte("0123456789abcdef0123456789abcdef"),
-		}, verifyAvailable: true},
+		},
+		verifyAvailable: true,
 	}
+	return &scheme
 }
 
 func TestPKU2USchemeDelegatesMechanism(t *testing.T) {
-	mechanism := &testPKU2UMechanism{testSchemeMechanism: newTestScheme(PKU2UAuthScheme), metadata: []byte("metadata")}
+	mechanism := &testPKU2UMechanism{
+		testSchemeMechanism: newTestScheme(PKU2UAuthScheme),
+		metadata:            []byte("metadata"),
+		metadataErr:         nil,
+	}
 	scheme := NewPKU2UScheme(mechanism)
 	if scheme.AuthScheme() != PKU2UAuthScheme {
 		t.Fatalf("auth scheme = %v", scheme.AuthScheme())

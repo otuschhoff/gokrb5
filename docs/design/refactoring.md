@@ -824,6 +824,27 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 48 (2026-11-18, NEGOEX error contracts; Q-03):
+NEGOEX now identifies failures in negotiation random generation, mechanism
+initialization and continuation, message encoding, and VERIFY checksum
+computation without losing the underlying errors. The PKU2U adapter also
+preserves causes and any values returned alongside an error. Peer-directed
+error tokens, optimistic fallback, metadata pruning, sequence numbering, and
+successful wire encodings are unchanged.
+
+Regression tests cover terminal and recoverable mechanism failures, PKU2U
+adapter results, message encoding errors, and checksum error classification.
+Both module suites and changed-line lint gates passed, along with focused
+race, build, and vet checks for NEGOEX, PKU2U, and SPNEGO.
+`FuzzNegoExUnmarshal` passed a 60-second run (2,616,519 executions).
+Cross-package v8 statement coverage was 86.8%, above the 86.0% floor.
+Live interoperability was not run; Docker daemon access was denied.
+
+The canonical v8 total fell from 888 to 874 (`wrapcheck`: 313 to 300).
+All 13 NEGOEX `wrapcheck` reports were resolved, as was the remaining
+`unparam` report: the new conversation tests use distinct target names.
+There were no new canonical findings and zero v8 gosec findings.
+
 Slice 47 (2026-11-18, GSSAPI token error contracts; Q-03):
 MIC and wrap token operations now identify the failed enctype lookup,
 checksum, encryption, or decryption operation while preserving its cause.

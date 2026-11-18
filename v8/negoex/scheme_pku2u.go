@@ -1,6 +1,8 @@
 package negoex
 
 import (
+	"fmt"
+
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
 )
 
@@ -26,17 +28,32 @@ func NewPKU2UScheme(mechanism PKU2UMechanism) MetadataScheme {
 func (*pku2uScheme) AuthScheme() AuthScheme { return PKU2UAuthScheme }
 
 func (scheme *pku2uScheme) InitSecContext(target string, input []byte) ([]byte, gssapi.Context, bool, error) {
-	return scheme.mechanism.InitSecContext(target, input)
+	output, context, done, err := scheme.mechanism.InitSecContext(target, input)
+	if err != nil {
+		return output, context, done, fmt.Errorf("initialize PKU2U context: %w", err)
+	}
+	return output, context, done, nil
 }
 
 func (scheme *pku2uScheme) AcceptSecContext(input []byte) ([]byte, gssapi.Context, bool, error) {
-	return scheme.mechanism.AcceptSecContext(input)
+	output, context, done, err := scheme.mechanism.AcceptSecContext(input)
+	if err != nil {
+		return output, context, done, fmt.Errorf("accept PKU2U context: %w", err)
+	}
+	return output, context, done, nil
 }
 
 func (scheme *pku2uScheme) QueryMetadata(target string, initiator bool) ([]byte, error) {
-	return scheme.mechanism.QueryMetadata(target, initiator)
+	metadata, err := scheme.mechanism.QueryMetadata(target, initiator)
+	if err != nil {
+		return metadata, fmt.Errorf("query PKU2U metadata: %w", err)
+	}
+	return metadata, nil
 }
 
 func (scheme *pku2uScheme) ExchangeMetadata(metadata []byte, initiator bool) error {
-	return scheme.mechanism.ExchangeMetadata(metadata, initiator)
+	if err := scheme.mechanism.ExchangeMetadata(metadata, initiator); err != nil {
+		return fmt.Errorf("exchange PKU2U metadata: %w", err)
+	}
+	return nil
 }

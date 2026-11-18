@@ -145,13 +145,21 @@ func Marshal(messages ...Message) ([]byte, error) {
 		if message == nil {
 			return nil, errors.New("cannot marshal a nil NEGOEX message")
 		}
-		encoded, err := message.MarshalBinary()
+		encoded, err := marshalMessage(message)
 		if err != nil {
 			return nil, err
 		}
 		token = append(token, encoded...)
 	}
 	return token, nil
+}
+
+func marshalMessage(message Message) ([]byte, error) {
+	encoded, err := message.MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("marshal NEGOEX message type %d: %w", message.messageHeader().MessageType, err)
+	}
+	return encoded, nil
 }
 
 // Unmarshal parses all concatenated messages in a NEGOEX token.

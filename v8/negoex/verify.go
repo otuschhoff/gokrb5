@@ -21,11 +21,11 @@ var (
 func MakeChecksum(key types.EncryptionKey, usage uint32, transcript []byte) (Checksum, error) {
 	etype, err := krbcrypto.GetEtype(key.KeyType)
 	if err != nil {
-		return Checksum{}, err
+		return Checksum{}, fmt.Errorf("select NEGOEX VERIFY enctype: %w", err)
 	}
 	value, err := etype.GetChecksumHash(key.KeyValue, transcript, usage)
 	if err != nil {
-		return Checksum{}, err
+		return Checksum{}, fmt.Errorf("compute NEGOEX VERIFY checksum: %w", err)
 	}
 	hashID := etype.GetHashID()
 	if hashID < 0 {
@@ -56,7 +56,7 @@ func VerifyChecksum(key types.EncryptionKey, usage uint32, transcript []byte, ch
 	}
 	expected, err := checksumType.GetChecksumHash(key.KeyValue, transcript, usage)
 	if err != nil {
-		return err
+		return fmt.Errorf("recompute NEGOEX VERIFY checksum: %w", err)
 	}
 	if !hmac.Equal(expected, checksum.Value) {
 		return ErrInvalidChecksum
