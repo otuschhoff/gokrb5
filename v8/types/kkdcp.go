@@ -15,13 +15,31 @@ type KDCProxyMessage struct {
 	DCLocatorHint int32  `asn1:"optional,explicit,tag:2"`
 }
 
+func kkdcpUint32(name string, length int) (uint32, error) {
+	if length < 0 || uint64(length) > math.MaxUint32 { // #nosec G115 -- nonnegative branch bounded above.
+		return 0, fmt.Errorf("%s length %d exceeds uint32", name, length)
+	}
+	return uint32(length), nil // #nosec G115 -- bounded by MaxUint32 above.
+}
+
+func kkdcpUint64(name string, length int) (uint64, error) {
+	if length < 0 {
+		return 0, fmt.Errorf("%s length %d cannot be negative", name, length)
+	}
+	return uint64(length), nil
+}
+
 // NewKDCProxyMessage wraps a Kerberos message with its network-order length.
 func NewKDCProxyMessage(message []byte, targetDomain string, dcLocatorHint int32) (KDCProxyMessage, error) {
 	if uint64(len(message)) > math.MaxUint32 {
 		return KDCProxyMessage{}, fmt.Errorf("Kerberos message length %d exceeds uint32", len(message))
 	}
 	framed := make([]byte, 4+len(message))
-	binary.BigEndian.PutUint32(framed, uint32(len(message)))
+	messageLength, err := kkdcpUint32("Kerberos message", len(message))
+	if err != nil {
+		return KDCProxyMessage{}, err
+	}
+	binary.BigEndian.PutUint32(framed, messageLength)
 	copy(framed[4:], message)
 	return KDCProxyMessage{KerbMessage: framed, TargetDomain: targetDomain, DCLocatorHint: dcLocatorHint}, nil
 }
@@ -49,7 +67,11 @@ func (m KDCProxyMessage) KerberosMessage() ([]byte, error) {
 		return nil, fmt.Errorf("KKDCP Kerberos message is shorter than its length prefix")
 	}
 	length := binary.BigEndian.Uint32(m.KerbMessage[:4])
-	if uint64(length) != uint64(len(m.KerbMessage)-4) {
+	payloadLength, err := kkdcpUint64("KKDCP payload", len(m.KerbMessage)-4)
+	if err != nil {
+		return nil, err
+	}
+	if uint64(length) != payloadLength {
 		return nil, fmt.Errorf("KKDCP Kerberos message length %d does not match payload length %d", length, len(m.KerbMessage)-4)
 	}
 	return append([]byte(nil), m.KerbMessage[4:]...), nil

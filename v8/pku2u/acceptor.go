@@ -140,15 +140,15 @@ func (acceptor *Acceptor) acceptAPRequest(encoded []byte) ([]byte, gssapi.Contex
 	if err != nil {
 		return nil, nil, err
 	}
-	reply, err := messages.NewAPRepFromAuthenticator(request.Authenticator, request.Authenticator.SubKey, acceptorSubkey, int64(sequence))
+	output, err := marshalPKU2UReply(&request, acceptorSubkey, sequence)
 	if err != nil {
 		return nil, nil, err
 	}
-	output, err := reply.Marshal()
+	peerSequence, err := pku2uSequenceUint64(request.Authenticator.SeqNumber)
 	if err != nil {
 		return nil, nil, err
 	}
-	context, err := gssapi.NewSecurityContext(acceptorSubkey, false, sequence, uint64(request.Authenticator.SeqNumber), true)
+	context, err := gssapi.NewSecurityContext(acceptorSubkey, false, sequence, peerSequence, true)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -162,6 +162,32 @@ func (acceptor *Acceptor) acceptAPRequest(encoded []byte) ([]byte, gssapi.Contex
 // InitSecContext rejects use of an acceptor as an initiator.
 func (*Acceptor) InitSecContext(string, []byte, ...gssapi.MechanismOption) ([]byte, gssapi.Context, bool, error) {
 	return nil, nil, false, fmt.Errorf("PKU2U acceptor cannot initiate a security context")
+}
+
+func pku2uSequenceInt64(sequence uint64) (int64, error) {
+	if sequence > 0x3fffffff {
+		return 0, fmt.Errorf("PKU2U sequence number %d exceeds 30-bit range", sequence)
+	}
+	return int64(sequence), nil
+}
+
+func pku2uSequenceUint64(sequence int64) (uint64, error) {
+	if sequence < 0 || sequence > 0x3fffffff {
+		return 0, fmt.Errorf("PKU2U sequence number %d exceeds 30-bit range", sequence)
+	}
+	return uint64(sequence), nil
+}
+
+func marshalPKU2UReply(request *messages.APReq, key types.EncryptionKey, sequence uint64) ([]byte, error) {
+	sequenceInt, err := pku2uSequenceInt64(sequence)
+	if err != nil {
+		return nil, err
+	}
+	reply, err := messages.NewAPRepFromAuthenticator(request.Authenticator, request.Authenticator.SubKey, key, sequenceInt)
+	if err != nil {
+		return nil, err
+	}
+	return reply.Marshal()
 }
 
 func randomSequence() (uint64, error) {

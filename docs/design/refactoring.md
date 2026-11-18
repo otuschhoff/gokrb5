@@ -824,6 +824,16 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 32 (2026-11-18, final protocol wire ranges): all v8 G115 findings are
+zero. Kadmin message/AP_REQ lengths and KKDCP payload framing use checked
+uint16/uint32 encoders; PKINIT padding and KDF counters are bounded before
+byte/uint32 encoding; PKU2U sequence numbers are validated at signed/unsigned
+boundaries and converted through extracted reply/context helpers; the service
+SID fixture documents its small fixed test bound. Malformed KDF lengths return
+errors. Kadmin/PKINIT/PKU2U/types/service G115 falls 13 to 0, total G115 falls
+13 to 0, gosec falls 98 to 85, and canonical findings fall 1,084 to 1,071;
+coverage measures 86.5%.
+
 Slice 31 (2026-11-18, ASN.1 and crypto wire ranges): ASN.1 tools and crypto
 G115 findings are zero. ASN.1 length octets and n-fold bit values use proven
 0..255 bounds, PKCS7 padding rejects block sizes above the byte representation,

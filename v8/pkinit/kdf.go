@@ -101,16 +101,30 @@ func kdfHash(oid []int) (func() hash.Hash, error) {
 	}
 }
 
+func pkinitUint32(name string, value int) (uint32, error) {
+	if value < 0 || int64(value) > math.MaxUint32 { // int is at most int64 on supported Go architectures.
+		return 0, fmt.Errorf("PKINIT %s %d exceeds uint32 range", name, value)
+	}
+	return uint32(value), nil // #nosec G115 -- bounded by MaxUint32 above.
+}
+
 func counterKDF(hashFunc func() hash.Hash, secret, otherInfo []byte, outputBytes int) ([]byte, error) {
 	hashSize := hashFunc().Size()
+	if outputBytes < 0 {
+		return nil, fmt.Errorf("PKINIT KDF output length cannot be negative")
+	}
 	blocks := (outputBytes + hashSize - 1) / hashSize
-	if uint64(blocks) > math.MaxUint32 {
+	if blocks > math.MaxUint32 {
 		return nil, fmt.Errorf("PKINIT KDF output is too long")
 	}
 	output := make([]byte, 0, blocks*hashSize)
 	var counter [4]byte
 	for block := 1; block <= blocks; block++ {
-		binary.BigEndian.PutUint32(counter[:], uint32(block))
+		counterValue, err := pkinitUint32("KDF counter", block)
+		if err != nil {
+			return nil, err
+		}
+		binary.BigEndian.PutUint32(counter[:], counterValue)
 		digest := hashFunc()
 		digest.Write(counter[:])
 		digest.Write(secret)

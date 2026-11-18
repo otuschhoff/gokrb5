@@ -206,7 +206,10 @@ func contentCipher(algorithm asn1.ObjectIdentifier, key []byte) (cipher.Block, e
 
 func pkcs7Pad(content []byte, blockSize int) []byte {
 	padding := blockSize - len(content)%blockSize
-	return append(append([]byte(nil), content...), bytes.Repeat([]byte{byte(padding)}, padding)...)
+	if padding > 255 {
+		return nil
+	}
+	return append(append([]byte(nil), content...), bytes.Repeat([]byte{byte(padding)}, padding)...) // #nosec G115 -- bounded by 255 above.
 }
 
 func pkcs7Unpad(content []byte, blockSize int) ([]byte, error) {
@@ -219,7 +222,7 @@ func pkcs7Unpad(content []byte, blockSize int) ([]byte, error) {
 	}
 	var mismatch byte
 	for _, value := range content[len(content)-padding:] {
-		mismatch |= value ^ byte(padding)
+		mismatch |= value ^ byte(padding) // #nosec G115 -- padding is at most block size 16 or 32 and checked above.
 	}
 	if mismatch != 0 {
 		return nil, fmt.Errorf("invalid PKINIT CMS content padding")

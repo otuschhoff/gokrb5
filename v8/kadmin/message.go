@@ -41,6 +41,13 @@ type PasswordPolicy struct {
 	MinAge     uint64
 }
 
+func kadminUint16(name string, length int) (uint16, error) {
+	if length < 0 || length > int(^uint16(0)) {
+		return 0, fmt.Errorf("%s length %d exceeds uint16 range", name, length)
+	}
+	return uint16(length), nil
+}
+
 // Marshal a Request into a byte slice.
 func (m *Request) Marshal() ([]byte, error) {
 	var b []byte
@@ -56,7 +63,11 @@ func (m *Request) Marshal() ([]byte, error) {
 		return b, err
 	}
 	al := make([]byte, 2)
-	binary.BigEndian.PutUint16(al, uint16(len(ab)))
+	apReqLength, err := kadminUint16("AP_REQ", len(ab))
+	if err != nil {
+		return b, err
+	}
+	binary.BigEndian.PutUint16(al, apReqLength)
 	b = append(b, al...)
 	b = append(b, ab...)
 	pb, e := m.KRBPriv.Marshal()
@@ -70,7 +81,11 @@ func (m *Request) Marshal() ([]byte, error) {
 		return b, err
 	}
 	ml := make([]byte, 2)
-	binary.BigEndian.PutUint16(ml, uint16(len(b)+2))
+	messageLength, err := kadminUint16("message", len(b)+2)
+	if err != nil {
+		return b, err
+	}
+	binary.BigEndian.PutUint16(ml, messageLength)
 	b = append(ml, b...)
 	return b, err
 }

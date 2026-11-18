@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ import (
 func TestEnvelopedDataRoundTrip(t *testing.T) {
 	certificate, privateKey := testRSARecipient(t)
 	for _, algorithm := range []ContentEncryptionAlgorithm{AES128CBC, AES256CBC, TripleDESCBC} {
-		t.Run(string(rune('0'+algorithm)), func(t *testing.T) {
+		t.Run(fmt.Sprint(algorithm), func(t *testing.T) {
 			der, err := EncryptEnvelopedData([]byte("reply-key-pack"), certificate, algorithm)
 			require.NoError(t, err)
 			plaintext, err := DecryptEnvelopedData(der, certificate, privateKey)

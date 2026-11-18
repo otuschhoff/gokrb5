@@ -11,7 +11,7 @@ import (
 
 func testSID(parts ...uint32) mstypes.RPCSID {
 	return mstypes.RPCSID{
-		Revision: 1, SubAuthorityCount: uint8(len(parts)),
+		Revision: 1, SubAuthorityCount: uint8(len(parts)), // #nosec G115 -- RPC SID subauthority fixtures contain at most three entries.
 		IdentifierAuthority: [6]byte{0, 0, 0, 0, 0, 5}, SubAuthority: parts,
 	}
 }

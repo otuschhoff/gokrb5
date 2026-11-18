@@ -113,10 +113,7 @@ func (initiator *Initiator) InitSecContext(target string, input []byte, _ ...gss
 		if !isPKU2UEType(reply.DecryptedEncPart.Subkey.KeyType) {
 			return nil, nil, false, fmt.Errorf("PKU2U AP reply subkey must use AES")
 		}
-		context, err := gssapi.NewSecurityContext(
-			reply.DecryptedEncPart.Subkey, true,
-			uint64(initiator.authenticator.SeqNumber), uint64(reply.DecryptedEncPart.SequenceNumber), true,
-		)
+		context, err := newPKU2UInitiatorContext(initiator.authenticator.SeqNumber, reply.DecryptedEncPart.SequenceNumber, reply.DecryptedEncPart.Subkey)
 		if err != nil {
 			return nil, nil, false, err
 		}
@@ -134,4 +131,16 @@ func (initiator *Initiator) InitSecContext(target string, input []byte, _ ...gss
 // AcceptSecContext rejects use of an initiator as an acceptor.
 func (*Initiator) AcceptSecContext([]byte, ...gssapi.MechanismOption) ([]byte, gssapi.Context, bool, error) {
 	return nil, nil, false, fmt.Errorf("PKU2U initiator cannot accept a security context")
+}
+
+func newPKU2UInitiatorContext(initiatorSequence, acceptorSequence int64, key types.EncryptionKey) (*gssapi.SecurityContext, error) {
+	send, err := pku2uSequenceUint64(initiatorSequence)
+	if err != nil {
+		return nil, err
+	}
+	receive, err := pku2uSequenceUint64(acceptorSequence)
+	if err != nil {
+		return nil, err
+	}
+	return gssapi.NewSecurityContext(key, true, send, receive, true)
 }
