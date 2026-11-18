@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/base64"
+	"errors"
 	"strings"
 	"testing"
 
@@ -47,9 +48,14 @@ func TestParseBasicHeaderValue(t *testing.T) {
 }
 
 func TestParseBasicHeaderValueRejectsMalformedInput(t *testing.T) {
-	if _, _, _, err := parseBasicHeaderValue("!!!"); err == nil {
-		t.Fatal("invalid base64 accepted")
-	}
+	domain, username, password, err := parseBasicHeaderValue("!!!")
+	assert.Empty(t, domain)
+	assert.Empty(t, username)
+	assert.Empty(t, password)
+	assert.ErrorContains(t, err, "decode basic authentication value:")
+	_, corrupt := errors.AsType[base64.CorruptInputError](err)
+	assert.True(t, corrupt, "expected the base64 error to remain discoverable")
+
 	withoutSeparator := base64.StdEncoding.EncodeToString([]byte("alice"))
 	if _, _, _, err := parseBasicHeaderValue(withoutSeparator); err == nil || !strings.Contains(err.Error(), "separator") {
 		t.Fatalf("missing separator error = %v", err)

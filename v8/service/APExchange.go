@@ -2,6 +2,7 @@ package service
 
 import (
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"time"
 
@@ -33,19 +34,11 @@ func VerifyAPREQ(apReq *messages.APReq, s *Settings) (bool, *credentials.Credent
 }
 
 // VerifyAPREQWithResult verifies an AP_REQ and returns its GSS negotiation data.
+// The result contains authenticated credentials only on success.
 func VerifyAPREQWithResult(apReq *messages.APReq, s *Settings) (APREQResult, error) {
 	var result APREQResult
-	if !servicePrincipalAllowed(apReq.Ticket.SName, apReq.Ticket.Realm, s) {
-		return result, messages.NewKRBError(apReq.Ticket.SName, apReq.Ticket.Realm, errorcode.KRB_AP_ERR_NOT_US, "ticket service principal is not accepted")
-	}
-	ok, err := apReq.Verify(s.Keytab, s.MaxClockSkew(), s.ClientAddress(), s.KeytabPrincipal())
-	if err != nil || !ok {
+	if err := verifyServiceAPREQ(apReq, s); err != nil {
 		return result, err
-	}
-
-	if s.RequireHostAddr() && len(apReq.Ticket.DecryptedEncPart.CAddr) < 1 {
-		return result,
-			messages.NewKRBError(apReq.Ticket.SName, apReq.Ticket.Realm, errorcode.KRB_AP_ERR_BADADDR, "ticket does not contain HostAddress values required")
 	}
 	cbtAdvertised, err := authenticatorAdvertisesCBT(apReq.Authenticator.AuthorizationData)
 	if err != nil {
@@ -61,14 +54,11 @@ func VerifyAPREQWithResult(apReq *messages.APReq, s *Settings) (APREQResult, err
 	// Check for replay
 	rc := GetReplayCache(s.MaxClockSkew())
 	if rc.IsReplay(apReq.Ticket.SName, apReq.Authenticator) {
-		return result,
-			messages.NewKRBError(apReq.Ticket.SName, apReq.Ticket.Realm, errorcode.KRB_AP_ERR_REPEAT, "replay detected")
+		return result, serviceTicketError(&apReq.Ticket, errorcode.KRB_AP_ERR_REPEAT, "replay detected")
 	}
 
 	c := credentials.NewFromPrincipalName(apReq.Authenticator.CName, apReq.Authenticator.CRealm)
-	result.Credentials = c
 	c.SetAuthTime(time.Now().UTC())
-	c.SetAuthenticated(true)
 	c.SetValidUntil(apReq.Ticket.DecryptedEncPart.EndTime)
 	if checksum.Flags&gssapi.ContextFlagDeleg != 0 {
 		delegated, err := extractDelegatedCredentials(checksum, apReq.Ticket.DecryptedEncPart.Key)
@@ -78,18 +68,47 @@ func VerifyAPREQWithResult(apReq *messages.APReq, s *Settings) (APREQResult, err
 		c.SetDelegatedCredentials(delegated)
 	}
 
-	// PAC decoding
-	if !s.disablePACDecoding {
-		isPAC, pac, err := apReq.Ticket.GetPACType(s.Keytab, s.KeytabPrincipal(), s.Logger())
-		if isPAC && err != nil {
+	if s.DecodePAC() {
+		if err := attachPACCredentials(c, &apReq.Ticket, s); err != nil {
 			return result, err
 		}
-		if isPAC {
-			// There is a valid PAC. Adding attributes to creds
-			c.SetADCredentials(adCredentialsFromPAC(pac, apReq.Ticket.DecryptedEncPart.AuthTime))
-		}
 	}
+	c.SetAuthenticated(true)
+	result.Credentials = c
 	return result, nil
+}
+
+func verifyServiceAPREQ(apReq *messages.APReq, s *Settings) error {
+	if apReq == nil {
+		return errors.New("service AP-REQ is nil")
+	}
+	ticket := &apReq.Ticket
+	if !servicePrincipalAllowed(ticket.SName, ticket.Realm, s) {
+		return serviceTicketError(ticket, errorcode.KRB_AP_ERR_NOT_US, "ticket service principal is not accepted")
+	}
+	ok, err := apReq.Verify(s.Keytab, s.MaxClockSkew(), s.ClientAddress(), s.KeytabPrincipal())
+	if err != nil {
+		return serviceVerificationError(err)
+	}
+	if !ok {
+		return errors.New("service AP-REQ verification did not succeed")
+	}
+	if s.RequireHostAddr() && len(ticket.DecryptedEncPart.CAddr) == 0 {
+		return serviceTicketError(ticket, errorcode.KRB_AP_ERR_BADADDR, "ticket does not contain HostAddress values required")
+	}
+	return nil
+}
+
+func serviceTicketError(ticket *messages.Ticket, code int32, detail string) messages.KRBError {
+	return messages.NewKRBError(ticket.SName, ticket.Realm, code, detail)
+}
+
+func serviceVerificationError(err error) error {
+	// Preserve wire errors and their existing wrapping, including bare KRB-ERRORs.
+	if _, ok := errors.AsType[messages.KRBError](err); ok {
+		return err
+	}
+	return fmt.Errorf("verify service AP-REQ: %w", err)
 }
 
 func servicePrincipalAllowed(sname types.PrincipalName, realm string, settings *Settings) bool {

@@ -62,19 +62,11 @@ func (a KRB5BasicAuthenticator) Authenticate() (goidentity.Identity, bool, error
 		return i, ok, err
 	}
 	cl.Credentials.SetAuthTime(time.Now().UTC())
-	cl.Credentials.SetAuthenticated(true)
-	isPAC, pac, err := tkt.GetPACType(a.serviceSettings.Keytab, a.serviceSettings.KeytabPrincipal(), a.serviceSettings.Logger())
-	if isPAC && err != nil {
-		err = fmt.Errorf("error processing PAC: %w", err)
+	if err = attachPACCredentials(cl.Credentials, &tkt, a.serviceSettings); err != nil {
 		return i, ok, err
 	}
-	if isPAC {
-		// There is a valid PAC. Adding attributes to creds
-		cl.Credentials.SetADCredentials(adCredentialsFromPAC(pac, tkt.DecryptedEncPart.AuthTime))
-	}
-	ok = true
-	i = cl.Credentials
-	return i, ok, err
+	cl.Credentials.SetAuthenticated(true)
+	return cl.Credentials, true, nil
 }
 
 // Mechanism returns the authentication mechanism.
@@ -89,7 +81,7 @@ func parseBasicHeaderValue(s string) (string, string, string, error) {
 	var err error
 	b, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
-		return domain, username, password, err
+		return domain, username, password, fmt.Errorf("decode basic authentication value: %w", err)
 	}
 	v := string(b)
 	vc := strings.SplitN(v, ":", 2)

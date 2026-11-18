@@ -824,6 +824,29 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 50 (2026-11-18, service authentication error contracts; Q-03):
+Service AP-REQ verification preserves concrete KRB-ERROR values and their
+wire codes while adding context to other verification failures. Nil requests
+return an error, and failed verification does not publish authenticated
+credentials. AP-REQ and Kerberos Basic authentication share PAC processing:
+malformed authorization data is an error, not an absent PAC. The existing
+AP-REQ PAC opt-out and verification order are unchanged. Invalid Basic
+authentication values retain the base64 cause without exposing the input.
+
+Regression tests cover concrete protocol errors and wire encoding, missing
+requests, verification causes, failed delegation, malformed PAC and
+authorization data, and typed base64 errors. Both module suites and
+changed-line lint gates passed, along with focused race, build, and vet
+checks for service, SPNEGO, and PAC. `FuzzPACUnmarshal` passed a 60-second run
+(1,696,754 executions). Cross-package v8 statement coverage was 86.9%.
+An unchanged PKINIT wrong-password test failed once on the expected error
+text, then passed ten isolated repetitions and the full rerun. Live
+interoperability was not run; Docker daemon access was denied.
+
+The canonical v8 total fell from 838 to 831 (`wrapcheck`: 265 to 259).
+All six service `wrapcheck` reports and one complexity report were resolved,
+with no new canonical findings and zero v8 gosec findings.
+
 Slice 49 (2026-11-18, PKU2U error contracts; Q-03):
 PKU2U now identifies the failed operation while preserving causes from AS and
 AP message processing, key and context setup, certificate name mapping, and

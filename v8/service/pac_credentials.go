@@ -5,8 +5,20 @@ import (
 	"time"
 
 	"github.com/otuschhoff/gokrb5/v8/credentials"
+	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/pac"
 )
+
+func attachPACCredentials(c *credentials.Credentials, ticket *messages.Ticket, s *Settings) error {
+	found, decoded, err := ticket.GetPACType(s.Keytab, s.KeytabPrincipal(), s.Logger())
+	if err != nil {
+		return fmt.Errorf("process service ticket PAC: %w", err)
+	}
+	if found {
+		c.SetADCredentials(adCredentialsFromPAC(decoded, ticket.DecryptedEncPart.AuthTime))
+	}
+	return nil
+}
 
 func adCredentialsFromPAC(p pac.PACType, authTime time.Time) credentials.ADCredentials {
 	validation := p.KerbValidationInfo

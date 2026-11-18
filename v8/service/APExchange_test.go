@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/config"
@@ -19,6 +20,7 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/msflags"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
+	"github.com/otuschhoff/gokrb5/v8/krberror"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/otuschhoff/gokrb5/v8/types"
@@ -63,9 +65,85 @@ func TestVerifyAPREQ(t *testing.T) {
 
 	h, _ := types.GetHostAddress("127.0.0.1:1234")
 	s := NewSettings(kt, ClientAddress(h))
+	badRequest := APReq
+	badRequest.Ticket.EncPart.Cipher = nil
+	result, err := VerifyAPREQWithResult(&badRequest, s)
+	assert.Nil(t, result.Credentials)
+	assert.ErrorContains(t, err, "verify service AP-REQ:")
+	_, hasCause := errors.AsType[krberror.Krberror](err)
+	assert.True(t, hasCause, "expected the verification error cause")
+
+	result, err = VerifyAPREQWithResult(&APReq, NewSettings(kt, ClientAddress(h), RequireHostAddr(true)))
+	assert.Nil(t, result.Credentials)
+	wireErr := requireServiceWireError(t, err, errorcode.KRB_AP_ERR_BADADDR)
+	assert.Equal(t, APReq.Ticket.Realm, wireErr.Realm)
+
 	ok, _, err := VerifyAPREQ(&APReq, s)
 	if !ok || err != nil {
 		t.Fatalf("Validation of AP_REQ failed when it should not have: %v", err)
+	}
+}
+
+func TestVerifyAPREQRejectsMissingInput(t *testing.T) {
+	t.Parallel()
+
+	require.NotPanics(t, func() {
+		result, err := VerifyAPREQWithResult(nil, NewSettings(nil))
+		assert.Nil(t, result.Credentials)
+		assert.ErrorContains(t, err, "service AP-REQ is nil")
+	})
+}
+
+func TestVerifyAPREQPreservesServiceMismatchProtocolError(t *testing.T) {
+	t.Parallel()
+
+	var request messages.APReq
+	request.Ticket.SName = types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "HTTP/unconfigured")
+	request.Ticket.Realm = testdata.TEST_REALM
+	result, err := VerifyAPREQWithResult(&request, NewSettings(nil))
+	assert.Nil(t, result.Credentials)
+	wireErr := requireServiceWireError(t, err, errorcode.KRB_AP_ERR_NOT_US)
+
+	encoded, err := wireErr.Marshal()
+	require.NoError(t, err)
+	var decoded messages.KRBError
+	require.NoError(t, decoded.Unmarshal(encoded))
+	assert.Equal(t, wireErr.ErrorCode, decoded.ErrorCode)
+	assert.Equal(t, request.Ticket.Realm, decoded.Realm)
+	assert.Equal(t, request.Ticket.SName, decoded.SName)
+}
+
+func TestVerifyAPREQWithResultWithholdsCredentialsOnDelegationFailure(t *testing.T) {
+	t.Parallel()
+
+	const realm = "TEST.GOKRB5"
+	cname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "delegation-regression")
+	sname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "HTTP/host.test.gokrb5")
+	rawKeytab, err := hex.DecodeString(testdata.HTTP_KEYTAB)
+	require.NoError(t, err)
+	kt := keytab.New()
+	require.NoError(t, kt.Unmarshal(rawKeytab))
+	now := time.Now().UTC()
+	ticket, key, err := messages.NewTicket(
+		cname, realm, sname, realm, types.NewKrbFlags(), kt,
+		18, 1, now, now, now.Add(time.Hour), now.Add(time.Hour),
+	)
+	require.NoError(t, err)
+	authenticator, err := types.NewAuthenticator(realm, cname)
+	require.NoError(t, err)
+	checksum := gssapi.NewAuthenticatorChecksum(nil, gssapi.ContextFlagDeleg)
+	checksum.DelegationOption = 1
+	checksum.Deleg = []byte{0x76} // Incomplete KRB-CRED in the local test fixture.
+	rawChecksum, err := checksum.Marshal()
+	require.NoError(t, err)
+	authenticator.Cksum = types.Checksum{CksumType: chksumtype.GSSAPI, Checksum: rawChecksum}
+	request, err := messages.NewAPReq(ticket, key, authenticator)
+	require.NoError(t, err)
+
+	result, err := VerifyAPREQWithResult(&request, NewSettings(kt))
+	assert.ErrorContains(t, err, "invalid delegated KRB_CRED")
+	if result.Credentials != nil {
+		t.Error("failed verification published authenticated credentials")
 	}
 }
 
@@ -325,11 +403,17 @@ func TestVerifyAPREQ_Replay(t *testing.T) {
 	if ok || err == nil {
 		t.Fatal("Validation of AP_REQ passed when it should not have")
 	}
-	var krbErr messages.KRBError
-	if !errors.As(err, &krbErr) {
-		t.Fatal("Error is not a KRBError")
-	}
-	assert.Equal(t, errorcode.KRB_AP_ERR_REPEAT, krbErr.ErrorCode, "Error code not as expected")
+	wireErr := requireServiceWireError(t, err, errorcode.KRB_AP_ERR_REPEAT)
+	assert.Equal(t, APReq.Ticket.Realm, wireErr.Realm)
+}
+
+func requireServiceWireError(t *testing.T, err error, code int32) messages.KRBError {
+	t.Helper()
+	wireErr, ok := errors.AsType[messages.KRBError](err)
+	require.True(t, ok, "expected a KRB-ERROR, got %v", err)
+	assert.IsType(t, wireErr, err)
+	assert.Equal(t, code, wireErr.ErrorCode)
+	return wireErr
 }
 
 func TestVerifyAPREQ_FutureTicket(t *testing.T) {

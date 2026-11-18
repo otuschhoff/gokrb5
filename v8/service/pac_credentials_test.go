@@ -4,10 +4,56 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/jcmturner/rpc/v2/mstypes"
+	"github.com/stretchr/testify/assert"
 
+	"github.com/otuschhoff/gokrb5/v8/credentials"
+	"github.com/otuschhoff/gokrb5/v8/iana/adtype"
+	"github.com/otuschhoff/gokrb5/v8/keytab"
+	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/pac"
+	"github.com/otuschhoff/gokrb5/v8/test/testdata"
+	"github.com/otuschhoff/gokrb5/v8/types"
 )
+
+func TestAttachPACCredentialsPreservesDecodeErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		entry types.AuthorizationDataEntry
+		cause error
+	}{
+		{
+			name:  "incomplete PAC",
+			entry: types.AuthorizationDataEntry{ADType: adtype.ADWin2KPAC, ADData: []byte{0}},
+			cause: pac.ErrPACMalformed,
+		},
+		{
+			name:  "incomplete authorization data",
+			entry: types.AuthorizationDataEntry{ADType: adtype.ADIfRelevant, ADData: []byte{0x30}},
+			cause: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var ticket messages.Ticket
+			ticket.DecryptedEncPart.AuthorizationData = types.AuthorizationData{tt.entry}
+			c := credentials.New("pac-fixture", testdata.TEST_REALM)
+			err := attachPACCredentials(c, &ticket, NewSettings(keytab.New()))
+			assert.ErrorContains(t, err, "process service ticket PAC:")
+			if tt.cause != nil {
+				assert.ErrorIs(t, err, tt.cause)
+			} else {
+				assert.ErrorAs(t, err, new(asn1.SyntaxError))
+			}
+			assert.Empty(t, c.GetADCredentials().UserSID)
+		})
+	}
+}
 
 func testSID(parts ...uint32) mstypes.RPCSID {
 	return mstypes.RPCSID{
