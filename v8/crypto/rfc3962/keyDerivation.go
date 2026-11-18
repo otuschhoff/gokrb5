@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"fmt"
 
 	"github.com/jcmturner/gofork/x/crypto/pbkdf2"
 
@@ -31,7 +32,11 @@ func StringToPBKDF2(secret, salt string, iterations int64, e etype.EType) []byte
 // StringToKeyIter returns a key derived from the string provided according to the definition in RFC 3961.
 func StringToKeyIter(secret, salt string, iterations int64, e etype.EType) ([]byte, error) {
 	tkey := e.RandomToKey(StringToPBKDF2(secret, salt, iterations, e))
-	return e.DeriveKey(tkey, []byte("kerberos"))
+	key, err := e.DeriveKey(tkey, []byte("kerberos"))
+	if err != nil {
+		return key, fmt.Errorf("derive protocol key: %w", err)
+	}
+	return key, nil
 }
 
 // S2KparamsToItertions converts the string representation of iterations to an integer
@@ -45,7 +50,7 @@ func S2KparamsToItertions(s2kparams string) (int64, error) {
 	}
 	b, err := hex.DecodeString(s2kparams)
 	if err != nil {
-		return int64(s2kParamsZero), errors.New("invalid s2kparams, cannot decode string to bytes")
+		return int64(s2kParamsZero), fmt.Errorf("invalid s2kparams, cannot decode string to bytes: %w", err)
 	}
 	i = binary.BigEndian.Uint32(b)
 	return int64(i), nil

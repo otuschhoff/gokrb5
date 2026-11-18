@@ -35,12 +35,12 @@ func DeriveRandom(key, usage []byte, e etype.EType) ([]byte, error) {
 	// Keep feeding the output back into the encryption function until it is no longer short than k.
 	_, K, err := e.EncryptData(key, nFoldUsage)
 	if err != nil {
-		return out, err
+		return out, fmt.Errorf("encrypt initial derivation block: %w", err)
 	}
 	for i := copy(out, K); i < len(out); {
 		_, K, err = e.EncryptData(key, K)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("encrypt feedback derivation block: %w", err)
 		}
 		i += copy(out[i:], K)
 	}
@@ -51,7 +51,7 @@ func DeriveRandom(key, usage []byte, e etype.EType) ([]byte, error) {
 func DeriveKey(protocolKey, usage []byte, e etype.EType) ([]byte, error) {
 	r, err := e.DeriveRandom(protocolKey, usage)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("derive key seed: %w", err)
 	}
 	return e.RandomToKey(r), nil
 }
@@ -79,7 +79,11 @@ func DES3StringToKey(secret, salt string, e etype.EType) ([]byte, error) {
 		return nil, fmt.Errorf("invalid n-fold input for key seed size %d", e.GetKeySeedBitLength())
 	}
 	tkey := e.RandomToKey(folded)
-	return e.DeriveKey(tkey, []byte("kerberos"))
+	key, err := e.DeriveKey(tkey, []byte("kerberos"))
+	if err != nil {
+		return key, fmt.Errorf("derive des3 protocol key: %w", err)
+	}
+	return key, nil
 }
 
 // PseudoRandom function as defined in RFC 3961
@@ -93,11 +97,11 @@ func PseudoRandom(key, b []byte, e etype.EType) ([]byte, error) {
 	tmp := h.Sum(nil)[:blockSize]
 	k, err := e.DeriveKey(key, []byte(prfconstant))
 	if err != nil {
-		return []byte{}, err
+		return []byte{}, fmt.Errorf("derive prf key: %w", err)
 	}
 	_, prf, err := e.EncryptData(k, tmp)
 	if err != nil {
-		return []byte{}, err
+		return []byte{}, fmt.Errorf("encrypt prf block: %w", err)
 	}
 	return prf, nil
 }

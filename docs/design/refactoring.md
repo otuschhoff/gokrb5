@@ -824,6 +824,29 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 56 (2026-11-19, RFC crypto error contracts; Q-03):
+The RFC 3961, 3962, and 8009 helpers preserve causes from key derivation,
+AES-CTS operations, and integrity hashing. Invalid hex string-to-key
+parameters retain the decoder's typed error. RFC 4757 hashes the same bytes
+directly instead of copying them through a reader; hash writes cannot fail.
+Wire outputs, integrity checks, and nil, empty, or partial results on
+failure remain unchanged.
+
+Regression tests cover injected initial and feedback block failures, key
+derivation and decryption causes, and malformed string-to-key parameters.
+Both module suites, the RFC vectors, focused race/build/vet checks, and
+Linux/386 crypto tests passed. V8 cross-package statement coverage remained
+87.1%. The 60-second GSSAPI unwrap and MIC fuzz runs passed 27,555 and
+1,447,769 executions, respectively. Live interoperability was not run;
+Docker daemon access was denied.
+
+All 17 remaining crypto `wrapcheck` reports and one `staticcheck` report
+were resolved without suppressions. Both changed-line lint gates passed.
+Canonical v8 findings fell from 681 to 663 (`wrapcheck`: 107 to 90);
+the supplemental total remained 3,688, with no new findings in either
+profile. The baseline includes two gosec reports and one shadowing report
+from the rebased AD discovery tests; those files were not changed.
+
 Slice 55 (2026-11-18, encryption profile error contracts; Q-03):
 The top-level v8 crypto package adds operation and profile context to
 key derivation, encryption, decryption, checksum, and FAST PRF failures.

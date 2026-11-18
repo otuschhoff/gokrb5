@@ -1,10 +1,8 @@
 package rfc4757
 
 import (
-	"bytes"
 	"crypto/hmac"
 	"crypto/md5" // #nosec G501 -- RFC 4757 defines the legacy RC4-HMAC checksums with MD5.
-	"io"
 )
 
 // Checksum returns a hash of the data in accordance with RFC 4757
@@ -15,15 +13,10 @@ func Checksum(key []byte, usage uint32, data []byte) ([]byte, error) {
 	mac.Write(s)
 	Ksign := mac.Sum(nil)
 
-	// Format data
-	p := UsageToMSMsgType(usage)
-	p = append(p, data...)
 	h := md5.New() // #nosec G401 -- RFC 4757 section 4 fixes this digest inside the keyed checksum.
-	rb := bytes.NewReader(p)
-	_, err := io.Copy(h, rb)
-	if err != nil {
-		return []byte{}, err
-	}
+	// Hash writes cannot fail; hash the encoded usage before the data.
+	h.Write(UsageToMSMsgType(usage))
+	h.Write(data)
 	tmp := h.Sum(nil)
 
 	// Generate HMAC

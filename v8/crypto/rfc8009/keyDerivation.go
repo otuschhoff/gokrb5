@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"math"
 
 	"golang.org/x/crypto/pbkdf2"
@@ -55,7 +56,11 @@ func StringToKey(secret, salt, s2kparams string, e etype.EType) ([]byte, error) 
 // StringToKeyIter returns a key derived from the string provided according to the definition in RFC 8009.
 func StringToKeyIter(secret, salt string, iterations int, e etype.EType) ([]byte, error) {
 	tkey := e.RandomToKey(StringToPBKDF2(secret, salt, iterations, e))
-	return e.DeriveKey(tkey, []byte("kerberos"))
+	key, err := e.DeriveKey(tkey, []byte("kerberos"))
+	if err != nil {
+		return key, fmt.Errorf("derive protocol key: %w", err)
+	}
+	return key, nil
 }
 
 // StringToPBKDF2 generates an encryption key from a pass phrase and salt string using the PBKDF2 function from PKCS #5 v2.0
@@ -106,7 +111,7 @@ func S2KparamsToItertions(s2kparams string) (int, error) {
 	}
 	b, err := hex.DecodeString(s2kparams)
 	if err != nil {
-		return s2kParamsZero, errors.New("Invalid s2kparams, cannot decode string to bytes")
+		return s2kParamsZero, fmt.Errorf("invalid s2kparams, cannot decode string to bytes: %w", err)
 	}
 	i = binary.BigEndian.Uint32(b)
 	return int(i), nil

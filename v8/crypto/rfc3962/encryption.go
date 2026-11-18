@@ -18,7 +18,11 @@ func EncryptData(key, data []byte, e etype.EType) ([]byte, []byte, error) {
 		return []byte{}, []byte{}, fmt.Errorf("incorrect keysize: expected: %v actual: %v", e.GetKeyByteSize(), len(key))
 	}
 	ivz := make([]byte, e.GetCypherBlockBitLength()/8)
-	return aescts.Encrypt(key, ivz, data)
+	iv, ciphertext, err := aescts.Encrypt(key, ivz, data)
+	if err != nil {
+		return iv, ciphertext, fmt.Errorf("encrypt aes-cts data: %w", err)
+	}
+	return iv, ciphertext, nil
 }
 
 // EncryptMessage encrypts the message provided using the methods specific to the etype provided as defined in RFC 3962.
@@ -65,7 +69,11 @@ func DecryptData(key, data []byte, e etype.EType) ([]byte, error) {
 		return []byte{}, fmt.Errorf("incorrect keysize: expected: %v actual: %v", e.GetKeyByteSize(), len(key))
 	}
 	ivz := make([]byte, e.GetCypherBlockBitLength()/8)
-	return aescts.Decrypt(key, ivz, data)
+	plaintext, err := aescts.Decrypt(key, ivz, data)
+	if err != nil {
+		return plaintext, fmt.Errorf("decrypt aes-cts data: %w", err)
+	}
+	return plaintext, nil
 }
 
 // DecryptMessage decrypts the message provided using the methods specific to the etype provided as defined in RFC 3962.
@@ -83,7 +91,7 @@ func DecryptMessage(key, ciphertext []byte, usage uint32, e etype.EType) ([]byte
 	// Strip off the checksum from the end
 	b, err := e.DecryptData(k, ciphertext[:len(ciphertext)-checksumSize])
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decrypt message data: %w", err)
 	}
 	// Verify checksum
 	if !e.VerifyIntegrity(key, ciphertext, b, usage) {
