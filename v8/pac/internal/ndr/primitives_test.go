@@ -3,6 +3,8 @@ package ndr
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"io"
 	"math"
 	"reflect"
 	"testing"
@@ -59,12 +61,47 @@ func TestDecodePrimitiveRecord(t *testing.T) {
 	}
 }
 
+func TestDecodeSignedExtrema(t *testing.T) {
+	t.Parallel()
+
+	orders := []struct {
+		name  string
+		order binary.ByteOrder
+	}{
+		{name: "little endian", order: binary.LittleEndian},
+		{name: "big endian", order: binary.BigEndian},
+	}
+	for _, tt := range orders {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			input := marshalPrimitiveRecord(tt.order)
+			input[40] = 0x80
+			tt.order.PutUint16(input[42:44], 0x8000)
+			tt.order.PutUint32(input[44:48], 0x80000000)
+			tt.order.PutUint64(input[48:56], 0x8000000000000000)
+
+			var got primitiveRecord
+			if err := NewDecoder(bytes.NewReader(input)).Decode(&got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Int8 != math.MinInt8 || got.Int16 != math.MinInt16 ||
+				got.Int32 != math.MinInt32 || got.Int64 != math.MinInt64 {
+				t.Fatalf("signed fields decoded as %d, %d, %d, %d", got.Int8, got.Int16, got.Int32, got.Int64)
+			}
+		})
+	}
+}
+
 func TestDecodePrimitiveRecordRejectsEveryTruncatedPrefix(t *testing.T) {
 	input := marshalPrimitiveRecord(binary.LittleEndian)
 	for length := 0; length < len(input); length++ {
 		var got primitiveRecord
-		if err := NewDecoder(bytes.NewReader(input[:length])).Decode(&got); err == nil {
-			t.Fatalf("Decode() accepted truncated input of %d bytes", length)
+		err := NewDecoder(bytes.NewReader(input[:length])).Decode(&got)
+		_, malformed := errors.AsType[Malformed](err)
+		hasTruncation := errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+		if !malformed || !hasTruncation {
+			t.Fatalf("Decode(%d bytes) = %v, want malformed input retaining a truncation cause", length, err)
 		}
 	}
 }
@@ -231,20 +268,21 @@ func littleEndianWords(values ...uint32) []byte {
 }
 
 func wrapNDRBody(body []byte) []byte {
-	objectLength := len(body) + 4
-	data := make([]byte, 20, 20+len(body)+7)
+	const (
+		headerLength    = 16
+		objectAlignment = 8
+	)
+	objectLength := uint64(len(body)) + SizePtr
+	objectLengthAligned := (objectLength + objectAlignment - 1) &^ (objectAlignment - 1)
+	if objectLengthAligned > math.MaxUint32 || objectLengthAligned > math.MaxInt-headerLength {
+		panic("NDR test object length exceeds wire or platform range")
+	}
+	data := make([]byte, headerLength+int(objectLengthAligned))
 	data[0] = protocolVersion
 	data[1] = 0x10
 	binary.LittleEndian.PutUint16(data[2:4], commonHeaderBytes)
-	objectLengthAligned := (objectLength + 7) / 8 * 8
-	if objectLengthAligned > math.MaxUint32 {
-		panic("NDR test object length exceeds uint32")
-	}
 	binary.LittleEndian.PutUint32(data[8:12], uint32(objectLengthAligned)) // #nosec G115 -- checked against MaxUint32 above.
-	binary.LittleEndian.PutUint32(data[16:20], 1)
-	data = append(data, body...)
-	for len(data)%8 != 0 {
-		data = append(data, 0)
-	}
+	binary.LittleEndian.PutUint32(data[headerLength:headerLength+SizePtr], 1)
+	copy(data[headerLength+SizePtr:], body)
 	return data
 }

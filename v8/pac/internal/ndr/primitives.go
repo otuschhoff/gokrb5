@@ -1,7 +1,6 @@
 package ndr
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -117,63 +116,40 @@ func (dec *Decoder) readUint64() (uint64, error) {
 }
 
 func (dec *Decoder) readInt8() (int8, error) {
-	dec.ensureAlignment(SizeUint8)
-	b, err := dec.readBytes(SizeUint8)
-	if err != nil {
-		return 0, err
-	}
-	var i int8
-	buf := bytes.NewReader(b)
-	err = binary.Read(buf, dec.ch.Endianness, &i)
-	if err != nil {
-		return 0, err
-	}
-	return i, nil
+	var value int8
+	err := readSignedPrimitive(dec, &value)
+	return value, err
 }
 
 func (dec *Decoder) readInt16() (int16, error) {
-	dec.ensureAlignment(SizeUint16)
-	b, err := dec.readBytes(SizeUint16)
-	if err != nil {
-		return 0, err
-	}
-	var i int16
-	buf := bytes.NewReader(b)
-	err = binary.Read(buf, dec.ch.Endianness, &i)
-	if err != nil {
-		return 0, err
-	}
-	return i, nil
+	var value int16
+	err := readSignedPrimitive(dec, &value)
+	return value, err
 }
 
 func (dec *Decoder) readInt32() (int32, error) {
-	dec.ensureAlignment(SizeUint32)
-	b, err := dec.readBytes(SizeUint32)
-	if err != nil {
-		return 0, err
-	}
-	var i int32
-	buf := bytes.NewReader(b)
-	err = binary.Read(buf, dec.ch.Endianness, &i)
-	if err != nil {
-		return 0, err
-	}
-	return i, nil
+	var value int32
+	err := readSignedPrimitive(dec, &value)
+	return value, err
 }
 
 func (dec *Decoder) readInt64() (int64, error) {
-	dec.ensureAlignment(SizeUint64)
-	b, err := dec.readBytes(SizeUint64)
+	var value int64
+	err := readSignedPrimitive(dec, &value)
+	return value, err
+}
+
+func readSignedPrimitive[T int8 | int16 | int32 | int64](dec *Decoder, value *T) error {
+	size := binary.Size(*value)
+	dec.ensureAlignment(size)
+	data, err := dec.readBytes(size)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	var i int64
-	buf := bytes.NewReader(b)
-	err = binary.Read(buf, dec.ch.Endianness, &i)
-	if err != nil {
-		return 0, err
+	if _, err := binary.Decode(data, dec.ch.Endianness, value); err != nil {
+		return fmt.Errorf("decode NDR %T: %w", *value, err)
 	}
-	return i, nil
+	return nil
 }
 
 // https://en.wikipedia.org/wiki/IEEE_754-1985

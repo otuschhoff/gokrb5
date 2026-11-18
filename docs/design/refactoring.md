@@ -824,6 +824,30 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 52 (2026-11-18, NDR signed primitive reads; Q-03):
+The four signed integer readers share a fixed-width decoder that uses the
+NDR byte order directly on the bounded read. Alignment and truncation
+handling are unchanged. Tests cover each minimum signed value in both byte
+orders and require truncated records to retain the `Malformed`
+classification and the underlying `io.EOF` or `io.ErrUnexpectedEOF`.
+The NDR test fixture checks the aligned length against both the wire and
+platform limits before narrowing, restoring the internal NDR suite on
+Linux/386 without changing the fixture bytes.
+
+Both module suites and changed-line lint gates passed. PAC and internal NDR
+tests also ran successfully on Linux/386. Focused race, build, and vet checks
+passed for PAC, internal NDR, messages, service, and SPNEGO. Cross-package
+v8 statement coverage was 87.0%. The 60-second `FuzzDecodeArrays` run passed
+with 2,003,023 executions. The first downstream `FuzzPACProcessingInfoBuffers`
+run hit a deadline without reporting a failing input; the unchanged baseline
+passed and the edited decoder passed a 60-second rerun (531,600 executions).
+Live interoperability was not run; Docker daemon access was denied.
+
+The canonical v8 total fell from 810 to 806 (`wrapcheck`: 238 to 234).
+All four internal NDR `wrapcheck` reports were resolved, with no new
+canonical findings and zero v8 gosec findings. The supplemental v8 total
+remained 3,688.
+
 Slice 51 (2026-11-18, PAC error contracts; Q-03):
 PAC headers and buffer tables use checked little-endian decoding. Credential
 and signature reads retain `io.EOF` or `io.ErrUnexpectedEOF` with the failed
