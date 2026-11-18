@@ -1,12 +1,15 @@
 # v8 Code Quality and Refactoring Roadmap
 
-Status: active, authoritative remediation backlog; Phases 0-2 complete.
+Status: active, authoritative remediation backlog; Phases 0-2 complete and all
+Phase 3 decomposition slices implemented, with Phase 3's MIT/Samba
+interoperability exit evidence remaining an external CI obligation.
 Assessment date: 2026-11-17.
 Scope: `v8` module (`github.com/otuschhoff/gokrb5/v8`) only. Root-module v7
 refactoring is out of scope; whole-project lint automation remains unchanged.
 Original assessment revision: `26e11e9` plus the lint configuration and automation
 changes. Phase 1 follows the committed assessment at `d24235c`; Phase 2 follows
-the completed Phase 1 at `282e1bf`.
+the completed Phase 1 at `282e1bf`. Phase 3 slices follow the completed Phase 2
+at `632e87e`.
 The original checkout was two commits behind its existing `origin/main`
 reference; this assessment does not claim to cover those commits.
 
@@ -22,7 +25,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 2,963 canonical lint findings after Phase 2 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 2,886 canonical lint findings after the Phase 3 slices |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -537,6 +540,43 @@ line retains the same upstream decoder calls and is outside this roadmap.
 PAC/client/service/spnego unit and race tests, full v8 unit tests, build, vet,
 and the changed-code lint gate pass. The keytab slice and the pinned
 MIT-KDC/Samba matrix remain open.
+
+Slice 5 progress (2026-11-18): `Keytab.Unmarshal` now delegates header
+validation, version-1 byte-order detection, record-stream iteration, hole
+skipping, record decoding, and per-entry field decoding to private operations,
+and `parsePrincipal` returns a value built from a shared counted-string reader
+instead of mutating through the keytab. The 32-bit KVNO trailer and 8-bit key
+version are read with new unsigned readers, preserving wire bit patterns
+(including trailers above the int31 range) without narrowing conversions; the
+then-unused signed 8-bit reader and the deprecated unexported `entry`/`principal`
+aliases are removed. No exported signature, wire, error-text, or error-identity
+changes. Branch-level characterization in
+[unmarshal_characterization_test.go](../../v8/keytab/unmarshal_characterization_test.go)
+covers header validation order and field-mutation side effects, exact hole and
+record-bounds errors, per-field truncation error text and wrap behavior,
+trailing-garbage termination, KVNO trailer presence/zero/override rules,
+partial-state retention on failure, and ambiguous version-1 byte-order
+fallback to native order; it passed against the original implementation before
+extraction. The target's cognitive complexity dropped from 66 to 2, with
+helpers at most 10 (`parsePrincipal`) and control-flow nesting at most 1
+(limits 15/4). `ParsePrincipal` (46), `GetEntry` (29), and `AppendToFile` (24)
+are principal-text parsing, lookup, and persistence rather than decoding and
+remain canonical-debt candidates for Phase 5 ratcheting. The target and its
+helpers have 100% statement coverage except three unreachable defensive
+branches (negative-offset and post-guard read guards retained from the
+original defensive style) and the big-endian-host byte-order probe line, which
+requires a big-endian host like the pre-existing native-order helpers. Keytab
+package canonical diagnostics fell from 123 to 104 without merely moving; the
+regenerated full v8 inventories after all Phase 3 slices are 2,886 canonical
+and 4,163 advisory diagnostics. Keytab unit tests pass under race detection
+with 10 repetitions, the full v8 unit suite passes, Linux/386 tests pass,
+Windows/Darwin/FreeBSD/s390x compile checks pass, the changed-code lint gate
+is clean for both modules, and the seeded `FuzzUnmarshal` target passes a
+120-second run (734,923 executions, no new interesting inputs). All five
+Phase 3 slices are now implemented. The pinned MIT-KDC/Samba matrix remains a
+CI obligation, separate from the approved supplied-KDC local integration gate;
+Docker is unavailable in this environment, so no live interoperability pass is
+claimed here.
 
 Exit: touched functions meet canonical cognitive complexity 15 / nesting 4
 thresholds, or a separately reviewed protocol-specific exception is justified;
