@@ -250,7 +250,7 @@ func (pac *PACType) Sign(serverKey, kdcKey types.EncryptionKey, signOptions ...S
 func checksumTypeForKey(key types.EncryptionKey) (uint32, error) {
 	etype, err := crypto.GetEtype(key.KeyType)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("select PAC signing enctype: %w", err)
 	}
 	if len(key.KeyValue) != etype.GetKeyByteSize() {
 		return 0, fmt.Errorf("key length is %d, expected %d", len(key.KeyValue), etype.GetKeyByteSize())
@@ -311,11 +311,11 @@ func writeChecksum(data []byte, buffers []pacBuffer, typeID uint32, key types.En
 	}
 	etype, err := crypto.GetEtype(key.KeyType)
 	if err != nil {
-		return err
+		return fmt.Errorf("select enctype for PAC checksum buffer %d: %w", typeID, err)
 	}
 	checksum, err := etype.GetChecksumHash(key.KeyValue, input, keyusage.KERB_NON_KERB_CKSUM_SALT)
 	if err != nil {
-		return err
+		return fmt.Errorf("compute PAC checksum buffer %d: %w", typeID, err)
 	}
 	if len(checksum) != len(signature) {
 		return fmt.Errorf("checksum length is %d, expected %d", len(checksum), len(signature))

@@ -5,8 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/jcmturner/rpc/v2/mstypes"
-
 	"github.com/otuschhoff/gokrb5/v8/iana/chksumtype"
 )
 
@@ -29,6 +27,11 @@ type SignatureData struct {
 	RODCIdentifier    uint16 // A 16-bit unsigned integer value in little-endian format that contains the first 16 bits of the key version number ([MS-KILE] section 3.1.5.8) when the KDC is an RODC. When the KDC is not an RODC, this field does not exist.
 	HasRODCIdentifier bool
 }
+
+const (
+	signatureTypeLength  = 4
+	rodcIdentifierLength = 2
+)
 
 func signatureLength(signatureType uint32) (int, error) {
 	switch signatureType {
@@ -54,59 +57,49 @@ func (k SignatureData) Marshal() ([]byte, error) {
 	if len(k.Signature) != length {
 		return nil, fmt.Errorf("PAC signature length is %d, expected %d", len(k.Signature), length)
 	}
-	size := 4 + length
+	size := signatureTypeLength + length
 	if k.HasRODCIdentifier || k.RODCIdentifier != 0 {
-		size += 2
+		size += rodcIdentifierLength
 	}
 	b := make([]byte, size)
 	binary.LittleEndian.PutUint32(b, k.SignatureType)
-	copy(b[4:], k.Signature)
+	copy(b[signatureTypeLength:], k.Signature)
 	if k.HasRODCIdentifier || k.RODCIdentifier != 0 {
-		binary.LittleEndian.PutUint16(b[4+length:], k.RODCIdentifier)
+		binary.LittleEndian.PutUint16(b[signatureTypeLength+length:], k.RODCIdentifier)
 	}
 	return b, nil
 }
 
 // Unmarshal bytes into the SignatureData struct
 func (k *SignatureData) Unmarshal(b []byte) ([]byte, error) {
-	var rb []byte
 	var err error
-	r := mstypes.NewReader(bytes.NewReader(b))
-
-	k.SignatureType, err = r.Uint32()
+	k.SignatureType, err = readPACUint32(bytes.NewReader(b), "PAC signature type")
 	if err != nil {
 		return nil, err
 	}
 
-	c, err := signatureLength(k.SignatureType)
+	length, err := signatureLength(k.SignatureType)
 	if err != nil {
 		return nil, err
 	}
-	if len(b) != 4+c && len(b) != 4+c+2 {
+	end := signatureTypeLength + length
+	if end > len(b) {
 		return nil, fmt.Errorf("invalid PAC signature data length %d", len(b))
 	}
-	k.Signature, err = r.ReadBytes(c)
-	if err != nil {
-		return nil, err
+	tail := b[end:]
+	if len(tail) != 0 && len(tail) != rodcIdentifierLength {
+		return nil, fmt.Errorf("invalid PAC signature data length %d", len(b))
 	}
-
-	// When the KDC is not an Read Only Domain Controller (RODC), this field does not exist.
-	if len(b) >= 4+c+2 {
-		k.RODCIdentifier, err = r.Uint16()
-		if err != nil {
-			return nil, err
-		}
+	k.Signature = bytes.Clone(b[signatureTypeLength:end])
+	if len(tail) == rodcIdentifierLength {
+		k.RODCIdentifier = binary.LittleEndian.Uint16(tail)
 		k.HasRODCIdentifier = true
 	} else {
 		k.RODCIdentifier = 0
 		k.HasRODCIdentifier = false
 	}
 
-	// Create bytes with zeroed signature needed for checksum verification
-	rb = make([]byte, len(b))
-	copy(rb, b)
-	z := make([]byte, len(b))
-	copy(rb[4:4+c], z)
-
-	return rb, err
+	zeroed := bytes.Clone(b)
+	clear(zeroed[signatureTypeLength:end])
+	return zeroed, nil
 }

@@ -3,6 +3,8 @@ package pac
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jcmturner/rpc/v2/mstypes"
@@ -125,6 +127,21 @@ func TestPACMarshalRejectsInvalidMetadata(t *testing.T) {
 	value.AttributesInfo = &AttributesInfo{FlagsLength: 1}
 	if _, err := value.Marshal(); err == nil {
 		t.Fatal("typed buffer marshal failure was ignored")
+	}
+}
+
+func TestPACSignPreservesEnctypeLookupError(t *testing.T) {
+	t.Parallel()
+
+	var key types.EncryptionKey
+	key.KeyType = 12345
+	encoded, err := minimalPAC().Sign(key, key)
+	if encoded != nil || err == nil || !strings.HasPrefix(err.Error(), "server key: select PAC signing enctype:") {
+		t.Fatalf("want contextual signing key error with no output, got %v", err)
+	}
+	cause := errors.Unwrap(errors.Unwrap(err))
+	if cause == nil || !strings.Contains(cause.Error(), "unsupported EType") {
+		t.Fatalf("signing enctype lookup cause was lost: %v", err)
 	}
 }
 

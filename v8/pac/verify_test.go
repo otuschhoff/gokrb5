@@ -2,6 +2,7 @@ package pac
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,21 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
+
+func TestVerifyPACChecksumEnctypeError(t *testing.T) {
+	t.Parallel()
+
+	var signature SignatureData
+	signature.SignatureType = 12345
+	var unusedKey types.EncryptionKey
+	err := verifyPACChecksum(&signature, unusedKey, nil, "service")
+	if err == nil || !strings.HasPrefix(err.Error(), "select PAC service checksum algorithm:") {
+		t.Fatalf("want contextual checksum lookup error, got %v", err)
+	}
+	if cause := errors.Unwrap(err); cause == nil || !strings.Contains(cause.Error(), "unsupported checksum type") {
+		t.Fatalf("checksum lookup cause was lost: %v", err)
+	}
+}
 
 func TestPACVerifyOptions(t *testing.T) {
 	serverKey := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: bytes.Repeat([]byte{0x51}, 16)}

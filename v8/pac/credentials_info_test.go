@@ -3,6 +3,8 @@ package pac
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -24,24 +26,31 @@ func TestNTLMSupplementalCredUnmarshal(t *testing.T) {
 		t.Fatal(err)
 	}
 	if credential.Flags != 1<<24|1<<25 || !bytes.Equal(credential.LMPassword, lm) || !bytes.Equal(credential.NTPassword, nt) {
-		t.Fatalf("NTLM credential = %+v", credential)
+		t.Fatal("supplemental credential fixture did not round-trip")
 	}
 
 	tests := []struct {
-		name string
-		data []byte
+		name  string
+		data  []byte
+		want  string
+		cause error
 	}{
-		{"missing version", nil},
-		{"nonzero version", []byte{1, 0, 0, 0}},
-		{"missing flags", []byte{0, 0, 0, 0}},
-		{"short LM password", append([]byte{0, 0, 0, 0, 0, 0, 0, 1}, make([]byte, 15)...)},
-		{"short NT password", append([]byte{0, 0, 0, 0, 0, 0, 0, 2}, make([]byte, 15)...)},
+		{name: "missing version", data: nil, want: "read supplemental credential version", cause: io.EOF},
+		{name: "nonzero version", data: []byte{1, 0, 0, 0}, want: "version is not zero", cause: nil},
+		{name: "missing flags", data: make([]byte, 4), want: "read supplemental credential flags", cause: io.EOF},
+		{
+			name: "short lm field", data: append([]byte{0, 0, 0, 0, 0, 0, 0, 1}, make([]byte, 15)...),
+			want: "read supplemental LM credential", cause: io.ErrUnexpectedEOF,
+		},
+		{
+			name: "short nt field", data: append([]byte{0, 0, 0, 0, 0, 0, 0, 2}, make([]byte, 15)...),
+			want: "read supplemental NT credential", cause: io.ErrUnexpectedEOF,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if err := new(NTLMSupplementalCred).Unmarshal(test.data); err == nil {
-				t.Fatal("malformed credential was accepted")
-			}
+			err := new(NTLMSupplementalCred).Unmarshal(test.data)
+			requireCredentialError(t, err, test.want, test.cause)
 		})
 	}
 	if isFlagSet(0, NTLMSupCredLMOWF) || !isFlagSet(1<<24, NTLMSupCredLMOWF) {
@@ -52,21 +61,22 @@ func TestNTLMSupplementalCredUnmarshal(t *testing.T) {
 func TestCredentialInfoFailurePaths(t *testing.T) {
 	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: bytes.Repeat([]byte{1}, 16)}
 	tests := []struct {
-		name string
-		data []byte
-		want string
+		name  string
+		data  []byte
+		want  string
+		cause error
 	}{
-		{"missing version", nil, "EOF"},
-		{"nonzero version", []byte{1, 0, 0, 0}, "version is not zero"},
-		{"missing etype", []byte{0, 0, 0, 0}, "EOF"},
-		{"wrong key type", []byte{0, 0, 0, 0, 23, 0, 0, 0}, "not the correct type"},
-		{"invalid ciphertext", []byte{0, 0, 0, 0, 17, 0, 0, 0, 1}, "decrypting"},
+		{name: "missing version", data: nil, want: "read PAC credentials version", cause: io.EOF},
+		{name: "nonzero version", data: []byte{1, 0, 0, 0}, want: "version is not zero", cause: nil},
+		{name: "missing etype", data: make([]byte, 4), want: "read PAC credentials enctype", cause: io.EOF},
+		{name: "partial etype", data: make([]byte, 7), want: "read PAC credentials enctype", cause: io.ErrUnexpectedEOF},
+		{name: "wrong key type", data: []byte{0, 0, 0, 0, 23, 0, 0, 0}, want: "not the correct type", cause: nil},
+		{name: "invalid ciphertext", data: []byte{0, 0, 0, 0, 17, 0, 0, 0, 1}, want: "decrypting", cause: nil},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if err := new(CredentialsInfo).Unmarshal(test.data, key); err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("error = %v, want containing %q", err, test.want)
-			}
+			err := new(CredentialsInfo).Unmarshal(test.data, key)
+			requireCredentialError(t, err, test.want, test.cause)
 		})
 	}
 
@@ -79,5 +89,36 @@ func TestCredentialInfoFailurePaths(t *testing.T) {
 	}
 	if err := new(SECPKGSupplementalCred).Unmarshal([]byte{1}); err == nil || !strings.Contains(err.Error(), "unmarshaling") {
 		t.Fatalf("supplemental credential error = %v", err)
+	}
+}
+
+func requireCredentialError(t *testing.T, err error, context string, cause error) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), context) {
+		t.Fatalf("want contextual failure %q, got %v", context, err)
+	}
+	if cause != nil && !errors.Is(err, cause) {
+		t.Errorf("error lost cause %v: %v", cause, err)
+	}
+}
+
+func TestCredentialInfoReadsFullOpaquePayload(t *testing.T) {
+	t.Parallel()
+
+	const headerLength = 8
+	payload := make([]byte, headerLength+8192)
+	binary.LittleEndian.PutUint32(payload[4:], uint32(etypeID.AES128_CTS_HMAC_SHA1_96))
+	payload[headerLength] = 1
+	var info CredentialsInfo
+	var missingKey types.EncryptionKey
+	if err := info.Unmarshal(payload, missingKey); err == nil || !strings.Contains(err.Error(), "not the correct type") {
+		t.Fatalf("expected key rejection after reading the payload, got %v", err)
+	}
+	if !bytes.Equal(info.PACCredentialDataEncrypted, payload[headerLength:]) {
+		t.Fatal("credential payload was truncated")
+	}
+	payload[headerLength] = 2
+	if info.PACCredentialDataEncrypted[0] != 1 {
+		t.Fatal("credential payload aliases input")
 	}
 }

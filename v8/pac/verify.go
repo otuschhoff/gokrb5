@@ -133,7 +133,7 @@ func verifyPACChecksum(signature *SignatureData, key types.EncryptionKey, data [
 	}
 	etype, err := crypto.GetChksumEtype(checksumType)
 	if err != nil {
-		return err
+		return fmt.Errorf("select PAC %s checksum algorithm: %w", name, err)
 	}
 	if !etype.VerifyChecksum(key.KeyValue, data, signature.Signature, keyusage.KERB_NON_KERB_CKSUM_SALT) {
 		return fmt.Errorf("PAC %s checksum verification failed", name)

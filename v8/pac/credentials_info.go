@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/jcmturner/rpc/v2/mstypes"
-
 	"github.com/otuschhoff/gokrb5/v8/crypto"
 	"github.com/otuschhoff/gokrb5/v8/iana/keyusage"
 	"github.com/otuschhoff/gokrb5/v8/pac/internal/ndr"
@@ -26,36 +24,24 @@ type CredentialsInfo struct {
 
 // Unmarshal bytes into the CredentialsInfo struct
 func (c *CredentialsInfo) Unmarshal(b []byte, k types.EncryptionKey) error {
-	var
-	// The CredentialsInfo structure is a simple structure that is not NDR-encoded.
-	err error
-
-	r := mstypes.NewReader(bytes.NewReader(b))
-
-	c.Version, err = r.Uint32()
+	var err error
+	r := bytes.NewReader(b)
+	c.Version, err = readPACUint32(r, "PAC credentials version")
 	if err != nil {
 		return err
 	}
 	if c.Version != 0 {
-		err = errors.New("credentials info version is not zero")
-		return err
+		return errors.New("credentials info version is not zero")
 	}
-	c.EType, err = r.Uint32()
+	c.EType, err = readPACUint32(r, "PAC credentials enctype")
 	if err != nil {
 		return err
 	}
-	c.PACCredentialDataEncrypted, err = r.ReadBytes(len(b) - 8)
+	c.PACCredentialDataEncrypted, err = readPACBytes(r, r.Len(), "PAC encrypted credential data")
 	if err != nil {
-		err = fmt.Errorf("error reading PAC Credetials Data: %w", err)
 		return err
 	}
-
-	err = c.DecryptEncPart(k)
-	if err != nil {
-		err = fmt.Errorf("error decrypting PAC Credentials Data: %w", err)
-		return err
-	}
-	return err
+	return c.DecryptEncPart(k)
 }
 
 // DecryptEncPart decrypts the encrypted part of the CredentialsInfo.
@@ -68,13 +54,9 @@ func (c *CredentialsInfo) DecryptEncPart(k types.EncryptionKey) error {
 	}
 	pt, err := crypto.DecryptMessage(c.PACCredentialDataEncrypted, k, keyusage.KERB_NON_KERB_SALT)
 	if err != nil {
-		return err
+		return fmt.Errorf("error decrypting PAC credential data: %w", err)
 	}
-	err = c.PACCredentialData.Unmarshal(pt)
-	if err != nil {
-		return err
-	}
-	return nil
+	return c.PACCredentialData.Unmarshal(pt)
 }
 
 // CredentialData implements https://msdn.microsoft.com/en-us/library/cc237952.aspx
@@ -85,11 +67,9 @@ type CredentialData struct {
 
 // Unmarshal converts the bytes provided into a CredentialData type.
 func (c *CredentialData) Unmarshal(b []byte) error {
-	var err error
 	dec := ndr.NewDecoder(bytes.NewReader(b))
-	err = dec.Decode(c)
-	if err != nil {
-		err = fmt.Errorf("error unmarshaling KerbValidationInfo: %w", err)
+	if err := dec.Decode(c); err != nil {
+		return fmt.Errorf("error unmarshaling PAC credential data: %w", err)
 	}
-	return err
+	return nil
 }

@@ -260,7 +260,7 @@ func TestPACProcessingCredentialDecryptionFailureState(t *testing.T) {
 	expected := value
 	seedProcessedPAC(&value)
 	cause := new(CredentialsInfo).Unmarshal(payload, key)
-	if cause == nil || cause.Error() != "error decrypting PAC Credentials Data: error unmarshaling KerbValidationInfo: missing conformant array maximum" {
+	if cause == nil || cause.Error() != "error unmarshaling PAC credential data: missing conformant array maximum" {
 		t.Fatalf("credential fixture error = %v", cause)
 	}
 	err = value.ProcessPACInfoBuffersWithCredentialKey(types.EncryptionKey{}, key, nil)

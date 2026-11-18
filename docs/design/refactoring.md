@@ -824,6 +824,29 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 51 (2026-11-18, PAC error contracts; Q-03):
+PAC headers and buffer tables use checked little-endian decoding. Credential
+and signature reads retain `io.EOF` or `io.ErrUnexpectedEOF` with the failed
+field identified. Credential parsing reads the entire opaque payload instead
+of rejecting a large payload after a short buffered read. Decryption, decoded
+credential parsing, and checksum failures identify their stage without
+including credential or checksum bytes. Valid wire encodings, signature
+inputs, and checksum validation order are unchanged.
+
+Both module suites and changed-line lint gates passed. PAC, internal NDR,
+messages, service, and SPNEGO passed focused race, build, and vet checks.
+`FuzzPACUnmarshal` and `FuzzPACProcessingInfoBuffers` passed 60-second runs
+(1,840,410 and 581,642 executions). Cross-package v8 statement coverage was
+87.0%. The PAC suite passed on Linux/386, and internal NDR built on that
+target; the unchanged NDR test suite did not compile on 386 because a test
+compares an `int` to `math.MaxUint32`. Live interoperability was not run;
+Docker daemon access was denied.
+
+The canonical v8 total fell from 831 to 810 (`wrapcheck`: 259 to 238).
+All 21 `wrapcheck` reports in the PAC package were resolved. The independent
+internal NDR package was not changed. There were no new canonical findings
+and zero v8 gosec findings.
+
 Slice 50 (2026-11-18, service authentication error contracts; Q-03):
 Service AP-REQ verification preserves concrete KRB-ERROR values and their
 wire codes while adding context to other verification failures. Nil requests

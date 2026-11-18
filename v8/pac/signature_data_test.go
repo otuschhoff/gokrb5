@@ -3,6 +3,9 @@ package pac
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -62,6 +65,16 @@ func TestSignatureDataStrictMarshal(t *testing.T) {
 	}
 	if _, err := (&SignatureData{SignatureType: uint32(chksumtype.HMAC_SHA1_96_AES128)}).Marshal(); err == nil {
 		t.Fatal("invalid signature length was accepted")
+	}
+}
+
+func TestSignatureDataPreservesTruncatedTypeCause(t *testing.T) {
+	t.Parallel()
+
+	result, err := new(SignatureData).Unmarshal([]byte{0})
+	if result != nil || err == nil ||
+		!errors.Is(err, io.ErrUnexpectedEOF) || !strings.HasPrefix(err.Error(), "read PAC signature type:") {
+		t.Fatalf("wanted truncated signature type cause, got %v", err)
 	}
 }
 

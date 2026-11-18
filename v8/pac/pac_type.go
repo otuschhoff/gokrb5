@@ -2,12 +2,11 @@ package pac
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
 	"math"
-
-	"github.com/jcmturner/rpc/v2/mstypes"
 
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
@@ -125,23 +124,13 @@ type InfoBuffer struct {
 
 // Unmarshal bytes into the PACType struct
 func (pac *PACType) Unmarshal(b []byte) error {
-	var err error
 	if len(b) < 8 {
 		return fmt.Errorf("%w: header is %d bytes, want at least 8", ErrPACMalformed, len(b))
 	}
 	pac.Data = b
-	zb := make([]byte, len(b))
-	copy(zb, b)
-	pac.ZeroSigData = zb
-	r := mstypes.NewReader(bytes.NewReader(b))
-	pac.CBuffers, err = r.Uint32()
-	if err != nil {
-		return err
-	}
-	pac.Version, err = r.Uint32()
-	if err != nil {
-		return err
-	}
+	pac.ZeroSigData = bytes.Clone(b)
+	pac.CBuffers = binary.LittleEndian.Uint32(b[:4])
+	pac.Version = binary.LittleEndian.Uint32(b[4:8])
 	if pac.Version != 0 {
 		return fmt.Errorf("%w: unsupported version %d", ErrPACMalformed, pac.Version)
 	}
@@ -153,19 +142,8 @@ func (pac *PACType) Unmarshal(b []byte) error {
 		return fmt.Errorf("%w: buffer count %d exceeds table capacity %d", ErrPACMalformed, pac.CBuffers, maxBuffers)
 	}
 	buf := make([]InfoBuffer, int(pac.CBuffers))
-	for i := range buf {
-		buf[i].ULType, err = r.Uint32()
-		if err != nil {
-			return err
-		}
-		buf[i].CBBufferSize, err = r.Uint32()
-		if err != nil {
-			return err
-		}
-		buf[i].Offset, err = r.Uint64()
-		if err != nil {
-			return err
-		}
+	if _, err := binary.Decode(b[8:], binary.LittleEndian, buf); err != nil {
+		return fmt.Errorf("%w: decode buffer table: %w", ErrPACMalformed, err)
 	}
 	pac.Buffers = buf
 	return nil

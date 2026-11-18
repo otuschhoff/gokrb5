@@ -29,32 +29,31 @@ type NTLMSupplementalCred struct {
 // Unmarshal converts the bytes provided into a NTLMSupplementalCred.
 func (c *NTLMSupplementalCred) Unmarshal(b []byte) error {
 	var err error
-	r := mstypes.NewReader(bytes.NewReader(b))
-	c.Version, err = r.Uint32()
+	r := bytes.NewReader(b)
+	c.Version, err = readPACUint32(r, "supplemental credential version")
 	if err != nil {
 		return err
 	}
 	if c.Version != 0 {
-		err = errors.New("NTLMSupplementalCred version is not zero")
-		return err
+		return errors.New("NTLMSupplementalCred version is not zero")
 	}
-	c.Flags, err = r.Uint32()
+	c.Flags, err = readPACUint32(r, "supplemental credential flags")
 	if err != nil {
 		return err
 	}
 	if isFlagSet(c.Flags, NTLMSupCredLMOWF) {
-		c.LMPassword, err = r.ReadBytes(16)
+		c.LMPassword, err = readPACBytes(r, 16, "supplemental LM credential")
 		if err != nil {
 			return err
 		}
 	}
 	if isFlagSet(c.Flags, NTLMSupCredNTOWF) {
-		c.NTPassword, err = r.ReadBytes(16)
+		c.NTPassword, err = readPACBytes(r, 16, "supplemental NT credential")
 		if err != nil {
 			return err
 		}
 	}
-	return err
+	return nil
 }
 
 // isFlagSet tests if a flag is set in the uint32 little endian flag
