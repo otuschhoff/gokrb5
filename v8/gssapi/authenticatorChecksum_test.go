@@ -9,6 +9,18 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestGSSWireLengthBounds(t *testing.T) {
+	if _, err := gssUint16Length("test", -1); err == nil {
+		t.Fatal("negative uint16 length accepted")
+	}
+	if _, err := gssUint16Length("test", 1<<16); err == nil {
+		t.Fatal("uint16 overflow accepted")
+	}
+	if _, err := gssUint32Length("test", -1); err == nil {
+		t.Fatal("negative uint32 length accepted")
+	}
+}
+
 func TestChannelBindingsMD5Hash(t *testing.T) {
 	bindings := ChannelBindings{
 		InitiatorAddress: ChannelBindingAddress{AddressType: 2, Address: []byte{127, 0, 0, 1}},

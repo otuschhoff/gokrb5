@@ -31,7 +31,9 @@ func NewAuthenticatorChecksum(bindings *ChannelBindings, flags ...int) Authentic
 		checksum.Bnd = bindings.MD5Hash()
 	}
 	for _, flag := range flags {
-		checksum.Flags |= uint32(flag)
+		if flag >= 0 && uint64(flag) <= uint64(^uint32(0)) {
+			checksum.Flags |= uint32(flag) // #nosec G115 -- range checked above.
+		}
 	}
 	return checksum
 }
@@ -50,12 +52,20 @@ func (c AuthenticatorChecksum) Marshal() ([]byte, error) {
 	binary.LittleEndian.PutUint32(b[20:24], c.Flags)
 	if c.Flags&ContextFlagDeleg != 0 {
 		b = appendUint16LE(b, c.DelegationOption)
-		b = appendUint16LE(b, uint16(len(c.Deleg)))
+		delegLength, err := gssUint16Length("delegation", len(c.Deleg))
+		if err != nil {
+			return nil, err
+		}
+		b = appendUint16LE(b, delegLength)
 		b = append(b, c.Deleg...)
 	}
 	for _, extension := range c.Exts {
 		b = appendUint32LE(b, extension.Type)
-		b = appendUint32LE(b, uint32(len(extension.Data)))
+		length, err := gssUint32Length("checksum extension", len(extension.Data))
+		if err != nil {
+			return nil, err
+		}
+		b = appendUint32LE(b, length)
 		b = append(b, extension.Data...)
 	}
 	return b, nil

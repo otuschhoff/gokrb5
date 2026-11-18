@@ -824,6 +824,16 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 30 (2026-11-18, GSS token wire ranges): GSSAPI G115 findings are zero.
+Authenticator extension, channel-binding, delegation, checksum, rotation,
+and wrap-token lengths use checked uint16/uint32 helpers. Context flags are
+accepted only within the uint32 protocol range. Invalid oversized lengths now
+return errors where public marshal APIs permit it; channel-binding hash
+construction fails closed to an empty digest if an input somehow exceeds the
+wire length. Regressions preserve existing byte-exact token vectors. GSSAPI
+G115 falls 8 to 0, total G115 falls 28 to 20, gosec falls 112 to 104, and
+canonical findings fall 1,098 to 1,091; coverage remains 86.6%.
+
 Slice 29 (2026-11-18, message and client wire ranges): messages/client G115
 findings are zero. Authenticator key usages use uint32 protocol constants
 directly; S4U and FAST nonce values are checked before protocol conversion;

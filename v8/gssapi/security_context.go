@@ -73,7 +73,10 @@ func (context *SecurityContext) Wrap(message []byte, confidential bool) ([]byte,
 		return append(header, ciphertext...), nil
 	}
 
-	checksumLength := uint16(etype.GetHMACBitLength() / 8)
+	checksumLength, err := gssUint16Length("checksum", etype.GetHMACBitLength()/8)
+	if err != nil {
+		return nil, err
+	}
 	header = wrapHeader(flags, checksumLength, 0, context.sendSequence)
 	checksumHeader := checksumWrapHeader(header)
 	checksum, err := etype.GetChecksumHash(context.key.KeyValue, append(append([]byte(nil), message...), checksumHeader...), context.sendSealUsage())

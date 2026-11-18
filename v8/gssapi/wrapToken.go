@@ -192,10 +192,14 @@ func NewInitiatorWrapToken(payload []byte, key types.EncryptionKey) (*WrapToken,
 		return nil, err
 	}
 
+	checksumLength, err := gssUint16Length("wrap checksum", encType.GetHMACBitLength()/8)
+	if err != nil {
+		return nil, err
+	}
 	token := WrapToken{
 		Flags: 0x00, // all zeroed out (this is a token sent by the initiator)
 		// Checksum size: length of output of the HMAC function, in bytes.
-		EC:        uint16(encType.GetHMACBitLength() / 8),
+		EC:        checksumLength,
 		RRC:       0,
 		SndSeqNum: 0,
 		Payload:   payload,

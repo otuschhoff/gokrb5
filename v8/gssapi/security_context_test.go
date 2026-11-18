@@ -87,7 +87,9 @@ func TestSecurityContextSignOnlyConnection(t *testing.T) {
 	body := token[HdrLen:]
 	rotation := len(body) + 7
 	rotateRight(body, rotation)
-	binary.BigEndian.PutUint16(token[6:8], uint16(rotation))
+	rotation16, err := gssUint16Length("rotation", rotation)
+	require.NoError(t, err)
+	binary.BigEndian.PutUint16(token[6:8], rotation16)
 	tampered := append([]byte(nil), token...)
 	tampered[HdrLen+7] ^= 1
 	_, _, err = acceptor.Unwrap(tampered)

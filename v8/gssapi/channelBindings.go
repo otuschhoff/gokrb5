@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash"
 )
 
@@ -26,18 +27,41 @@ type ChannelBindings struct {
 }
 
 // MD5Hash returns the RFC 4121 channel-binding digest.
+func gssUint32Length(name string, length int) (uint32, error) {
+	if length < 0 || uint64(length) > uint64(^uint32(0)) { // #nosec G115 -- nonnegative and bounded before conversion.
+		return 0, fmt.Errorf("%s length %d exceeds uint32 range", name, length)
+	}
+	return uint32(length), nil // #nosec G115 -- bounded by uint32 range above.
+}
+
+func gssUint16Length(name string, length int) (uint16, error) {
+	if length < 0 || length > int(^uint16(0)) {
+		return 0, fmt.Errorf("%s length %d exceeds uint16 range", name, length)
+	}
+	return uint16(length), nil
+}
+
+// MD5Hash returns the RFC 4121 channel-binding digest.
 func (c ChannelBindings) MD5Hash() [md5.Size]byte {
 	b := make([]byte, 0, 20+len(c.InitiatorAddress.Address)+len(c.AcceptorAddress.Address)+len(c.ApplicationData))
 	b = appendChannelBindingAddress(b, c.InitiatorAddress)
 	b = appendChannelBindingAddress(b, c.AcceptorAddress)
-	b = appendUint32LE(b, uint32(len(c.ApplicationData)))
+	applicationLength, err := gssUint32Length("application data", len(c.ApplicationData))
+	if err != nil {
+		return md5.Sum(nil)
+	}
+	b = appendUint32LE(b, applicationLength)
 	b = append(b, c.ApplicationData...)
 	return md5.Sum(b)
 }
 
 func appendChannelBindingAddress(b []byte, address ChannelBindingAddress) []byte {
 	b = appendUint32LE(b, address.AddressType)
-	b = appendUint32LE(b, uint32(len(address.Address)))
+	length, err := gssUint32Length("channel binding address", len(address.Address))
+	if err != nil {
+		return b
+	}
+	b = appendUint32LE(b, length)
 	return append(b, address.Address...)
 }
 
