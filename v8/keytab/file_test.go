@@ -46,7 +46,7 @@ func setEnv(t *testing.T, key, value string) {
 func TestWriteFileAtomicAndMode0600(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "service.keytab")
-	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	kt := New()

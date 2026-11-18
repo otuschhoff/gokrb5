@@ -1,8 +1,9 @@
 package config
 
 import (
+	crand "crypto/rand"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"net"
 	"strconv"
 	"strings"
@@ -156,12 +157,25 @@ func firstServiceSRV(services []string, proto, name string) (int, map[int]*net.S
 }
 
 func randServOrder(ks []string) map[int]string {
-	kdcs := make(map[int]string, len(ks))
 	if len(ks) == 0 {
-		return kdcs
+		return map[int]string{}
 	}
-	for i, index := range rand.Perm(len(ks)) {
-		kdcs[i+1] = ks[index]
+	ordered := append(make([]string, 0, len(ks)), ks...)
+	for i := len(ordered) - 1; i > 0; i-- {
+		index, err := crand.Int(crand.Reader, big.NewInt(int64(i+1)))
+		if err != nil {
+			return sequentialKDCOrder(ks)
+		}
+		j := int(index.Int64())
+		ordered[i], ordered[j] = ordered[j], ordered[i]
+	}
+	return sequentialKDCOrder(ordered)
+}
+
+func sequentialKDCOrder(ks []string) map[int]string {
+	kdcs := make(map[int]string, len(ks))
+	for i, kdc := range ks {
+		kdcs[i+1] = kdc
 	}
 	return kdcs
 }

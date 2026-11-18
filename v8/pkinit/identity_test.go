@@ -113,7 +113,7 @@ func TestPEMIdentityFormatsAndFailures(t *testing.T) {
 }
 
 func TestPrivateKeyFormatsAndIdentityPolicies(t *testing.T) {
-	rsaKey, err := rsa.GenerateKey(rand.Reader, 1024)
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 	signer, err := parsePrivateKey(x509.MarshalPKCS1PrivateKey(rsaKey))
 	require.NoError(t, err)

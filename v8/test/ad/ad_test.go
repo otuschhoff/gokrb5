@@ -192,7 +192,7 @@ func TestADLocalDiscoveryHelpers(t *testing.T) {
 
 func TestFindRepoRootFromGitHubWorkspace(t *testing.T) {
 	root := t.TempDir()
-	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	wd, err := os.Getwd()
@@ -201,7 +201,7 @@ func TestFindRepoRootFromGitHubWorkspace(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(wd) }()
 	other := filepath.Join(t.TempDir(), "outside")
-	if ierr := os.MkdirAll(other, 0o755); ierr != nil {
+	if ierr := os.MkdirAll(other, 0o700); ierr != nil {
 		t.Fatal(ierr)
 	}
 	if ierr := os.Chdir(other); ierr != nil {

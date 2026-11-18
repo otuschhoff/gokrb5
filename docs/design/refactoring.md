@@ -824,6 +824,15 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 35 (2026-11-18, security hygiene): crypto-backed KDC ordering and
+safe fixture permissions. KDC service ordering now uses unbiased `crypto/rand`
+shuffle choices and falls back to the original ordering if the secure source
+fails, without mutating config slices. RSA private-key format coverage uses
+2048 bits, and temporary keytab/workspace fixtures use 0600/0700 permissions.
+The random-order helper handles nil/empty slices without introducing NilAway
+flows. G404/G403/G306/G301 fall from 5 to 0, gosec falls 77 to 72, and
+canonical findings fall 1,062 to 1,056; coverage remains 86.5%.
+
 Slice 34 (2026-11-18, SPNEGO exchange cookie attributes): cookie G124
 findings are zero. SPNEGO exchange creation and expiration now share one
 cookie constructor, consistently setting `Path=/`, `HttpOnly`, and
