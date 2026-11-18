@@ -252,8 +252,13 @@ func TestGetEncryptionKeyRejectsKVNOOverflow(t *testing.T) {
 	if strconv.IntSize == 32 {
 		t.Skip("int cannot exceed uint32 on this platform")
 	}
+	// Parse MaxUint32 + 1 at runtime so the test still compiles on 32-bit systems.
+	kvno, err := strconv.Atoi("4294967296")
+	if err != nil {
+		t.Fatal(err)
+	}
 	kt := New()
-	_, _, err := kt.GetEncryptionKey(types.PrincipalName{}, "", int(int64(^uint32(0))+1), 17)
+	_, _, err = kt.GetEncryptionKey(types.PrincipalName{}, "", kvno, 17)
 	if !errors.Is(err, ErrKVNONotFound) {
 		t.Fatalf("GetEncryptionKey overflow error = %v", err)
 	}
@@ -411,14 +416,9 @@ func TestUnmarshalRejectsInvalidComponentCount(t *testing.T) {
 		count   int16
 		endian  binary.ByteOrder
 	}{
-		"v2 zero":     {2, 0, binary.BigEndian},
-		"v2 negative": {2, -1, binary.BigEndian},
-		"v1 realm only": {1, 1, func() binary.ByteOrder {
-			if isNativeEndianLittle() {
-				return binary.LittleEndian
-			}
-			return binary.BigEndian
-		}()},
+		"v2 zero":       {version: 2, count: 0, endian: binary.BigEndian},
+		"v2 negative":   {version: 2, count: -1, endian: binary.BigEndian},
+		"v1 realm only": {version: 1, count: 1, endian: binary.NativeEndian},
 	} {
 		t.Run(name, func(t *testing.T) {
 			b := []byte{5, test.version, 0, 0, 0, 2, 0, 0}

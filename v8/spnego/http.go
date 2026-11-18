@@ -535,13 +535,16 @@ type contextKey string
 const (
 	// spnegoNegTokenRespKRBAcceptCompleted - The response on successful authentication always has this header. Capturing as const so we don't have marshaling and encoding overhead.
 	spnegoNegTokenRespKRBAcceptCompleted = "Negotiate oRQwEqADCgEAoQsGCSqGSIb3EgECAg=="
-	// spnegoNegTokenRespReject - The response on a failed authentication always has this rejection header. Capturing as const so we don't have marshaling and encoding overhead.
+	// spnegoNegTokenRespReject is the fixed rejection header for failed authentication.
+	// #nosec G101 -- the encoded response contains only the public SPNEGO reject state.
 	spnegoNegTokenRespReject = "Negotiate oQcwBaADCgEC"
 	// spnegoNegTokenRespIncompleteKRB5 - Response token specifying incomplete context and KRB5 as the supported mechtype.
 	spnegoNegTokenRespIncompleteKRB5 = "Negotiate oRQwEqADCgEBoQsGCSqGSIb3EgECAg=="
 	// sessionCredentials is the session value key holding the credentials jcmturner/goidentity/Identity object.
+	// #nosec G101 -- this names the session entry; the credentials are stored separately.
 	sessionCredentials = "github.com/otuschhoff/gokrb5/v8/sessionCredentials"
 	// ctxCredentials is the SPNEGO context key holding the credentials jcmturner/goidentity/Identity object.
+	// #nosec G101 -- this is a context lookup key, not the associated value.
 	ctxCredentials contextKey = "github.com/otuschhoff/gokrb5/v8/ctxCredentials"
 	// HTTPHeaderAuthRequest is the header that will hold authn/z information.
 	HTTPHeaderAuthRequest = "Authorization"

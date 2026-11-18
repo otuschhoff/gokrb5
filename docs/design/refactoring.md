@@ -824,6 +824,23 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 38 (2026-11-18, native byte order and credential false positives):
+ccache v1/v2 and keytab v1 now use `binary.NativeEndian` instead of unsafe
+pointer probes. The fixed big-endian formats and keytab v1's opposite-endian
+fallback are unchanged. A regression pins native-order precedence when both
+record lengths are plausible, complementing the existing both-invalid case
+and byte-exact fixtures for each order. The KVNO overflow test now compiles on
+32-bit hosts and skips only where the input cannot fit in `int`. Six G101
+reports are classified at their individual declarations: three lookup keys,
+one public SPNEGO rejection header, and two test-realm wire vectors. No
+literal values changed. G101 and G103 are both zero; gosec falls from 38 to
+30 and canonical findings from 1,021 to 1,013, with no added diagnostics.
+Both module test suites, the v8 race suite, the Linux/386 keytab and ccache
+tests, and both changed-line lint gates pass. Big-endian Linux/s390x test
+binaries cross-compile; they were not run locally. CI-style cross-package
+atomic coverage is 86.5%. The remaining 30 gosec findings concern
+cryptographic primitives and remain open for a separate compatibility review.
+
 Slice 37 (2026-11-18, explicit path and subprocess classification): filesystem
 and subprocess diagnostics G304/G703/G204/G702 are zero. Configuration,
 credential-cache, keytab, PKINIT identity, and test-fixture operations now mark

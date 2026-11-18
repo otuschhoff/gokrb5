@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unsafe"
 
 	"github.com/otuschhoff/gokrb5/v8/crypto"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
@@ -672,18 +671,17 @@ func keytabByteOrder(b []byte, version uint8) binary.ByteOrder {
 	if version != 1 {
 		return binary.BigEndian
 	}
-	endian := nativeByteOrder()
-	if firstRecordLengthValid(b, endian) {
-		return endian
+	if firstRecordLengthValid(b, binary.NativeEndian) {
+		return binary.NativeEndian
 	}
 	other := binary.ByteOrder(binary.BigEndian)
-	if endian == binary.BigEndian {
+	if binary.NativeEndian.Uint16([]byte{0, 1}) == 1 {
 		other = binary.LittleEndian
 	}
 	if firstRecordLengthValid(b, other) {
-		endian = other
+		return other
 	}
-	return endian
+	return binary.NativeEndian
 }
 
 // firstRecordLengthValid reports whether the bytes following the header start
@@ -1111,29 +1109,6 @@ func readSizedBytes(b []byte, p *int, e *binary.ByteOrder) ([]byte, error) {
 		return nil, err
 	}
 	return readBytes(b, p, int(l), e)
-}
-
-func isNativeEndianLittle() bool {
-	x := 0x012345678
-	p := unsafe.Pointer(&x)
-	bp := (*[4]byte)(p)
-
-	switch {
-	case bp[0] == 0x01:
-		return false
-	case bp[0]&0xff == 0x78&0xff:
-		return true
-	default:
-		// Default to big endian
-		return false
-	}
-}
-
-func nativeByteOrder() binary.ByteOrder {
-	if isNativeEndianLittle() {
-		return binary.LittleEndian
-	}
-	return binary.BigEndian
 }
 
 func validRecordLength(b []byte, endian binary.ByteOrder, remaining int) bool {

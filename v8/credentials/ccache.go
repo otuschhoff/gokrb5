@@ -9,7 +9,6 @@ import (
 	"os"
 	"strings"
 	"time"
-	"unsafe"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
 
@@ -105,11 +104,10 @@ func (c *CCache) Unmarshal(b []byte) error {
 		return errors.New("Invalid credential cache data. Keytab version is not within 1 to 4")
 	}
 	p++
-	// Version 1 or 2 of the file format uses native byte order for integer representations. Versions 3 & 4 always uses big-endian byte order
-	var endian binary.ByteOrder
-	endian = binary.BigEndian
-	if (c.Version == 1 || c.Version == 2) && isNativeEndianLittle() {
-		endian = binary.LittleEndian
+	// Versions 1 and 2 use native byte order; versions 3 and 4 use big endian.
+	var endian binary.ByteOrder = binary.BigEndian
+	if c.Version <= 2 {
+		endian = binary.NativeEndian
 	}
 	if c.Version == 4 {
 		err := parseHeader(b, &p, c, &endian)
@@ -465,20 +463,4 @@ func readBytes(b []byte, p *int, size int) ([]byte, error) {
 	r := append([]byte(nil), b[*p:*p+size]...)
 	*p += size
 	return r, nil
-}
-
-func isNativeEndianLittle() bool {
-	x := 0x012345678
-	p := unsafe.Pointer(&x)
-	bp := (*[4]byte)(p)
-
-	switch {
-	case bp[0] == 0x01:
-		return false
-	case bp[0]&0xff == 0x78&0xff:
-		return true
-	default:
-		// Default to big endian
-		return false
-	}
 }

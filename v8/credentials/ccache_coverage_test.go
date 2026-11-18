@@ -133,14 +133,10 @@ func TestCCacheV4HeaderFieldRejections(t *testing.T) {
 // TestCCacheV1V2NativeByteOrder parses minimal version 1 and 2 caches, which
 // use native byte order for integer representations.
 func TestCCacheV1V2NativeByteOrder(t *testing.T) {
-	var endian binary.ByteOrder = binary.BigEndian
-	if isNativeEndianLittle() {
-		endian = binary.LittleEndian
-	}
+	t.Parallel()
+
 	uint32Bytes := func(v uint32) []byte {
-		b := make([]byte, 4)
-		endian.PutUint32(b, v)
-		return b
+		return binary.NativeEndian.AppendUint32(nil, v)
 	}
 	dataField := func(s string) []byte {
 		return append(uint32Bytes(mustCCacheUint32(t, "string length", int64(len(s)))), s...)

@@ -98,7 +98,7 @@ func TestUnmarshalHeaderCharacterization(t *testing.T) {
 		kt := new(Keytab)
 		require.NoError(t, kt.Unmarshal([]byte{keytabFirstByte, 1}))
 		assert.Equal(t, uint8(1), kt.version)
-		assert.Equal(t, nativeByteOrder(), kt.byteOrder)
+		assert.Equal(t, binary.NativeEndian, kt.byteOrder)
 	})
 }
 
@@ -291,6 +291,19 @@ func TestUnmarshalPartialStateOnError(t *testing.T) {
 	})
 }
 
+// TestKeytabByteOrderV1PrefersNativeWhenBothPlausible checks that a plausible
+// opposite-endian length does not override an equally plausible native length.
+func TestKeytabByteOrderV1PrefersNativeWhenBothPlausible(t *testing.T) {
+	t.Parallel()
+
+	// 0x00010000 is 65536 big endian and 256 little endian. Both fit.
+	b := make([]byte, 6+65536)
+	copy(b, []byte{keytabFirstByte, 1, 0, 1, 0, 0})
+
+	order := keytabByteOrder(b, 1)
+	assert.Equal(t, binary.NativeEndian.Uint32(b[2:6]), order.Uint32(b[2:6]))
+}
+
 // TestUnmarshalV1AmbiguousByteOrderKeepsNative pins that a version 1 keytab
 // whose first record length is invalid in both byte orders keeps the native
 // order for the subsequent record parse.
@@ -301,10 +314,10 @@ func TestUnmarshalV1AmbiguousByteOrderKeepsNative(t *testing.T) {
 	kt := new(Keytab)
 	err := kt.Unmarshal(b)
 	require.Error(t, err)
-	if isNativeEndianLittle() {
-		assert.EqualError(t, err, "keytab hole at offset 2 exceeds remaining data")
-	} else {
+	if binary.NativeEndian.Uint32(b[2:6]) == 0x7fffffff {
 		assert.EqualError(t, err, "keytab record at offset 2 has length 2147483647 with only 0 bytes remaining")
+	} else {
+		assert.EqualError(t, err, "keytab hole at offset 2 exceeds remaining data")
 	}
-	assert.Equal(t, nativeByteOrder(), kt.byteOrder)
+	assert.Equal(t, binary.NativeEndian, kt.byteOrder)
 }

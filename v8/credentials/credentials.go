@@ -17,7 +17,8 @@ import (
 )
 
 const (
-	// AttributeKeyADCredentials assigned number for AD credentials.
+	// AttributeKeyADCredentials identifies the AD credentials entry in the attribute map.
+	// #nosec G101 -- this is a map key, not credential material.
 	AttributeKeyADCredentials = "gokrb5AttributeKeyADCredentials"
 	// AttributeKeyCertificateIdentity identifies certificate-authenticated peers.
 	AttributeKeyCertificateIdentity = "gokrb5AttributeKeyCertificateIdentity"
