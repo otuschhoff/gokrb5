@@ -334,11 +334,6 @@ func (d *DomainRealm) addMapping(domain, realm string) {
 	(*d)[domain] = realm
 }
 
-// Delete a domain to realm mapping.
-func (d *DomainRealm) deleteMapping(domain, realm string) {
-	delete(*d, domain)
-}
-
 // ResolveRealm resolves the kerberos realm for the specified domain name from the domain to realm mapping.
 // The most specific mapping is returned.
 func (c *Config) ResolveRealm(domainName string) string {

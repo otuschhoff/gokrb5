@@ -10,10 +10,6 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
-const (
-	verisonHex = "ff80"
-)
-
 // Request message for changing password.
 type Request struct {
 	APREQ   messages.APReq

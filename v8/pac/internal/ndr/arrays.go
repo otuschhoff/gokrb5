@@ -253,9 +253,9 @@ func (dec *Decoder) fillMultiDimensionalConformantArray(v reflect.Value, d int, 
 
 // fillVaryingArray establishes if the varying array is uni or multi dimensional and then fills the slice.
 func (dec *Decoder) fillVaryingArray(v reflect.Value, tag reflect.StructTag, def *[]deferedPtr) error {
-	d, t := sliceDimensions(v.Type())
+	d, _ := sliceDimensions(v.Type())
 	if d > 1 {
-		err := dec.fillMultiDimensionalVaryingArray(v, t, d, tag, def)
+		err := dec.fillMultiDimensionalVaryingArray(v, d, tag, def)
 		if err != nil {
 			return err
 		}
@@ -300,7 +300,7 @@ func (dec *Decoder) fillUniDimensionalVaryingArray(v reflect.Value, tag reflect.
 // fillMultiDimensionalVaryingArray fills the multi-dimensional slice value provided from varying array data.
 // The number of dimensions must be specified. This must be less than or equal to the dimensions in the slice for this
 // method not to panic.
-func (dec *Decoder) fillMultiDimensionalVaryingArray(v reflect.Value, t reflect.Type, d int, tag reflect.StructTag, def *[]deferedPtr) error {
+func (dec *Decoder) fillMultiDimensionalVaryingArray(v reflect.Value, d int, tag reflect.StructTag, def *[]deferedPtr) error {
 	// Read the offset and actual count of each dimensions from the ndr stream
 	o := make([]int, d, d)
 	l := make([]int, d, d)
@@ -357,9 +357,9 @@ func (dec *Decoder) fillMultiDimensionalVaryingArray(v reflect.Value, t reflect.
 
 // fillConformantVaryingArray establishes if the varying array is uni or multi dimensional and then fills the slice.
 func (dec *Decoder) fillConformantVaryingArray(v reflect.Value, tag reflect.StructTag, def *[]deferedPtr) error {
-	d, t := sliceDimensions(v.Type())
+	d, _ := sliceDimensions(v.Type())
 	if d > 1 {
-		err := dec.fillMultiDimensionalConformantVaryingArray(v, t, d, tag, def)
+		err := dec.fillMultiDimensionalConformantVaryingArray(v, d, tag, def)
 		if err != nil {
 			return err
 		}
@@ -402,7 +402,7 @@ func (dec *Decoder) fillUniDimensionalConformantVaryingArray(v reflect.Value, ta
 // fillMultiDimensionalConformantVaryingArray fills the multi-dimensional slice value provided from conformant varying array data.
 // The number of dimensions must be specified. This must be less than or equal to the dimensions in the slice for this
 // method not to panic.
-func (dec *Decoder) fillMultiDimensionalConformantVaryingArray(v reflect.Value, t reflect.Type, d int, tag reflect.StructTag, def *[]deferedPtr) error {
+func (dec *Decoder) fillMultiDimensionalConformantVaryingArray(v reflect.Value, d int, tag reflect.StructTag, def *[]deferedPtr) error {
 	// Read the offset and actual count of each dimensions from the ndr stream
 	m := make([]int, d, d)
 	for i := range m {

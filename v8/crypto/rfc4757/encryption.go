@@ -64,7 +64,7 @@ func DecryptMessage(key, data []byte, usage uint32, export bool, e etype.EType) 
 	}
 	checksum := data[:checksumSize]
 	ct := data[checksumSize:]
-	_, k2, k3 := deriveKeys(key, checksum, usage, export)
+	_, k2, k3 := deriveKeys(key, checksum, usage)
 
 	pt, err := DecryptData(k3, ct, e)
 	if err != nil {

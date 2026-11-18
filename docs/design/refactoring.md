@@ -709,6 +709,20 @@ after Phase 3). Keytab unit and race tests (5 repetitions), Linux/386 tests,
 the full v8 suite, Windows/Darwin builds, and the changed-line lint gate
 (0 issues, both modules) pass.
 
+Slice 3 (2026-11-18, dead code and vestigial parameters; Q-11 cleared):
+removed the unused `DomainRealm.deleteMapping` method, the misspelled unused
+`verisonHex` constant, two unused gssapi test helpers, and unused parameters
+that never influenced behavior: the `export` flag of the private rfc4757
+`deriveKeys` (the exported `EncryptMessage`/`DecryptMessage` signatures are
+unchanged; RC4-HMAC-EXP key weakening was never implemented and the flag was
+already ignored), the redundant element-type parameter of the two
+multi-dimensional NDR array fillers, and always-constant or unread test-helper
+parameters in pac and messages tests. The v8 canonical scan now reports zero
+`unused` and zero `unparam` findings, and the total is 2,435. The full v8
+suite, race tests for all touched packages, a 60-second `FuzzDecodeArrays`
+run (5.4 million executions), and the changed-line lint gate (0 issues, both
+modules) pass.
+
 Preserve v8's Go 1.26.0 floor. Validate proposed modernizations on the supported
 module toolchain and retain tagged/platform code. Measure optimizations before
 and after with existing benchmarks. Gradually reduce canonical debt to zero;

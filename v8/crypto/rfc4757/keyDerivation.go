@@ -32,7 +32,7 @@ func StringToKey(secret string) ([]byte, error) {
 	return h.Sum(nil), nil
 }
 
-func deriveKeys(key, checksum []byte, usage uint32, export bool) (k1, k2, k3 []byte) {
+func deriveKeys(key, checksum []byte, usage uint32) (k1, k2, k3 []byte) {
 	k1 = key
 	k2 = HMAC(k1, UsageToMSMsgType(usage))
 	k3 = HMAC(k2, checksum)

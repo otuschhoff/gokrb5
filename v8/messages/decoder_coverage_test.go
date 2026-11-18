@@ -426,7 +426,7 @@ func TestS4UErrorPaths(t *testing.T) {
 	t.Run("nonce mismatch", func(t *testing.T) {
 		req, err := NewS4U2SelfTGSReq(service, "EXAMPLE.COM", cfg, s4uTestTicket(), key, service, user, "EXAMPLE.COM", S4U2SelfReqOptions{})
 		require.NoError(t, err)
-		reply := s4uReply(t, uint32(req.ReqBody.Nonce)+1, key, user, true, false)
+		reply := s4uReply(t, uint32(req.ReqBody.Nonce)+1, key, user, false)
 		_, err = reply.VerifyS4UX509UserReply(req, key)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "nonce")
@@ -434,7 +434,7 @@ func TestS4UErrorPaths(t *testing.T) {
 	t.Run("checksum type mismatch", func(t *testing.T) {
 		req, err := NewS4U2SelfTGSReq(service, "EXAMPLE.COM", cfg, s4uTestTicket(), key, service, user, "EXAMPLE.COM", S4U2SelfReqOptions{})
 		require.NoError(t, err)
-		reply := s4uReply(t, uint32(req.ReqBody.Nonce), key, user, true, true)
+		reply := s4uReply(t, uint32(req.ReqBody.Nonce), key, user, true)
 		_, err = reply.VerifyS4UX509UserReply(req, key)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "checksum type")
@@ -443,7 +443,7 @@ func TestS4UErrorPaths(t *testing.T) {
 		req, err := NewS4U2SelfTGSReq(service, "EXAMPLE.COM", cfg, s4uTestTicket(), key, service, user, "EXAMPLE.COM", S4U2SelfReqOptions{})
 		require.NoError(t, err)
 		other := types.EncryptionKey{KeyType: key.KeyType, KeyValue: append([]byte{0xFF}, key.KeyValue[1:]...)}
-		reply := s4uReply(t, uint32(req.ReqBody.Nonce), other, user, true, false)
+		reply := s4uReply(t, uint32(req.ReqBody.Nonce), other, user, false)
 		_, err = reply.VerifyS4UX509UserReply(req, key)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "checksum invalid")
@@ -451,7 +451,7 @@ func TestS4UErrorPaths(t *testing.T) {
 	t.Run("valid reply accepted", func(t *testing.T) {
 		req, err := NewS4U2SelfTGSReq(service, "EXAMPLE.COM", cfg, s4uTestTicket(), key, service, user, "EXAMPLE.COM", S4U2SelfReqOptions{})
 		require.NoError(t, err)
-		reply := s4uReply(t, uint32(req.ReqBody.Nonce), key, user, true, false)
+		reply := s4uReply(t, uint32(req.ReqBody.Nonce), key, user, false)
 		userID, err := reply.VerifyS4UX509UserReply(req, key)
 		require.NoError(t, err)
 		assert.Equal(t, user.PrincipalNameString(), userID.CName.PrincipalNameString())
@@ -459,14 +459,12 @@ func TestS4UErrorPaths(t *testing.T) {
 }
 
 // s4uReply builds a TGS reply carrying a PA-S4U-X509-USER answer computed with
-// the reply key usage. ackUsage controls the reply-usage flag and wrongCksumType
+// the reply key usage and the reply-usage flag acknowledged; wrongCksumType
 // corrupts the checksum type.
-func s4uReply(t *testing.T, nonce uint32, key types.EncryptionKey, user types.PrincipalName, ackUsage, wrongCksumType bool) TGSRep {
+func s4uReply(t *testing.T, nonce uint32, key types.EncryptionKey, user types.PrincipalName, wrongCksumType bool) TGSRep {
 	t.Helper()
 	options := types.NewKrbFlags()
-	if ackUsage {
-		types.SetFlag(&options, flags.S4UOptionUseReplyKeyUsage)
-	}
+	types.SetFlag(&options, flags.S4UOptionUseReplyKeyUsage)
 	userID := types.S4UUserID{Nonce: nonce, CName: user, CRealm: "EXAMPLE.COM", Options: options}
 	userIDBytes, err := userID.Marshal()
 	require.NoError(t, err)

@@ -141,23 +141,23 @@ func TestPACSignFullChecksumOrder(t *testing.T) {
 	zeroTestSignature(t, fullInput, buffers, infoTypePACServerSignatureData)
 	zeroTestSignature(t, fullInput, buffers, infoTypePACKDCSignatureData)
 	zeroTestSignature(t, fullInput, buffers, infoTypePACFullChecksum)
-	verifyTestSignature(t, data, buffers, infoTypePACFullChecksum, kdcKey, fullInput)
+	verifyTestSignature(t, buffers, infoTypePACFullChecksum, kdcKey, fullInput)
 
 	serverInput := append([]byte(nil), data...)
 	zeroTestSignature(t, serverInput, buffers, infoTypePACServerSignatureData)
 	zeroTestSignature(t, serverInput, buffers, infoTypePACKDCSignatureData)
-	verifyTestSignature(t, data, buffers, infoTypePACServerSignatureData, serverKey, serverInput)
+	verifyTestSignature(t, buffers, infoTypePACServerSignatureData, serverKey, serverInput)
 
 	serverSignature, err := signatureBytes(data, buffers, infoTypePACServerSignatureData)
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifyTestSignature(t, data, buffers, infoTypePACKDCSignatureData, kdcKey, serverSignature)
+	verifyTestSignature(t, buffers, infoTypePACKDCSignatureData, kdcKey, serverSignature)
 
 	tampered := append([]byte(nil), serverInput...)
 	payloadOffset := binary.LittleEndian.Uint64(data[16:])
 	tampered[int(payloadOffset)] ^= 0xff
-	serverSignatureData := signatureDataForTest(t, data, buffers, infoTypePACServerSignatureData)
+	serverSignatureData := signatureDataForTest(t, buffers, infoTypePACServerSignatureData)
 	etype, _ := crypto.GetChksumEtype(int32(serverSignatureData.SignatureType))
 	if etype.VerifyChecksum(serverKey.KeyValue, tampered, serverSignatureData.Signature, keyusage.KERB_NON_KERB_CKSUM_SALT) {
 		t.Fatal("server checksum accepted tampered PAC")
@@ -173,7 +173,7 @@ func TestPACSignTicketChecksum(t *testing.T) {
 		t.Fatal(err)
 	}
 	buffers := readTestBuffers(t, data)
-	verifyTestSignature(t, data, buffers, infoTypePACTicketChecksum, kdcKey, ticketData)
+	verifyTestSignature(t, buffers, infoTypePACTicketChecksum, kdcKey, ticketData)
 }
 
 func minimalPAC() *PACType {
@@ -200,7 +200,7 @@ func readTestBuffers(t *testing.T, data []byte) []pacBuffer {
 	return buffers
 }
 
-func signatureDataForTest(t *testing.T, data []byte, buffers []pacBuffer, typeID uint32) SignatureData {
+func signatureDataForTest(t *testing.T, buffers []pacBuffer, typeID uint32) SignatureData {
 	t.Helper()
 	index := findBuffer(buffers, typeID)
 	if index < 0 {
@@ -227,9 +227,9 @@ func zeroTestSignature(t *testing.T, data []byte, buffers []pacBuffer, typeID ui
 	}
 }
 
-func verifyTestSignature(t *testing.T, data []byte, buffers []pacBuffer, typeID uint32, key types.EncryptionKey, input []byte) {
+func verifyTestSignature(t *testing.T, buffers []pacBuffer, typeID uint32, key types.EncryptionKey, input []byte) {
 	t.Helper()
-	signature := signatureDataForTest(t, data, buffers, typeID)
+	signature := signatureDataForTest(t, buffers, typeID)
 	etype, err := crypto.GetChksumEtype(int32(signature.SignatureType))
 	if err != nil {
 		t.Fatal(err)
