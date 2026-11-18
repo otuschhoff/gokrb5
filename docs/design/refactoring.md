@@ -1,8 +1,9 @@
 # v8 Code Quality and Refactoring Roadmap
 
-Status: active, authoritative remediation backlog; Phases 0-2 complete and all
-Phase 3 decomposition slices implemented, with Phase 3's MIT/Samba
-interoperability exit evidence remaining an external CI obligation.
+Status: active, authoritative remediation backlog; Phases 0-2 complete, all
+Phase 3 decomposition slices implemented, and Phase 4's local coverage items
+done (floor raised to 86.0%). Phase 3/4 interoperability and Windows exit
+evidence remains an external CI obligation.
 Assessment date: 2026-11-17.
 Scope: `v8` module (`github.com/otuschhoff/gokrb5/v8`) only. Root-module v7
 refactoring is out of scope; whole-project lint automation remains unchanged.
@@ -41,10 +42,12 @@ PAC processing, and keytab decoding. Cosmetic modernization must not precede
 correctness work or change protocol compatibility.
 
 Assessment-time v8 cross-package statement coverage was **84.4%**, versus the historical
-70.9% baseline from 2026-09-07. The CI floor remains **70.0%**: it no longer
-closely protects the current baseline. This aggregate is not proof of critical
-branch coverage or of the historical 100% combined-coverage goal. Coverage has
-not been remeasured after Phase 2; that remains a Phase 4 gate.
+70.9% baseline from 2026-09-07. Phase 4 remeasured coverage at **86.9%** with
+the CI job's instrumentation (`-covermode=atomic -coverpkg=./...`, Go 1.26.11,
+Linux/amd64) and raised the CI floor from 70.0% to **86.0%**, retaining the
+historical ~0.9-point margin for Go release instrumentation drift. This
+aggregate is not proof of critical branch coverage or of the historical 100%
+combined-coverage goal.
 
 ### Consolidation and status rules
 
@@ -604,6 +607,62 @@ Finding: Q-09. Historical coverage requirements are preserved in Appendix C.
    coverage** goal using merged source-block profiles from native, integration,
    subprocess, version, and platform jobs. Track uncovered blocks and their
    executing job; do not fake profiles, reduce coverpkg, or hide rejection paths.
+
+#### Phase 4 progress (2026-11-18, local items)
+
+Items 1 and 2 are implemented; items 3-5 remain standing or external work.
+
+Measured with the CI job's exact command (`go test -covermode=atomic
+-coverpkg=./... -coverprofile=coverage.out ./...` inside `v8`, Go 1.26.11,
+Linux/amd64, the platform family the coverage job runs on):
+
+| Package | Target | Before | After |
+| --- | ---: | ---: | ---: |
+| `messages` | 90% | 82.1% | **90.9%** |
+| `credentials` | 90% | 87.7% | **95.2%** |
+| `asn1tools` | 90% | 100.0% | 100.0% |
+| `types` | 90% | 92.6% | 92.7% |
+| `pac` (incl. internal NDR) | 90% | 90.8% | 90.9% |
+| `keytab` | 90% | 93.2% | 93.2% |
+| `crypto` | 90% | 92.5% | 92.8% |
+| `client` | 75% | 81.0% | 81.0% |
+| `service` | 75% | 80.0% | 80.0% |
+| `spnego` | 75% | 82.4% | 82.4% |
+| **Total** | — | 85.9% | **86.9%** |
+
+The [messages decoder coverage tests](../../v8/messages/decoder_coverage_test.go)
+add truncation sweeps over every valid message vector (every strict prefix must
+be rejected), byte-flip robustness sweeps, marshal round trips, msg-type and
+ticket-sequence rejections, wrong-key and integrity failures, and branch-level
+tests for the security-sensitive transitions: `APReq.Verify` (ticket decrypt,
+validity, client-address, authenticator-integrity, CName, and skew branches),
+`APRep.VerifyDCE` (sequence, subkey, and skew branches), the AS-REP
+`verifyWithReplyKey` reply checks (CName/realm/nonce/SName/SRealm/addresses/
+skew and the PA-REQ-ENC-PA-REP acknowledgment paths), and S4U error paths.
+`APReq.Verify`, `APRep.Verify`/`VerifyDCE`, the AS-REP/TGS-REP `Verify`
+families, and `Ticket.ValidAt` now report 100% statement coverage and
+`verifyEncPARep` reports 94.7%. A seeded `FuzzMessageUnmarshal` target covers
+every wire decoder in the package, is wired into the CI fuzz matrix, and passes
+a 90-second run (13 million executions); `FuzzCCacheUnmarshal` passes a
+65-second run. The
+[credentials coverage tests](../../v8/credentials/ccache_coverage_test.go) add
+full truncation and byte-flip sweeps, v1/v2 native-order parsing, header-field
+rejections, marshal-time state validation, name-resolution rejections, and
+delegated-credential deep-copy checks. Remaining uncovered blocks in both
+packages are dominated by asn1.Marshal error branches that are unreachable
+with valid in-memory values and by big-endian-host probe lines.
+
+The [coverage floor](../../.github/workflows/testingv8.yml) rises from 70.0%
+to **86.0%** (86.9% measured minus the historical ~0.9-point instrumentation
+margin). The floor remains a single aggregate gate; per-package targets are
+verified here numerically but are not yet separately enforced in CI.
+
+Not done locally (external prerequisites, unchanged): the Windows checklist
+including fixture 14, PKU2U directions, claims, PKINIT, IIS/RPC, and KKDCP;
+the MIT/Samba and Windows AD interoperability matrices; native Windows/macOS
+runs; and mobile-runner coverage. Merged multi-job source-block profiles for
+the strict 100% goal remain future work. Docker is unavailable in this
+environment, so no live interoperability evidence is claimed.
 
 Exit: monotonically raised measured floors, critical-path targets verified,
 external gaps explicitly recorded with prerequisites/owner/run evidence, and

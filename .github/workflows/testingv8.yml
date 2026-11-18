@@ -144,10 +144,13 @@ jobs:
 
       - name: Enforce coverage floor
         shell: bash
+        # Floor 86.0 follows the 86.9% measurement with Go 1.26.11 on
+        # Linux/amd64 (docs/design/refactoring.md Phase 4), retaining the
+        # historical ~0.9-point margin for Go release instrumentation drift.
         run: |
           coverage=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub(/%/, "", $3); print $3}')
           echo "Total statement coverage: ${coverage}%"
-          awk -v coverage="${coverage}" 'BEGIN { if (coverage + 0 < 70.0) exit 1 }'
+          awk -v coverage="${coverage}" 'BEGIN { if (coverage + 0 < 86.0) exit 1 }'
 
       - name: Upload coverage profile
         if: always()
@@ -309,6 +312,8 @@ jobs:
             target: FuzzUnmarshal
           - package: ./credentials
             target: FuzzCCacheUnmarshal
+          - package: ./messages
+            target: FuzzMessageUnmarshal
           - package: ./pac
             target: FuzzPACUnmarshal
           - package: ./gssapi
