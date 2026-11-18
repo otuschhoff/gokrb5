@@ -1,9 +1,10 @@
 # v8 Code Quality and Refactoring Roadmap
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
-Phase 3 decomposition slices implemented, and Phase 4's local coverage items
-done (floor raised to 86.0%). Phase 3/4 interoperability and Windows exit
-evidence remains an external CI obligation.
+Phase 3 decomposition slices implemented, Phase 4's local coverage items done
+(floor raised to 86.0%), and Phase 5 started with the formatter and keytab
+complexity slices. Phase 3/4 interoperability and Windows exit evidence
+remains an external CI obligation.
 Assessment date: 2026-11-17.
 Scope: `v8` module (`github.com/otuschhoff/gokrb5/v8`) only. Root-module v7
 refactoring is out of scope; whole-project lint automation remains unchanged.
@@ -26,7 +27,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 2,886 canonical lint findings after the Phase 3 slices |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 2,449 canonical lint findings after Phase 5 slices 1-2 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -679,6 +680,34 @@ shadowing, naming, return clarity, deprecated APIs, and dead code with
 compatibility checks. Separate protocol tables and long fixtures from ordinary
 logic when judging line-length/constants suggestions. Keep advisory rules
 advisory until intentionally adopted; avoid adding dependencies for style fixes.
+
+Slice 1 (2026-11-18, formatter normalization): the pinned custom linter's
+`fmt` command (gofumpt and gci with the v8 import group) was applied across
+the v8 module in one mechanical-only change, clearing all 213 canonical
+formatter findings (127 gci, 86 gofumpt): import grouping, comment spacing,
+octal-literal prefixes, and redundant declaration forms. No code, wire, API,
+or behavior changes; the full canonical scan now reports zero gofumpt/gci
+diagnostics in v8.
+
+Slice 2 (2026-11-18, keytab): the three non-decoding complexity outliers
+deferred from Phase 3 now meet the canonical thresholds. `ParsePrincipal` (46)
+splits into separator classification, a splitter state machine with per-role
+methods, and escape writing; `GetEntry` (29) splits into an entry-lookup
+accumulator with per-candidate consideration and result resolution;
+`AppendToFile` (24) extracts its existing-file inspection into `appendTarget`.
+All resulting functions score at most 14 cognitive complexity with no nested-if
+findings (limits 15/4). Branch characterization added first pins exact parse
+error texts, enterprise/escape edge cases, KVNO tie-breaks and fallback
+preference, and no-entry append behavior; it passed against the original
+implementation. The Yoda if-else chain in `isNativeEndianLittle` became a
+switch and a dead declaration comment was removed. Keytab package canonical
+findings fell from 104 to 92; the remainder are intentional wire-format
+integer conversions (gosec G115/G103), Phase 2's deliberate error-propagation
+deferrals (wrapcheck), and pre-existing test-file findings — all explained
+categories, not new debt. The v8 canonical total is now 2,449 (from 2,886
+after Phase 3). Keytab unit and race tests (5 repetitions), Linux/386 tests,
+the full v8 suite, Windows/Darwin builds, and the changed-line lint gate
+(0 issues, both modules) pass.
 
 Preserve v8's Go 1.26.0 floor. Validate proposed modernizations on the supported
 module toolchain and retain tagged/platform code. Measure optimizations before

@@ -54,31 +54,9 @@ func AppendToFile(name string, entries ...Entry) (err error) {
 		}
 	}()
 
-	info, err := f.Stat()
+	version, endian, writeHeader, err := appendTarget(f)
 	if err != nil {
 		return err
-	}
-	version := uint8(2)
-	var endian binary.ByteOrder = binary.BigEndian
-	writeHeader := info.Size() == 0
-	if writeHeader {
-		if err := f.Chmod(0o600); err != nil {
-			return err
-		}
-	} else {
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			return err
-		}
-		data, err := io.ReadAll(f)
-		if err != nil {
-			return err
-		}
-		existing := new(Keytab)
-		if err := existing.Unmarshal(data); err != nil {
-			return fmt.Errorf("cannot append to invalid keytab: %w", err)
-		}
-		version = existing.version
-		endian = existing.byteOrder
 	}
 
 	var appendData []byte
@@ -99,4 +77,33 @@ func AppendToFile(name string, entries ...Entry) (err error) {
 		return err
 	}
 	return f.Sync()
+}
+
+// appendTarget inspects f and returns the format version and byte order to
+// append with, reporting writeHeader for an empty file whose header must be
+// written first. An empty file is initialized as a version 2 big-endian
+// keytab; a non-empty file must parse as a valid keytab.
+func appendTarget(f *os.File) (uint8, binary.ByteOrder, bool, error) {
+	info, err := f.Stat()
+	if err != nil {
+		return 0, nil, false, err
+	}
+	if info.Size() == 0 {
+		if cerr := f.Chmod(0o600); cerr != nil {
+			return 0, nil, false, cerr
+		}
+		return 2, binary.BigEndian, true, nil
+	}
+	if _, serr := f.Seek(0, io.SeekStart); serr != nil {
+		return 0, nil, false, serr
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return 0, nil, false, err
+	}
+	existing := new(Keytab)
+	if uerr := existing.Unmarshal(data); uerr != nil {
+		return 0, nil, false, fmt.Errorf("cannot append to invalid keytab: %w", uerr)
+	}
+	return existing.version, existing.byteOrder, false, nil
 }

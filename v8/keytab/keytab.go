@@ -98,11 +98,17 @@ func escapePrincipalPart(s string) string {
 
 // ParsePrincipal parses a principal name with MIT-style backslash escapes.
 func ParsePrincipal(s string) (Principal, error) {
-	var p Principal
-	var part strings.Builder
-	inRealm := false
+	enterprise, err := classifyPrincipalName(s)
+	if err != nil {
+		return Principal{}, err
+	}
+	return splitPrincipalName(s, enterprise)
+}
+
+// classifyPrincipalName counts the unescaped realm separators in s and reports
+// whether the name is an enterprise principal with an embedded '@'.
+func classifyPrincipalName(s string) (bool, error) {
 	escaped := false
-	firstEnterpriseAt := true
 	unescapedAts := 0
 	for _, r := range s {
 		if escaped {
@@ -116,87 +122,129 @@ func ParsePrincipal(s string) (Principal, error) {
 		}
 	}
 	if unescapedAts > 2 {
-		return Principal{}, errors.New("principal contains too many realm separators")
+		return false, errors.New("principal contains too many realm separators")
 	}
-	enterprise := unescapedAts == 2
-	escaped = false
+	return unescapedAts == 2, nil
+}
 
-	appendPart := func() error {
-		if part.Len() == 0 {
-			return errors.New("principal contains an empty component")
-		}
-		p.Components = append(p.Components, part.String())
-		part.Reset()
-		return nil
-	}
+// principalSplitter holds the state while splitting a principal name into
+// components and realm.
+type principalSplitter struct {
+	p                 Principal
+	part              strings.Builder
+	inRealm           bool
+	enterprise        bool
+	firstEnterpriseAt bool
+}
 
+// splitPrincipalName splits s into components and realm. Enterprise names keep
+// the first unescaped '@' literally inside the component.
+func splitPrincipalName(s string, enterprise bool) (Principal, error) {
+	sp := principalSplitter{enterprise: enterprise, firstEnterpriseAt: true}
+	escaped := false
 	for _, r := range s {
 		if escaped {
-			switch r {
-			case 'n':
-				part.WriteByte('\n')
-			case 't':
-				part.WriteByte('\t')
-			case 'b':
-				part.WriteByte('\b')
-			case '0':
-				part.WriteByte(0)
-			default:
-				part.WriteRune(r)
-			}
+			writePrincipalEscape(&sp.part, r)
 			escaped = false
 			continue
 		}
-		if r == '\\' {
+		switch r {
+		case '\\':
 			escaped = true
-			continue
-		}
-		if r == '@' {
-			if enterprise && firstEnterpriseAt {
-				part.WriteByte('@')
-				firstEnterpriseAt = false
-				continue
-			}
-			if inRealm {
-				return Principal{}, errors.New("principal contains multiple realm separators")
-			}
-			if err := appendPart(); err != nil {
+		case '@':
+			if err := sp.realmSeparator(); err != nil {
 				return Principal{}, err
 			}
-			inRealm = true
-			continue
-		}
-		if r == '/' && !enterprise {
-			if inRealm {
-				return Principal{}, errors.New("realm contains an unescaped component separator")
-			}
-			if err := appendPart(); err != nil {
+		case '/':
+			if err := sp.componentSeparator(r); err != nil {
 				return Principal{}, err
 			}
-			continue
+		default:
+			sp.part.WriteRune(r)
 		}
-		part.WriteRune(r)
 	}
 	if escaped {
 		return Principal{}, errors.New("principal ends with an incomplete escape")
 	}
-	if part.Len() == 0 {
-		if inRealm {
+	return sp.finish()
+}
+
+// writePrincipalEscape writes the escaped form of r to part.
+func writePrincipalEscape(part *strings.Builder, r rune) {
+	switch r {
+	case 'n':
+		part.WriteByte('\n')
+	case 't':
+		part.WriteByte('\t')
+	case 'b':
+		part.WriteByte('\b')
+	case '0':
+		part.WriteByte(0)
+	default:
+		part.WriteRune(r)
+	}
+}
+
+// appendPart ends the current component and appends it to the principal.
+func (sp *principalSplitter) appendPart() error {
+	if sp.part.Len() == 0 {
+		return errors.New("principal contains an empty component")
+	}
+	sp.p.Components = append(sp.p.Components, sp.part.String())
+	sp.part.Reset()
+	return nil
+}
+
+// realmSeparator handles an unescaped '@'.
+func (sp *principalSplitter) realmSeparator() error {
+	if sp.enterprise && sp.firstEnterpriseAt {
+		sp.part.WriteByte('@')
+		sp.firstEnterpriseAt = false
+		return nil
+	}
+	if sp.inRealm {
+		return errors.New("principal contains multiple realm separators")
+	}
+	if err := sp.appendPart(); err != nil {
+		return err
+	}
+	sp.inRealm = true
+	return nil
+}
+
+// componentSeparator handles an unescaped '/'; enterprise names keep it
+// literally.
+func (sp *principalSplitter) componentSeparator(r rune) error {
+	if sp.enterprise {
+		sp.part.WriteRune(r)
+		return nil
+	}
+	if sp.inRealm {
+		return errors.New("realm contains an unescaped component separator")
+	}
+	return sp.appendPart()
+}
+
+// finish stores the final part as the realm or last component and assigns the
+// name type.
+func (sp *principalSplitter) finish() (Principal, error) {
+	if sp.part.Len() == 0 {
+		if sp.inRealm {
 			return Principal{}, errors.New("principal contains an empty realm")
 		}
 		return Principal{}, errors.New("principal contains an empty component")
 	}
-	if inRealm {
-		p.Realm = part.String()
+	if sp.inRealm {
+		sp.p.Realm = sp.part.String()
 	} else {
-		p.Components = append(p.Components, part.String())
+		sp.p.Components = append(sp.p.Components, sp.part.String())
 	}
-	if enterprise {
-		p.NameType = nametype.KRB_NT_ENTERPRISE
+	if sp.enterprise {
+		sp.p.NameType = nametype.KRB_NT_ENTERPRISE
 	} else {
-		p.NameType = nametype.KRB_NT_PRINCIPAL
+		sp.p.NameType = nametype.KRB_NT_PRINCIPAL
 	}
-	return p, nil
+	return sp.p, nil
 }
 
 // New creates new, empty Keytab type.
@@ -255,47 +303,62 @@ func (kt *Keytab) ETypesForPrincipal(p Principal) []int32 {
 // GetEntry returns the best matching keytab entry using MIT Kerberos lookup semantics.
 // Enctype zero is a wildcard; similar enctype matching is not supported.
 func (kt *Keytab) GetEntry(p Principal, kvno uint32, etype int32) (Entry, error) {
-	var exact Entry
-	var fallback Entry
-	var exactFound bool
-	var fallbackFound bool
-	var principalAndETypeFound bool
-
+	var lookup entryLookup
 	for _, candidate := range kt.Entries {
 		if !principalMatches(candidate.Principal, p) || etype != 0 && candidate.Key.KeyType != etype {
 			continue
 		}
-		principalAndETypeFound = true
+		lookup.principalAndETypeFound = true
+		lookup.consider(candidate, kvno)
+	}
+	return lookup.result(p, kvno, etype)
+}
 
-		if kvno == 0 {
-			if !exactFound || candidate.KVNO > exact.KVNO || candidate.KVNO == exact.KVNO && candidate.Timestamp.After(exact.Timestamp) {
-				exact = candidate
-				exactFound = true
-			}
-			continue
-		}
-		if candidate.KVNO == kvno {
-			if !exactFound || candidate.Timestamp.After(exact.Timestamp) {
-				exact = candidate
-				exactFound = true
-			}
-			continue
-		}
-		if kvno > 255 && candidate.KVNO == kvno&0xff {
-			if !fallbackFound || candidate.Timestamp.After(fallback.Timestamp) {
-				fallback = candidate
-				fallbackFound = true
-			}
-		}
-	}
+// entryLookup accumulates the best exact and 8-bit KVNO fallback matches while
+// scanning keytab entries.
+type entryLookup struct {
+	exact                  Entry
+	fallback               Entry
+	exactFound             bool
+	fallbackFound          bool
+	principalAndETypeFound bool
+}
 
-	if exactFound {
-		return exact, nil
+// consider records candidate for the requested KVNO. A zero KVNO requests the
+// newest highest-KVNO entry; otherwise an exact KVNO match wins over the 8-bit
+// fallback, and ties break on the newest timestamp.
+func (l *entryLookup) consider(candidate Entry, kvno uint32) {
+	if kvno == 0 {
+		if !l.exactFound || candidate.KVNO > l.exact.KVNO || candidate.KVNO == l.exact.KVNO && candidate.Timestamp.After(l.exact.Timestamp) {
+			l.exact = candidate
+			l.exactFound = true
+		}
+		return
 	}
-	if fallbackFound {
-		return fallback, nil
+	if candidate.KVNO == kvno {
+		if !l.exactFound || candidate.Timestamp.After(l.exact.Timestamp) {
+			l.exact = candidate
+			l.exactFound = true
+		}
+		return
 	}
-	if principalAndETypeFound && kvno != 0 {
+	if kvno > 255 && candidate.KVNO == kvno&0xff {
+		if !l.fallbackFound || candidate.Timestamp.After(l.fallback.Timestamp) {
+			l.fallback = candidate
+			l.fallbackFound = true
+		}
+	}
+}
+
+// result resolves the lookup: exact match, then fallback, then a typed error.
+func (l *entryLookup) result(p Principal, kvno uint32, etype int32) (Entry, error) {
+	if l.exactFound {
+		return l.exact, nil
+	}
+	if l.fallbackFound {
+		return l.fallback, nil
+	}
+	if l.principalAndETypeFound && kvno != 0 {
 		return Entry{}, fmt.Errorf("%w: principal %q, kvno %d, enctype %d", ErrKVNONotFound, p.String(), kvno, etype)
 	}
 	return Entry{}, fmt.Errorf("%w: principal %q, enctype %d", ErrNotFound, p.String(), etype)
@@ -844,7 +907,6 @@ func parsePrincipal(b []byte, p *int, version uint8, e *binary.ByteOrder) (Princ
 }
 
 func (p Principal) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
-	//var b []byte
 	b := make([]byte, 2)
 	componentCount := len(p.Components)
 	if v == 1 {
@@ -986,16 +1048,15 @@ func isNativeEndianLittle() bool {
 	p := unsafe.Pointer(&x)
 	bp := (*[4]byte)(p)
 
-	var endian bool
-	if 0x01 == bp[0] {
-		endian = false
-	} else if (0x78 & 0xff) == (bp[0] & 0xff) {
-		endian = true
-	} else {
+	switch {
+	case bp[0] == 0x01:
+		return false
+	case bp[0]&0xff == 0x78&0xff:
+		return true
+	default:
 		// Default to big endian
-		endian = false
+		return false
 	}
-	return endian
 }
 
 func nativeByteOrder() binary.ByteOrder {
