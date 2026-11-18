@@ -824,6 +824,16 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 19 (2026-11-18, NEGOEX nil invariants): NEGOEX NilAway is zero.
+Conversation accessors return their zero values for a nil receiver, while
+`Step` reports the new `ErrInvalidConversationState` error before reading
+state. Tests cover the nil receiver contract, check constructor failures
+before dereferencing conversations, and verify that decoded messages and
+protocol tokens have the lengths they are about to consume. Full NilAway
+falls from 65 to 44 and full canonical diagnostics fall from 1,293 to 1,273;
+aggregate coverage measures 87.0%. The next remaining concentrations are `crypto`,
+`cmd`, `types`, and PAC NDR rather than NEGOEX.
+
 Slice 18 (2026-11-18, SPNEGO nil invariants): production and test SPNEGO
 NilAway is zero. `cloneNegotiationRequest`, `setRequestSPN`, header-setting,
 and response-token parsing reject nil request/URL/response inputs. Acceptor

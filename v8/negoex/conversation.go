@@ -16,6 +16,8 @@ import (
 var (
 	// ErrInvalidConversation indicates a NEGOEX message with an unexpected conversation ID.
 	ErrInvalidConversation = errors.New("invalid NEGOEX conversation ID")
+	// ErrInvalidConversationState indicates an uninitialized NEGOEX conversation.
+	ErrInvalidConversationState = errors.New("invalid NEGOEX conversation state")
 	// ErrMessageOutOfSequence indicates a NEGOEX message arrived out of sequence.
 	ErrMessageOutOfSequence = errors.New("NEGOEX message out of sequence")
 	ErrNoAvailableSchemes   = errors.New("no mutually supported NEGOEX authentication schemes")
@@ -87,12 +89,17 @@ func NewAcceptor(schemes ...Scheme) (*Conversation, error) {
 }
 
 // Context returns the selected mechanism context, if one has been created.
-func (c *Conversation) Context() gssapi.Context { return c.context }
+func (c *Conversation) Context() gssapi.Context {
+	if c == nil {
+		return nil
+	}
+	return c.context
+}
 
 // SelectedScheme returns the selected authentication scheme, or zero before
 // one has been selected.
 func (c *Conversation) SelectedScheme() AuthScheme {
-	if c.selected == nil {
+	if c == nil || c.selected == nil {
 		return AuthScheme{}
 	}
 	return c.selected.AuthScheme()
@@ -100,6 +107,9 @@ func (c *Conversation) SelectedScheme() AuthScheme {
 
 // Step consumes one peer token and produces the next local token.
 func (c *Conversation) Step(input []byte) ([]byte, bool, error) {
+	if c == nil {
+		return nil, false, ErrInvalidConversationState
+	}
 	if c.step == 0 && c.initiator {
 		if len(input) != 0 {
 			return nil, false, ErrUnexpectedToken
