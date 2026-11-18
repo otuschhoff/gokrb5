@@ -4,14 +4,29 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type failingConfigReader struct{ err error }
+
+func TestConfigJSONError(t *testing.T) {
+	t.Parallel()
+
+	cfg := New()
+	cfg.LibDefaults.ExtraAddresses = []net.IP{{1, 2, 3}}
+	output, err := cfg.JSON()
+	assert.Empty(t, output)
+	require.ErrorContains(t, err, "encode Kerberos configuration JSON:")
+	addrErr, ok := errors.AsType[*net.AddrError](err)
+	require.True(t, ok)
+	assert.Equal(t, "invalid IP address", addrErr.Err)
+}
 
 func (reader failingConfigReader) Read([]byte) (int, error) { return 0, reader.err }
 

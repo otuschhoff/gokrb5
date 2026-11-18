@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/gob"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/hashicorp/go-uuid"
@@ -427,7 +428,9 @@ func (c *Credentials) RemoveAttribute(k string) {
 	delete(c.attributes, k)
 }
 
-// Marshal the Credentials into a byte slice
+// Marshal encodes credential metadata as gob. It records whether a password or
+// keytab is configured without encoding either one. Attributes are included,
+// so the output may contain sensitive information.
 func (c *Credentials) Marshal() ([]byte, error) {
 	gob.Register(map[string]interface{}{})
 	gob.Register(ADCredentials{})
@@ -448,23 +451,22 @@ func (c *Credentials) Marshal() ([]byte, error) {
 		GroupMembership: c.groupMembership,
 		SessionID:       c.sessionID,
 	}
-	err := enc.Encode(&mc)
-	if err != nil {
-		return []byte{}, err
+	if err := enc.Encode(&mc); err != nil {
+		return []byte{}, fmt.Errorf("encode credentials gob: %w", err)
 	}
 	return buf.Bytes(), nil
 }
 
-// Unmarshal a byte slice into Credentials
+// Unmarshal restores credential metadata from a trusted gob payload. A decode
+// failure leaves the receiver unchanged. Passwords and keytabs are not restored.
 func (c *Credentials) Unmarshal(b []byte) error {
 	gob.Register(map[string]interface{}{})
 	gob.Register(ADCredentials{})
 	mc := new(marshalCredentials)
 	buf := bytes.NewBuffer(b)
 	dec := gob.NewDecoder(buf)
-	err := dec.Decode(mc)
-	if err != nil {
-		return err
+	if err := dec.Decode(mc); err != nil {
+		return fmt.Errorf("decode credentials gob: %w", err)
 	}
 	c.username = mc.Username
 	c.displayName = mc.DisplayName
@@ -480,7 +482,8 @@ func (c *Credentials) Unmarshal(b []byte) error {
 	return nil
 }
 
-// JSON return details of the Credentials in a JSON format.
+// JSON encodes credential metadata without including passwords, keytab contents,
+// or attributes.
 func (c *Credentials) JSON() (string, error) {
 	mc := marshalCredentials{
 		Username:      c.username,
@@ -497,7 +500,7 @@ func (c *Credentials) JSON() (string, error) {
 	}
 	b, err := json.MarshalIndent(mc, "", "  ")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("encode credentials JSON: %w", err)
 	}
 	return string(b), nil
 }

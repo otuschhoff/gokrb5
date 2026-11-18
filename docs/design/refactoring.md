@@ -824,6 +824,23 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 43 (2026-11-18, credentials and configuration serialization errors):
+credential gob encoding and decoding, credential JSON encoding, and
+configuration JSON encoding now identify the failed operation while preserving
+the underlying error. Failed gob decoding still leaves the receiver unchanged.
+Successful output and sensitive-field exclusions are unchanged; the credential
+godoc distinguishes what the two formats include and limits gob decoding to
+trusted payloads.
+
+Regression tests cover gob attribute round trips and encode failures, EOF on
+decode, JSON exclusions, and typed JSON errors for an unrepresentable
+credential timestamp and an invalid configuration IP address. The v8 unit
+suite and the focused configuration, credentials, and SPNEGO race suites
+passed. Cross-package statement coverage remains 86.6%, above the 86.0% floor.
+Both changed-line lint gates passed. Neither package has remaining `wrapcheck`
+findings; canonical v8 totals fell from 958 to 954 (`wrapcheck`: 374 to 370),
+with zero gosec findings.
+
 Slice 42 (2026-11-18, keytab codec and remaining keytab error contracts):
 fixed-width fields now use byte-order operations directly, and decoded key
 bytes still belong to the keytab rather than the input buffer. Signed wire

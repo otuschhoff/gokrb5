@@ -576,11 +576,11 @@ func appendUntilFinal(s *[]string, value string, final *bool) {
 	*s = append(*s, value)
 }
 
-// JSON return details of the config in a JSON format.
+// JSON encodes the configuration without its PKINIT settings.
 func (c *Config) JSON() (string, error) {
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("encode Kerberos configuration JSON: %w", err)
 	}
 	return string(b), nil
 }
