@@ -641,6 +641,9 @@ func establishSPNEGO(t *testing.T, initiator, acceptor *spnego.Negotiator) (gssa
 
 func assertProtectedMessage(t *testing.T, sender, receiver gssapi.Context, message []byte, confidential bool) {
 	t.Helper()
+	if sender == nil || receiver == nil {
+		t.Fatal("protected-message context is nil")
+	}
 	token, err := sender.Wrap(message, confidential)
 	if err != nil {
 		t.Fatal(err)

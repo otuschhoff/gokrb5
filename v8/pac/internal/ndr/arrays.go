@@ -25,13 +25,17 @@ func intFromTag(tag reflect.StructTag, key string) (int, error) {
 func parseDimensions(v reflect.Value) ([]int, reflect.Type) {
 	var l []int
 	var tb reflect.Type
-	if v.Kind() == reflect.Ptr {
-		v = v.Elem()
+	if !v.IsValid() {
+		return l, tb
+	}
+	for v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			v = reflect.Zero(v.Type().Elem())
+		} else {
+			v = v.Elem()
+		}
 	}
 	t := v.Type()
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
 	if t.Kind() != reflect.Array && t.Kind() != reflect.Slice {
 		return l, tb
 	}
@@ -147,6 +151,9 @@ func (dec *Decoder) precedingMax() uint32 {
 // fillFixedArray establishes if the fixed array is uni or multi dimensional and then fills it.
 func (dec *Decoder) fillFixedArray(v reflect.Value, tag reflect.StructTag, def *[]deferedPtr) error {
 	l, t := parseDimensions(v)
+	if t == nil {
+		return errors.New("could not establish fixed array element type")
+	}
 	if t.Kind() == reflect.String {
 		tag = reflect.StructTag(subStringArrayTag)
 	}

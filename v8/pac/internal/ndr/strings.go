@@ -11,15 +11,16 @@ const (
 )
 
 func uint16SliceToString(a []uint16) string {
-	s := make([]rune, len(a))
-	for i := range s {
-		s[i] = rune(a[i])
+	if a == nil {
+		return ""
 	}
-	if len(s) > 0 {
-		// Remove any null terminator
-		if s[len(s)-1] == rune(0) {
-			s = s[:len(s)-1]
-		}
+	length := len(a)
+	if length > 0 && a[length-1] == 0 {
+		length--
+	}
+	s := make([]rune, length)
+	for i := range length {
+		s[i] = rune(a[i])
 	}
 	return string(s)
 }

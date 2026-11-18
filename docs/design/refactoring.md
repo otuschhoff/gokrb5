@@ -824,6 +824,17 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 23 (2026-11-18, PAC and PKU2U nil invariants): all v8 NilAway
+findings are zero. NDR dimension parsing handles invalid and nil reflect values
+without method dispatch on missing types, fixed-array decoding checks for an
+unknown element type, and UTF-16 conversion explicitly handles a nil slice.
+Tests now construct nonnil NDR bodies, check dimension and checksum helper
+results before method calls, and validate GSS contexts before wrap/unwrap.
+These final call-site and helper checks cover the remaining analyzer paths
+without changing valid PAC or PKU2U behavior. PAC/PKU2U NilAway falls 9 to 0,
+total NilAway falls 9 to 0, and canonical findings fall 1,241 to 1,231;
+aggregate coverage remains 86.9%.
+
 Slice 22 (2026-11-18, protocol type nil invariants): types NilAway is zero.
 `PADataSequence.Contains` returns false for a nil receiver, PA-FX-ERROR
 unmarshal rejects a nil destination, and host-address conversion always

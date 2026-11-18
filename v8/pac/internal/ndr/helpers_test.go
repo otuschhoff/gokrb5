@@ -37,15 +37,29 @@ func TestDimensionHelpers(t *testing.T) {
 
 	array := [2][3]uint16{}
 	lengths, elementType := parseDimensions(reflect.ValueOf(array))
+	if elementType == nil {
+		t.Fatal("array element type is nil")
+	}
 	if !reflect.DeepEqual(lengths, []int{2, 3}) || elementType.Kind() != reflect.Uint16 {
 		t.Fatalf("array dimensions = %v, %v", lengths, elementType)
 	}
 	lengths, elementType = parseDimensions(reflect.ValueOf(&array))
+	if elementType == nil {
+		t.Fatal("pointer array element type is nil")
+	}
 	if !reflect.DeepEqual(lengths, []int{2, 3}) || elementType.Kind() != reflect.Uint16 {
 		t.Fatalf("pointer dimensions = %v, %v", lengths, elementType)
 	}
 	if lengths, elementType = parseDimensions(reflect.ValueOf(1)); lengths != nil || elementType != nil {
 		t.Fatalf("scalar dimensions = %v, %v", lengths, elementType)
+	}
+	if lengths, elementType = parseDimensions(reflect.Value{}); lengths != nil || elementType != nil {
+		t.Fatalf("invalid dimensions = %v, %v", lengths, elementType)
+	}
+	var nilArray *[2][3]uint16
+	lengths, elementType = parseDimensions(reflect.ValueOf(nilArray))
+	if elementType == nil || !reflect.DeepEqual(lengths, []int{2, 3}) || elementType.Kind() != reflect.Uint16 {
+		t.Fatalf("nil pointer dimensions = %v, %v", lengths, elementType)
 	}
 	if dimensions, base := sliceDimensions(reflect.TypeOf(&[][]uint32{})); dimensions != 2 || base.Kind() != reflect.Uint32 {
 		t.Fatalf("slice dimensions = %d, %v", dimensions, base)

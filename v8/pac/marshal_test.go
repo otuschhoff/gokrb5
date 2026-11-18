@@ -158,7 +158,13 @@ func TestPACSignFullChecksumOrder(t *testing.T) {
 	payloadOffset := binary.LittleEndian.Uint64(data[16:])
 	tampered[int(payloadOffset)] ^= 0xff
 	serverSignatureData := signatureDataForTest(t, buffers, infoTypePACServerSignatureData)
-	etype, _ := crypto.GetChksumEtype(int32(serverSignatureData.SignatureType))
+	etype, err := crypto.GetChksumEtype(int32(serverSignatureData.SignatureType))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if etype == nil {
+		t.Fatal("checksum encryption type is nil")
+	}
 	if etype.VerifyChecksum(serverKey.KeyValue, tampered, serverSignatureData.Signature, keyusage.KERB_NON_KERB_CKSUM_SALT) {
 		t.Fatal("server checksum accepted tampered PAC")
 	}

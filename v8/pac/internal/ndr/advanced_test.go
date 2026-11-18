@@ -47,7 +47,7 @@ type failingReader struct{}
 func (failingReader) Read([]byte) (int, error) { return 0, errors.New("read failed") }
 
 func TestDecodeRejectsMalformedHeaders(t *testing.T) {
-	valid := wrapNDRBody(nil)
+	valid := wrapNDRBody([]byte{})
 	tests := []struct {
 		name   string
 		mutate func([]byte) []byte
@@ -76,7 +76,7 @@ func TestDecodeReaderFailureAndUnsupportedTarget(t *testing.T) {
 	if err := NewDecoder(failingReader{}).Decode(&struct{}{}); err == nil {
 		t.Fatal("reader failure was not returned")
 	}
-	if err := NewDecoder(bytes.NewReader(wrapNDRBody(nil))).Decode(&map[string]string{}); err == nil {
+	if err := NewDecoder(bytes.NewReader(wrapNDRBody([]byte{}))).Decode(&map[string]string{}); err == nil {
 		t.Fatal("unsupported target type was accepted")
 	}
 	var value struct{ Flag bool }
