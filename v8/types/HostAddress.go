@@ -101,7 +101,7 @@ func LocalHostAddresses() (HostAddresses, error) {
 
 // HostAddressesFromNetIPs returns a HostAddresses type from a slice of net.IP
 func HostAddressesFromNetIPs(ips []net.IP) HostAddresses {
-	var ha HostAddresses
+	ha := make(HostAddresses, 0, len(ips))
 	for _, ip := range ips {
 		ha = append(ha, HostAddressFromNetIP(ip))
 	}

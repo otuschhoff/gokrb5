@@ -467,6 +467,10 @@ func TestMSKILEExtendedErrorAndAuthorizationDataHelpers(t *testing.T) {
 }
 
 func TestFASTPADataHelpers(t *testing.T) {
+	var nilFXError *PAFXError
+	if err := nilFXError.Unmarshal([]byte{0}); err == nil {
+		t.Fatal("nil PA-FX-ERROR receiver accepted input")
+	}
 	fxError := PAFXError(mustHex(t, testdata.MSKILEPAFXError))
 	pa, err := NewPAFXErrorPAData(fxError)
 	if err != nil {

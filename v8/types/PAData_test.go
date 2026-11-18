@@ -13,6 +13,13 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 )
 
+func TestNilPADataSequenceContains(t *testing.T) {
+	var sequence *PADataSequence
+	if sequence.Contains(patype.PA_ENC_TIMESTAMP) {
+		t.Fatal("nil sequence reported a contained PA type")
+	}
+}
+
 func TestUnmarshalPADataSequence(t *testing.T) {
 	t.Parallel()
 	var a PADataSequence

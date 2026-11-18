@@ -34,6 +34,9 @@ type PAEncTSEnc struct {
 
 // Contains tests if a PADataSequence contains PA Data of a certain type.
 func (pas *PADataSequence) Contains(patype int32) bool {
+	if pas == nil {
+		return false
+	}
 	for _, pa := range *pas {
 		if pa.PADataType == patype {
 			return true

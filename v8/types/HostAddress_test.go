@@ -56,6 +56,9 @@ func TestHostAddressGetAddress(t *testing.T) {
 }
 
 func TestHostAddressesFromNetIPs(t *testing.T) {
+	if empty := HostAddressesFromNetIPs(nil); empty == nil {
+		t.Fatal("nil input returned nil address slice")
+	}
 	ipv4 := net.ParseIP("192.0.2.1")
 	ipv6 := net.ParseIP("2001:db8::1")
 	addresses := HostAddressesFromNetIPs([]net.IP{ipv4, ipv6, nil})

@@ -253,6 +253,9 @@ func (v PAFXError) Marshal() ([]byte, error) {
 
 // Unmarshal unmarshals DER bytes into PAFXError.
 func (v *PAFXError) Unmarshal(b []byte) error {
+	if v == nil {
+		return fmt.Errorf("cannot unmarshal PA-FX-ERROR into nil receiver")
+	}
 	var raw asn1.RawValue
 	rest, err := asn1.Unmarshal(b, &raw)
 	if err != nil {

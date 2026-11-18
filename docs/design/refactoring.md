@@ -824,6 +824,16 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 22 (2026-11-18, protocol type nil invariants): types NilAway is zero.
+`PADataSequence.Contains` returns false for a nil receiver, PA-FX-ERROR
+unmarshal rejects a nil destination, and host-address conversion always
+returns an allocated sequence including the established zero entry for an
+invalid IP. Regressions cover nil sequence lookup, nil PA-FX-ERROR decode,
+and empty IP conversion. These changes establish useful zero-input behavior
+without changing valid decoding or PA-DATA membership semantics. Types
+NilAway falls 9 to 0, total NilAway falls 18 to 9, and canonical findings fall
+1,250 to 1,241; aggregate coverage remains 86.9%.
+
 Slice 21 (2026-11-18, command configuration nil invariants): command NilAway
 is zero. `LoadConfig` rejects a nil configuration returned without an error,
 and `gokinit`'s PKINIT and AS request-option helpers reject nil configuration
