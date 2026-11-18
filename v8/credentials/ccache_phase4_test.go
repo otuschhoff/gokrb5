@@ -479,7 +479,7 @@ func TestCCacheWriteFileAtomicAndMode0600(t *testing.T) {
 	}
 	cache.Credentials = append(cache.Credentials, nil)
 	assert.Error(t, cache.WriteFile(path))
-	written, err := os.ReadFile(path)
+	written, err := os.ReadFile(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
 	if err != nil {
 		t.Fatal(err)
 	}

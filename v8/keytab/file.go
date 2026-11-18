@@ -35,7 +35,7 @@ func AppendToFile(name string, entries ...Entry) (err error) {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o600)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o600) // #nosec G304 -- name is the credential file explicitly selected by the caller.
 	if err != nil {
 		return err
 	}

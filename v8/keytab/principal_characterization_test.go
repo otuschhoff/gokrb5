@@ -131,7 +131,7 @@ func TestAppendToFileNoEntries(t *testing.T) {
 	t.Run("empty file gets header", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "empty.kt")
 		require.NoError(t, AppendToFile(path))
-		b, err := os.ReadFile(path)
+		b, err := os.ReadFile(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
 		require.NoError(t, err)
 		assert.Equal(t, []byte{keytabFirstByte, 2}, b)
 	})
@@ -140,10 +140,10 @@ func TestAppendToFileNoEntries(t *testing.T) {
 		kt := New()
 		require.NoError(t, kt.AddEntry("user", "EXAMPLE.ORG", "password", time.Unix(1700000000, 0), 1, etypeID.AES128_CTS_HMAC_SHA1_96))
 		require.NoError(t, kt.WriteFile(path))
-		before, err := os.ReadFile(path)
+		before, err := os.ReadFile(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
 		require.NoError(t, err)
 		require.NoError(t, AppendToFile(path))
-		after, err := os.ReadFile(path)
+		after, err := os.ReadFile(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
 		require.NoError(t, err)
 		assert.Equal(t, before, after)
 	})

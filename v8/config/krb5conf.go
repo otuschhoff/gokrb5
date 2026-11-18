@@ -361,7 +361,7 @@ func (c *Config) ResolveRealm(domainName string) string {
 
 // Load the KRB5 configuration from the specified file path.
 func Load(cfgPath string) (*Config, error) {
-	fh, err := os.Open(cfgPath)
+	fh, err := os.Open(cfgPath) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
 	if err != nil {
 		return nil, errors.New("configuration file could not be opened: " + cfgPath + " " + err.Error())
 	}

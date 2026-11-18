@@ -73,7 +73,7 @@ func LoadCCache(cpath string) (*CCache, error) {
 		return new(CCache), err
 	}
 	c := new(CCache)
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
 	if err != nil {
 		return c, err
 	}

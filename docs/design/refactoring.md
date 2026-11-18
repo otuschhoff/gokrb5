@@ -824,6 +824,21 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 37 (2026-11-18, explicit path and subprocess classification): filesystem
+and subprocess diagnostics G304/G703/G204/G702 are zero. Configuration,
+credential-cache, keytab, PKINIT identity, and test-fixture operations now mark
+the exact calls where the path is an explicit API, CLI configuration, or
+isolated-test input rather than request-derived traversal. AD fixture discovery
+remains limited to an explicitly supplied CI workspace or ancestors of the
+test working directory; the PTY helper executes the current test binary with a
+fixed test selector. Each classification is line-scoped and records the trust
+boundary instead of excluding a package or broad file. G304 falls 10 to 0,
+G703 falls 11 to 0, G204/G702 fall 1 each to 0, gosec falls 61 to 38, and
+canonical findings fall 1,044 to 1,021. Focused affected-package tests, the
+full v8 suite, the full v8 race suite, both-module tests, the changed-line lint
+gate for both modules, and `git diff --check` pass; the full `./...` coverage
+profile measures 85.9% statements.
+
 Slice 36 (2026-11-18, HTTP trust-boundary hardening): HTTP G704/G705/G120
 findings are zero. The SPNEGO negotiating client documents and suppresses its
 deliberate caller-selected outbound destination at the single transport

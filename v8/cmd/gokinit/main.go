@@ -251,7 +251,7 @@ func loadPKINITSettings(opts initOptions, cfg *config.Config, stdin io.Reader, s
 		if err != nil {
 			return nil, false, err
 		}
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- FILE: and PKCS12: paths are explicit user configuration inputs.
 		if err != nil {
 			return nil, false, fmt.Errorf("read PKINIT anchor %q: %w", path, err)
 		}
@@ -265,7 +265,7 @@ func loadPKINITSettings(opts initOptions, cfg *config.Config, stdin io.Reader, s
 		if err != nil {
 			return nil, false, err
 		}
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- FILE: and PKCS12: paths are explicit user configuration inputs.
 		if err != nil {
 			return nil, false, fmt.Errorf("read PKINIT certificate pool %q: %w", path, err)
 		}
@@ -311,7 +311,7 @@ func loadPKINITIdentity(source string, stdin io.Reader, stderr io.Writer, allowS
 		return pkinit.FromPEM(certificate, key, []byte(pin))
 	case strings.HasPrefix(source, "PKCS12:"):
 		path := strings.TrimPrefix(source, "PKCS12:")
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- FILE: and PKCS12: paths are explicit user configuration inputs.
 		if err != nil {
 			return nil, fmt.Errorf("read PKINIT PKCS#12 identity: %w", err)
 		}

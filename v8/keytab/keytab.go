@@ -582,7 +582,7 @@ func Load(ktPath string) (*Keytab, error) {
 		return new(Keytab), err
 	}
 	kt := new(Keytab)
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304,G703 -- keytab path is an explicit caller-selected credential path.
 	if err != nil {
 		return kt, err
 	}

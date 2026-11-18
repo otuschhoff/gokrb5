@@ -74,7 +74,7 @@ func TestReadPasswordFromTTYWithoutEcho(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PTY test is Unix-specific")
 	}
-	command := exec.Command(os.Args[0], "-test.run=TestReadPasswordFromTTYWithoutEcho")
+	command := exec.Command(os.Args[0], "-test.run=TestReadPasswordFromTTYWithoutEcho") // #nosec G204,G702 -- executes the current test binary with a fixed argument.
 	command.Env = append(os.Environ(), "GOKRB5_PASSWORD_HELPER=1")
 	tty, err := pty.Start(command)
 	if err != nil {

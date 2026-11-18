@@ -114,7 +114,7 @@ func TestAppendToFileCreatesHeaderAndAppendsConcurrently(t *testing.T) {
 		}
 	}
 
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestAppendToFileRejectsInvalidExistingFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Error(t, AppendToFile(path, testEntry(1)))
-	after, err := os.ReadFile(path)
+	after, err := os.ReadFile(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func TestKeytabFileAndNameErrors(t *testing.T) {
 	if err := AppendToFile(path); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
 	if err != nil || !bytes.Equal(data, []byte{5, 2}) {
 		t.Fatalf("empty append data = %x, %v", data, err)
 	}

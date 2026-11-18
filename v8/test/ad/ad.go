@@ -349,6 +349,7 @@ func credentialPaths() (string, string, string, error) {
 	userPath = envOr(UserFileEnvVar, filepath.Join(dir, UserFile))
 	passwordPath = envOr(PasswordFileEnvVar, filepath.Join(dir, PasswordFile))
 	for _, p := range []string{keytabPath, userPath, passwordPath} {
+		// #nosec G703 -- paths come from explicit test environment variables or the discovered test workspace.
 		if _, statErr := os.Stat(p); statErr != nil {
 			return "", "", "", fmt.Errorf("AD credential file %s: %w", p, statErr)
 		}
@@ -362,10 +363,10 @@ func credentialPaths() (string, string, string, error) {
 // directory is a nested package directory or a container temp directory.
 func findRepoRoot() (string, error) {
 	if workspace := os.Getenv("GITHUB_WORKSPACE"); workspace != "" {
-		if _, err := os.Stat(filepath.Join(workspace, ".git")); err == nil {
+		if _, err := os.Stat(filepath.Join(workspace, ".git")); err == nil { // #nosec G703 -- GITHUB_WORKSPACE is an explicit CI root.
 			return workspace, nil
 		}
-		if _, err := os.Stat(filepath.Join(workspace, KeytabFile)); err == nil {
+		if _, err := os.Stat(filepath.Join(workspace, KeytabFile)); err == nil { // #nosec G703 -- GITHUB_WORKSPACE is an explicit CI root.
 			return workspace, nil
 		}
 	}
@@ -375,10 +376,10 @@ func findRepoRoot() (string, error) {
 		return "", err
 	}
 	for {
-		if _, err := os.Stat(filepath.Join(dir, KeytabFile)); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, KeytabFile)); err == nil { // #nosec G703 -- path search is confined to working-directory ancestors.
 			return dir, nil
 		}
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil { // #nosec G703 -- path search is confined to working-directory ancestors.
 			return dir, nil
 		}
 		parent := filepath.Dir(dir)
@@ -397,7 +398,7 @@ func envOr(key, fallback string) string {
 }
 
 func readTrimmedFile(path string) (string, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
 	if err != nil {
 		return "", err
 	}

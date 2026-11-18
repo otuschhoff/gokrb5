@@ -23,7 +23,7 @@ func unlockFile(f *os.File) error {
 }
 
 func syncDir(path string) error {
-	dir, err := os.Open(path)
+	dir, err := os.Open(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
 	if err != nil {
 		return err
 	}
