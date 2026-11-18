@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 )
 
 // MessageSignature is the fixed NEGOEX message signature ("NEGOEXTS").
@@ -210,11 +211,34 @@ func unmarshalHeader(data []byte) (MessageHeader, error) {
 	if header.Signature != MessageSignature {
 		return header, ErrInvalidSignature
 	}
-	if header.MessageLength != uint32(len(data)) || header.HeaderLength < messageHeaderLength || header.HeaderLength > header.MessageLength {
+	if uint64(header.MessageLength) != uint64(len(data)) || header.HeaderLength < messageHeaderLength || header.HeaderLength > header.MessageLength {
 		return header, ErrInvalidMessageSize
 	}
 	return header, nil
 }
+
+func negoexUint32FromInt(value int) (uint32, error) {
+	if value < 0 || uint64(value) > math.MaxUint32 { // #nosec G115 -- nonnegative and bounded check precedes conversion.
+		return 0, ErrInvalidMessageSize
+	}
+	return uint32(value), nil // #nosec G115 -- bounded by MaxUint32 above.
+}
+
+func negoexUint16FromInt(value int) (uint16, error) {
+	if value < 0 || value > math.MaxUint16 {
+		return 0, ErrInvalidMessageSize
+	}
+	return uint16(value), nil // #nosec G115 -- bounded by MaxUint16 above.
+}
+
+func negoexIntFromUint64(value uint64) (int, error) {
+	if value > uint64(maxInt()) { // #nosec G115 -- maxInt is nonnegative.
+		return 0, ErrInvalidMessageSize
+	}
+	return int(value), nil // #nosec G115 -- bounded by platform max int above.
+}
+
+func maxInt() int { return int(^uint(0) >> 1) }
 
 func marshalHeader(header MessageHeader, messageType, headerLength, messageLength uint32) []byte {
 	header.Signature = MessageSignature

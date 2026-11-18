@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -43,6 +44,34 @@ func mustNewAcceptor(t *testing.T, schemes ...Scheme) *Conversation {
 	return conversation
 }
 
+func mustNEGOEXUint32(t *testing.T, value int) uint32 {
+	t.Helper()
+	result, err := negoexUint32FromInt(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestNEGOEXConversionBounds(t *testing.T) {
+	tests := []struct {
+		name string
+		call func() error
+	}{
+		{name: "negative uint32", call: func() error { _, err := negoexUint32FromInt(-1); return err }},
+		{name: "negative uint16", call: func() error { _, err := negoexUint16FromInt(-1); return err }},
+		{name: "uint16 overflow", call: func() error { _, err := negoexUint16FromInt(math.MaxUint16 + 1); return err }},
+		{name: "platform int overflow", call: func() error { _, err := negoexIntFromUint64(uint64(maxInt()) + 1); return err }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.call(); !errors.Is(err, ErrInvalidMessageSize) {
+				t.Fatalf("conversion error = %v, want ErrInvalidMessageSize", err)
+			}
+		})
+	}
+}
+
 func testHeader(messageType, sequence uint32) MessageHeader {
 	return MessageHeader{
 		MessageType: messageType,
@@ -74,7 +103,7 @@ func TestMessageHeaderRoundTrip(t *testing.T) {
 	if got := binary.LittleEndian.Uint32(data[16:20]); got != exchangeHeaderLength {
 		t.Fatalf("header length = %d", got)
 	}
-	if got := binary.LittleEndian.Uint32(data[20:24]); got != uint32(len(data)) {
+	if got := binary.LittleEndian.Uint32(data[20:24]); got != mustNEGOEXUint32(t, len(data)) {
 		t.Fatalf("message length = %d, encoded length = %d", got, len(data))
 	}
 	decoded, err := Unmarshal(data)

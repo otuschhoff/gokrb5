@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"errors"
 	"fmt"
+	"math"
 
 	krbcrypto "github.com/otuschhoff/gokrb5/v8/crypto"
 	"github.com/otuschhoff/gokrb5/v8/types"
@@ -26,10 +27,14 @@ func MakeChecksum(key types.EncryptionKey, usage uint32, transcript []byte) (Che
 	if err != nil {
 		return Checksum{}, err
 	}
+	hashID := etype.GetHashID()
+	if hashID < 0 {
+		return Checksum{}, fmt.Errorf("negative NEGOEX checksum type %d", hashID)
+	}
 	return Checksum{
 		HeaderLength: 20,
 		Scheme:       ChecksumSchemeRFC3961,
-		Type:         uint32(etype.GetHashID()),
+		Type:         uint32(hashID), // #nosec G115 -- nonnegative check above.
 		Value:        value,
 	}, nil
 }
@@ -39,7 +44,10 @@ func VerifyChecksum(key types.EncryptionKey, usage uint32, transcript []byte, ch
 	if checksum.Scheme != ChecksumSchemeRFC3961 {
 		return ErrUnsupportedChecksumScheme
 	}
-	checksumType, err := krbcrypto.GetChksumEtype(int32(checksum.Type))
+	if checksum.Type > math.MaxInt32 {
+		return ErrUnsupportedChecksumScheme
+	}
+	checksumType, err := krbcrypto.GetChksumEtype(int32(checksum.Type)) // #nosec G115 -- bounded by MaxInt32 above.
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrUnsupportedChecksumScheme, err)
 	}

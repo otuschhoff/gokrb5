@@ -824,6 +824,16 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 27 (2026-11-18, NEGOEX wire ranges): NEGOEX G115 findings are zero.
+Message and vector lengths now use checked uint32/uint16 and platform-int
+helpers before allocation or encoding; malformed descriptor offsets remain
+bounded by message size. Checksum types are checked against signed int32 and
+nonnegative hash identifiers before protocol conversion. Marshal helpers
+return size errors consistently, including ALERT and extension vectors, and
+fixtures use checked conversion helpers. NEGOEX G115 falls 13 to 0, total G115
+falls 73 to 60, gosec falls 157 to 144, and canonical findings fall 1,143 to
+1,130; coverage measures 86.6%.
+
 Slice 26 (2026-11-18, PAC/NDR wire ranges): PAC G115 findings are zero.
 PAC buffer offsets, allocation sizes, signature ranges, checksum identifiers,
 UPN/DNS lengths, and client-name lengths now use checked platform or wire-width
