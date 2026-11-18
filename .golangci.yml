@@ -118,6 +118,11 @@ linters:
 
   exclusions:
     rules:
+      # NewErrorf creates an original classified error; use krberror.Errorf when a cause exists.
+      - path: '^v8/messages/'
+        text: '^error returned from external package is unwrapped: sig: func github\.com/otuschhoff/gokrb5/v8/krberror\.NewErrorf\('
+        linters:
+          - wrapcheck
       # Relax complexity, global-table, and error-wrapping rules in test files
       - path: _test\.go
         linters:

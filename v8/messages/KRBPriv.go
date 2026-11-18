@@ -74,7 +74,7 @@ func (k *KRBPriv) Marshal() ([]byte, error) {
 	}
 	b, err := asn1.Marshal(tk)
 	if err != nil {
-		return []byte{}, err
+		return []byte{}, fmt.Errorf("encode KRB-PRIV: %w", err)
 	}
 	b = asn1tools.AddASNAppTag(b, asnAppTag.KRBPriv)
 	return b, nil
@@ -85,12 +85,12 @@ func (k *KRBPriv) Marshal() ([]byte, error) {
 func (k *KRBPriv) EncryptEncPart(key types.EncryptionKey) error {
 	b, err := asn1.Marshal(k.DecryptedEncPart)
 	if err != nil {
-		return err
+		return fmt.Errorf("encode KRB-PRIV encrypted part: %w", err)
 	}
 	b = asn1tools.AddASNAppTag(b, asnAppTag.EncKrbPrivPart)
 	k.EncPart, err = crypto.GetEncryptedData(b, key, keyusage.KRB_PRIV_ENCPART, 1)
 	if err != nil {
-		return err
+		return fmt.Errorf("encrypt KRB-PRIV encrypted part: %w", err)
 	}
 	return nil
 }

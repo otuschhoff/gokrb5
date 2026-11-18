@@ -3,11 +3,14 @@ package messages
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/otuschhoff/gokrb5/v8/iana"
@@ -18,9 +21,31 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/iana/trtype"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
+	"github.com/otuschhoff/gokrb5/v8/pac"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
+
+func TestTicketDecodeErrorContext(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name    string
+		context string
+		decode  func([]byte) error
+	}{
+		{name: "ticket", context: "decode ticket:", decode: new(Ticket).Unmarshal},
+		{name: "encrypted part", context: "decode encrypted ticket part:", decode: new(EncTicketPart).Unmarshal},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := tt.decode(nil)
+			if _, ok := errors.AsType[asn1.SyntaxError](err); !ok || !strings.HasPrefix(err.Error(), tt.context) {
+				t.Fatalf("Unmarshal() = %v; want %q and ASN.1 syntax cause", err, tt.context)
+			}
+		})
+	}
+}
 
 func TestUnmarshalTicket(t *testing.T) {
 	t.Parallel()
@@ -222,25 +247,35 @@ func TestAuthorizationData_GetPACType_GOKRB5TestData(t *testing.T) {
 	}
 	b, _ = hex.DecodeString(testdata.KEYTAB_SYSHTTP_TEST_GOKRB5)
 	kt := keytab.New()
-	if err := kt.Unmarshal(b); err != nil {
-		t.Fatal(err)
+	if keytabErr := kt.Unmarshal(b); keytabErr != nil {
+		t.Fatal(keytabErr)
 	}
 
 	sname := types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: []string{"sysHTTP"}}
 	w := bytes.NewBufferString("")
 	l := log.New(w, "", 0)
-	isPAC, pac, err := tkt.GetPACType(kt, &sname, l)
+	isPAC, parsedPAC, err := tkt.GetPACType(kt, &sname, l)
 	if err != nil {
 		t.Log(w.String())
 		t.Errorf("error getting PAC: %v", err)
 	}
 	assert.True(t, isPAC, "PAC should be present")
-	assert.Equal(t, 5, len(pac.Buffers), "Number of buffers not as expected")
-	assert.Equal(t, uint32(5), pac.CBuffers, "Count of buffers not as expected")
-	assert.Equal(t, uint32(0), pac.Version, "PAC version not as expected")
-	assert.NotNil(t, pac.KerbValidationInfo, "PAC Kerb Validation info is nil")
-	assert.NotNil(t, pac.ClientInfo, "PAC Client Info info is nil")
-	assert.NotNil(t, pac.UPNDNSInfo, "PAC UPN DNS Info info is nil")
-	assert.NotNil(t, pac.KDCChecksum, "PAC KDC Checksum info is nil")
-	assert.NotNil(t, pac.ServerChecksum, "PAC Server checksum info is nil")
+	assert.Equal(t, 5, len(parsedPAC.Buffers), "Number of buffers not as expected")
+	assert.Equal(t, uint32(5), parsedPAC.CBuffers, "Count of buffers not as expected")
+	assert.Equal(t, uint32(0), parsedPAC.Version, "PAC version not as expected")
+	assert.NotNil(t, parsedPAC.KerbValidationInfo, "PAC Kerb Validation info is nil")
+	assert.NotNil(t, parsedPAC.ClientInfo, "PAC Client Info info is nil")
+	assert.NotNil(t, parsedPAC.UPNDNSInfo, "PAC UPN DNS Info info is nil")
+	assert.NotNil(t, parsedPAC.KDCChecksum, "PAC KDC Checksum info is nil")
+	assert.NotNil(t, parsedPAC.ServerChecksum, "PAC Server checksum info is nil")
+
+	t.Run("option verification retains its cause", func(t *testing.T) {
+		var options pac.VerifyOptions
+		options.ExpectedClientName = "different-client"
+		found, parsed, verifyErr := tkt.GetPACTypeWithOptions(kt, &sname, l, options)
+		assert.True(t, found)
+		assert.NotNil(t, parsed.ClientInfo)
+		assert.ErrorContains(t, verifyErr, "verify ticket PAC:")
+		assert.ErrorContains(t, errors.Unwrap(verifyErr), "PAC client name")
+	})
 }

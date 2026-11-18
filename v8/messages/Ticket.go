@@ -108,15 +108,18 @@ func NewTicketWithKey(cname types.PrincipalName, crealm string, sname types.Prin
 
 // Unmarshal bytes b into a Ticket struct.
 func (t *Ticket) Unmarshal(b []byte) error {
-	_, err := asn1.UnmarshalWithParams(b, t, fmt.Sprintf("application,explicit,tag:%d", asnAppTag.Ticket))
-	return err
+	params := fmt.Sprintf("application,explicit,tag:%d", asnAppTag.Ticket)
+	if _, err := asn1.UnmarshalWithParams(b, t, params); err != nil {
+		return fmt.Errorf("decode ticket: %w", err)
+	}
+	return nil
 }
 
 // Marshal the Ticket.
 func (t *Ticket) Marshal() ([]byte, error) {
 	b, err := asn1.Marshal(*t)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("encode ticket: %w", err)
 	}
 	b = asn1tools.AddASNAppTag(b, asnAppTag.Ticket)
 	return b, nil
@@ -124,8 +127,11 @@ func (t *Ticket) Marshal() ([]byte, error) {
 
 // Unmarshal bytes b into the EncTicketPart struct.
 func (t *EncTicketPart) Unmarshal(b []byte) error {
-	_, err := asn1.UnmarshalWithParams(b, t, fmt.Sprintf("application,explicit,tag:%d", asnAppTag.EncTicketPart))
-	return err
+	params := fmt.Sprintf("application,explicit,tag:%d", asnAppTag.EncTicketPart)
+	if _, err := asn1.UnmarshalWithParams(b, t, params); err != nil {
+		return fmt.Errorf("decode encrypted ticket part: %w", err)
+	}
+	return nil
 }
 
 // unmarshalTicket returns a ticket from the bytes provided.
@@ -174,7 +180,7 @@ func MarshalTicketSequence(tkts []Ticket) (asn1.RawValue, error) {
 	for i, t := range tkts {
 		b, err := t.Marshal()
 		if err != nil {
-			return raw, fmt.Errorf("error marshaling ticket number %d in sequence of tickets", i+1)
+			return raw, fmt.Errorf("error marshaling ticket number %d in sequence of tickets: %w", i+1, err)
 		}
 		btkts = append(btkts, b...)
 	}
@@ -248,7 +254,7 @@ func (t *Ticket) GetPACTypeWithOptions(keytab *keytab.Keytab, sname *types.Princ
 		return true, p, NewKRBError(t.SName, t.Realm, errorcode.KRB_AP_ERR_NOKEY, fmt.Sprintf("Could not get key from keytab: %v", err))
 	}
 	if err := p.ProcessPACInfoBuffers(key, l); err != nil {
-		return true, p, err
+		return true, p, fmt.Errorf("process ticket PAC buffers: %w", err)
 	}
 	if options.ExpectedClientName == "" {
 		options.ExpectedClientName = t.DecryptedEncPart.CName.PrincipalNameString()
@@ -257,7 +263,7 @@ func (t *Ticket) GetPACTypeWithOptions(keytab *keytab.Keytab, sname *types.Princ
 		options.ExpectedAuthTime = &t.DecryptedEncPart.AuthTime
 	}
 	if err := p.Verify(key, options); err != nil {
-		return true, p, err
+		return true, p, fmt.Errorf("verify ticket PAC: %w", err)
 	}
 	return true, p, nil
 }

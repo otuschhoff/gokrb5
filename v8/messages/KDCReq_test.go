@@ -1,9 +1,12 @@
 package messages
 
 import (
+	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -20,6 +23,38 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
+
+func TestKDCRequestNonceErrors(t *testing.T) {
+	// rand.Reader is process-wide; restore it before parallel tests run.
+	cause := errors.New("test nonce reader failure")
+	reader := rand.Reader
+	t.Cleanup(func() { rand.Reader = reader })
+	rand.Reader = iotest.ErrReader(cause)
+
+	const realm = "NONCE-TEST.EXAMPLE"
+	cfg := config.New()
+	client := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "client")
+	service := types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/"+realm)
+	asReq, asErr := NewASReq(realm, cfg, client, service)
+	assert.Zero(t, asReq.PVNO)
+	assert.ErrorIs(t, asErr, cause)
+	assert.ErrorContains(t, asErr, "generate AS-REQ nonce:")
+
+	var ticket Ticket
+	var key types.EncryptionKey
+	tgsReq, tgsErr := NewTGSReq(
+		client,
+		realm,
+		cfg,
+		ticket,
+		key,
+		service,
+		false,
+	)
+	assert.Zero(t, tgsReq.PVNO)
+	assert.ErrorIs(t, tgsErr, cause)
+	assert.ErrorContains(t, tgsErr, "generate TGS-REQ nonce:")
+}
 
 func TestNewASReqRenewLifetimeHonoured(t *testing.T) {
 	cfg := config.New()

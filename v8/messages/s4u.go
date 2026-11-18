@@ -23,14 +23,18 @@ const s4uAuthPackage = "Kerberos"
 func NewPAForUserPAData(userName types.PrincipalName, userRealm string, sessionKey types.EncryptionKey) (types.PAData, error) {
 	checksum, err := rfc4757.Checksum(sessionKey.KeyValue, keyusage.KERB_NON_KERB_CKSUM_SALT, s4uChecksumData(userName, userRealm, s4uAuthPackage))
 	if err != nil {
-		return types.PAData{}, err
+		return types.PAData{}, fmt.Errorf("checksum PA-FOR-USER: %w", err)
 	}
-	return types.NewPAForUserPAData(types.PAForUser{
+	pa, err := types.NewPAForUserPAData(types.PAForUser{
 		UserName:    userName,
 		UserRealm:   userRealm,
 		Cksum:       types.Checksum{CksumType: chksumtype.KERB_CHECKSUM_HMAC_MD5, Checksum: checksum},
 		AuthPackage: s4uAuthPackage,
 	})
+	if err != nil {
+		return pa, fmt.Errorf("encode PA-FOR-USER: %w", err)
+	}
+	return pa, nil
 }
 
 func s4uChecksumData(userName types.PrincipalName, userRealm, authPackage string) []byte {
@@ -62,9 +66,13 @@ func NewPAS4UX509UserPAData(userID types.S4UUserID, sessionKey types.EncryptionK
 	}
 	value, err := types.NewPAS4UX509User(userID, types.Checksum{CksumType: etype.GetHashID(), Checksum: checksum})
 	if err != nil {
-		return types.PAData{}, err
+		return types.PAData{}, fmt.Errorf("construct PA-S4U-X509-USER: %w", err)
 	}
-	return types.NewPAS4UX509UserPAData(value)
+	pa, err := types.NewPAS4UX509UserPAData(value)
+	if err != nil {
+		return pa, fmt.Errorf("encode PA-S4U-X509-USER: %w", err)
+	}
+	return pa, nil
 }
 
 func nonceUint32(value int) (uint32, error) {
@@ -130,7 +138,11 @@ func s4uOptionSet(options asn1.BitString, option int) bool {
 func findS4UX509User(paData types.PADataSequence) (types.PAS4UX509User, error) {
 	for i := range paData {
 		if paData[i].PADataType == patype.PA_S4U_X509_USER {
-			return paData[i].GetPAS4UX509User()
+			value, err := paData[i].GetPAS4UX509User()
+			if err != nil {
+				return value, fmt.Errorf("decode PA-S4U-X509-USER: %w", err)
+			}
+			return value, nil
 		}
 	}
 	return types.PAS4UX509User{}, fmt.Errorf("PA-S4U-X509-USER is missing")

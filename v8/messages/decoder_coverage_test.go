@@ -2,8 +2,12 @@ package messages
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
+	"maps"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -253,6 +257,7 @@ func TestTicketGetPACTypeWithOptions(t *testing.T) {
 		assert.True(t, ok)
 		var krbErr KRBError
 		require.ErrorAs(t, err, &krbErr)
+		assert.IsType(t, krbErr, err, "missing key must return a concrete KRB-ERROR")
 		assert.Equal(t, errorcode.KRB_AP_ERR_NOKEY, krbErr.ErrorCode)
 	})
 	t.Run("valid PAC with wrong key", func(t *testing.T) {
@@ -263,8 +268,11 @@ func TestTicketGetPACTypeWithOptions(t *testing.T) {
 			Components: []string{"krbtgt", "EXAMPLE.COM"},
 			NameType:   nametype.KRB_NT_SRV_INST,
 		}, 1, types.EncryptionKey{KeyType: etypeID.AES256_CTS_HMAC_SHA1_96, KeyValue: make([]byte, 32)}, time.Now()))
-		_, _, err := ticket.GetPACTypeWithOptions(kt, nil, logger, pacVerifyOptions())
+		found, _, err := ticket.GetPACTypeWithOptions(kt, nil, logger, pacVerifyOptions())
 		require.Error(t, err, "PAC verification with the wrong key must fail")
+		if !found || !strings.HasPrefix(err.Error(), "process ticket PAC buffers:") || errors.Unwrap(err) == nil {
+			t.Fatalf("expected a wrapped PAC processing failure, got %v", err)
+		}
 	})
 }
 
@@ -327,7 +335,9 @@ func TestKRBPrivCrypto(t *testing.T) {
 	badKey := types.EncryptionKey{KeyType: -1}
 	priv := NewKRBPriv(EncKrbPrivPart{UserData: []byte("confidential")})
 
-	require.Error(t, priv.EncryptEncPart(badKey), "unknown enctype must be rejected")
+	encryptErr := priv.EncryptEncPart(badKey)
+	assert.ErrorContains(t, encryptErr, "encrypt KRB-PRIV encrypted part:")
+	assert.ErrorContains(t, errors.Unwrap(encryptErr), "error getting etype:")
 	require.NoError(t, priv.EncryptEncPart(key))
 	other := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: make([]byte, 16)}
 	require.Error(t, priv.DecryptEncPart(other))
@@ -406,10 +416,6 @@ func TestS4UErrorPaths(t *testing.T) {
 		_, err := findS4UX509User(types.PADataSequence{})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "PA-S4U-X509-USER is missing")
-	})
-	t.Run("find rejects corrupt value", func(t *testing.T) {
-		_, err := findS4UX509User(types.PADataSequence{{PADataType: patype.PA_S4U_X509_USER, PADataValue: []byte{0xFF}}})
-		require.Error(t, err)
 	})
 	t.Run("reply verification requires request PA", func(t *testing.T) {
 		_, err := new(TGSRep).VerifyS4UX509UserReply(TGSReq{}, key)
@@ -1263,14 +1269,13 @@ func TestTGSReqRejectsOutOfRangePACOption(t *testing.T) {
 // the valid message vectors as seeds. Malformed inputs must never panic.
 func FuzzMessageUnmarshal(f *testing.F) {
 	vectors := messageUnmarshalVectors(f)
-	names := make([]string, 0, len(vectors))
-	for name, vector := range vectors {
-		names = append(names, name)
-		b, err := hex.DecodeString(vector.hex)
+	names := slices.Sorted(maps.Keys(vectors))
+	for i, name := range names {
+		b, err := hex.DecodeString(vectors[name].hex)
 		if err != nil {
 			f.Fatal(err)
 		}
-		f.Add(len(names)-1, b)
+		f.Add(i, b)
 	}
 	f.Fuzz(func(_ *testing.T, index int, b []byte) {
 		i := index % len(names)

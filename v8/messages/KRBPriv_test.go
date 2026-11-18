@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/otuschhoff/gokrb5/v8/iana"
@@ -14,6 +15,18 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
+
+func TestKRBPrivEncryptEncodingError(t *testing.T) {
+	t.Parallel()
+
+	var part EncKrbPrivPart
+	part.Timestamp = time.Date(10000, time.January, 1, 0, 0, 0, 0, time.UTC)
+	priv := NewKRBPriv(part)
+	var key types.EncryptionKey
+	err := priv.EncryptEncPart(key)
+	assert.ErrorAs(t, err, new(asn1.StructuralError))
+	assert.ErrorContains(t, err, "encode KRB-PRIV encrypted part:")
+}
 
 func TestUnmarshalKRBPriv(t *testing.T) {
 	t.Parallel()

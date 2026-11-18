@@ -2,7 +2,11 @@ package messages
 
 import (
 	"bytes"
+	"errors"
+	"strings"
 	"testing"
+
+	"github.com/jcmturner/gofork/encoding/asn1"
 
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/crypto"
@@ -15,6 +19,18 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
+
+func TestFindS4UX509UserDecodeError(t *testing.T) {
+	t.Parallel()
+
+	paData := types.PADataSequence{{PADataType: patype.PA_S4U_X509_USER, PADataValue: []byte{0xFF}}}
+	_, err := findS4UX509User(paData)
+	cause := errors.Unwrap(err)
+	if _, ok := errors.AsType[asn1.SyntaxError](cause); err == nil || !ok ||
+		!strings.HasPrefix(err.Error(), "decode PA-S4U-X509-USER:") {
+		t.Fatalf("expected PA-DATA decode context and syntax cause, got %v", err)
+	}
+}
 
 func mustNonceUint32(t *testing.T, value int) uint32 {
 	t.Helper()

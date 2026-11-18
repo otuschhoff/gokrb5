@@ -824,6 +824,30 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 54 (2026-11-18, Kerberos message error contracts; Q-03):
+AS and TGS request builders retain random-source failures with nonce
+context. Ticket, KRB-PRIV, and S4U operations identify encoding, decoding,
+encryption, and checksum failures without discarding their causes. Ticket
+PAC errors distinguish buffer processing from verification with caller
+options. The concrete no-key KRB-ERROR, validation order, and wire encodings
+are unchanged.
+
+Regression tests cover injected nonce failures, typed ASN.1 errors,
+KRB-PRIV encryption failures, and PAC processing and client binding
+failures. The message fuzz target sorts its decoder names so cached
+inputs select the same decoder across runs. Its 60-second run passed
+1,682,383 executions. Both module suites and changed-line lint gates
+passed, along with focused race, build, and vet checks and Linux/386
+message tests. V8 cross-package statement coverage reached 87.1%.
+Live interoperability was not run; Docker daemon access was denied.
+
+All 45 messages `wrapcheck` reports were resolved: 15 propagated errors
+now wrap their causes, and 30 original `krberror.NewErrorf` constructions
+have no cause to wrap. The exception matches only that constructor's
+diagnostic in `v8/messages`. Canonical v8 findings fell from 772 to 726
+(`wrapcheck`: 200 to 155); the supplemental total fell from 3,686 to 3,685.
+Neither inventory introduced findings, and v8 gosec remained at zero.
+
 Slice 53 (2026-11-18, Kerberos type error contracts; Q-03):
 The v8 types package now identifies the failed ASN.1 operation while
 preserving syntax and structural causes. Legacy decoders still accept a

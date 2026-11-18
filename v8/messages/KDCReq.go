@@ -157,7 +157,7 @@ func NewASReq(realm string, c *config.Config, cname, sname types.PrincipalName) 
 func NewASReqWithOptions(realm string, c *config.Config, cname, sname types.PrincipalName, options ASReqOptions) (ASReq, error) {
 	nonce, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt32))
 	if err != nil {
-		return ASReq{}, err
+		return ASReq{}, fmt.Errorf("generate AS-REQ nonce: %w", err)
 	}
 	t := time.Now().UTC()
 	// Copy the default options to make this thread safe
@@ -352,7 +352,7 @@ func NewUser2UserTGSReqWithOptions(cname types.PrincipalName, kdcRealm string, c
 func tgsReq(cname, sname types.PrincipalName, kdcRealm string, renewal bool, c *config.Config, options TGSReqOptions) (TGSReq, error) {
 	nonce, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt32))
 	if err != nil {
-		return TGSReq{}, err
+		return TGSReq{}, fmt.Errorf("generate TGS-REQ nonce: %w", err)
 	}
 	t := time.Now().UTC()
 	k := KDCReqFields{
