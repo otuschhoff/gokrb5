@@ -425,7 +425,7 @@ func (kt *Keytab) AddEntry(principalName, realm, password string, ts time.Time, 
 	princ, _ := types.ParseSPNString(principalName)
 	key, _, err := crypto.GetKeyFromPassword(password, princ, realm, encType, types.PADataSequence{})
 	if err != nil {
-		return err
+		return fmt.Errorf("derive keytab entry key: %w", err)
 	}
 	return kt.AddKey(Principal{Realm: realm, Components: princ.NameString, NameType: princ.NameType}, kvno, key, ts)
 }
@@ -435,7 +435,7 @@ func (kt *Keytab) AddEntryWithSalt(principalName, realm, password, salt, s2kpara
 	princ, _ := types.ParseSPNString(principalName)
 	et, err := crypto.GetEtype(encType)
 	if err != nil {
-		return err
+		return fmt.Errorf("select keytab string-to-key enctype: %w", err)
 	}
 	if s2kparams == "" {
 		s2kparams = et.GetDefaultStringToKeyParams()
@@ -464,7 +464,7 @@ func (kt *Keytab) AddKey(p Principal, kvno uint32, key types.EncryptionKey, ts t
 	}
 	et, err := crypto.GetEtype(key.KeyType)
 	if err != nil {
-		return err
+		return fmt.Errorf("validate keytab key enctype: %w", err)
 	}
 	keySize := et.GetKeyByteSize()
 	if key.KeyType == etypeID.AES256_CTS_HMAC_SHA384_192 {
@@ -864,30 +864,18 @@ func (e Entry) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
 	if err != nil {
 		return b, err
 	}
-	t := make([]byte, 9)
-	var timestampBytes bytes.Buffer
-	if writeErr := binary.Write(&timestampBytes, endian, timestamp); writeErr != nil {
-		return b, writeErr
-	}
-	copy(t[0:4], timestampBytes.Bytes())
-	var kvno [4]byte
-	binary.BigEndian.PutUint32(kvno[:], e.KVNO)
-	t[4] = kvno[3]
+	var t [9]byte
+	endian.PutUint32(t[:4], uint32(timestamp)) // #nosec G115 -- encode the signed timestamp's two's-complement bits.
+	t[4] = byte(e.KVNO & 0xff)
 	endian.PutUint16(t[5:7], keyType)
-	endian.PutUint16(t[7:9], keyLength)
-	b = append(b, t...)
-
-	buf := new(bytes.Buffer)
-	err = binary.Write(buf, endian, e.Key.KeyValue)
-	if err != nil {
-		return b, err
-	}
-	b = append(b, buf.Bytes()...)
+	endian.PutUint16(t[7:], keyLength)
+	b = append(b, t[:]...)
+	b = append(b, e.Key.KeyValue...)
 
 	if v == 2 || e.kvno32Present || e.KVNO > 255 {
-		t = make([]byte, 4)
-		endian.PutUint32(t, e.KVNO)
-		b = append(b, t...)
+		var kvno [4]byte
+		endian.PutUint32(kvno[:], e.KVNO)
+		b = append(b, kvno[:]...)
 	}
 
 	// Add the length header
@@ -895,9 +883,9 @@ func (e Entry) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
 	if err != nil {
 		return b, err
 	}
-	t = make([]byte, 4)
-	endian.PutUint32(t, recordLength)
-	b = append(t, b...)
+	header := make([]byte, 4)
+	endian.PutUint32(header, recordLength)
+	b = append(header, b...)
 	return b, nil
 }
 
@@ -997,20 +985,13 @@ func keytabUint32(name string, value int64) (uint32, error) {
 }
 
 func marshalString(s string, endian binary.ByteOrder) ([]byte, error) {
-	sb := []byte(s)
-	length, err := keytabUint16("string length", int64(len(sb)))
+	length, err := keytabUint16("string length", int64(len(s)))
 	if err != nil {
 		return nil, err
 	}
-	b := make([]byte, 2)
-	endian.PutUint16(b[0:], length)
-	buf := new(bytes.Buffer)
-	err = binary.Write(buf, endian, sb)
-	if err != nil {
-		return b, err
-	}
-	b = append(b, buf.Bytes()...)
-	return b, err
+	b := make([]byte, 2, 2+len(s))
+	endian.PutUint16(b, length)
+	return append(b, s...), nil
 }
 
 // Read bytes representing a timestamp.
@@ -1028,7 +1009,7 @@ func readUint8(b []byte, p *int) (uint8, error) {
 		return 0, fmt.Errorf("%d cannot be less than zero", *p)
 	}
 
-	if (*p + 1) > len(b) {
+	if len(b)-*p < 1 {
 		return 0, fmt.Errorf("need 1 byte at offset %d, input length is %d", *p, len(b))
 	}
 	i := b[*p]
@@ -1038,40 +1019,26 @@ func readUint8(b []byte, p *int) (uint8, error) {
 
 // Read bytes representing a sixteen bit integer.
 func readInt16(b []byte, p *int, e *binary.ByteOrder) (int16, error) {
-	var i int16
-	var err error
 	if *p < 0 {
 		return 0, fmt.Errorf("%d cannot be less than zero", *p)
 	}
 
-	if (*p + 2) > len(b) {
+	if len(b)-*p < 2 {
 		return 0, fmt.Errorf("need 2 bytes at offset %d, input length is %d", *p, len(b))
 	}
 
-	if readErr := binary.Read(bytes.NewReader(b[*p:*p+2]), *e, &i); readErr != nil {
-		return 0, readErr
-	}
+	i := int16((*e).Uint16(b[*p : *p+2])) // #nosec G115 -- interpret the wire bits as a signed 16-bit field.
 	*p += 2
-	return i, err
+	return i, nil
 }
 
 // Read bytes representing a thirty two bit integer.
 func readInt32(b []byte, p *int, e *binary.ByteOrder) (int32, error) {
-	var i int32
-	var err error
-	if *p < 0 {
-		return 0, fmt.Errorf("%d cannot be less than zero", *p)
+	i, err := readUint32(b, p, e)
+	if err != nil {
+		return 0, err
 	}
-
-	if (*p + 4) > len(b) {
-		return 0, fmt.Errorf("need 4 bytes at offset %d, input length is %d", *p, len(b))
-	}
-
-	if readErr := binary.Read(bytes.NewReader(b[*p:*p+4]), *e, &i); readErr != nil {
-		return 0, readErr
-	}
-	*p += 4
-	return i, err
+	return int32(i), nil // #nosec G115 -- interpret the wire bits as a signed 32-bit field.
 }
 
 // Read bytes representing a thirty two bit unsigned integer.
@@ -1080,7 +1047,7 @@ func readUint32(b []byte, p *int, e *binary.ByteOrder) (uint32, error) {
 		return 0, fmt.Errorf("%d cannot be less than zero", *p)
 	}
 
-	if (*p + 4) > len(b) {
+	if len(b)-*p < 4 {
 		return 0, fmt.Errorf("need 4 bytes at offset %d, input length is %d", *p, len(b))
 	}
 
@@ -1089,7 +1056,7 @@ func readUint32(b []byte, p *int, e *binary.ByteOrder) (uint32, error) {
 	return i, nil
 }
 
-func readBytes(b []byte, p *int, s int, e *binary.ByteOrder) ([]byte, error) {
+func readBytes(b []byte, p *int, s int) ([]byte, error) {
 	if *p < 0 {
 		return nil, fmt.Errorf("%d cannot be less than zero", *p)
 	}
@@ -1099,12 +1066,8 @@ func readBytes(b []byte, p *int, s int, e *binary.ByteOrder) ([]byte, error) {
 	if s > len(b)-*p {
 		return nil, fmt.Errorf("need %d bytes at offset %d, input length is %d", s, *p, len(b))
 	}
-	i := *p + s
-	buf := bytes.NewBuffer(b[*p:i])
 	r := make([]byte, s)
-	if err := binary.Read(buf, *e, &r); err != nil {
-		return nil, err
-	}
+	copy(r, b[*p:*p+s])
 	*p += s
 	return r, nil
 }
@@ -1115,12 +1078,13 @@ func readSizedBytes(b []byte, p *int, e *binary.ByteOrder) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return readBytes(b, p, int(l), e)
+	return readBytes(b, p, int(l))
 }
 
 func validRecordLength(b []byte, endian binary.ByteOrder, remaining int) bool {
-	var l int32
-	if err := binary.Read(bytes.NewReader(b[:4]), endian, &l); err != nil {
+	var offset int
+	l, err := readInt32(b, &offset, &endian)
+	if err != nil {
 		return false
 	}
 	if l == 0 {
@@ -1140,7 +1104,7 @@ func validRecordLength(b []byte, endian binary.ByteOrder, remaining int) bool {
 func (kt *Keytab) JSON() (string, error) {
 	b, err := json.MarshalIndent(kt, "", "  ")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("encode keytab JSON: %w", err)
 	}
 	return string(b), nil
 }

@@ -824,6 +824,24 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 42 (2026-11-18, keytab codec and remaining keytab error contracts):
+fixed-width fields now use byte-order operations directly, and decoded key
+bytes still belong to the keytab rather than the input buffer. Signed wire
+fields retain their two's-complement interpretation, including negative
+timestamps and deleted-record lengths. Version 1 byte-order probing and the
+optional 32-bit KVNO trailer retain their existing behavior. Key derivation,
+enctype validation, and JSON errors now identify the failed operation while
+preserving their causes. Successful binary and JSON output is unchanged.
+
+The canonical v8 total fell from 969 to 958 and `wrapcheck` from 385 to 374;
+the keytab package now has no `wrapcheck` findings and v8 still has zero
+gosec findings. Both module suites, the v8 race suite, both changed-line
+lint gates, and all four MIT keytab interoperability tests passed. The
+keytab decoder passed a 60-second fuzz run (1.47 million executions).
+Cross-package statement coverage is 86.6% against the 86.0% floor. Keytab
+tests ran on Linux/386 and cross-compiled for Linux/s390x; the big-endian
+binary and live KDC exchanges were not run.
+
 Slice 41 (2026-11-18, credential-file and keytab stream error contracts):
 v8 keytab and FILE credential-cache loads identify the failed read operation
 without losing filesystem causes. Keytab append errors identify the failed

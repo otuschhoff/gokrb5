@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -271,20 +272,70 @@ func TestMarshalRejectsWireRangeOverflow(t *testing.T) {
 }
 
 func TestMarshalPreservesSignedTimestampBoundary(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		order  binary.ByteOrder
+		prefix []byte
+	}{
+		{name: "big endian", order: binary.BigEndian, prefix: []byte{0x80, 0, 0, 0}},
+		{name: "little endian", order: binary.LittleEndian, prefix: []byte{0, 0, 0, 0x80}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			entry := testEntry(300)
+			entry.Timestamp = time.Unix(-1<<31, 0)
+			principal, err := entry.Principal.marshal(1, tc.order)
+			require.NoError(t, err)
+			src := New()
+			src.version, src.byteOrder = 1, tc.order
+			src.Entries = []Entry{entry}
+			encoded, err := src.Marshal()
+			require.NoError(t, err)
+			offset := 6 + len(principal)
+			assert.Equal(t, tc.prefix, encoded[offset:offset+4])
+
+			decoded := New()
+			require.NoError(t, decoded.Unmarshal(encoded))
+			require.Len(t, decoded.Entries, 1)
+			clear(encoded)
+			assert.True(t, decoded.Entries[0].Timestamp.Equal(entry.Timestamp))
+			assert.Equal(t, entry.KVNO, decoded.Entries[0].KVNO)
+			assert.Equal(t, entry.Key, decoded.Entries[0].Key)
+		})
+	}
+}
+
+func TestKeytabExternalErrorContext(t *testing.T) {
+	t.Parallel()
+
+	kt := New()
+	ts := time.Unix(0, 0)
+	const unsupported = -1
+	err := kt.AddEntry("user", "EXAMPLE.ORG", "test password", ts, 1, unsupported)
+	require.ErrorContains(t, err, "derive keytab entry key:")
+	require.NotNil(t, errors.Unwrap(err))
+
+	err = kt.AddEntryWithSalt("user", "EXAMPLE.ORG", "test password", "test salt", "", ts, 1, unsupported)
+	require.ErrorContains(t, err, "select keytab string-to-key enctype:")
+	require.NotNil(t, errors.Unwrap(err))
+
 	entry := testEntry(1)
-	entry.Timestamp = time.Unix(-1, 0)
-	encoded, err := entry.marshal(2, binary.BigEndian)
-	if err != nil {
-		t.Fatal(err)
-	}
-	keytab := characterizationKeytab(encoded[4:])
-	decoded := New()
-	if err := decoded.Unmarshal(keytab); err != nil {
-		t.Fatal(err)
-	}
-	if !decoded.Entries[0].Timestamp.Equal(entry.Timestamp) {
-		t.Fatalf("timestamp = %v, want %v", decoded.Entries[0].Timestamp, entry.Timestamp)
-	}
+	entry.Key.KeyType = unsupported
+	err = kt.AddKey(entry.Principal, entry.KVNO, entry.Key, ts)
+	require.ErrorContains(t, err, "validate keytab key enctype:")
+	require.NotNil(t, errors.Unwrap(err))
+	assert.Empty(t, kt.Entries)
+
+	entry.Timestamp = time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)
+	kt.Entries = []Entry{entry}
+	output, err := kt.JSON()
+	assert.Empty(t, output)
+	require.ErrorContains(t, err, "encode keytab JSON:")
+	_, ok := errors.AsType[*json.MarshalerError](err)
+	assert.True(t, ok)
 }
 
 func TestGetEncryptionKeyRejectsKVNOOverflow(t *testing.T) {
@@ -624,13 +675,12 @@ func TestLoad(t *testing.T) {
 // This test provides inputs to readBytes that previously
 // caused a panic.
 func TestReadBytes(t *testing.T) {
-	var endian binary.ByteOrder = binary.BigEndian
 	p := 0
 
-	if _, err := readBytes(nil, &p, 1, &endian); err == nil {
+	if _, err := readBytes(nil, &p, 1); err == nil {
 		t.Fatal("err should be populated because s was given that exceeds array length")
 	}
-	if _, err := readBytes(nil, &p, -1, &endian); err == nil {
+	if _, err := readBytes(nil, &p, -1); err == nil {
 		t.Fatal("err should be given because negative s was given")
 	}
 }
