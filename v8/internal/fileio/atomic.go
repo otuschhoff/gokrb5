@@ -22,9 +22,9 @@ type fileOps struct {
 	remove func(string) error
 }
 
-// AtomicWrite replaces path with private, synced data, then syncs its directory
-// using the caller's platform-specific directory synchronization policy.
-func AtomicWrite(path string, data []byte, syncDir func(string) error) error {
+// AtomicWrite replaces path with private, synced data, then syncs its
+// directory on platforms where directory syncing is enabled.
+func AtomicWrite(path string, data []byte) error {
 	ops := fileOps{
 		create: func(dir, pattern string) (temporaryFile, error) {
 			return os.CreateTemp(dir, pattern)

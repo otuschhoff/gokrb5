@@ -574,7 +574,7 @@ func newPrincipal() Principal {
 	}
 }
 
-// Load a Keytab file into a Keytab type.
+// Load reads a keytab file. File read errors wrap the underlying filesystem error.
 func Load(ktPath string) (*Keytab, error) {
 	path, _, err := ResolveName(ktPath, nil)
 	if err != nil {
@@ -583,7 +583,7 @@ func Load(ktPath string) (*Keytab, error) {
 	kt := new(Keytab)
 	b, err := os.ReadFile(path) // #nosec G304,G703 -- keytab path is an explicit caller-selected credential path.
 	if err != nil {
-		return kt, err
+		return kt, fmt.Errorf("read keytab file: %w", err)
 	}
 	err = kt.Unmarshal(b)
 	if err == nil {
@@ -596,7 +596,7 @@ func Load(ktPath string) (*Keytab, error) {
 func (kt *Keytab) Read(r io.Reader) error {
 	b, err := io.ReadAll(r)
 	if err != nil {
-		return err
+		return fmt.Errorf("read keytab stream: %w", err)
 	}
 	return kt.Unmarshal(b)
 }
@@ -618,14 +618,21 @@ func (kt *Keytab) Marshal() ([]byte, error) {
 	return b, nil
 }
 
-// Write the keytab bytes to io.Writer.
-// Returns the number of bytes written
+// Write marshals the keytab to w and returns the number of bytes written.
+// If w reports a short write without an error, Write returns an error wrapping io.ErrShortWrite.
 func (kt *Keytab) Write(w io.Writer) (int, error) {
 	b, err := kt.Marshal()
 	if err != nil {
 		return 0, fmt.Errorf("error marshaling keytab: %w", err)
 	}
-	return w.Write(b)
+	n, err := w.Write(b)
+	if err != nil {
+		return n, fmt.Errorf("write keytab stream: %w", err)
+	}
+	if n != len(b) {
+		return n, fmt.Errorf("write keytab stream: %w", io.ErrShortWrite)
+	}
+	return n, nil
 }
 
 // Unmarshal byte slice of Keytab data into Keytab type.

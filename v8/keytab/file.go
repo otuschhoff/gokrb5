@@ -21,7 +21,7 @@ func (kt *Keytab) WriteFile(name string) error {
 	if err != nil {
 		return fmt.Errorf("error marshaling keytab: %w", err)
 	}
-	if err := fileio.AtomicWrite(path, b, syncDir); err != nil {
+	if err := fileio.AtomicWrite(path, b); err != nil {
 		return fmt.Errorf("write keytab: %w", err)
 	}
 	kt.name = path
@@ -30,6 +30,7 @@ func (kt *Keytab) WriteFile(name string) error {
 
 // AppendToFile appends entries to a keytab while holding an advisory exclusive lock.
 // A missing or empty file is initialized as a version 2 keytab.
+// Filesystem errors can be inspected with errors.Is or errors.As.
 func AppendToFile(name string, entries ...Entry) (err error) {
 	path, _, err := ResolveName(name, nil)
 	if err != nil {
@@ -37,7 +38,7 @@ func AppendToFile(name string, entries ...Entry) (err error) {
 	}
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o600) // #nosec G304 -- name is the credential file explicitly selected by the caller.
 	if err != nil {
-		return err
+		return fmt.Errorf("open keytab for append: %w", err)
 	}
 	defer func() {
 		if closeErr := f.Close(); closeErr != nil {
@@ -74,9 +75,12 @@ func AppendToFile(name string, entries ...Entry) (err error) {
 		return nil
 	}
 	if _, err := io.Copy(f, bytes.NewReader(appendData)); err != nil {
-		return err
+		return fmt.Errorf("append keytab data: %w", err)
 	}
-	return f.Sync()
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("sync appended keytab: %w", err)
+	}
+	return nil
 }
 
 // appendTarget inspects f and returns the format version and byte order to
@@ -86,20 +90,20 @@ func AppendToFile(name string, entries ...Entry) (err error) {
 func appendTarget(f *os.File) (uint8, binary.ByteOrder, bool, error) {
 	info, err := f.Stat()
 	if err != nil {
-		return 0, nil, false, err
+		return 0, nil, false, fmt.Errorf("stat keytab for append: %w", err)
 	}
 	if info.Size() == 0 {
 		if cerr := f.Chmod(0o600); cerr != nil {
-			return 0, nil, false, cerr
+			return 0, nil, false, fmt.Errorf("set permissions on empty keytab: %w", cerr)
 		}
 		return 2, binary.BigEndian, true, nil
 	}
 	if _, serr := f.Seek(0, io.SeekStart); serr != nil {
-		return 0, nil, false, serr
+		return 0, nil, false, fmt.Errorf("seek to keytab header: %w", serr)
 	}
 	data, err := io.ReadAll(f)
 	if err != nil {
-		return 0, nil, false, err
+		return 0, nil, false, fmt.Errorf("read existing keytab for append: %w", err)
 	}
 	existing := new(Keytab)
 	if uerr := existing.Unmarshal(data); uerr != nil {

@@ -4,7 +4,6 @@
 package keytab
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -12,7 +11,10 @@ import (
 )
 
 func lockFile(f *os.File) error {
-	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("lock keytab for append: %w", err)
+	}
+	return nil
 }
 
 func unlockFile(f *os.File) error {
@@ -20,16 +22,6 @@ func unlockFile(f *os.File) error {
 		return fmt.Errorf("unlock keytab: %w", err)
 	}
 	return nil
-}
-
-func syncDir(path string) error {
-	dir, err := os.Open(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
-	if err != nil {
-		return err
-	}
-	syncErr := dir.Sync()
-	closeErr := dir.Close()
-	return errors.Join(syncErr, closeErr)
 }
 
 func currentUIDs() (string, string) {

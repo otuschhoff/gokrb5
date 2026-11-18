@@ -407,7 +407,7 @@ func (c *CCache) WriteFile(path string) error {
 	if err != nil {
 		return err
 	}
-	if err := fileio.AtomicWrite(resolved, b, syncCacheDir); err != nil {
+	if err := fileio.AtomicWrite(resolved, b); err != nil {
 		return fmt.Errorf("write credential cache: %w", err)
 	}
 	c.Path = resolved

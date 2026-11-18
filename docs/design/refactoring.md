@@ -824,6 +824,31 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 41 (2026-11-18, credential-file and keytab stream error contracts):
+v8 keytab and FILE credential-cache loads identify the failed read operation
+without losing filesystem causes. Keytab append errors identify the failed
+open, lock, inspection, write, or sync operation; unlock and close errors
+still follow the primary failure. Keytab stream writes preserve the reported
+byte count and any writer error, and return `io.ErrShortWrite` through the
+error chain when a writer reports a short count without an error. Callers
+should inspect wrapped errors with `errors.Is` and `errors.As`.
+
+The shared atomic writer now owns the directory-sync policy for both file
+types, with the same platform build constraints. Open, sync, and close
+failures retain their causes; a post-rename sync failure still does not
+remove the replacement. File formats, successful I/O behavior, and locking
+policy are unchanged. Binary codec internals, key derivation, and JSON/gob
+serialization are outside this I/O slice.
+
+The scoped I/O boundaries have no remaining `wrapcheck` findings. Without
+changing lint configuration, the canonical v8 total fell from 983 to 969
+and `wrapcheck` from 399 to 385; gosec remains at zero. Both module suites,
+the v8 race suite, both changed-line lint gates, and all four MIT keytab
+interoperability tests passed. Cross-package statement coverage is 86.5%
+against the 86.0% floor. The affected test packages cross-compiled for
+Windows/amd64, Solaris/amd64, and macOS/arm64; those binaries and live KDC
+exchanges were not run.
+
 Slice 40 (2026-11-18, retire deprecated client enctype defaults): v8 now
 defaults to the same two RFC 3962 AES enctypes, in their original order, for
 AS requests, TGS requests, and the configured permitted list. RC4 and

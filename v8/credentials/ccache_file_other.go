@@ -13,5 +13,3 @@ func currentCacheUIDs() (string, string) {
 	}
 	return "0", "0"
 }
-
-func syncCacheDir(_ string) error { return nil }

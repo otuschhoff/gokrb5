@@ -3,6 +3,8 @@ package keytab
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
@@ -26,6 +29,26 @@ func testEntry(kvno uint32) Entry {
 		KVNO:      kvno,
 		Key:       types.EncryptionKey{KeyType: 17, KeyValue: bytes.Repeat([]byte{keytabTestByte(kvno)}, 16)},
 	}
+}
+
+func TestMissingKeytabFileErrors(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "missing", "service.keytab")
+	kt, err := Load("FILE:" + path)
+	require.NotNil(t, kt)
+	require.ErrorContains(t, err, "read keytab file:")
+	require.ErrorIs(t, err, fs.ErrNotExist)
+	readErr, ok := errors.AsType[*fs.PathError](err)
+	require.True(t, ok)
+	assert.Equal(t, path, readErr.Path)
+
+	err = AppendToFile("FILE:" + path)
+	require.ErrorContains(t, err, "open keytab for append:")
+	require.ErrorIs(t, err, fs.ErrNotExist)
+	appendErr, ok := errors.AsType[*fs.PathError](err)
+	require.True(t, ok)
+	assert.Equal(t, path, appendErr.Path)
 }
 
 func setEnv(t *testing.T, key, value string) {

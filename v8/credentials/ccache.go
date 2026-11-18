@@ -65,7 +65,7 @@ type Credential struct {
 	SecondTicket []byte
 }
 
-// LoadCCache loads a credential cache file into a CCache type.
+// LoadCCache reads a FILE credential cache. File read errors wrap the underlying filesystem error.
 func LoadCCache(cpath string) (*CCache, error) {
 	path, err := resolveCCacheName(cpath)
 	if err != nil {
@@ -74,7 +74,7 @@ func LoadCCache(cpath string) (*CCache, error) {
 	c := new(CCache)
 	b, err := os.ReadFile(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
 	if err != nil {
-		return c, err
+		return c, fmt.Errorf("read credential cache file: %w", err)
 	}
 	err = c.Unmarshal(b)
 	if err == nil {

@@ -3,7 +3,10 @@ package credentials
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
+	"io/fs"
 	"math"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -235,9 +238,15 @@ func TestCCacheLoadCCacheErrors(t *testing.T) {
 	if _, err := LoadCCache(""); err == nil {
 		t.Fatal("LoadCCache accepted an empty name")
 	}
-	if _, err := LoadCCache("FILE:/nonexistent-dir-gokrb5/ccache"); err == nil {
-		t.Fatal("LoadCCache accepted a missing file")
-	}
+	path := filepath.Join(t.TempDir(), "missing", "ccache")
+	cache, err := LoadCCache("FILE:" + path)
+	require.NotNil(t, cache)
+	assert.Empty(t, cache.Path)
+	require.ErrorContains(t, err, "read credential cache file:")
+	require.ErrorIs(t, err, fs.ErrNotExist)
+	pathErr, ok := errors.AsType[*fs.PathError](err)
+	require.True(t, ok)
+	assert.Equal(t, path, pathErr.Path)
 }
 
 // TestResolveCCacheNameRejections covers name resolution rejection branches.

@@ -6,15 +6,18 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/crypto"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
@@ -22,6 +25,42 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
+
+type keytabTestWriter struct {
+	n   int
+	err error
+}
+
+func (w keytabTestWriter) Write([]byte) (int, error) {
+	return w.n, w.err
+}
+
+func TestKeytabStreamErrors(t *testing.T) {
+	t.Parallel()
+
+	kt := New()
+	cause := errors.New("injected stream failure")
+	err := kt.Read(io.MultiReader(bytes.NewReader([]byte{5, 2}), iotest.ErrReader(cause)))
+	require.ErrorContains(t, err, "read keytab stream:")
+	require.ErrorIs(t, err, cause)
+
+	for _, tc := range []struct {
+		name     string
+		writeErr error
+		wantErr  error
+	}{
+		{name: "short write without error", wantErr: io.ErrShortWrite},
+		{name: "partial write with error", writeErr: cause, wantErr: cause},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			n, err := kt.Write(keytabTestWriter{n: 1, err: tc.writeErr})
+			assert.Equal(t, 1, n)
+			require.ErrorContains(t, err, "write keytab stream:")
+			require.ErrorIs(t, err, tc.wantErr)
+		})
+	}
+}
 
 func mustKeytabUint32(t *testing.T, name string, value int) uint32 {
 	t.Helper()
