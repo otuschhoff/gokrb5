@@ -1,8 +1,10 @@
 package messages
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
 
@@ -33,7 +35,9 @@ func NewPAForUserPAData(userName types.PrincipalName, userRealm string, sessionK
 
 func s4uChecksumData(userName types.PrincipalName, userRealm, authPackage string) []byte {
 	b := make([]byte, 4, 4+len(userRealm)+len(authPackage))
-	binary.LittleEndian.PutUint32(b, uint32(userName.NameType))
+	var nameType bytes.Buffer
+	_ = binary.Write(&nameType, binary.LittleEndian, userName.NameType)
+	copy(b, nameType.Bytes())
 	for _, component := range userName.NameString {
 		b = append(b, component...)
 	}
@@ -63,6 +67,13 @@ func NewPAS4UX509UserPAData(userID types.S4UUserID, sessionKey types.EncryptionK
 	return types.NewPAS4UX509UserPAData(value)
 }
 
+func nonceUint32(value int) (uint32, error) {
+	if value < 0 || uint64(value) > math.MaxUint32 { // #nosec G115 -- nonnegative branch is bounded before conversion.
+		return 0, fmt.Errorf("nonce %d exceeds uint32 range", value)
+	}
+	return uint32(value), nil // #nosec G115 -- bounded by MaxUint32 above.
+}
+
 // VerifyS4UX509UserReply verifies and returns the normalized user identity in a TGS reply.
 func (k *TGSRep) VerifyS4UX509UserReply(tgsReq TGSReq, sessionKey types.EncryptionKey) (types.S4UUserID, error) {
 	request, err := findS4UX509User(tgsReq.PAData)
@@ -77,7 +88,11 @@ func (k *TGSRep) VerifyS4UX509UserReply(tgsReq TGSReq, sessionKey types.Encrypti
 	if err != nil {
 		return types.S4UUserID{}, fmt.Errorf("decode S4U reply user ID: %w", err)
 	}
-	if userID.Nonce != uint32(tgsReq.ReqBody.Nonce) {
+	nonce, err := nonceUint32(tgsReq.ReqBody.Nonce)
+	if err != nil {
+		return types.S4UUserID{}, fmt.Errorf("S4U request nonce: %w", err)
+	}
+	if userID.Nonce != nonce {
 		return types.S4UUserID{}, fmt.Errorf("S4U reply nonce %d does not match request nonce %d", userID.Nonce, tgsReq.ReqBody.Nonce)
 	}
 	userIDBytes, err := userID.Marshal()

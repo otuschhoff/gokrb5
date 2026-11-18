@@ -426,7 +426,7 @@ func TestS4UErrorPaths(t *testing.T) {
 	t.Run("nonce mismatch", func(t *testing.T) {
 		req, err := NewS4U2SelfTGSReq(service, "EXAMPLE.COM", cfg, s4uTestTicket(), key, service, user, "EXAMPLE.COM", S4U2SelfReqOptions{})
 		require.NoError(t, err)
-		reply := s4uReply(t, uint32(req.ReqBody.Nonce)+1, key, user, false)
+		reply := s4uReply(t, mustNonceUint32(t, req.ReqBody.Nonce)+1, key, user, false)
 		_, err = reply.VerifyS4UX509UserReply(req, key)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "nonce")
@@ -434,7 +434,7 @@ func TestS4UErrorPaths(t *testing.T) {
 	t.Run("checksum type mismatch", func(t *testing.T) {
 		req, err := NewS4U2SelfTGSReq(service, "EXAMPLE.COM", cfg, s4uTestTicket(), key, service, user, "EXAMPLE.COM", S4U2SelfReqOptions{})
 		require.NoError(t, err)
-		reply := s4uReply(t, uint32(req.ReqBody.Nonce), key, user, true)
+		reply := s4uReply(t, mustNonceUint32(t, req.ReqBody.Nonce), key, user, true)
 		_, err = reply.VerifyS4UX509UserReply(req, key)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "checksum type")
@@ -443,7 +443,7 @@ func TestS4UErrorPaths(t *testing.T) {
 		req, err := NewS4U2SelfTGSReq(service, "EXAMPLE.COM", cfg, s4uTestTicket(), key, service, user, "EXAMPLE.COM", S4U2SelfReqOptions{})
 		require.NoError(t, err)
 		other := types.EncryptionKey{KeyType: key.KeyType, KeyValue: append([]byte{0xFF}, key.KeyValue[1:]...)}
-		reply := s4uReply(t, uint32(req.ReqBody.Nonce), other, user, false)
+		reply := s4uReply(t, mustNonceUint32(t, req.ReqBody.Nonce), other, user, false)
 		_, err = reply.VerifyS4UX509UserReply(req, key)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "checksum invalid")
@@ -451,7 +451,7 @@ func TestS4UErrorPaths(t *testing.T) {
 	t.Run("valid reply accepted", func(t *testing.T) {
 		req, err := NewS4U2SelfTGSReq(service, "EXAMPLE.COM", cfg, s4uTestTicket(), key, service, user, "EXAMPLE.COM", S4U2SelfReqOptions{})
 		require.NoError(t, err)
-		reply := s4uReply(t, uint32(req.ReqBody.Nonce), key, user, false)
+		reply := s4uReply(t, mustNonceUint32(t, req.ReqBody.Nonce), key, user, false)
 		userID, err := reply.VerifyS4UX509UserReply(req, key)
 		require.NoError(t, err)
 		assert.Equal(t, user.PrincipalNameString(), userID.CName.PrincipalNameString())

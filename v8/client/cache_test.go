@@ -46,7 +46,7 @@ func TestCache_addEntry_getEntry_remove_clear(t *testing.T) {
 			assert.Equal(t, time.Unix(int64(20+i), 0).UTC(), e.EndTime, "end time not as expected")
 			assert.Equal(t, time.Unix(int64(30+i), 0).UTC(), e.RenewTill, "renew time not as expected")
 			assert.Equal(t, []string{fmt.Sprintf("%d", i), "test.cache"}, e.Ticket.SName.NameString, "ticket not correct")
-			assert.Equal(t, []byte{byte(i)}, e.SessionKey.KeyValue, "session key not correct")
+			assert.Equal(t, []byte{byte(i)}, e.SessionKey.KeyValue, "session key not correct") // #nosec G115 -- i is bounded by the test count.
 			wg.Done()
 		}(i)
 	}
@@ -78,7 +78,7 @@ func TestCache_addEntry_getEntry_remove_clear(t *testing.T) {
 				assert.Equal(t, time.Unix(int64(20+i), 0).UTC(), e.EndTime, "end time not as expected")
 				assert.Equal(t, time.Unix(int64(30+i), 0).UTC(), e.RenewTill, "renew time not as expected")
 				assert.Equal(t, []string{fmt.Sprintf("%d", i), "test.cache"}, e.Ticket.SName.NameString, "ticket not correct")
-				assert.Equal(t, []byte{byte(i)}, e.SessionKey.KeyValue, "session key not correct")
+				assert.Equal(t, []byte{byte(i)}, e.SessionKey.KeyValue, "session key not correct") // #nosec G115 -- i is bounded by the test count.
 			}
 			wg.Done()
 		}(i)

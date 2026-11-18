@@ -193,6 +193,20 @@ func exchangeAndClose(conn net.Conn, b []byte, exchange func(net.Conn, []byte) (
 	return reply, err
 }
 
+func clientUint32FromInt(name string, value int) (uint32, error) {
+	if value < 0 || uint64(value) > math.MaxUint32 { // #nosec G115 -- nonnegative branch is bounded before conversion.
+		return 0, fmt.Errorf("%s %d exceeds uint32 range", name, value)
+	}
+	return uint32(value), nil // #nosec G115 -- bounded by MaxUint32 above.
+}
+
+func clientUint16FromInt(name string, value int) (uint16, error) {
+	if value < 0 || value > math.MaxUint16 {
+		return 0, fmt.Errorf("%s %d exceeds uint16 range", name, value)
+	}
+	return uint16(value), nil
+}
+
 func kdcAttemptsError(attempts []error) error {
 	if len(attempts) == 0 {
 		return errors.New("no KDC servers configured")
@@ -207,7 +221,11 @@ func exchangeTCP(conn net.Conn, b []byte) ([]byte, error) {
 	}
 	// RFC 4120 7.2.2 specifies the first 4 bytes indicate the length of the message in big endian order.
 	hb := make([]byte, 4)
-	binary.BigEndian.PutUint32(hb, uint32(len(b)))
+	length, err := clientUint32FromInt("KDC TCP frame length", len(b))
+	if err != nil {
+		return nil, err
+	}
+	binary.BigEndian.PutUint32(hb, length)
 	b = append(hb, b...)
 
 	if _, err := io.Copy(conn, bytes.NewReader(b)); err != nil {

@@ -354,7 +354,11 @@ func (state *fastState) unwrapResponse(paData types.PADataSequence, nonce int) (
 		if err := response.Unmarshal(plain); err != nil {
 			return response, fmt.Errorf("decode FAST response: %w", err)
 		}
-		if response.Nonce != uint32(nonce) {
+		nonce32, convertErr := clientUint32FromInt("FAST nonce", nonce)
+		if convertErr != nil {
+			return response, convertErr
+		}
+		if response.Nonce != nonce32 {
 			return response, fmt.Errorf("FAST response nonce %d does not match request nonce %d", response.Nonce, nonce)
 		}
 		return response, nil

@@ -16,6 +16,15 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+func mustNonceUint32(t *testing.T, value int) uint32 {
+	t.Helper()
+	result, err := nonceUint32(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
 func TestNewPAForUserPAData(t *testing.T) {
 	user := types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: []string{"alice", "admin"}}
 	realm := "EXAMPLE.COM"
@@ -45,6 +54,14 @@ func TestNewPAForUserPAData(t *testing.T) {
 	}
 }
 
+func TestNonceConversionRange(t *testing.T) {
+	for _, value := range []int{-1} {
+		if _, err := nonceUint32(value); err == nil {
+			t.Fatalf("nonce %d was accepted", value)
+		}
+	}
+}
+
 func TestNewS4U2SelfTGSReq(t *testing.T) {
 	config := s4uTestConfig()
 	service := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "HTTP/service.example.com")
@@ -69,7 +86,7 @@ func TestNewS4U2SelfTGSReq(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetUserID() error = %v", err)
 	}
-	if userID.Nonce != uint32(req.ReqBody.Nonce) || !types.IsFlagSet(&userID.Options, flags.S4UOptionUseReplyKeyUsage) {
+	if userID.Nonce != mustNonceUint32(t, req.ReqBody.Nonce) || !types.IsFlagSet(&userID.Options, flags.S4UOptionUseReplyKeyUsage) {
 		t.Errorf("S4UUserID = %+v, want matching nonce and reply-key-usage option", userID)
 	}
 }
@@ -182,7 +199,7 @@ func TestVerifyS4UX509UserReplyRequiresUsageAcknowledgement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	userID := types.S4UUserID{Nonce: uint32(request.ReqBody.Nonce), CName: user, CRealm: "EXAMPLE.COM"}
+	userID := types.S4UUserID{Nonce: mustNonceUint32(t, request.ReqBody.Nonce), CName: user, CRealm: "EXAMPLE.COM"}
 	userIDBytes, err := userID.Marshal()
 	if err != nil {
 		t.Fatal(err)

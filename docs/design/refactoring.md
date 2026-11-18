@@ -824,6 +824,16 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 29 (2026-11-18, message and client wire ranges): messages/client G115
+findings are zero. Authenticator key usages use uint32 protocol constants
+directly; S4U and FAST nonce values are checked before protocol conversion;
+and KDC TCP/KKDCP lengths use checked 32/16-bit encoders. S4U checksum name
+types are serialized directly as signed little-endian values, avoiding a cast
+while preserving the wire form. Test fixtures use shared checked nonce helpers
+or explicitly proven byte-bounded values. Messages/client G115 falls 20 to 0,
+total G115 falls 48 to 28, gosec falls 132 to 112, and canonical findings fall
+1,118 to 1,098; coverage remains 86.6%.
+
 Slice 28 (2026-11-18, SPNEGO sequence ranges): SPNEGO G115 findings are
 zero. Sequence numbers remain signed while parsed from Kerberos messages and
 are converted only when constructing the GSS security context or mechListMIC.

@@ -2,6 +2,7 @@ package client
 
 import (
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +49,27 @@ func newFASTTestState(t *testing.T) (*Client, *fastState, messages.ASReq) {
 		t.Fatal(err)
 	}
 	return cl, state, request
+}
+
+func mustClientUint32(t *testing.T, name string, value int) uint32 {
+	t.Helper()
+	result, err := clientUint32FromInt(name, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestClientWireConversionBounds(t *testing.T) {
+	if _, err := clientUint32FromInt("nonce", -1); err == nil {
+		t.Fatal("negative uint32 value was accepted")
+	}
+	if _, err := clientUint16FromInt("length", -1); err == nil {
+		t.Fatal("negative uint16 value was accepted")
+	}
+	if _, err := clientUint16FromInt("length", math.MaxUint16+1); err == nil {
+		t.Fatal("uint16 overflow was accepted")
+	}
 }
 
 func TestFASTASRequestEncryptsInnerRequest(t *testing.T) {
@@ -287,7 +309,7 @@ func TestFASTExplicitArmorValidation(t *testing.T) {
 
 func fastTestError(t *testing.T, state *fastState, nonce int, paData types.PADataSequence) messages.KRBError {
 	t.Helper()
-	responseBytes, err := (&types.KrbFastResponse{PAData: paData, Nonce: uint32(nonce)}).Marshal()
+	responseBytes, err := (&types.KrbFastResponse{PAData: paData, Nonce: mustClientUint32(t, "FAST nonce", nonce)}).Marshal()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +388,7 @@ func TestFASTVerifyASReplyStrengthensKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	response := types.KrbFastResponse{
-		PAData: challengePASequence(challengePA), StrengthenKey: strengthen, Nonce: uint32(request.ReqBody.Nonce),
+		PAData: challengePASequence(challengePA), StrengthenKey: strengthen, Nonce: mustClientUint32(t, "FAST request nonce", request.ReqBody.Nonce),
 		Finished: types.KrbFastFinished{
 			Timestamp: now, Usec: now.Nanosecond() / int(time.Microsecond), CRealm: reply.CRealm, CName: reply.CName,
 			TicketChecksum: types.Checksum{CksumType: chksumtype.HMAC_SHA1_96_AES128, Checksum: ticketChecksum},
@@ -495,7 +517,7 @@ func TestFASTVerifyTGSReplyUsesStrengthenedSubkey(t *testing.T) {
 		t.Fatal(err)
 	}
 	response := types.KrbFastResponse{
-		PAData: types.PADataSequence{}, StrengthenKey: strengthen, Nonce: uint32(request.ReqBody.Nonce),
+		PAData: types.PADataSequence{}, StrengthenKey: strengthen, Nonce: mustClientUint32(t, "FAST request nonce", request.ReqBody.Nonce),
 		Finished: types.KrbFastFinished{
 			Timestamp: now, Usec: now.Nanosecond() / int(time.Microsecond), CRealm: reply.CRealm, CName: reply.CName,
 			TicketChecksum: types.Checksum{CksumType: chksumtype.HMAC_SHA1_96_AES128, Checksum: checksum},
@@ -549,7 +571,7 @@ func TestFASTVerifyTGSReplyUsesStrengthenedSubkey(t *testing.T) {
 	if err := state.verifyTGSReply(cl, &reply, request); err == nil {
 		t.Fatal("FAST TGS-REP with mismatched nonce was accepted")
 	}
-	response.Nonce = uint32(request.ReqBody.Nonce)
+	response.Nonce = mustClientUint32(t, "FAST request nonce", request.ReqBody.Nonce)
 	response.Finished.CName = types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "other-user")
 	setFASTResponse(response)
 	if err := state.verifyTGSReply(cl, &reply, request); err == nil {

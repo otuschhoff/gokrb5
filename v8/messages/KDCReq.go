@@ -287,8 +287,12 @@ func NewS4U2SelfTGSReq(cname types.PrincipalName, kdcRealm string, c *config.Con
 	if !options.PAForUserOnly && supportsS4UX509(sessionKey.KeyType) {
 		s4uOptions := types.NewKrbFlags()
 		types.SetFlag(&s4uOptions, flags.S4UOptionUseReplyKeyUsage)
+		nonce, convertErr := nonceUint32(a.ReqBody.Nonce)
+		if convertErr != nil {
+			return a, convertErr
+		}
 		x509, err := NewPAS4UX509UserPAData(types.S4UUserID{
-			Nonce:              uint32(a.ReqBody.Nonce),
+			Nonce:              nonce,
 			CName:              user,
 			CRealm:             userRealm,
 			SubjectCertificate: append([]byte(nil), options.SubjectCertificate...),

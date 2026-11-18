@@ -39,7 +39,7 @@ type APReq struct {
 
 // NewAPReq generates a new KRB_AP_REQ struct.
 func NewAPReq(tkt Ticket, sessionKey types.EncryptionKey, auth types.Authenticator) (APReq, error) {
-	return NewAPReqWithKeyUsage(tkt, sessionKey, auth, uint32(authenticatorKeyUsage(tkt.SName)))
+	return NewAPReqWithKeyUsage(tkt, sessionKey, auth, authenticatorKeyUsage(tkt.SName))
 }
 
 // NewAPReqWithKeyUsage generates a new KRB_AP_REQ using the specified
@@ -77,7 +77,7 @@ func encryptAuthenticator(a types.Authenticator, sessionKey types.EncryptionKey,
 // DecryptAuthenticator decrypts the Authenticator within the AP_REQ.
 // sessionKey may simply be the key within the decrypted EncPart of the ticket within the AP_REQ.
 func (a *APReq) DecryptAuthenticator(sessionKey types.EncryptionKey) error {
-	return a.DecryptAuthenticatorWithKeyUsage(sessionKey, uint32(authenticatorKeyUsage(a.Ticket.SName)))
+	return a.DecryptAuthenticatorWithKeyUsage(sessionKey, authenticatorKeyUsage(a.Ticket.SName))
 }
 
 // DecryptAuthenticatorWithKeyUsage decrypts the Authenticator using the
@@ -94,7 +94,7 @@ func (a *APReq) DecryptAuthenticatorWithKeyUsage(sessionKey types.EncryptionKey,
 	return nil
 }
 
-func authenticatorKeyUsage(pn types.PrincipalName) int {
+func authenticatorKeyUsage(pn types.PrincipalName) uint32 {
 	if pn.NameString[0] == "krbtgt" {
 		return keyusage.TGS_REQ_PA_TGS_REQ_AP_REQ_AUTHENTICATOR
 	}

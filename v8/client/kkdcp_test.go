@@ -173,7 +173,11 @@ func TestKKDCPPasswordTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	passwordReply := make([]byte, 6+len(krbErrorBytes))
-	binary.BigEndian.PutUint16(passwordReply[0:2], uint16(len(passwordReply)))
+	length, err := clientUint16FromInt("KKDCP password reply length", len(passwordReply))
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary.BigEndian.PutUint16(passwordReply[0:2], length)
 	binary.BigEndian.PutUint16(passwordReply[2:4], 1)
 	copy(passwordReply[6:], krbErrorBytes)
 
