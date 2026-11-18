@@ -27,6 +27,9 @@ func DeriveRandom(key, usage []byte, e etype.EType) ([]byte, error) {
 	k := e.GetKeySeedBitLength()
 	// Ensure the usage constant is at least the size of the cypher block size. Pass it through the nfold algorithm that will "stretch" it if needs be.
 	nFoldUsage := Nfold(usage, n)
+	if len(nFoldUsage) == 0 {
+		return nil, fmt.Errorf("invalid n-fold input for block size %d", n)
+	}
 	// k-truncate implemented by creating a byte array the size of k (k is in bits hence /8)
 	out := make([]byte, k/8)
 	// Keep feeding the output back into the encryption function until it is no longer short than k.
@@ -71,7 +74,11 @@ func DES3RandomToKey(b []byte) []byte {
 // DES3StringToKey returns a key derived from the string provided according to the definition in RFC 3961 for DES3 etypes.
 func DES3StringToKey(secret, salt string, e etype.EType) ([]byte, error) {
 	s := secret + salt
-	tkey := e.RandomToKey(Nfold([]byte(s), e.GetKeySeedBitLength()))
+	folded := Nfold([]byte(s), e.GetKeySeedBitLength())
+	if len(folded) == 0 {
+		return nil, fmt.Errorf("invalid n-fold input for key seed size %d", e.GetKeySeedBitLength())
+	}
+	tkey := e.RandomToKey(folded)
 	return e.DeriveKey(tkey, []byte("kerberos"))
 }
 

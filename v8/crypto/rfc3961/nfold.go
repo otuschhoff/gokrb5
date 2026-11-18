@@ -17,7 +17,11 @@ License: http://www.apache.org/licenses/LICENSE-2.0
 // Defined in RFC 3961.
 //
 // m input bytes that will be "stretched" to the least common multiple of n bits and the bit length of m.
+// It returns nil if m is empty or n is not a positive, byte-aligned bit length.
 func Nfold(m []byte, n int) []byte {
+	if len(m) == 0 || n <= 0 || n%8 != 0 {
+		return nil
+	}
 	k := len(m) * 8
 
 	// Get the lowest common multiple of the two bit sizes
@@ -32,6 +36,9 @@ func Nfold(m []byte, n int) []byte {
 
 	nfold := make([]byte, n/8)
 	sum := make([]byte, n/8)
+	if len(sumBytes) < n/8 {
+		return nil
+	}
 	for i := 0; i < lcm/n; i++ {
 		for j := 0; j < n/8; j++ {
 			sum[j] = sumBytes[j+(i*len(sum))]

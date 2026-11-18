@@ -7,6 +7,28 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func Test_nfoldRejectsInvalidInputs(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input []byte
+		bits  int
+	}{
+		{name: "empty input", bits: 64},
+		{name: "zero bit length", input: []byte("key")},
+		{name: "negative bit length", input: []byte("key"), bits: -8},
+		{name: "partial byte", input: []byte("key"), bits: 63},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if folded := Nfold(tt.input, tt.bits); folded != nil {
+				t.Fatalf("Nfold(%x, %d) = %x, want nil", tt.input, tt.bits, folded)
+			}
+		})
+	}
+}
+
 func Test_nfold(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

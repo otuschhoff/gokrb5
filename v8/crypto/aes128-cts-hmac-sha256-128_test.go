@@ -120,11 +120,15 @@ func TestAes128CtsHmacSha256128_Cypto(t *testing.T) {
 
 		// Test decryption of raw encrypted bytes
 		p, err := e.DecryptData(ke, b)
-		// Remove the confounder bytes
-		p = p[e.GetConfounderByteSize():]
 		if err != nil {
 			t.Errorf("decryption failed for test %v: %v", i+1, err)
+			continue
 		}
+		if len(p) < e.GetConfounderByteSize() {
+			t.Fatalf("decrypted length = %d, confounder = %d", len(p), e.GetConfounderByteSize())
+		}
+		// Remove the confounder bytes
+		p = p[e.GetConfounderByteSize():]
 		assert.Equal(t, test.plain, hex.EncodeToString(p), "Decrypted result not as expected - test %v", i)
 
 		// Test integrity check of complete ciphertext message

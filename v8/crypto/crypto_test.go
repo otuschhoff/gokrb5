@@ -26,6 +26,9 @@ func TestGetKeyFromPasswordSelectsMatchingETypeInfo2Entry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if selected == nil {
+		t.Fatal("selected encryption type is nil")
+	}
 	expected, err := selected.StringToKey("password", "aes128-salt", selected.GetDefaultStringToKeyParams())
 	if err != nil {
 		t.Fatal(err)
@@ -46,6 +49,9 @@ func TestGetKeyFromPasswordUsesDefaultForOmittedETypeInfo2Salt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if selected == nil {
+		t.Fatal("selected encryption type is nil")
+	}
 	expected, err := selected.StringToKey("passwordvalue", cname.GetSalt("TEST.GOKRB5"), selected.GetDefaultStringToKeyParams())
 	if err != nil {
 		t.Fatal(err)
@@ -63,6 +69,9 @@ func TestGetKeyFromPasswordPreservesExplicitEmptyETypeInfo2Salt(t *testing.T) {
 	key, selected, err := GetKeyFromPassword("passwordvalue", cname, "TEST.GOKRB5", etypeID.AES256_CTS_HMAC_SHA1_96, pas)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if selected == nil {
+		t.Fatal("selected encryption type is nil")
 	}
 	expected, err := selected.StringToKey("passwordvalue", "", selected.GetDefaultStringToKeyParams())
 	if err != nil {
@@ -105,6 +114,9 @@ func TestGetKeyFromPasswordETypeInfo2PrecedesPasswordSalt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if selected == nil {
+		t.Fatal("selected encryption type is nil")
+	}
 	expected, err := selected.StringToKey("password", "info2-salt", selected.GetDefaultStringToKeyParams())
 	if err != nil {
 		t.Fatal(err)
@@ -122,6 +134,9 @@ func TestGetKeyFromPasswordUsesETypeInfoOnly(t *testing.T) {
 	key, selected, err := GetKeyFromPasswordForETypes("password", types.PrincipalName{}, "EXAMPLE.ORG", []int32{etypeID.DES3_CBC_SHA1_KD}, pas)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if selected == nil {
+		t.Fatal("selected encryption type is nil")
 	}
 	expected, err := selected.StringToKey("password", "legacy-salt", selected.GetDefaultStringToKeyParams())
 	if err != nil {
@@ -147,6 +162,9 @@ func TestGetKeyFromPasswordETypeInfo2PrecedesETypeInfo(t *testing.T) {
 	key, selected, err := GetKeyFromPasswordForETypes("password", types.PrincipalName{}, "EXAMPLE.ORG", []int32{etypeID.AES128_CTS_HMAC_SHA1_96}, pas)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if selected == nil {
+		t.Fatal("selected encryption type is nil")
 	}
 	expected, err := selected.StringToKey("password", "info2-salt", selected.GetDefaultStringToKeyParams())
 	if err != nil {

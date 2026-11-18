@@ -137,6 +137,9 @@ func GetKeyFromPasswordForETypes(passwd string, cname types.PrincipalName, realm
 	if !found {
 		parameters, et, found = firstSupportedKeyParameters(info)
 	}
+	if found && et == nil {
+		return key, nil, fmt.Errorf("selected encryption type implementation is unavailable")
+	}
 	if !found && hasETypeInfo {
 		return key, nil, fmt.Errorf("KDC did not provide parameters for a requested supported encryption type")
 	}
@@ -151,7 +154,7 @@ func GetKeyFromPasswordForETypes(passwd string, cname types.PrincipalName, realm
 			}
 		}
 	}
-	if !found {
+	if !found || et == nil {
 		return key, nil, fmt.Errorf("none of the requested encryption types are supported")
 	}
 	if len(info2) == 0 && len(info) == 0 && passwordSalt != nil {

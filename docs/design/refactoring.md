@@ -824,6 +824,19 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 20 (2026-11-18, crypto nil and derivation invariants): crypto NilAway
+is zero. Password-derived-key selection now explicitly rejects an unavailable
+encryption implementation before method dispatch. N-fold rejects empty input
+and non-byte-aligned or nonpositive output widths instead of dividing or
+indexing invalid slices; RFC 3961 derivation callers convert those rejected
+inputs into descriptive errors before passing data to cipher implementations.
+AES-SHA2 vector tests check decryption failures and output length before
+removing the confounder, and key-derivation tests check selected enctype
+results before use. Regressions cover empty and malformed n-fold requests and
+empty RFC 3961 derivation inputs. Crypto NilAway falls 17 to 0, total NilAway
+falls 44 to 27, and canonical findings fall 1,273 to 1,256. Aggregate coverage
+remains 86.9%, above the 86.0% floor.
+
 Slice 19 (2026-11-18, NEGOEX nil invariants): NEGOEX NilAway is zero.
 Conversation accessors return their zero values for a nil receiver, while
 `Step` reports the new `ErrInvalidConversationState` error before reading

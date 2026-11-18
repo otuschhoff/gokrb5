@@ -74,6 +74,12 @@ func TestKeyDerivationHelpers(t *testing.T) {
 	key, _ := hex.DecodeString("dce06b1f64c857a11c3db57c51899b2cc1791008ce973b92")
 	usage, _ := hex.DecodeString("0000000155")
 
+	if _, err := rfc3961.DeriveRandom(key, nil, etype); err == nil {
+		t.Fatal("DeriveRandom accepted empty usage")
+	}
+	if _, err := rfc3961.DES3StringToKey("", "", etype); err == nil {
+		t.Fatal("DES3StringToKey accepted empty secret and salt")
+	}
 	random, err := rfc3961.DeriveRandom(key, usage, etype)
 	if err != nil {
 		t.Fatal(err)
