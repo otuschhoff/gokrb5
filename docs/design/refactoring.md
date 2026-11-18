@@ -2,9 +2,9 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-8 done (formatter normalization,
+(floor raised to 86.0%), and Phase 5 slices 1-9 done (formatter normalization,
 keytab complexity, dead code, mechanical clarity, shadow elimination,
-errorlint, revive mechanical and exported documentation).
+errorlint, revive mechanical, exported documentation, and the NDR carry-over).
 Remaining canonical debt is concentrated in the classification-heavy
 categories (gosec, NilAway, wrapcheck, errcheck, gocognit/nestif, ireturn,
 nonamedreturns, bodyclose) plus documented intentional categories (iana
@@ -33,7 +33,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,872 canonical lint findings after Phase 5 slices 1-8 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,869 canonical lint findings after Phase 5 slices 1-9 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -753,12 +753,12 @@ shadow findings in v8 production and test code by renaming inner declarations
 (script-assisted for `if`-initializers, hand-reviewed for everything else).
 Notably, `client.sendToKDC`'s UDP-first block was verified self-consistent
 under the shadowed name before renaming, and `GetCachedTicket`'s cache-hit
-short-circuit now returns distinctly named variables. Discovered and recorded
-but NOT fixed (wire-acceptance behavior change, needs a dedicated correctness
-slice with characterization): NDR `readCommonHeader` computes
+short-circuit now returns distinctly named variables. Discovered and recorded for a dedicated correctness slice (wire-acceptance
+behavior change requiring characterization): NDR `readCommonHeader` read
 `CharacterEncoding` from the version byte (`vb & 0xF`) instead of the
-endianness/encoding byte (`eb & 0xF`), so the field always reads 1 and the
-encoding validation never rejects; nothing consumes the field today.
+endianness/encoding byte (`eb & 0xF`), so the field always read 1 and encoding
+validation never rejected. It was fixed with characterization in Slice 9
+below; nothing consumes the field today.
 
 The v8 canonical total is now 2,103 (from 2,435): gocritic 0, unconvert 0,
 copyloopvar 0, nakedret 0, govet 4 (only the documented inline reports),
@@ -801,9 +801,30 @@ The v8 canonical total is now 1,872. Remaining debt concentrates in gosec
 (Q-05 classification), NilAway (Q-02 invariants), wrapcheck/errcheck (Q-03),
 gocognit/nestif on remaining complex functions, ireturn/gochecknoglobals
 (API design decisions), nonamedreturns (Phase 2 defer-join patterns), and
-bodyclose (Q-06 helper ownership). Full v8 unit and race suites pass; the
-changed-line lint gate is clean for both modules; cross-package coverage
-remains 86.9%, so the 86.0% floor holds.
+bodyclose (Q-06 helper ownership).
+
+Slice 9 (2026-11-18, Phase 3 NDR carry-over and recorded header defect): fixed
+`readCommonHeader` to read `CharacterEncoding` from the second header byte's
+low nibble (`eb & 0xF`) instead of the version byte (`vb & 0xF`). The defect
+made every valid version-1 stream report EBCDIC (1) and incorrectly accepted
+invalid character-encoding nibbles. Characterization covers big/little-endian
+ASCII/EBCDIC combinations, invalid endianness/encoding/length, truncation,
+multidimensional varying and conformant-varying offsets/counts and resource
+failures, and conformant maximum scanning. The fix exposes the actual encoding
+metadata and rejects nibble values outside 0/1; the ASCII/EBCDIC value is not
+yet used for string interpretation, so valid existing PAC streams are
+unchanged on the wire. The complexity targets `conformantScan` (16),
+`fillMultiDimensionalVaryingArray` (18), and
+`fillMultiDimensionalConformantVaryingArray` (20) now dispatch to coherent
+maximum-slot registration, dimension reading, nested-slice allocation, and
+index traversal helpers; target/functions/helpers stay at cognitive
+complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
+unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
+million executions); the changed-line lint gate is clean for both modules.
+The v8 canonical total is 1,869.
+
+Full v8 unit and race suites pass; the changed-line lint gate is clean for
+both modules; cross-package coverage is 87.0%, above the 86.0% floor.
 
 Preserve v8's Go 1.26.0 floor. Validate proposed modernizations on the supported
 module toolchain and retain tagged/platform code. Measure optimizations before

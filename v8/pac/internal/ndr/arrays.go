@@ -300,58 +300,39 @@ func (dec *Decoder) fillUniDimensionalVaryingArray(v reflect.Value, tag reflect.
 // The number of dimensions must be specified. This must be less than or equal to the dimensions in the slice for this
 // method not to panic.
 func (dec *Decoder) fillMultiDimensionalVaryingArray(v reflect.Value, d int, tag reflect.StructTag, def *[]deferedPtr) error {
-	// Read the offset and actual count of each dimensions from the ndr stream
-	o := make([]int, d)
-	l := make([]int, d)
-	for i := range l {
-		off, err := dec.readUint32()
-		if err != nil {
-			return fmt.Errorf("could not read offset of dimension %d: %w", i+1, err)
-		}
-		o[i] = int(off)
-		s, err := dec.readUint32()
-		if err != nil {
-			return fmt.Errorf("could not read size of dimension %d: %w", i+1, err)
-		}
-		n := uint64(s) + uint64(off)
-		if n > uint64(dec.size) {
-			return fmt.Errorf("dimension %d length %d exceeds NDR input size %d", i+1, n, dec.size)
-		}
-		l[i] = int(n)
-	}
-	if err := dec.validateDimensions(l); err != nil {
+	offsets, lengths, err := dec.readVaryingDimensions(d)
+	if err != nil {
 		return err
 	}
-	// Initialise size of slices
-	//   Initialise the size of the 1st dimension
-	ty := v.Type()
-	v.Set(reflect.MakeSlice(ty, l[0], l[0]))
-	// Initialise the size of the other dimensions recursively
-	makeSubSlices(v, l[1:])
-
-	// Get all permutations of the indexes and go through each and fill
-	ps := multiDimensionalIndexPermutations(l)
-	for _, p := range ps {
-		// Get current multi-dimensional index to fill
-		a := v
-		var os bool // should this permutation be skipped due to the offset of any of the dimensions?
-		for i, j := range p {
-			if j < o[i] {
-				os = true
-				break
-			}
-			a = a.Index(j)
-		}
-		if os {
-			// This permutation should be skipped as it is less than the offset for one of the dimensions.
-			continue
-		}
-		err := dec.fill(a, tag, def)
-		if err != nil {
-			return fmt.Errorf("could not fill index %v of slice: %w", p, err)
-		}
+	if err := dec.validateDimensions(lengths); err != nil {
+		return err
 	}
-	return nil
+	initializeMultiDimensionalSlice(v, lengths)
+	return dec.fillMultiDimensionalValues(v, offsets, lengths, lengths, tag, def)
+}
+
+// readVaryingDimensions reads each dimension's offset and actual count and
+// returns the resulting total length, offset+count, for every dimension.
+func (dec *Decoder) readVaryingDimensions(d int) ([]int, []int, error) {
+	offsets := make([]int, d)
+	lengths := make([]int, d)
+	for i := range lengths {
+		offset, err := dec.readUint32()
+		if err != nil {
+			return nil, nil, fmt.Errorf("could not read offset of dimension %d: %w", i+1, err)
+		}
+		offsets[i] = int(offset)
+		count, err := dec.readUint32()
+		if err != nil {
+			return nil, nil, fmt.Errorf("could not read size of dimension %d: %w", i+1, err)
+		}
+		length := uint64(count) + uint64(offset)
+		if length > uint64(dec.size) {
+			return nil, nil, fmt.Errorf("dimension %d length %d exceeds NDR input size %d", i+1, length, dec.size)
+		}
+		lengths[i] = int(length)
+	}
+	return offsets, lengths, nil
 }
 
 // fillConformantVaryingArray establishes if the varying array is uni or multi dimensional and then fills the slice.
@@ -402,59 +383,75 @@ func (dec *Decoder) fillUniDimensionalConformantVaryingArray(v reflect.Value, ta
 // The number of dimensions must be specified. This must be less than or equal to the dimensions in the slice for this
 // method not to panic.
 func (dec *Decoder) fillMultiDimensionalConformantVaryingArray(v reflect.Value, d int, tag reflect.StructTag, def *[]deferedPtr) error {
-	// Read the offset and actual count of each dimensions from the ndr stream
-	m := make([]int, d)
-	for i := range m {
-		m[i] = int(dec.precedingMax())
-	}
-	o := make([]int, d)
-	l := make([]int, d)
-	for i := range l {
-		off, err := dec.readUint32()
-		if err != nil {
-			return fmt.Errorf("could not read offset of dimension %d: %w", i+1, err)
-		}
-		o[i] = int(off)
-		s, err := dec.readUint32()
-		if err != nil {
-			return fmt.Errorf("could not read actual count of dimension %d: %w", i+1, err)
-		}
-		if uint64(m[i]) < uint64(s)+uint64(off) {
-			return errors.New("max count is less than the offset plus actual count")
-		}
-		l[i] = int(off) + int(s)
-	}
-	if err := dec.validateDimensions(m); err != nil {
+	maximums, offsets, lengths, err := dec.readConformantVaryingDimensions(d)
+	if err != nil {
 		return err
 	}
-	// Initialise size of slices
-	//   Initialise the size of the 1st dimension
-	ty := v.Type()
-	v.Set(reflect.MakeSlice(ty, m[0], m[0]))
-	// Initialise the size of the other dimensions recursively
-	makeSubSlices(v, m[1:])
+	if err := dec.validateDimensions(maximums); err != nil {
+		return err
+	}
+	initializeMultiDimensionalSlice(v, maximums)
+	return dec.fillMultiDimensionalValues(v, offsets, lengths, maximums, tag, def)
+}
 
-	// Get all permutations of the indexes and go through each and fill
-	ps := multiDimensionalIndexPermutations(m)
-	for _, p := range ps {
-		// Get current multi-dimensional index to fill
-		a := v
-		var os bool // should this permutation be skipped due to the offset of any of the dimensions or max is higher than the actual count being passed
-		for i, j := range p {
-			if j < o[i] || j >= l[i] {
-				os = true
-				break
-			}
-			a = a.Index(j)
+// readConformantVaryingDimensions reads the preceding maximum counts and the
+// per-dimension offset/actual-count pairs. lengths contains offset+count;
+// maximums define the allocated storage.
+func (dec *Decoder) readConformantVaryingDimensions(d int) ([]int, []int, []int, error) {
+	maximums := make([]int, d)
+	for i := range maximums {
+		maximums[i] = int(dec.precedingMax())
+	}
+	offsets := make([]int, d)
+	lengths := make([]int, d)
+	for i := range lengths {
+		offset, err := dec.readUint32()
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("could not read offset of dimension %d: %w", i+1, err)
 		}
-		if os {
-			// This permutation should be skipped as it is less than the offset for one of the dimensions.
+		offsets[i] = int(offset)
+		count, err := dec.readUint32()
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("could not read actual count of dimension %d: %w", i+1, err)
+		}
+		if uint64(maximums[i]) < uint64(count)+uint64(offset) {
+			return nil, nil, nil, errors.New("max count is less than the offset plus actual count")
+		}
+		lengths[i] = int(offset) + int(count)
+	}
+	return maximums, offsets, lengths, nil
+}
+
+// initializeMultiDimensionalSlice allocates the nested slices described by
+// dimensions.
+func initializeMultiDimensionalSlice(v reflect.Value, dimensions []int) {
+	v.Set(reflect.MakeSlice(v.Type(), dimensions[0], dimensions[0]))
+	makeSubSlices(v, dimensions[1:])
+}
+
+// fillMultiDimensionalValues visits every in-range index and decodes values in
+// row-major order while retaining the original zero-filled offset regions.
+func (dec *Decoder) fillMultiDimensionalValues(v reflect.Value, offsets, lengths, dimensions []int, tag reflect.StructTag, def *[]deferedPtr) error {
+	for _, index := range multiDimensionalIndexPermutations(dimensions) {
+		value, ok := multidimensionalValue(v, index, offsets, lengths)
+		if !ok {
 			continue
 		}
-		err := dec.fill(a, tag, def)
-		if err != nil {
-			return fmt.Errorf("could not fill index %v of slice: %w", p, err)
+		if err := dec.fill(value, tag, def); err != nil {
+			return fmt.Errorf("could not fill index %v of slice: %w", index, err)
 		}
 	}
 	return nil
+}
+
+// multidimensionalValue returns the value at index when every coordinate is
+// inside the offset/length interval for that dimension.
+func multidimensionalValue(v reflect.Value, index, offsets, lengths []int) (reflect.Value, bool) {
+	for dimension, coordinate := range index {
+		if coordinate < offsets[dimension] || coordinate >= lengths[dimension] {
+			return reflect.Value{}, false
+		}
+		v = v.Index(coordinate)
+	}
+	return v, true
 }

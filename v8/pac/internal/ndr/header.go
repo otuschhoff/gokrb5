@@ -71,7 +71,7 @@ func (dec *Decoder) readCommonHeader() error {
 	if endian != 0 && endian != 1 {
 		return Malformed{EText: "common header does not indicate a valid endianness"}
 	}
-	dec.ch.CharacterEncoding = vb & 0xF
+	dec.ch.CharacterEncoding = eb & 0xF
 	if dec.ch.CharacterEncoding != 0 && dec.ch.CharacterEncoding != 1 {
 		return Malformed{EText: "common header does not indicate a valid character encoding"}
 	}

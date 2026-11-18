@@ -130,33 +130,36 @@ func (dec *Decoder) conformantScan(s interface{}, tag reflect.StructTag) error {
 		return nil
 	}
 	v := getReflectValue(s)
-	switch v.Kind() {
-	case reflect.Struct:
-		for i := 0; i < v.NumField(); i++ {
-			err := dec.conformantScan(v.Field(i), v.Type().Field(i).Tag)
-			if err != nil {
-				return err
-			}
-		}
-	case reflect.String:
-		if !ndrTag.HasValue(TagConformant) {
-			break
-		}
-		dec.conformantMax = append(dec.conformantMax, uint32(0))
-	case reflect.Slice:
-		if !ndrTag.HasValue(TagConformant) {
-			break
-		}
-		d, t := sliceDimensions(v.Type())
-		for i := 0; i < d; i++ {
-			dec.conformantMax = append(dec.conformantMax, uint32(0))
-		}
-		// For string arrays there is a common max for the strings within the array.
-		if t.Kind() == reflect.String {
-			dec.conformantMax = append(dec.conformantMax, uint32(0))
+	if v.Kind() != reflect.Struct {
+		dec.noteConformantValue(v, ndrTag)
+		return nil
+	}
+	for i := 0; i < v.NumField(); i++ {
+		if err := dec.conformantScan(v.Field(i), v.Type().Field(i).Tag); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// noteConformantValue reserves one maximum-count slot for each conformant
+// dimension in v. String arrays have an additional shared string maximum.
+func (dec *Decoder) noteConformantValue(v reflect.Value, tag tags) {
+	if !tag.HasValue(TagConformant) {
+		return
+	}
+	switch v.Kind() {
+	case reflect.String:
+		dec.conformantMax = append(dec.conformantMax, 0)
+	case reflect.Slice:
+		dimensions, base := sliceDimensions(v.Type())
+		for i := 0; i < dimensions; i++ {
+			dec.conformantMax = append(dec.conformantMax, 0)
+		}
+		if base.Kind() == reflect.String {
+			dec.conformantMax = append(dec.conformantMax, 0)
+		}
+	}
 }
 
 func (dec *Decoder) isPointer(v reflect.Value, tag reflect.StructTag, def *[]deferedPtr) (bool, error) {
