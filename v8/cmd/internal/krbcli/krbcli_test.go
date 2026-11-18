@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/creack/pty"
@@ -25,6 +26,33 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 )
+
+type passwordTestWriter struct{ err error }
+
+func (w passwordTestWriter) Write([]byte) (int, error) { return 0, w.err }
+
+func TestReadPasswordStdinErrors(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("injected I/O failure")
+	tests := []struct {
+		name   string
+		input  io.Reader
+		output io.Writer
+	}{
+		{name: "write password prompt", input: strings.NewReader("fixture\n"), output: passwordTestWriter{err: cause}},
+		{name: "read password from stdin", input: iotest.ErrReader(cause), output: io.Discard},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			password, err := ReadPassword("Password: ", tt.input, tt.output, true)
+			if password != "" || !errors.Is(err, cause) || !strings.HasPrefix(err.Error(), tt.name+":") {
+				t.Fatalf("want empty password and contextual I/O error, got empty=%t, err=%v", password == "", err)
+			}
+		})
+	}
+}
 
 func TestLoadConfigFromEnvironment(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "krb5.conf")
@@ -123,7 +151,7 @@ func TestReadPasswordFromExplicitStdin(t *testing.T) {
 }
 
 func TestReadPasswordReusesBufferedStdin(t *testing.T) {
-	reader := bufio.NewReader(strings.NewReader("old\nnew\nnew\n"))
+	reader := bufio.NewReader(strings.NewReader("old\nnew\nnew"))
 	var stderr bytes.Buffer
 	for _, expected := range []string{"old", "new", "new"} {
 		password, err := ReadPassword("Password: ", reader, &stderr, true)

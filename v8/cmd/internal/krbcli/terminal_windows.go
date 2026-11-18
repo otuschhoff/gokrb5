@@ -4,6 +4,8 @@
 package krbcli
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"os"
 )
@@ -17,23 +19,24 @@ type controllingTerminal struct {
 func openControllingTerminal() (*controllingTerminal, error) {
 	input, err := os.OpenFile("CONIN$", os.O_RDWR, 0)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open console input: %w", err)
 	}
 	output, err := os.OpenFile("CONOUT$", os.O_WRONLY, 0)
 	if err != nil {
-		input.Close()
-		return nil, err
+		return nil, errors.Join(fmt.Errorf("open console output: %w", err), closeConsoleFile(input, "input"))
 	}
 	return &controllingTerminal{
 		input:  input,
 		output: output,
 		close: func() error {
-			outputErr := output.Close()
-			inputErr := input.Close()
-			if outputErr != nil {
-				return outputErr
-			}
-			return inputErr
+			return errors.Join(closeConsoleFile(output, "output"), closeConsoleFile(input, "input"))
 		},
 	}, nil
+}
+
+func closeConsoleFile(file *os.File, name string) error {
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close console %s: %w", name, err)
+	}
+	return nil
 }

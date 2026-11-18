@@ -824,6 +824,29 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 44 (2026-11-18, v8 command error contracts):
+`gokinit`, `goklist`, and `gokdestroy` preserve flag parsing errors while
+retaining help and usage exit codes and quiet and silent behavior. Shared
+principal and hostname lookup, and `gokinit` keytab loading, ticket address
+discovery, PKINIT identity loading, and password changes identify the failed
+operation without adding password or PIN values to diagnostics. PKCS#12
+loading still tries the empty password before prompting.
+
+Password input retains its underlying I/O errors, requires explicit stdin
+opt-in, and keeps terminal echo disabled. Terminal restoration and close
+errors follow the primary failure, including when both Windows console
+handles fail to close. Regression tests cover missing keytabs, PKINIT
+decode and PIN read errors, stdin I/O failures, unterminated buffered input,
+and an isolated Linux process with no controlling terminal.
+
+Both module test suites and both changed-line lint gates passed, as did the
+v8 command race tests. Cross-package statement coverage is 86.6%, above
+the 86.0% floor. All four Windows/amd64 command and helper test binaries
+cross-compiled but were not run on Windows. The canonical v8 total fell
+from 954 to 927, including `wrapcheck` falling from 370 to 347. All 23
+command `wrapcheck` findings were resolved, with zero new canonical
+findings and zero gosec findings.
+
 Slice 43 (2026-11-18, credentials and configuration serialization errors):
 credential gob encoding and decoding, credential JSON encoding, and
 configuration JSON encoding now identify the failed operation while preserving

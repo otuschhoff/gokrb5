@@ -2,6 +2,7 @@ package krbcli
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"os/user"
@@ -50,7 +51,7 @@ func parsePrincipalWithDefaultRealm(value string, enterprise bool, cfg *config.C
 	}
 	principal, err := keytab.ParsePrincipal(value)
 	if err != nil {
-		return principal, err
+		return principal, fmt.Errorf("parse client principal: %w", err)
 	}
 	if principal.Realm == "" && cfg != nil {
 		principal.Realm = cfg.LibDefaults.DefaultRealm
@@ -64,7 +65,7 @@ func parsePrincipalWithDefaultRealm(value string, enterprise bool, cfg *config.C
 func canonicalHostname() (string, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("read local hostname: %w", err)
 	}
 	if canonical, lookupErr := net.LookupCNAME(hostname); lookupErr == nil && canonical != "" {
 		hostname = canonical

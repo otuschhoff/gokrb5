@@ -10,11 +10,13 @@ import (
 	"encoding/pem"
 	"errors"
 	"io"
+	"io/fs"
 	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -24,6 +26,48 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/credentials"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 )
+
+func TestLoadPKINITIdentityDecodeErrors(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "invalid")
+	if err := os.WriteFile(path, []byte("invalid identity"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inputErr := errors.New("injected PIN read failure")
+	tests := []struct {
+		name, source, prefix, prompt string
+		input                        io.Reader
+		cause                        error
+	}{
+		{name: "PEM decode", source: "FILE:", prefix: "decode PKINIT PEM identity:", input: iotest.ErrReader(inputErr)},
+		{name: "PKCS12 PIN read", source: "PKCS12:", prefix: "read PKINIT identity PIN:", prompt: "PIN for PKINIT identity: ", input: iotest.ErrReader(inputErr), cause: inputErr},
+		{name: "PKCS12 retry decode", source: "PKCS12:", prefix: "decode PKINIT PKCS#12 identity:", prompt: "PIN for PKINIT identity: ", input: strings.NewReader("test-pin\n")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			identity, err := loadPKINITIdentity(tt.source+path, tt.input, &stderr, true)
+			if identity != nil || err == nil || !strings.HasPrefix(err.Error(), tt.prefix) {
+				t.Fatalf("want nil identity and error prefixed by %q, got error %v", tt.prefix, err)
+			}
+			if tt.cause != nil && !errors.Is(err, tt.cause) {
+				t.Errorf("error lost PIN read cause: %v", err)
+			}
+			assert.Equal(t, tt.prompt, stderr.String())
+		})
+	}
+}
+
+func TestLoadExplicitKeytabError(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "missing.keytab")
+	_, err := loadKeytab(initOptions{keytabName: path}, config.New())
+	if !errors.Is(err, fs.ErrNotExist) || !strings.HasPrefix(err.Error(), "load explicit keytab:") {
+		t.Fatalf("expected contextual missing-keytab error, got %v", err)
+	}
+}
 
 func TestParseArgsMapsMITFlags(t *testing.T) {
 	var stderr bytes.Buffer

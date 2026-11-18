@@ -62,7 +62,7 @@ func parseArgs(args []string, stderr io.Writer) (listOptions, error) {
 	fs.BoolVar(&opts.silent, "s", false, "silent status")
 	fs.StringVar(&opts.cacheName, "c", "", "credential cache name")
 	if err := fs.Parse(args); err != nil {
-		return opts, err
+		return opts, fmt.Errorf("parse options: %w", err)
 	}
 	if fs.NArg() > 1 {
 		return opts, fmt.Errorf("too many arguments")

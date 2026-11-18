@@ -181,7 +181,7 @@ func parseArgs(args []string, stderr io.Writer) (initOptions, error) {
 	fs.BoolVar(&opts.disablePAReqEncPARep, "no-request-enc-pa-rep", false, "omit PA-REQ-ENC-PA-REP")
 	fs.Var(&opts.pkinitOptions, "X", "PKINIT attribute=value")
 	if err := fs.Parse(args); err != nil {
-		return opts, err
+		return opts, fmt.Errorf("parse options: %w", err)
 	}
 	if fs.NArg() > 1 {
 		return opts, errors.New("too many arguments")
@@ -302,31 +302,54 @@ func loadPKINITIdentity(source string, stdin io.Reader, stderr io.Writer, allowS
 		}
 		block, _ := pem.Decode(key)
 		if block == nil || !x509.IsEncryptedPEMBlock(block) {
-			return pkinit.FromPEM(certificate, key, nil)
+			return decodePKINITPEM(certificate, key, nil)
 		}
-		pin, readErr := krbcli.ReadPassword("PIN for PKINIT identity: ", stdin, stderr, allowStdin)
+		pin, readErr := readPKINITPIN(stdin, stderr, allowStdin)
 		if readErr != nil {
 			return nil, readErr
 		}
-		return pkinit.FromPEM(certificate, key, []byte(pin))
+		return decodePKINITPEM(certificate, key, []byte(pin))
 	case strings.HasPrefix(source, "PKCS12:"):
-		path := strings.TrimPrefix(source, "PKCS12:")
-		data, err := os.ReadFile(path) // #nosec G304 -- FILE: and PKCS12: paths are explicit user configuration inputs.
-		if err != nil {
-			return nil, fmt.Errorf("read PKINIT PKCS#12 identity: %w", err)
-		}
-		identity, err := pkinit.FromPKCS12(data, "")
-		if err == nil {
-			return identity, nil
-		}
-		pin, readErr := krbcli.ReadPassword("PIN for PKINIT identity: ", stdin, stderr, allowStdin)
-		if readErr != nil {
-			return nil, readErr
-		}
-		return pkinit.FromPKCS12(data, pin)
+		return loadPKINITPKCS12(strings.TrimPrefix(source, "PKCS12:"), stdin, stderr, allowStdin)
 	default:
 		return nil, fmt.Errorf("unsupported PKINIT identity source %q", source)
 	}
+}
+
+func loadPKINITPKCS12(path string, stdin io.Reader, stderr io.Writer, allowStdin bool) (*pkinit.Identity, error) {
+	data, err := os.ReadFile(path) // #nosec G304 -- PKCS12: paths are explicit user configuration inputs.
+	if err != nil {
+		return nil, fmt.Errorf("read PKINIT PKCS#12 identity: %w", err)
+	}
+	identity, err := pkinit.FromPKCS12(data, "")
+	if err == nil {
+		return identity, nil
+	}
+	pin, readErr := readPKINITPIN(stdin, stderr, allowStdin)
+	if readErr != nil {
+		return nil, readErr
+	}
+	identity, err = pkinit.FromPKCS12(data, pin)
+	if err != nil {
+		return nil, fmt.Errorf("decode PKINIT PKCS#12 identity: %w", err)
+	}
+	return identity, nil
+}
+
+func decodePKINITPEM(certificate, key, password []byte) (*pkinit.Identity, error) {
+	identity, err := pkinit.FromPEM(certificate, key, password)
+	if err != nil {
+		return nil, fmt.Errorf("decode PKINIT PEM identity: %w", err)
+	}
+	return identity, nil
+}
+
+func readPKINITPIN(stdin io.Reader, stderr io.Writer, allowStdin bool) (string, error) {
+	pin, err := krbcli.ReadPassword("PIN for PKINIT identity: ", stdin, stderr, allowStdin)
+	if err != nil {
+		return "", fmt.Errorf("read PKINIT identity PIN: %w", err)
+	}
+	return pin, nil
 }
 
 func pkinitFilePath(source string) (string, error) {
@@ -380,7 +403,7 @@ func asRequestOptions(opts initOptions, cfg *config.Config) (messages.ASReqOptio
 		if opts.addresses.value {
 			addresses, err := types.LocalHostAddresses()
 			if err != nil {
-				return result, err
+				return result, fmt.Errorf("collect local ticket addresses: %w", err)
 			}
 			addresses = append(addresses, types.HostAddressesFromNetIPs(cfg.LibDefaults.ExtraAddresses)...)
 			result.Addresses = addresses
@@ -407,12 +430,24 @@ func asRequestOptions(opts initOptions, cfg *config.Config) (messages.ASReqOptio
 
 func loadKeytab(opts initOptions, cfg *config.Config) (*keytab.Keytab, error) {
 	if opts.keytabName != "" {
-		return keytab.Load(opts.keytabName)
+		kt, err := keytab.Load(opts.keytabName)
+		if err != nil {
+			return kt, fmt.Errorf("load explicit keytab: %w", err)
+		}
+		return kt, nil
 	}
 	if opts.clientKeytab {
-		return keytab.LoadDefaultClient(cfg)
+		kt, err := keytab.LoadDefaultClient(cfg)
+		if err != nil {
+			return kt, fmt.Errorf("load default client keytab: %w", err)
+		}
+		return kt, nil
 	}
-	return keytab.LoadDefault(cfg)
+	kt, err := keytab.LoadDefault(cfg)
+	if err != nil {
+		return kt, fmt.Errorf("load default keytab: %w", err)
+	}
+	return kt, nil
 }
 
 func isPasswordExpired(err error) bool {
@@ -422,22 +457,22 @@ func isPasswordExpired(err error) bool {
 
 func changeExpiredPassword(cl *client.Client, principal string, stdin io.Reader, stderr io.Writer, passwordStdin bool) error {
 	if _, err := fmt.Fprintln(stderr, "Password expired.  You must change it now."); err != nil {
-		return err
+		return fmt.Errorf("write password expiration notice: %w", err)
 	}
 	first, err := krbcli.ReadPassword("Enter new password: ", stdin, stderr, passwordStdin)
 	if err != nil {
-		return err
+		return fmt.Errorf("read new password: %w", err)
 	}
 	second, err := krbcli.ReadPassword("Enter it again: ", stdin, stderr, passwordStdin)
 	if err != nil {
-		return err
+		return fmt.Errorf("read password confirmation: %w", err)
 	}
 	if first != second {
 		return errors.New("Password mismatch")
 	}
 	ok, err := cl.ChangePasswd(first)
 	if err != nil {
-		return err
+		return fmt.Errorf("change expired password: %w", err)
 	}
 	if !ok {
 		return fmt.Errorf("password change failed for %s", principal)

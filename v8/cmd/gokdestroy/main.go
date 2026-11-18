@@ -87,7 +87,7 @@ func parseArgs(args []string, stderr io.Writer) (destroyOptions, error) {
 	fs.BoolVar(&opts.quiet, "q", false, "quiet")
 	fs.StringVar(&opts.cacheName, "c", "", "credential cache name")
 	if err := fs.Parse(args); err != nil {
-		return opts, err
+		return opts, fmt.Errorf("parse options: %w", err)
 	}
 	if fs.NArg() != 0 {
 		return opts, errors.New("unexpected argument")
