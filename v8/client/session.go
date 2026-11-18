@@ -26,21 +26,33 @@ type sessions struct {
 
 // destroy erases all sessions
 func (s *sessions) destroy() {
+	if s == nil {
+		return
+	}
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	for k, e := range s.Entries {
-		e.destroy()
+		if e != nil {
+			e.destroy()
+		}
 		delete(s.Entries, k)
 	}
 }
 
 // update replaces a session with the one provided or adds it as a new one
 func (s *sessions) update(sess *session) {
+	if s == nil || sess == nil {
+		return
+	}
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	realmKey := strings.ToUpper(sess.realm)
 	// if a session already exists for this, cancel its auto renew.
 	if i, ok := s.Entries[realmKey]; ok {
+		if i == nil {
+			s.Entries[realmKey] = sess
+			return
+		}
 		if i != sess {
 			// Session in the sessions cache is not the same as one provided.
 			// Cancel the one in the cache and add this one.
@@ -59,10 +71,13 @@ func (s *sessions) update(sess *session) {
 
 // get returns the session for the realm specified
 func (s *sessions) get(realm string) (*session, bool) {
+	if s == nil {
+		return nil, false
+	}
 	s.mux.RLock()
 	defer s.mux.RUnlock()
-	sess, ok := s.Entries[strings.ToUpper(realm)]
-	return sess, ok
+	sess := s.Entries[strings.ToUpper(realm)]
+	return sess, sess != nil
 }
 
 // session holds the TGT details for a realm
@@ -126,6 +141,9 @@ func (cl *Client) addSession(tgt messages.Ticket, dep messages.EncKDCRepPart) {
 
 // update overwrites the session details with those from the TGT and decrypted encPart
 func (s *session) update(tgt messages.Ticket, dep messages.EncKDCRepPart) {
+	if s == nil {
+		return
+	}
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	s.authTime = dep.AuthTime
@@ -152,6 +170,9 @@ func getSupportedEncTypes(paData types.PADataSequence) (msflags.SupportedEncType
 }
 
 func (s *session) supportedEncryptionTypes() msflags.SupportedEncTypes {
+	if s == nil {
+		return 0
+	}
 	s.mux.RLock()
 	defer s.mux.RUnlock()
 	return s.supportedEncTypes
@@ -159,6 +180,9 @@ func (s *session) supportedEncryptionTypes() msflags.SupportedEncTypes {
 
 // destroy will cancel any auto renewal of the session and set the expiration times to the current time
 func (s *session) destroy() {
+	if s == nil {
+		return
+	}
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	if s.cancel != nil {
@@ -171,6 +195,9 @@ func (s *session) destroy() {
 
 // valid informs if the TGT is still within the valid time window
 func (s *session) valid() bool {
+	if s == nil {
+		return false
+	}
 	s.mux.RLock()
 	defer s.mux.RUnlock()
 	t := time.Now().UTC()
@@ -182,6 +209,9 @@ func (s *session) valid() bool {
 
 // tgtDetails is a thread safe way to get the session's realm, TGT and session key values
 func (s *session) tgtDetails() (string, messages.Ticket, types.EncryptionKey) {
+	if s == nil {
+		return "", messages.Ticket{}, types.EncryptionKey{}
+	}
 	s.mux.RLock()
 	defer s.mux.RUnlock()
 	return s.realm, s.tgt, s.sessionKey
@@ -189,6 +219,9 @@ func (s *session) tgtDetails() (string, messages.Ticket, types.EncryptionKey) {
 
 // timeDetails is a thread safe way to get the session's validity time values
 func (s *session) timeDetails() (string, time.Time, time.Time, time.Time, time.Time) {
+	if s == nil {
+		return "", time.Time{}, time.Time{}, time.Time{}, time.Time{}
+	}
 	s.mux.RLock()
 	defer s.mux.RUnlock()
 	return s.realm, s.authTime, s.endTime, s.renewTill, s.sessionKeyExpiration
@@ -205,7 +238,11 @@ func (s *sessions) JSON() (string, error) {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		r, at, et, rt, kt := s.Entries[k].timeDetails()
+		session := s.Entries[k]
+		if session == nil {
+			continue
+		}
+		r, at, et, rt, kt := session.timeDetails()
 		j := jsonSession{
 			Realm:                r,
 			AuthTime:             at,
@@ -301,7 +338,7 @@ func (cl *Client) refreshSession(s *session) (bool, error) {
 // ensureValidSession makes sure there is a valid session for the realm
 func (cl *Client) ensureValidSession(realm string) error {
 	s, ok := cl.sessions.get(realm)
-	if ok {
+	if ok && s != nil {
 		s.mux.RLock()
 		d := s.endTime.Sub(s.authTime) / 6
 		if s.endTime.Sub(time.Now().UTC()) > d {

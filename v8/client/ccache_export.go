@@ -2,6 +2,7 @@ package client
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 	"strconv"
 
@@ -27,6 +28,10 @@ func (cl *Client) CCache() (*credentials.CCache, error) {
 	sort.Strings(sessionRealms)
 	for _, realm := range sessionRealms {
 		session := cl.sessions.Entries[realm]
+		if session == nil {
+			cl.sessions.mux.RUnlock()
+			return nil, fmt.Errorf("client session for realm %s is nil", realm)
+		}
 		session.mux.RLock()
 		credential, err := sessionCredential(cl, session)
 		session.mux.RUnlock()
@@ -68,6 +73,12 @@ func (cl *Client) CCache() (*credentials.CCache, error) {
 }
 
 func sessionCredential(cl *Client, session *session) (*credentials.Credential, error) {
+	if session == nil {
+		return nil, errors.New("client session is nil")
+	}
+	if cl == nil || cl.Credentials == nil {
+		return nil, errors.New("client credentials are not initialized")
+	}
 	ticket, err := session.tgt.Marshal()
 	if err != nil {
 		return nil, err

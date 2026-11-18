@@ -17,7 +17,7 @@ func TestClient_Login_DNSKDCs(t *testing.T) {
 	// if ns == "" {
 	//	os.Setenv("DNSUTILS_OVERRIDE_NS", testdata.TEST_NS)
 	// }
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustClientTestConfig(t, testdata.KRB5_CONF)
 	// Set to lookup KDCs in DNS
 	c.LibDefaults.DNSLookupKDC = true
 	// Blank out the KDCs to ensure they are not being used

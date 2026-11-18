@@ -40,6 +40,9 @@ func newFASTTestState(t *testing.T) (*Client, *fastState, messages.ASReq) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if state == nil {
+		t.Fatal("newFASTState returned nil state without error")
+	}
 	request, err := cl.newASReq()
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +87,10 @@ func TestFASTASRequestEncryptsInnerRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	et, _ := crypto.GetEtype(state.armorKey.KeyType)
+	et, err := crypto.GetEtype(state.armorKey.KeyType)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !et.VerifyChecksum(state.armorKey.KeyValue, body, fastPA.ArmoredData.ReqChecksum.Checksum, keyusage.FAST_REQ_CHKSUM) {
 		t.Fatal("FAST outer request-body checksum did not verify")
 	}
@@ -351,7 +357,10 @@ func TestFASTVerifyASReplyStrengthensKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	et, _ := crypto.GetEtype(state.armorKey.KeyType)
+	et, err := crypto.GetEtype(state.armorKey.KeyType)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ticketChecksum, err := et.GetChecksumHash(state.armorKey.KeyValue, ticketBytes, keyusage.FAST_FINISHED)
 	if err != nil {
 		t.Fatal(err)
@@ -417,7 +426,10 @@ func TestFASTTGSRequestUsesImplicitArmor(t *testing.T) {
 	if fastPA.ArmoredData.Armor.ArmorType != 0 || len(fastPA.ArmoredData.Armor.ArmorValue) != 0 {
 		t.Fatal("implicit TGS armor unexpectedly included an explicit armor value")
 	}
-	et, _ := crypto.GetEtype(state.armorKey.KeyType)
+	et, err := crypto.GetEtype(state.armorKey.KeyType)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !et.VerifyChecksum(state.armorKey.KeyValue, wrapped.PAData[0].PADataValue, fastPA.ArmoredData.ReqChecksum.Checksum, keyusage.FAST_REQ_CHKSUM) {
 		t.Fatal("FAST PA-TGS-REQ checksum did not verify")
 	}
@@ -474,7 +486,10 @@ func TestFASTVerifyTGSReplyUsesStrengthenedSubkey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	et, _ := crypto.GetEtype(state.armorKey.KeyType)
+	et, err := crypto.GetEtype(state.armorKey.KeyType)
+	if err != nil {
+		t.Fatal(err)
+	}
 	checksum, err := et.GetChecksumHash(state.armorKey.KeyValue, ticketBytes, keyusage.FAST_FINISHED)
 	if err != nil {
 		t.Fatal(err)
@@ -575,4 +590,29 @@ func TestFASTTGSExchangeRejectsUnarmoredReply(t *testing.T) {
 
 func challengePASequence(pa types.PAData) types.PADataSequence {
 	return types.PADataSequence{pa}
+}
+
+func TestNilFASTStateRejectsOperations(t *testing.T) {
+	var state *fastState
+	if _, err := state.wrapASRequest(messages.ASReq{}); err == nil {
+		t.Fatal("nil FAST state accepted AS request")
+	}
+	if _, err := state.wrapTGSRequest(messages.TGSReq{}, messages.Ticket{}, types.EncryptionKey{}); err == nil {
+		t.Fatal("nil FAST state accepted TGS request")
+	}
+	if err := state.setASPreAuth(nil, nil, nil); err == nil {
+		t.Fatal("nil FAST state accepted pre-auth setup")
+	}
+	if _, err := state.unwrapResponse(nil, 0); err == nil {
+		t.Fatal("nil FAST state decoded a response")
+	}
+	if _, err := state.unwrapError(messages.KRBError{}, 0); err == nil {
+		t.Fatal("nil FAST state decoded an error")
+	}
+	if _, err := state.verifyASReplyWithKey(nil, nil, messages.ASReq{}, nil, nil); err == nil {
+		t.Fatal("nil FAST state verified an AS reply")
+	}
+	if err := state.verifyTGSReply(nil, nil, messages.TGSReq{}); err == nil {
+		t.Fatal("nil FAST state verified a TGS reply")
+	}
 }

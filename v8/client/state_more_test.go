@@ -17,6 +17,27 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+func TestSessionStoreHandlesNilEntries(t *testing.T) {
+	var nilStore *sessions
+	nilStore.destroy()
+	nilStore.update(nil)
+	if session, ok := nilStore.get("EXAMPLE.ORG"); ok || session != nil {
+		t.Fatalf("nil store get = %v, %v", session, ok)
+	}
+
+	store := &sessions{Entries: map[string]*session{"EXAMPLE.ORG": nil}}
+	if session, ok := store.get("EXAMPLE.ORG"); ok || session != nil {
+		t.Fatalf("nil entry get = %v, %v", session, ok)
+	}
+	store.destroy()
+	if len(store.Entries) != 0 {
+		t.Fatalf("destroy left %d entries", len(store.Entries))
+	}
+	if data, err := store.JSON(); err != nil || data != "null" {
+		t.Fatalf("empty JSON = %q, %v", data, err)
+	}
+}
+
 func TestSessionLifecycleHelpers(t *testing.T) {
 	now := time.Now().UTC()
 	oldCancel := make(chan bool, 1)

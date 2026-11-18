@@ -20,7 +20,7 @@ const (
 
 func isKKDCPServer(server string) bool {
 	u, err := url.Parse(server)
-	return err == nil && strings.EqualFold(u.Scheme, "https") && u.Host != ""
+	return err == nil && u != nil && strings.EqualFold(u.Scheme, "https") && u.Host != ""
 }
 
 func (cl *Client) sendKKDCP(proxyURL, realm string, message []byte) ([]byte, error) {

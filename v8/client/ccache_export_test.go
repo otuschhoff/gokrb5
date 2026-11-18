@@ -41,6 +41,23 @@ func TestCCacheRejectsUninitializedClient(t *testing.T) {
 	}
 }
 
+func TestCCacheRejectsNilSessionEntry(t *testing.T) {
+	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", nil)
+	cl.sessions.Entries["EXAMPLE.ORG"] = nil
+	cache, err := cl.CCache()
+	if err == nil || cache != nil || !strings.Contains(err.Error(), "session") {
+		t.Fatalf("CCache() = %v, %v; want nil cache and session error", cache, err)
+	}
+}
+
+func TestSessionCredentialRejectsNil(t *testing.T) {
+	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", nil)
+	credential, err := sessionCredential(cl, nil)
+	if err == nil || credential != nil {
+		t.Fatalf("sessionCredential(nil) = %v, %v; want nil credential and error", credential, err)
+	}
+}
+
 func TestNewFromCCacheRejectsNil(t *testing.T) {
 	client, err := NewFromCCache(nil, nil)
 	if err == nil || client != nil || !strings.Contains(err.Error(), "nil") {

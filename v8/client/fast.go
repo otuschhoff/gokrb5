@@ -159,6 +159,9 @@ func (cl *Client) fastArmorForRealm(realm string) (fastArmorCredentials, error) 
 }
 
 func (state *fastState) wrapASRequest(request messages.ASReq) (messages.ASReq, error) {
+	if state == nil {
+		return request, fmt.Errorf("FAST state is nil")
+	}
 	body, err := request.ReqBody.Marshal()
 	if err != nil {
 		return request, fmt.Errorf("marshal FAST inner request body: %w", err)
@@ -193,6 +196,9 @@ func (state *fastState) wrapASRequest(request messages.ASReq) (messages.ASReq, e
 }
 
 func (state *fastState) wrapTGSRequest(request messages.TGSReq, tgt messages.Ticket, sessionKey types.EncryptionKey) (messages.TGSReq, error) {
+	if state == nil {
+		return request, fmt.Errorf("FAST state is nil")
+	}
 	subkey, apReqBytes, err := request.SetPADataWithSubkey(tgt, sessionKey)
 	if err != nil {
 		return request, err
@@ -246,6 +252,12 @@ func (state *fastState) wrapTGSRequest(request messages.TGSReq, tgt messages.Tic
 }
 
 func (state *fastState) setASPreAuth(cl *Client, hint *messages.KRBError, request *messages.ASReq) error {
+	if state == nil {
+		return fmt.Errorf("FAST state is nil")
+	}
+	if cl == nil || request == nil {
+		return fmt.Errorf("FAST pre-authentication client and request are required")
+	}
 	var (
 		key types.EncryptionKey
 		et  = state.replyKey.KeyType
@@ -323,6 +335,9 @@ func fastAdvertised(err messages.KRBError) bool {
 }
 
 func (state *fastState) unwrapResponse(paData types.PADataSequence, nonce int) (types.KrbFastResponse, error) {
+	if state == nil {
+		return types.KrbFastResponse{}, fmt.Errorf("FAST state is nil")
+	}
 	for i := range paData {
 		if paData[i].PADataType != patype.PA_FX_FAST {
 			continue
@@ -348,6 +363,9 @@ func (state *fastState) unwrapResponse(paData types.PADataSequence, nonce int) (
 }
 
 func (state *fastState) unwrapError(outer messages.KRBError, nonce int) (messages.KRBError, error) {
+	if state == nil {
+		return messages.KRBError{}, fmt.Errorf("FAST state is nil")
+	}
 	var methodData types.PADataSequence
 	if err := methodData.Unmarshal(outer.EData); err != nil {
 		return messages.KRBError{}, fmt.Errorf("decode armored KRB-ERROR METHOD-DATA (outer error %d, e-data %d bytes): %w", outer.ErrorCode, len(outer.EData), err)
@@ -389,6 +407,12 @@ func (state *fastState) verifyASReply(cl *Client, reply *messages.ASRep, request
 }
 
 func (state *fastState) verifyASReplyWithKey(cl *Client, reply *messages.ASRep, request messages.ASReq, requestBytes []byte, deriveReplyKey func(types.PADataSequence) (types.EncryptionKey, error)) (types.EncryptionKey, error) {
+	if state == nil {
+		return types.EncryptionKey{}, fmt.Errorf("FAST state is nil")
+	}
+	if cl == nil || reply == nil {
+		return types.EncryptionKey{}, fmt.Errorf("FAST AS reply client and reply are required")
+	}
 	response, err := state.unwrapResponse(reply.PAData, request.ReqBody.Nonce)
 	if err != nil {
 		return types.EncryptionKey{}, err
@@ -436,6 +460,12 @@ func (state *fastState) verifyASReplyWithKey(cl *Client, reply *messages.ASRep, 
 }
 
 func (state *fastState) verifyTGSReply(cl *Client, reply *messages.TGSRep, request messages.TGSReq) error {
+	if state == nil {
+		return fmt.Errorf("FAST state is nil")
+	}
+	if cl == nil || reply == nil {
+		return fmt.Errorf("FAST TGS reply client and reply are required")
+	}
 	response, err := state.unwrapResponse(reply.PAData, request.ReqBody.Nonce)
 	if err != nil {
 		return err

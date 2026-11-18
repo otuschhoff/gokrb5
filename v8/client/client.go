@@ -278,12 +278,18 @@ func findTGTCredentialFold(entries []*credentials.Credential, realm string) (*cr
 
 // KDCTimeOffset returns the time offset learned from the KDC.
 func (cl *Client) KDCTimeOffset() time.Duration {
+	if cl == nil {
+		return 0
+	}
 	cl.kdcTimeMux.RLock()
 	defer cl.kdcTimeMux.RUnlock()
 	return cl.kdcTimeOffset
 }
 
 func (cl *Client) setKDCTimeOffset(offset time.Duration) {
+	if cl == nil {
+		return
+	}
 	cl.kdcTimeMux.Lock()
 	cl.kdcTimeOffset = offset
 	cl.kdcTimeMux.Unlock()

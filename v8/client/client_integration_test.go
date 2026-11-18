@@ -28,6 +28,18 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 )
 
+func mustIntegrationConfig(t testing.TB, content string) *config.Config {
+	t.Helper()
+	cfg, err := config.NewFromString(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg == nil {
+		t.Fatal("NewFromString returned nil config without error")
+	}
+	return cfg
+}
+
 func TestClient_SuccessfulLogin_Keytab(t *testing.T) {
 	test.Integration(t)
 
@@ -41,7 +53,7 @@ func TestClient_SuccessfulLogin_Keytab(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	tests := []string{
 		testdata.KDC_PORT_TEST_GOKRB5,
 		testdata.KDC_PORT_TEST_GOKRB5_OLD,
@@ -79,7 +91,7 @@ func TestClient_Login_Keytab_KDCPrefersEtypeNotInKeytab(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, _ := config.NewFromString(testdata.KRB5_CONF)
+	cfg := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -105,7 +117,7 @@ func TestClient_Login_Keytab_KDCPrefersEtypeNotInKeytab(t *testing.T) {
 func TestClient_Login_RenewLifetime(t *testing.T) {
 	test.Integration(t)
 
-	cfg, _ := config.NewFromString(testdata.KRB5_CONF)
+	cfg := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -134,7 +146,7 @@ func TestClient_SuccessfulLogin_Password(t *testing.T) {
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
 	}
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	tests := []string{
 		testdata.KDC_PORT_TEST_GOKRB5,
 		testdata.KDC_PORT_TEST_GOKRB5_OLD,
@@ -160,7 +172,7 @@ func TestClient_SuccessfulLogin_TCPOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -184,7 +196,7 @@ func TestClient_ASExchange_TGSExchange_EncTypes_Keytab(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -221,7 +233,7 @@ func TestClient_ASExchange_TGSExchange_EncTypes_Keytab(t *testing.T) {
 func TestClient_ASExchange_TGSExchange_EncTypes_Password(t *testing.T) {
 	test.Integration(t)
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -264,7 +276,7 @@ func TestClient_FailedLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -287,7 +299,7 @@ func TestClient_SuccessfulLogin_UserRequiringPreAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -310,7 +322,7 @@ func TestClient_SuccessfulLogin_UserRequiringPreAuth_TCPOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -334,7 +346,7 @@ func TestClient_NetworkTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	c.Realms[0].KDC = []string{testdata.KDC_IP_TEST_GOKRB5_BADADDR + ":88"}
 	cl := client.NewWithKeytab("testuser1", "TEST.GOKRB5", kt, c)
 
@@ -353,7 +365,7 @@ func TestClient_NetworkTryNextKDC(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -386,7 +398,7 @@ func TestClient_GetServiceTicket(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -424,7 +436,7 @@ func TestClient_GetServiceTicket_CanonicalizeTrue(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	c.LibDefaults.Canonicalize = true
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
@@ -463,7 +475,7 @@ func TestClient_GetServiceTicket_InvalidSPN(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -490,7 +502,7 @@ func TestClient_GetServiceTicket_OlderKDC(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -520,7 +532,7 @@ func TestMultiThreadedClientUse(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -607,7 +619,7 @@ func TestNewFromCCache(t *testing.T) {
 	if err != nil {
 		t.Fatal("error getting test CCache")
 	}
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -633,7 +645,7 @@ func TestClient_GetServiceTicket_Trusted_Resource_Domain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
@@ -741,7 +753,10 @@ func getServiceTkt() error {
 }
 
 func loadCCache() (*credentials.CCache, error) {
-	usr, _ := user.Current()
+	usr, err := user.Current()
+	if err != nil {
+		return nil, fmt.Errorf("resolve current OS user: %w", err)
+	}
 	cpath := "/tmp/krb5cc_" + usr.Uid
 	return credentials.LoadCCache(cpath)
 }
@@ -757,7 +772,7 @@ func TestGetServiceTicketFromCCacheTGT(t *testing.T) {
 	if err != nil {
 		t.Errorf("error loading CCache: %v", err)
 	}
-	cfg, _ := config.NewFromString(testdata.KRB5_CONF)
+	cfg := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -817,7 +832,7 @@ func TestGetServiceTicketFromCCacheWithoutKDC(t *testing.T) {
 	if err != nil {
 		t.Errorf("error loading CCache: %v", err)
 	}
-	cfg, _ := config.NewFromString("...")
+	cfg := mustIntegrationConfig(t, "...")
 	cl, err := client.NewFromCCache(c, cfg)
 	if err != nil {
 		t.Fatalf("error generating client from ccache: %v", err)
@@ -850,7 +865,7 @@ func TestClient_ChangePasswd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -892,7 +907,7 @@ func TestClient_Destroy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	c.Realms[0].KDC = []string{addr + ":" + testdata.KDC_PORT_TEST_GOKRB5_SHORTTICKETS}
 	cl := client.NewWithKeytab("testuser1", "TEST.GOKRB5", kt, c)
 

@@ -32,7 +32,7 @@ func TestMultiThreadedClientSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustClientTestConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
@@ -89,7 +89,7 @@ func TestClient_AutoRenew_Goroutine(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
+	c := mustClientTestConfig(t, testdata.KRB5_CONF)
 	c.Realms[0].KDC = []string{addr + ":" + testdata.KDC_PORT_TEST_GOKRB5_SHORTTICKETS}
 	c.LibDefaults.PreferredPreauthTypes = []int{int(etypeID.DES3_CBC_SHA1_KD)} // a preauth etype the KDC does not support. Test this does not cause renewal to fail.
 	cl := NewWithKeytab("testuser2", "TEST.GOKRB5", kt, c)
@@ -237,7 +237,7 @@ func TestAddSessionDefaultsStartTimeToAuthTime(t *testing.T) {
 	cl.addSession(ticket, decoded)
 
 	session, ok := cl.sessions.get("EXAMPLE.ORG")
-	if !ok {
+	if !ok || session == nil {
 		t.Fatal("TGT session was not added")
 	}
 	assert.Equal(t, authTime, session.startTime)
