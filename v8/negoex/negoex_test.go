@@ -61,7 +61,12 @@ func TestNEGOEXConversionBounds(t *testing.T) {
 		{name: "negative uint32", call: func() error { _, err := negoexUint32FromInt(-1); return err }},
 		{name: "negative uint16", call: func() error { _, err := negoexUint16FromInt(-1); return err }},
 		{name: "uint16 overflow", call: func() error { _, err := negoexUint16FromInt(math.MaxUint16 + 1); return err }},
-		{name: "platform int overflow", call: func() error { _, err := negoexIntFromUint64(uint64(maxInt()) + 1); return err }},
+		{name: "platform int overflow", call: func() error {
+			maxPlatformInt := maxInt()
+			value := uint64(maxPlatformInt) // #nosec G115 -- maxInt is nonnegative.
+			_, err := negoexIntFromUint64(value + 1)
+			return err
+		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

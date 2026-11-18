@@ -42,8 +42,8 @@ type SPNEGO struct {
 	dcePending       bool
 	context          context.Context
 	securityContext  gssapi.Context
-	contextSend      uint64
-	contextReceive   uint64
+	contextSend      int64
+	contextReceive   int64
 	acceptorSubkey   bool
 }
 
@@ -114,7 +114,7 @@ func (s *SPNEGO) InitSecContext() (gssapi.ContextToken, error) {
 	if !contextFlagSet(s.initiatorOptions.GSSAPIFlags, gssapi.ContextFlagMutual) &&
 		!contextFlagSet(s.initiatorOptions.GSSAPIFlags, gssapi.ContextFlagDCEStyle) {
 		s.contextKey = s.replyKey
-		s.contextSend = uint64(s.authenticator.SeqNumber)
+		s.contextSend = s.authenticator.SeqNumber
 		s.contextReceive = 0
 		s.acceptorSubkey = false
 		if err := s.completeSecurityContext(true); err != nil {
@@ -205,7 +205,7 @@ func (s *SPNEGO) AcceptSecContext(ct gssapi.ContextToken) (bool, context.Context
 		}
 	}
 	s.context = ctx
-	s.contextReceive = uint64(mechanismToken.APReq.Authenticator.SeqNumber)
+	s.contextReceive = mechanismToken.APReq.Authenticator.SeqNumber
 	mutual := mechanismToken.checksum.Flags&(gssapi.ContextFlagMutual|gssapi.ContextFlagDCEStyle) != 0 ||
 		types.IsFlagSet(&mechanismToken.APReq.APOptions, flags.APOptionMutualRequired)
 	if !mutual {
@@ -267,7 +267,7 @@ func (s *SPNEGO) AcceptSecContext(ct gssapi.ContextToken) (bool, context.Context
 	replyToken := NewKRB5TokenAPREP(reply, dceStyle)
 	s.contextKey = acceptorSubkey
 	s.sequenceNumber = sequenceNumber
-	s.contextSend = uint64(sequenceNumber)
+	s.contextSend = sequenceNumber
 	s.acceptorSubkey = true
 	if dceStyle {
 		s.dcePending = true
@@ -287,7 +287,8 @@ func (s *SPNEGO) AcceptSecContext(ct gssapi.ContextToken) (bool, context.Context
 		s.offeredMechTypes = append([]asn1.ObjectIdentifier(nil), offeredMechTypes...)
 	}
 	if includeMechMIC {
-		if err := response.SetMechListMIC(offeredMechTypes, s.contextKey, uint64(sequenceNumber), true); err != nil {
+		sequenceValue := uint64(sequenceNumber) // #nosec G115 -- randomSequenceNumber returns a nonnegative 30-bit value.
+		if err := response.SetMechListMIC(offeredMechTypes, s.contextKey, sequenceValue, true); err != nil {
 			return false, ctx, gssapi.Status{Code: gssapi.StatusFailure, Message: err.Error()}
 		}
 	}
@@ -357,7 +358,15 @@ func (s *SPNEGO) SecurityContext() gssapi.Context {
 }
 
 func (s *SPNEGO) completeSecurityContext(initiator bool) error {
-	securityContext, err := gssapi.NewSecurityContext(s.contextKey, initiator, s.contextSend, s.contextReceive, s.acceptorSubkey)
+	contextSend, err := sequenceNumberUint64(s.contextSend)
+	if err != nil {
+		return err
+	}
+	contextReceive, err := sequenceNumberUint64(s.contextReceive)
+	if err != nil {
+		return err
+	}
+	securityContext, err := gssapi.NewSecurityContext(s.contextKey, initiator, contextSend, contextReceive, s.acceptorSubkey)
 	if err != nil {
 		return err
 	}
@@ -392,8 +401,8 @@ func (s *SPNEGO) ContinueSecContext(ct gssapi.ContextToken) (bool, context.Conte
 			s.contextKey = s.replyKey
 		}
 		s.sequenceNumber = mechanismToken.APRep.DecryptedEncPart.SequenceNumber
-		s.contextSend = uint64(s.authenticator.SeqNumber)
-		s.contextReceive = uint64(s.sequenceNumber)
+		s.contextSend = s.authenticator.SeqNumber
+		s.contextReceive = s.sequenceNumber
 		s.acceptorSubkey = len(mechanismToken.APRep.DecryptedEncPart.Subkey.KeyValue) > 0
 		if spnegoToken, ok := ct.(*SPNEGOToken); ok {
 			if len(spnegoToken.NegTokenResp.MechListMIC) > 0 {
@@ -477,8 +486,8 @@ func (s *SPNEGO) continueInitiator(ct gssapi.ContextToken) (bool, context.Contex
 		}
 		s.contextKey = s.replyKey
 	}
-	s.contextSend = uint64(s.authenticator.SeqNumber)
-	s.contextReceive = uint64(s.sequenceNumber)
+	s.contextSend = s.authenticator.SeqNumber
+	s.contextReceive = s.sequenceNumber
 	s.acceptorSubkey = usesAcceptorSubkey
 
 	if len(token.NegTokenResp.MechListMIC) > 0 {
@@ -490,7 +499,7 @@ func (s *SPNEGO) continueInitiator(ct gssapi.ContextToken) (bool, context.Contex
 	}
 
 	if state == NegStateRequestMIC {
-		mic, err := makeMechListMIC(s.offeredMechTypes, s.contextKey, initiatorMICFlags(usesAcceptorSubkey), uint64(s.authenticator.SeqNumber), keyusage.GSSAPI_INITIATOR_SIGN)
+		mic, err := makeInitiatorMechListMIC(s.offeredMechTypes, s.contextKey, usesAcceptorSubkey, s.authenticator.SeqNumber)
 		if err != nil {
 			return false, s.context, gssapi.Status{Code: gssapi.StatusFailure, Message: err.Error()}
 		}
@@ -574,6 +583,21 @@ func contextKRB5Token(token gssapi.ContextToken, settings *service.Settings) (*K
 		spnegoToken.NegTokenResp.mechToken = mechanismToken
 	}
 	return negotiationKRB5Token(spnegoToken)
+}
+
+func sequenceNumberUint64(sequence int64) (uint64, error) {
+	if sequence < 0 || sequence > 0x3fffffff {
+		return 0, fmt.Errorf("invalid GSSAPI sequence number %d", sequence)
+	}
+	return uint64(sequence), nil
+}
+
+func makeInitiatorMechListMIC(mechTypes []asn1.ObjectIdentifier, key types.EncryptionKey, acceptorSubkey bool, sequence int64) ([]byte, error) {
+	sequenceNumber, err := sequenceNumberUint64(sequence)
+	if err != nil {
+		return nil, err
+	}
+	return makeMechListMIC(mechTypes, key, initiatorMICFlags(acceptorSubkey), sequenceNumber, keyusage.GSSAPI_INITIATOR_SIGN)
 }
 
 func randomSequenceNumber() (int64, error) {

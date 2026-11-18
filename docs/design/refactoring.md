@@ -824,6 +824,16 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 28 (2026-11-18, SPNEGO sequence ranges): SPNEGO G115 findings are
+zero. Sequence numbers remain signed while parsed from Kerberos messages and
+are converted only when constructing the GSS security context or mechListMIC.
+A centralized 30-bit validation helper rejects negative and out-of-range peer
+values; locally generated acceptor sequences retain an audited nonnegative
+30-bit conversion. Boundary regressions cover the full accepted endpoints and
+both rejected sides. SPNEGO G115 falls 12 to 0, total G115 falls 60 to 48,
+gosec falls 144 to 132, and canonical findings fall 1,131 to 1,118; coverage
+remains 86.6%.
+
 Slice 27 (2026-11-18, NEGOEX wire ranges): NEGOEX G115 findings are zero.
 Message and vector lengths now use checked uint32/uint16 and platform-int
 helpers before allocation or encoding; malformed descriptor offsets remain

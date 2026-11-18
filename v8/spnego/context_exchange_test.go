@@ -89,8 +89,10 @@ func TestMutualContextExchangeAcceptsTicketKeyAPRep(t *testing.T) {
 	require.Equal(t, gssapi.StatusComplete, status.Code)
 	require.Equal(t, acceptorSubkey, initiator.contextKey)
 
+	initiatorSequence, err := sequenceNumberUint64(initiator.authenticator.SeqNumber)
+	require.NoError(t, err)
 	acceptorContext, err := gssapi.NewSecurityContext(
-		acceptorSubkey, false, acceptorSequence, uint64(initiator.authenticator.SeqNumber), true,
+		acceptorSubkey, false, acceptorSequence, initiatorSequence, true,
 	)
 	require.NoError(t, err)
 	request, err := initiator.SecurityContext().Wrap([]byte("request"), true)
@@ -184,7 +186,9 @@ func TestMutualContextExchangeWithMechListMIC(t *testing.T) {
 		gssapi.OIDMSLegacyKRB5.OID(),
 		gssapi.OIDKRB5.OID(),
 	}
-	require.NoError(t, initialToken.NegTokenInit.SetMechListMIC(initiator.replyKey, uint64(initiator.authenticator.SeqNumber)))
+	sequenceNumber, err := sequenceNumberUint64(initiator.authenticator.SeqNumber)
+	require.NoError(t, err)
+	require.NoError(t, initialToken.NegTokenInit.SetMechListMIC(initiator.replyKey, sequenceNumber))
 	initiator.offeredMechTypes = append([]asn1.ObjectIdentifier(nil), initialToken.NegTokenInit.MechTypes...)
 	initiator.requireMechMIC = true
 
@@ -200,6 +204,19 @@ func TestMutualContextExchangeWithMechListMIC(t *testing.T) {
 	require.Equal(t, gssapi.StatusComplete, status.Code)
 }
 
+func TestSequenceNumberRange(t *testing.T) {
+	for _, value := range []int64{-1, 0x40000000} {
+		if _, err := sequenceNumberUint64(value); err == nil {
+			t.Fatalf("sequence number %d was accepted", value)
+		}
+	}
+	for _, value := range []int64{0, 0x3fffffff} {
+		if _, err := sequenceNumberUint64(value); err != nil {
+			t.Fatalf("sequence number %d rejected: %v", value, err)
+		}
+	}
+}
+
 func TestContextExchangeRejectsTamperedMechList(t *testing.T) {
 	initiator, acceptor, initial := newContextExchange(t, []int{gssapi.ContextFlagInteg})
 	initialToken := mustSPNEGOTestType[*SPNEGOToken](t, initial)
@@ -207,7 +224,9 @@ func TestContextExchangeRejectsTamperedMechList(t *testing.T) {
 		gssapi.OIDMSLegacyKRB5.OID(),
 		gssapi.OIDKRB5.OID(),
 	}
-	require.NoError(t, initialToken.NegTokenInit.SetMechListMIC(initiator.replyKey, uint64(initiator.authenticator.SeqNumber)))
+	sequenceNumber, err := sequenceNumberUint64(initiator.authenticator.SeqNumber)
+	require.NoError(t, err)
+	require.NoError(t, initialToken.NegTokenInit.SetMechListMIC(initiator.replyKey, sequenceNumber))
 	initialToken.NegTokenInit.MechTypes[0] = asn1.ObjectIdentifier{1, 2, 3, 4}
 
 	authenticated, _, status := acceptor.AcceptSecContext(initial)
