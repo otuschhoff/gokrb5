@@ -77,7 +77,7 @@ func (cl *Client) sendKDCUDP(realm string, b []byte) ([]byte, error) {
 	var r []byte
 	_, kdcs, err := cl.Config.GetKDCs(realm, false)
 	if err != nil {
-		return r, err
+		return r, fmt.Errorf("discover UDP KDCs: %w", err)
 	}
 	r, err = cl.sendToServers(kdcs, realm, b, false)
 	if err != nil {
@@ -144,7 +144,7 @@ func (cl *Client) sendKDCTCP(realm string, b []byte) ([]byte, error) {
 	var r []byte
 	_, kdcs, err := cl.Config.GetKDCs(realm, true)
 	if err != nil {
-		return r, err
+		return r, fmt.Errorf("discover TCP KDCs: %w", err)
 	}
 	r, err = cl.sendToServers(kdcs, realm, b, true)
 	if err != nil {

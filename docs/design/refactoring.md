@@ -824,6 +824,33 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 63 (2026-11-19, client transport and password-change errors; Q-03):
+Add operation context to UDP/TCP KDC discovery, KKDCP request framing,
+and password-change request construction, discovery, encoding, and reply
+processing. Preserve the underlying causes, wire format, transport order,
+and HTTP redirect and response ownership behavior. A genuine kpasswd
+KRB-ERROR remains a concrete protocol error. A non-success result in a
+protected reply retains its kpasswd result code and text without wrapping
+a zero-valued KRB-ERROR. The client updates its stored password only on
+success.
+
+Deterministic tests cover both discovery failures and forced TCP, kpasswd
+request and reply failures, concrete KRB-ERROR identity, and password
+publication after an encrypted success but not after rejection. Both module
+suites, the full Linux/386 v8 suite, and focused race, build, and vet checks
+passed. `FuzzReplyUnmarshal` (1,376,417 executions) and
+`FuzzKDCProxyMessage` (1,445,654 executions) passed 60-second runs.
+V8 cross-package statement coverage reached 87.8%. Live interoperability
+was not run because Docker daemon access was unavailable.
+
+All nine targeted `wrapcheck` reports were resolved without suppressions.
+Both modules passed the changed-line gates against the slice baseline and
+`origin/main`. Canonical v8 findings fell from 582 to 573 (`wrapcheck`: 15
+to 6), and supplemental findings fell from 3,657 to 3,655. Neither inventory
+introduced new findings, and v8 still reported zero `gosec` findings. The
+remaining `wrapcheck` reports are in credential export and cache, session,
+and settings serialization.
+
 Slice 62 (2026-11-19, client TGS and S4U error contracts; Q-03):
 Add operation context to ordinary and user-to-user referral requests,
 referral PA-DATA decoding, delegated KRB-CRED encoding, and S4U request

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/otuschhoff/gokrb5/v8/kadmin"
+	"github.com/otuschhoff/gokrb5/v8/krberror"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 )
 
@@ -20,30 +21,39 @@ const (
 )
 
 // ChangePasswd changes the password of the client to the value provided.
+// The stored password is updated only after the server confirms the change.
 func (cl *Client) ChangePasswd(newPasswd string) (bool, error) {
 	ASReq, err := messages.NewASReqForChgPasswd(cl.Credentials.Domain(), cl.Config, cl.Credentials.CName())
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("build AS-REQ for password change: %w", err)
 	}
 	ASRep, err := cl.ASExchange(cl.Credentials.Domain(), ASReq, 0)
 	if err != nil {
 		return false, err
 	}
 
-	msg, key, err := kadmin.ChangePasswdMsg(cl.Credentials.CName(), cl.Credentials.Domain(), newPasswd, ASRep.Ticket, ASRep.DecryptedEncPart.Key)
+	msg, key, err := kadmin.ChangePasswdMsg(
+		cl.Credentials.CName(),
+		cl.Credentials.Domain(),
+		newPasswd,
+		ASRep.Ticket,
+		ASRep.DecryptedEncPart.Key,
+	)
 	if err != nil {
-		return false, err
+		return false, krberror.Errorf(err, krberror.KRBMsgError, "build kpasswd request")
 	}
 	r, err := cl.sendToKPasswd(msg)
 	if err != nil {
 		return false, err
 	}
-	err = r.Decrypt(key)
-	if err != nil {
-		return false, err
+	if r.IsKRBError {
+		return false, r.KRBError
+	}
+	if err := r.Decrypt(key); err != nil {
+		return false, fmt.Errorf("process protected kpasswd reply: %w", err)
 	}
 	if r.ResultCode != KRB5_KPASSWD_SUCCESS {
-		return false, fmt.Errorf("error response from kadmin: code: %d; result: %s; krberror: %w", r.ResultCode, r.Result, r.KRBError)
+		return false, fmt.Errorf("error response from kadmin: code: %d; result: %s", r.ResultCode, r.Result)
 	}
 	cl.Credentials.WithPassword(newPasswd)
 	return true, nil
@@ -51,27 +61,22 @@ func (cl *Client) ChangePasswd(newPasswd string) (bool, error) {
 
 func (cl *Client) sendToKPasswd(msg kadmin.Request) (kadmin.Reply, error) {
 	var r kadmin.Reply
-	var err error
-	_, kps, err := cl.Config.GetKpasswdServers(cl.Credentials.Domain(), true)
+	realm := cl.Credentials.Domain()
+	_, kps, err := cl.Config.GetKpasswdServers(realm, true)
 	if err != nil {
-		return r, err
+		return r, fmt.Errorf("discover kpasswd servers: %w", err)
 	}
 	b, err := msg.Marshal()
 	if err != nil {
+		return r, fmt.Errorf("marshal kpasswd request: %w", err)
+	}
+	tcp := len(b) > cl.Config.LibDefaults.UDPPreferenceLimit
+	rb, err := cl.sendToServers(kps, realm, b, tcp)
+	if err != nil {
 		return r, err
 	}
-	var rb []byte
-	if len(b) <= cl.Config.LibDefaults.UDPPreferenceLimit {
-		rb, err = cl.sendToServers(kps, cl.Credentials.Domain(), b, false)
-		if err != nil {
-			return r, err
-		}
-	} else {
-		rb, err = cl.sendToServers(kps, cl.Credentials.Domain(), b, true)
-		if err != nil {
-			return r, err
-		}
+	if err := r.Unmarshal(rb); err != nil {
+		return r, fmt.Errorf("decode kpasswd reply: %w", err)
 	}
-	err = r.Unmarshal(rb)
-	return r, err
+	return r, nil
 }

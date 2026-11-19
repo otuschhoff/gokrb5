@@ -29,7 +29,7 @@ func (cl *Client) sendKKDCP(proxyURL, realm string, message []byte) ([]byte, err
 	}
 	proxyMessage, err := types.NewKDCProxyMessage(message, realm, 0)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("frame KKDCP request: %w", err)
 	}
 	body, err := proxyMessage.Marshal()
 	if err != nil {

@@ -3,13 +3,36 @@ package client
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/otuschhoff/gokrb5/v8/config"
 )
+
+func TestKDCDiscoveryErrorsRetainTransportContext(t *testing.T) {
+	cfg := config.New()
+	cfg.LibDefaults.DNSLookupKDC = false
+	cfg.LibDefaults.UDPPreferenceLimit = 1024
+	const realm = "MISSING.TEST"
+	cl := NewWithPassword("user", realm, "unused", cfg)
+
+	reply, err := cl.sendToKDC([]byte{1}, realm)
+	require.ErrorContains(t, err, "discover UDP KDCs")
+	require.ErrorContains(t, err, "discover TCP KDCs")
+	require.ErrorContains(t, err, "no KDCs defined in configuration")
+	require.Empty(t, reply)
+
+	cfg.LibDefaults.UDPPreferenceLimit = 1
+	_, err = cl.sendToKDC([]byte{1}, realm)
+	require.ErrorContains(t, err, "discover TCP KDCs")
+	require.NotContains(t, err.Error(), "discover UDP KDCs")
+	require.ErrorContains(t, errors.Unwrap(errors.Unwrap(err)), "no KDCs defined in configuration")
+}
 
 func mustClientTestType[T any](t *testing.T, value any) T {
 	t.Helper()
