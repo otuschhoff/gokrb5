@@ -21,6 +21,7 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/keyusage"
 	"github.com/otuschhoff/gokrb5/v8/iana/msgtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
+	"github.com/otuschhoff/gokrb5/v8/krberror"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/pkinit"
 	"github.com/otuschhoff/gokrb5/v8/types"
@@ -250,7 +251,9 @@ func TestASExchangePKINITBuildFailure(t *testing.T) {
 		return nil, cause
 	}
 	_, err := cl.ASExchange("EXAMPLE.ORG", req, 0)
+	require.ErrorIs(t, err, cause)
 	require.ErrorContains(t, err, "could not build PKINIT request")
+	require.ErrorContains(t, err, "initialize PKINIT exchange")
 }
 
 func TestASExchangePKINITDHFallback(t *testing.T) {
@@ -364,22 +367,62 @@ func asFASTPeerState(t *testing.T, peer *fastState, b []byte) messages.ASReq {
 	return request
 }
 
-func TestASExchangeFASTTerminalErrorCause(t *testing.T) {
-	cl, peer, req := newFASTTestState(t)
-	cl.settings.assumePreAuthentication = true
-	cl.sendToKDCFunc = func(b []byte, _ string) ([]byte, error) {
-		request := asFASTPeerState(t, peer, b)
-		inner := asPKINITError(t, errorcode.KDC_ERR_CLIENT_REVOKED, "")
-		encoded, err := inner.Marshal()
-		require.NoError(t, err)
-		pa, err := types.NewPAFXErrorPAData(types.PAFXError(encoded))
-		require.NoError(t, err)
-		return nil, fastTestError(t, peer, request.ReqBody.Nonce, types.PADataSequence{pa})
+func TestASExchangeFASTErrorCause(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		code       int32
+		referral   int
+		nonceDelta int
+		rootCause  string
+		context    string
+	}{
+		{
+			name: "terminal", code: errorcode.KDC_ERR_CLIENT_REVOKED, referral: 0, nonceDelta: 0,
+			rootCause: krberror.KDCError, context: "kerberos error response from KDC",
+		},
+		{
+			name: "referral limit", code: errorcode.KDC_ERR_WRONG_REALM, referral: 6, nonceDelta: 0,
+			rootCause: krberror.KRBMsgError, context: "maximum number of client referrals exceeded",
+		},
+		{
+			name: "invalid armored response", code: errorcode.KDC_ERR_CLIENT_REVOKED, referral: 0, nonceDelta: -1,
+			rootCause: krberror.KRBMsgError, context: "invalid FAST error response",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cl, peer, req := newFASTTestState(t)
+			cl.settings.assumePreAuthentication = true
+			const nonce = 42
+			req.ReqBody.Nonce = nonce
+			calls := 0
+			cl.sendToKDCFunc = func(b []byte, _ string) ([]byte, error) {
+				calls++
+				request := asFASTPeerState(t, peer, b)
+				inner := asPKINITError(t, tt.code, "")
+				encoded, err := inner.Marshal()
+				require.NoError(t, err)
+				pa, err := types.NewPAFXErrorPAData(types.PAFXError(encoded))
+				require.NoError(t, err)
+				return nil, fastTestError(t, peer, request.ReqBody.Nonce+tt.nonceDelta, types.PADataSequence{pa})
+			}
+			_, err := cl.ASExchange("EXAMPLE.ORG", req, tt.referral)
+			require.ErrorContains(t, err, tt.context)
+			require.NotContains(t, err.Error(), "%!")
+			var classified krberror.Krberror
+			require.ErrorAs(t, err, &classified)
+			require.Equal(t, tt.rootCause, classified.RootCause)
+			require.Equal(t, 1, calls)
+
+			inner, found := errors.AsType[messages.KRBError](err)
+			if tt.nonceDelta != 0 {
+				require.False(t, found, "a rejected armored response must not expose a KDC error")
+				return
+			}
+			require.True(t, found)
+			require.Equal(t, tt.code, inner.ErrorCode)
+			require.Equal(t, "scripted", inner.EText)
+		})
 	}
-	_, err := cl.ASExchange("EXAMPLE.ORG", req, 0)
-	require.EqualError(t, err, "[Root cause: KDC_Error] KDC_Error: AS Exchange Error: kerberos error response from KDC: %!s(<nil>)")
-	_, found := errors.AsType[messages.KRBError](err)
-	require.False(t, found, "structural refactor must retain successful FAST unwrap's nil cause")
 }
 
 func TestASExchangeNormalPreAuthBudgets(t *testing.T) {

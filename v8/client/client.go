@@ -309,21 +309,36 @@ func (cl *Client) sendKDCRequest(request []byte, realm string) ([]byte, error) {
 // the key for pre-authentication from the client's password. If a KRBError is not available, pass nil to this argument.
 func (cl *Client) Key(etype etype.EType, kvno int, krberr *messages.KRBError) (types.EncryptionKey, int, error) {
 	if cl.Credentials.HasKeytab() && etype != nil {
-		return cl.Credentials.Keytab().GetEncryptionKey(cl.Credentials.CName(), cl.Credentials.Domain(), kvno, etype.GetETypeID())
-	} else if cl.Credentials.HasPassword() {
-		if krberr != nil && (krberr.ErrorCode == errorcode.KDC_ERR_PREAUTH_REQUIRED || krberr.ErrorCode == errorcode.KDC_ERR_PREAUTH_FAILED) {
-			var pas types.PADataSequence
-			err := pas.Unmarshal(krberr.EData)
-			if err != nil {
-				return types.EncryptionKey{}, 0, fmt.Errorf("could not get PAData from KRBError to generate key from password: %w", err)
-			}
-			key, _, err := crypto.GetKeyFromPassword(cl.Credentials.Password(), krberr.CName, krberr.CRealm, etype.GetETypeID(), pas)
-			return key, 0, err
+		key, keyVersion, err := cl.Credentials.Keytab().GetEncryptionKey(
+			cl.Credentials.CName(),
+			cl.Credentials.Domain(),
+			kvno,
+			etype.GetETypeID(),
+		)
+		if err != nil {
+			return key, keyVersion, fmt.Errorf("lookup keytab key: %w", err)
 		}
-		key, _, err := crypto.GetKeyFromPassword(cl.Credentials.Password(), cl.Credentials.CName(), cl.Credentials.Domain(), etype.GetETypeID(), types.PADataSequence{})
-		return key, 0, err
+		return key, keyVersion, nil
 	}
-	return types.EncryptionKey{}, 0, errors.New("credential has neither keytab or password to generate key")
+	if !cl.Credentials.HasPassword() {
+		return types.EncryptionKey{}, 0, errors.New("credential has neither keytab or password to generate key")
+	}
+	cname, realm := cl.Credentials.CName(), cl.Credentials.Domain()
+	var paData types.PADataSequence
+	if krberr != nil && (krberr.ErrorCode == errorcode.KDC_ERR_PREAUTH_REQUIRED ||
+		krberr.ErrorCode == errorcode.KDC_ERR_PREAUTH_FAILED) {
+		if err := paData.Unmarshal(krberr.EData); err != nil {
+			return types.EncryptionKey{}, 0, fmt.Errorf(
+				"could not get PAData from KRBError to generate key from password: %w", err,
+			)
+		}
+		cname, realm = krberr.CName, krberr.CRealm
+	}
+	key, _, err := crypto.GetKeyFromPassword(cl.Credentials.Password(), cname, realm, etype.GetETypeID(), paData)
+	if err != nil {
+		return key, 0, fmt.Errorf("derive key from password: %w", err)
+	}
+	return key, 0, nil
 }
 
 // IsConfigured indicates if the client has the values required set.
@@ -380,6 +395,7 @@ func (cl *Client) LoginWithOptions(options messages.ASReqOptions) error {
 			return krberror.Errorf(err, krberror.KRBMsgError, "no user credentials available and error getting any existing session")
 		}
 		if time.Now().UTC().After(endTime) {
+			//nolint:wrapcheck // This is a new classified error; there is no underlying error to wrap.
 			return krberror.New(krberror.KRBMsgError, "cannot login, no user credentials available and no valid existing session")
 		}
 		// no credentials but there is a session with tgt already
@@ -478,8 +494,11 @@ func (cl *Client) newASReq() (messages.ASReq, error) {
 
 func (cl *Client) newASReqWithOptions(options messages.ASReqOptions) (messages.ASReq, error) {
 	req, err := messages.NewASReqForTGTWithOptions(cl.Credentials.Domain(), cl.Config, cl.Credentials.CName(), options)
-	if err != nil || !cl.Credentials.HasKeytab() {
-		return req, err
+	if err != nil {
+		return req, fmt.Errorf("build initial AS request: %w", err)
+	}
+	if !cl.Credentials.HasKeytab() {
+		return req, nil
 	}
 	available := cl.Credentials.Keytab().ETypesForPrincipal(keytab.Principal{
 		Realm:      cl.Credentials.Domain(),

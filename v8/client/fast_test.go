@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/crypto"
@@ -21,6 +22,7 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
+	"github.com/otuschhoff/gokrb5/v8/krberror"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
@@ -213,6 +215,16 @@ func TestFASTUnwrapAuthenticatedError(t *testing.T) {
 	}
 }
 
+func TestFASTUnwrapResponseRetainsDecodeCause(t *testing.T) {
+	_, state, request := newFASTTestState(t)
+	data := types.PADataSequence{{PADataType: patype.PA_FX_FAST, PADataValue: []byte{0xa0, 0x01}}}
+	response, err := state.unwrapResponse(data, request.ReqBody.Nonce)
+	require.ErrorContains(t, err, "decode PA-FX-FAST response")
+	var syntax asn1.SyntaxError
+	require.ErrorAs(t, err, &syntax)
+	require.Zero(t, response)
+}
+
 func TestFASTASExchangeRejectsUnarmoredReplyAfterActivation(t *testing.T) {
 	cl, _, request := newFASTTestState(t)
 	info, err := asn1.Marshal(types.ETypeInfo2{{EType: etypeID.AES128_CTS_HMAC_SHA1_96}})
@@ -309,25 +321,25 @@ func TestFASTExplicitArmorValidation(t *testing.T) {
 
 func fastTestError(t *testing.T, state *fastState, nonce int, paData types.PADataSequence) messages.KRBError {
 	t.Helper()
-	responseBytes, err := (&types.KrbFastResponse{PAData: paData, Nonce: mustClientUint32(t, "FAST nonce", nonce)}).Marshal()
-	if err != nil {
-		t.Fatal(err)
-	}
-	encrypted, err := crypto.GetEncryptedData(responseBytes, state.armorKey, keyusage.FAST_REP, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fastPA, err := types.NewPAFXFastReplyPAData(types.PAFXFastReply{ArmoredData: types.KrbFastArmoredRep{EncFastRep: encrypted}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	methodData, err := asn1.Marshal(types.PADataSequence{fastPA})
-	if err != nil {
-		t.Fatal(err)
-	}
+	response := types.KrbFastResponse{PAData: paData, Nonce: mustClientUint32(t, "FAST nonce", nonce)}
+	methodData, err := asn1.Marshal(fastTestReplyPAData(t, state, response))
+	require.NoError(t, err)
 	outer := messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KDC_ERR_PREAUTH_FAILED, "outer")
 	outer.EData = methodData
 	return outer
+}
+
+func fastTestReplyPAData(t *testing.T, state *fastState, response types.KrbFastResponse) types.PADataSequence {
+	t.Helper()
+	plain, err := response.Marshal()
+	require.NoError(t, err)
+	encrypted, err := crypto.GetEncryptedData(plain, state.armorKey, keyusage.FAST_REP, 0)
+	require.NoError(t, err)
+	pa, err := types.NewPAFXFastReplyPAData(types.PAFXFastReply{
+		ArmoredData: types.KrbFastArmoredRep{EncFastRep: encrypted},
+	})
+	require.NoError(t, err)
+	return types.PADataSequence{pa}
 }
 
 func TestFASTVerifyASReplyStrengthensKey(t *testing.T) {
@@ -359,22 +371,7 @@ func TestFASTVerifyASReplyStrengthensKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	challengeKey, err := crypto.KRBFXCF2(state.armorKey, state.replyKey, []byte("kdcchallengearmor"), []byte("challengelongterm"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	challengeBytes, err := types.GetPAEncTSEncAsnMarshalledAt(now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	challengeEncrypted, err := crypto.GetEncryptedData(challengeBytes, challengeKey, keyusage.ENC_CHALLENGE_KDC, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	challengePA, err := types.NewPAEncryptedChallengePAData(types.PAEncryptedChallenge(challengeEncrypted))
-	if err != nil {
-		t.Fatal(err)
-	}
+	challengePA := fastTestKDCChallenge(t, state, now)
 	ticketBytes, err := reply.Ticket.Marshal()
 	if err != nil {
 		t.Fatal(err)
@@ -394,19 +391,8 @@ func TestFASTVerifyASReplyStrengthensKey(t *testing.T) {
 			TicketChecksum: types.Checksum{CksumType: chksumtype.HMAC_SHA1_96_AES128, Checksum: ticketChecksum},
 		},
 	}
-	responseBytes, err := response.Marshal()
-	if err != nil {
-		t.Fatal(err)
-	}
-	fastEncrypted, err := crypto.GetEncryptedData(responseBytes, state.armorKey, keyusage.FAST_REP, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fastPA, err := types.NewPAFXFastReplyPAData(types.PAFXFastReply{ArmoredData: types.KrbFastArmoredRep{EncFastRep: fastEncrypted}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reply.PAData = types.PADataSequence{fastPA}
+	fastPA := fastTestReplyPAData(t, state, response)
+	reply.PAData = fastPA
 	if err := state.verifyASReply(cl, &reply, request, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -414,11 +400,23 @@ func TestFASTVerifyASReplyStrengthensKey(t *testing.T) {
 		t.Fatal("FAST-strengthened AS-REP was not decrypted")
 	}
 
+	wrongRequest := request
+	wrongRequest.ReqBody.CName = types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "other-user")
+	reply.PAData = fastPA
+	const offset = 2 * time.Minute
+	cl.setKDCTimeOffset(offset)
+	key, verifyErr := state.verifyASReplyWithKey(cl, &reply, wrongRequest, nil, nil)
+	require.ErrorContains(t, verifyErr, "verify FAST AS-REP")
+	var classified krberror.Krberror
+	require.ErrorAs(t, verifyErr, &classified)
+	require.Equal(t, krberror.KRBMsgError, classified.RootCause)
+	require.ErrorContains(t, verifyErr, "CName in response does not match")
+	require.Zero(t, key)
+	require.Equal(t, offset, cl.KDCTimeOffset())
+	require.Equal(t, request.ReqBody.CName, cl.Credentials.CName())
+
 	response.Finished.TicketChecksum.Checksum[0] ^= 0xff
-	responseBytes, _ = response.Marshal()
-	fastEncrypted, _ = crypto.GetEncryptedData(responseBytes, state.armorKey, keyusage.FAST_REP, 0)
-	fastPA, _ = types.NewPAFXFastReplyPAData(types.PAFXFastReply{ArmoredData: types.KrbFastArmoredRep{EncFastRep: fastEncrypted}})
-	reply.PAData = types.PADataSequence{fastPA}
+	reply.PAData = fastTestReplyPAData(t, state, response)
 	if err := state.verifyASReply(cl, &reply, request, nil); err == nil {
 		t.Fatal("tampered FAST finished checksum was accepted")
 	}
@@ -523,19 +521,8 @@ func TestFASTVerifyTGSReplyUsesStrengthenedSubkey(t *testing.T) {
 			TicketChecksum: types.Checksum{CksumType: chksumtype.HMAC_SHA1_96_AES128, Checksum: checksum},
 		},
 	}
-	responseBytes, err := response.Marshal()
-	if err != nil {
-		t.Fatal(err)
-	}
-	encrypted, err := crypto.GetEncryptedData(responseBytes, state.armorKey, keyusage.FAST_REP, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fastPA, err := types.NewPAFXFastReplyPAData(types.PAFXFastReply{ArmoredData: types.KrbFastArmoredRep{EncFastRep: encrypted}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reply.PAData = types.PADataSequence{fastPA}
+	fastPA := fastTestReplyPAData(t, state, response)
+	reply.PAData = fastPA
 	if err := state.verifyTGSReply(cl, &reply, request); err != nil {
 		t.Fatal(err)
 	}
@@ -543,40 +530,40 @@ func TestFASTVerifyTGSReplyUsesStrengthenedSubkey(t *testing.T) {
 		t.Fatal("FAST-strengthened TGS-REP was not decrypted")
 	}
 
-	setFASTResponse := func(response types.KrbFastResponse) {
-		t.Helper()
-		responseBytes, marshalErr := response.Marshal()
-		if marshalErr != nil {
-			t.Fatal(marshalErr)
-		}
-		encrypted, encryptErr := crypto.GetEncryptedData(responseBytes, state.armorKey, keyusage.FAST_REP, 0)
-		if encryptErr != nil {
-			t.Fatal(encryptErr)
-		}
-		fastPA, paErr := types.NewPAFXFastReplyPAData(types.PAFXFastReply{ArmoredData: types.KrbFastArmoredRep{EncFastRep: encrypted}})
-		if paErr != nil {
-			t.Fatal(paErr)
-		}
-		reply.PAData = types.PADataSequence{fastPA}
-	}
+	reply.PAData = fastPA
+	wrongRequest := request
+	wrongRequest.ReqBody.CName = types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "other-user")
+	const offset = 2 * time.Minute
+	cl.setKDCTimeOffset(offset)
+	verifyErr := state.verifyTGSReply(cl, &reply, wrongRequest)
+	require.ErrorContains(t, verifyErr, "verify FAST TGS-REP")
+	var classified krberror.Krberror
+	require.ErrorAs(t, verifyErr, &classified)
+	require.Equal(t, krberror.KRBMsgError, classified.RootCause)
+	require.ErrorContains(t, verifyErr, "CName in response does not match")
+	require.Equal(t, offset, cl.KDCTimeOffset())
 
 	response.StrengthenKey = types.EncryptionKey{}
-	setFASTResponse(response)
+	reply.PAData = fastTestReplyPAData(t, state, response)
 	if err := state.verifyTGSReply(cl, &reply, request); err == nil {
 		t.Fatal("FAST TGS-REP without strengthen-key was accepted")
 	}
 	response.StrengthenKey = strengthen
 	response.Nonce++
-	setFASTResponse(response)
+	reply.PAData = fastTestReplyPAData(t, state, response)
 	if err := state.verifyTGSReply(cl, &reply, request); err == nil {
 		t.Fatal("FAST TGS-REP with mismatched nonce was accepted")
 	}
 	response.Nonce = mustClientUint32(t, "FAST request nonce", request.ReqBody.Nonce)
 	response.Finished.CName = types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "other-user")
-	setFASTResponse(response)
+	reply.PAData = fastTestReplyPAData(t, state, response)
 	if err := state.verifyTGSReply(cl, &reply, request); err == nil {
 		t.Fatal("FAST TGS-REP with mismatched finished identity was accepted")
 	}
+}
+
+func TestCheckFASTReplyVerificationRejectsWithoutCause(t *testing.T) {
+	require.EqualError(t, checkFASTReplyVerification("AS-REP", false, nil), "FAST AS-REP verification failed")
 }
 
 func TestFASTTGSExchangeRejectsUnarmoredReply(t *testing.T) {
@@ -612,6 +599,24 @@ func TestFASTTGSExchangeRejectsUnarmoredReply(t *testing.T) {
 
 func challengePASequence(pa types.PAData) types.PADataSequence {
 	return types.PADataSequence{pa}
+}
+
+func fastTestKDCChallenge(t *testing.T, state *fastState, now time.Time) types.PAData {
+	t.Helper()
+	key, err := crypto.KRBFXCF2(
+		state.armorKey,
+		state.replyKey,
+		[]byte("kdcchallengearmor"),
+		[]byte("challengelongterm"),
+	)
+	require.NoError(t, err)
+	plain, err := types.GetPAEncTSEncAsnMarshalledAt(now)
+	require.NoError(t, err)
+	encrypted, err := crypto.GetEncryptedData(plain, key, keyusage.ENC_CHALLENGE_KDC, 0)
+	require.NoError(t, err)
+	pa, err := types.NewPAEncryptedChallengePAData(types.PAEncryptedChallenge(encrypted))
+	require.NoError(t, err)
+	return pa
 }
 
 func TestNilFASTStateRejectsOperations(t *testing.T) {

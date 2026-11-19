@@ -4,9 +4,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
+	"github.com/stretchr/testify/require"
+
 	"github.com/otuschhoff/gokrb5/v8/config"
+	"github.com/otuschhoff/gokrb5/v8/crypto"
+	"github.com/otuschhoff/gokrb5/v8/iana/errorcode"
+	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
+	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
+	"github.com/otuschhoff/gokrb5/v8/messages"
+	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
 func TestAssumePreauthentication(t *testing.T) {
@@ -77,4 +86,30 @@ func TestDisablePAReqEncPARep(t *testing.T) {
 	if !settings.DisablePAReqEncPARep() || !settings.DisablePAFXFAST() {
 		t.Fatal("new and deprecated setting accessors should share behavior")
 	}
+}
+
+func TestKeyPreservesPasswordDerivationCause(t *testing.T) {
+	t.Parallel()
+
+	const password = "test-password"
+	cl := NewWithPassword("user", "EXAMPLE.ORG", password, config.New())
+	et, err := crypto.GetEtype(etypeID.AES128_CTS_HMAC_SHA1_96)
+	require.NoError(t, err)
+	paData, err := asn1.Marshal(types.PADataSequence{
+		{PADataType: patype.PA_ETYPE_INFO2, PADataValue: []byte{0x30, 0x01}},
+	})
+	require.NoError(t, err)
+	server := types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/EXAMPLE.ORG")
+	hint := messages.NewKRBError(server, cl.Credentials.Domain(), errorcode.KDC_ERR_PREAUTH_REQUIRED, "")
+	hint.CName = cl.Credentials.CName()
+	hint.CRealm = cl.Credentials.Domain()
+	hint.EData = paData
+
+	key, kvno, err := cl.Key(et, 0, &hint)
+	require.ErrorContains(t, err, "derive key from password")
+	var syntax asn1.SyntaxError
+	require.ErrorAs(t, err, &syntax)
+	require.NotContains(t, err.Error(), password)
+	require.Zero(t, key)
+	require.Zero(t, kvno)
 }

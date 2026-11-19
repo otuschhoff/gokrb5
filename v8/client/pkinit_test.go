@@ -7,9 +7,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/iana/errorcode"
+	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/pac"
+	"github.com/otuschhoff/gokrb5/v8/pkinit"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
@@ -32,8 +34,25 @@ func TestPKINITFreshnessToken(t *testing.T) {
 }
 
 func TestPKINITFreshnessTokenRejectsMalformedMethodData(t *testing.T) {
-	_, _, err := pkinitFreshnessToken(messages.KRBError{ErrorCode: errorcode.KDC_ERR_PREAUTH_REQUIRED, EData: []byte{0x30, 0x01}})
-	require.Error(t, err)
+	token, found, err := pkinitFreshnessToken(messages.KRBError{
+		ErrorCode: errorcode.KDC_ERR_PREAUTH_REQUIRED,
+		EData:     []byte{0x30, 0x01},
+	})
+	require.ErrorContains(t, err, "decode PKINIT freshness METHOD-DATA")
+	var syntax asn1.SyntaxError
+	require.ErrorAs(t, err, &syntax)
+	require.False(t, found)
+	require.Nil(t, token)
+}
+
+func TestProcessPKINITReplyRetainsDecodeCause(t *testing.T) {
+	key, err := processPKINITReply(new(pkinit.Exchange), types.PADataSequence{
+		{PADataType: patype.PA_PK_AS_REP, PADataValue: []byte{0x80, 0x01}},
+	}, etypeID.AES128_CTS_HMAC_SHA1_96)
+	require.ErrorContains(t, err, "process PKINIT reply")
+	var syntax asn1.SyntaxError
+	require.ErrorAs(t, err, &syntax)
+	require.Zero(t, key)
 }
 
 func TestPKINITCredentialsReturnsDefensiveCopy(t *testing.T) {

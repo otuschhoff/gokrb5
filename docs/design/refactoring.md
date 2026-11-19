@@ -824,6 +824,35 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 61 (2026-11-19, client AS, PKINIT, and FAST error contracts; Q-03):
+Add operation context to key lookup and derivation, AS request construction,
+PKINIT request and reply processing, and armored AS/TGS processing. Existing
+keytab preference, password salt selection, request options, and FAST key
+selection and key usages are unchanged. Keep existing Kerberos error
+classifications and make typed causes available to callers. An authenticated
+FAST AS error is now retained as the cause on terminal failure and referral
+exhaustion, in place of a nil cause. Invalid armored errors still do not
+expose either KDC error. FAST reply rejection does not publish a reply key
+or KDC time offset.
+
+Deterministic regressions reproduced the lost KDC cause and verify typed
+PKINIT and FAST ASN.1 errors, the identity-validation callback cause, and
+verification failures before publishing client state. Both module suites,
+the full Linux/386 v8 suite, and focused race, build, and vet checks passed.
+`FuzzFASTUnmarshal` (731,822 executions) and `FuzzPKASRep` (596,412
+executions) each passed a 60-second run. V8 cross-package statement coverage
+reached 87.4%. Live interoperability was not run because Docker daemon
+access was unavailable.
+
+The 24 targeted `wrapcheck` reports fell to zero: 23 propagation sites now
+add context and one line-specific exception covers the original classified
+error for an expired credential-less session, which has no cause to wrap.
+The changed-line gate passed for both modules. Canonical v8 findings fell
+from 619 to 594 (`wrapcheck`: 50 to 26) and supplemental findings fell from
+3,684 to 3,668, with no new findings or increased complexity scores. V8
+continued to report zero `gosec` findings. The remaining `wrapcheck` reports
+are in other client paths.
+
 Slice 60 (2026-11-19, SPNEGO mechanism and token error contracts; Q-03):
 The non-HTTP SPNEGO paths identify failures in credential acquisition,
 AP token handling, mechanism negotiation, MIC processing, and security

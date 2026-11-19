@@ -134,12 +134,14 @@ func (x *asExchange) handleError(cause error, referral int) (messages.ASRep, boo
 		return messages.ASRep{}, false, krberror.Errorf(cause, krberror.NetworkingError, "AS Exchange Error: failed sending AS_REQ to KDC")
 	}
 	if x.fastActive() {
-		// Preserve the original exchange's overwrite of the transport error,
-		// including its nil cause after a successful FAST unwrap.
-		e, cause = x.fast.unwrapError(e, x.request.ReqBody.Nonce)
-		if cause != nil {
-			return messages.ASRep{}, false, krberror.Errorf(cause, krberror.KRBMsgError, "AS Exchange Error: invalid FAST error response")
+		inner, err := x.fast.unwrapError(e, x.request.ReqBody.Nonce)
+		if err != nil {
+			return messages.ASRep{}, false, krberror.Errorf(
+				err, krberror.KRBMsgError, "AS Exchange Error: invalid FAST error response",
+			)
 		}
+		// RFC 6113 section 5.4.4: use the authenticated error, not the outer KRB-ERROR.
+		e, cause = inner, inner
 	} else if x.fast != nil && fastAdvertised(e) {
 		if err := x.fast.activate(x.cl, x.realm); err != nil {
 			return messages.ASRep{}, false, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: could not activate FAST")
@@ -469,7 +471,11 @@ func beginPKINITExchange(request *messages.ASReq, options pkinit.ExchangeOptions
 	request.PAData = removePAData(request.PAData, patype.PA_PK_AS_REQ, patype.PA_PK_OCSP_RESPONSE, patype.PA_AS_FRESHNESS, patype.PA_ENC_TIMESTAMP)
 	options.FreshnessToken = append([]byte(nil), freshness...)
 	options.CurrentTime = clientNow().UTC()
-	return pkinit.BeginExchange(request, options)
+	exchange, err := pkinit.BeginExchange(request, options)
+	if err != nil {
+		return exchange, krberror.Errorf(err, krberror.KRBMsgError, "initialize PKINIT exchange")
+	}
+	return exchange, nil
 }
 
 func removePAData(data types.PADataSequence, kinds ...int32) types.PADataSequence {
@@ -497,7 +503,7 @@ func pkinitFreshnessToken(response messages.KRBError) ([]byte, bool, error) {
 	}
 	data, err := response.MethodData()
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("decode PKINIT freshness METHOD-DATA: %w", err)
 	}
 	for _, item := range data {
 		if item.PADataType == patype.PA_AS_FRESHNESS {
@@ -523,7 +529,7 @@ func processPKINITReply(exchange *pkinit.Exchange, data types.PADataSequence, et
 	}
 	result, err := exchange.ProcessReply(value, etype)
 	if err != nil {
-		return types.EncryptionKey{}, err
+		return types.EncryptionKey{}, krberror.Errorf(err, krberror.KRBMsgError, "process PKINIT reply")
 	}
 	return result.ReplyKey, nil
 }

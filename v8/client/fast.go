@@ -12,6 +12,7 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/msflags"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
+	"github.com/otuschhoff/gokrb5/v8/krberror"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
@@ -168,7 +169,7 @@ func (state *fastState) wrapASRequest(request messages.ASReq) (messages.ASReq, e
 	}
 	et, err := crypto.GetEtype(state.armorKey.KeyType)
 	if err != nil {
-		return request, err
+		return request, fmt.Errorf("select FAST AS armor encryption type: %w", err)
 	}
 	checksum, err := et.GetChecksumHash(state.armorKey.KeyValue, body, keyusage.FAST_REQ_CHKSUM)
 	if err != nil {
@@ -201,7 +202,7 @@ func (state *fastState) wrapTGSRequest(request messages.TGSReq, tgt messages.Tic
 	}
 	subkey, apReqBytes, err := request.SetPADataWithSubkey(tgt, sessionKey)
 	if err != nil {
-		return request, err
+		return request, krberror.Errorf(err, krberror.KRBMsgError, "prepare FAST PA-TGS-REQ")
 	}
 	armorKey, err := crypto.KRBFXCF2(subkey, sessionKey, []byte("subkeyarmor"), []byte("ticketarmor"))
 	if err != nil {
@@ -224,7 +225,7 @@ func (state *fastState) wrapTGSRequest(request messages.TGSReq, tgt messages.Tic
 	}
 	et, err := crypto.GetEtype(armorKey.KeyType)
 	if err != nil {
-		return request, err
+		return request, fmt.Errorf("select FAST TGS armor encryption type: %w", err)
 	}
 	checksum, err := et.GetChecksumHash(armorKey.KeyValue, apReqBytes, keyusage.FAST_REQ_CHKSUM)
 	if err != nil {
@@ -244,7 +245,7 @@ func (state *fastState) wrapTGSRequest(request messages.TGSReq, tgt messages.Tic
 		EncFastReq:  encrypted,
 	}})
 	if err != nil {
-		return request, err
+		return request, fmt.Errorf("marshal FAST TGS PA-FX-FAST request: %w", err)
 	}
 	outerPAData = append(outerPAData, fastPA)
 	request.PAData = outerPAData
@@ -291,7 +292,7 @@ func (state *fastState) setASPreAuth(cl *Client, hint *messages.KRBError, reques
 	}
 	timestamp, err := types.GetPAEncTSEncAsnMarshalledAt(clientNow().UTC().Add(cl.KDCTimeOffset()))
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal FAST challenge timestamp: %w", err)
 	}
 	encrypted, err := crypto.GetEncryptedData(timestamp, challengeKey, keyusage.ENC_CHALLENGE_CLIENT, 0)
 	if err != nil {
@@ -299,7 +300,7 @@ func (state *fastState) setASPreAuth(cl *Client, hint *messages.KRBError, reques
 	}
 	challenge, err := types.NewPAEncryptedChallengePAData(types.PAEncryptedChallenge(encrypted))
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal FAST PA-ENCRYPTED-CHALLENGE: %w", err)
 	}
 	inner := make(types.PADataSequence, 0, len(request.PAData)+1)
 	for _, pa := range request.PAData {
@@ -344,7 +345,7 @@ func (state *fastState) unwrapResponse(paData types.PADataSequence, nonce int) (
 		}
 		reply, err := paData[i].GetPAFXFastReply()
 		if err != nil {
-			return types.KrbFastResponse{}, err
+			return types.KrbFastResponse{}, fmt.Errorf("decode PA-FX-FAST response: %w", err)
 		}
 		plain, err := crypto.DecryptEncPart(reply.ArmoredData.EncFastRep, state.armorKey, keyusage.FAST_REP)
 		if err != nil {
@@ -388,10 +389,10 @@ func (state *fastState) unwrapError(outer messages.KRBError, nonce int) (message
 		}
 		encoded, decodeErr := response.PAData[i].GetPAFXError()
 		if decodeErr != nil {
-			return inner, decodeErr
+			return inner, fmt.Errorf("decode FAST PA-FX-ERROR: %w", decodeErr)
 		}
 		if ierr := inner.Unmarshal(encoded); ierr != nil {
-			return inner, ierr
+			return inner, krberror.Errorf(ierr, krberror.EncodingError, "decode FAST inner KRB-ERROR")
 		}
 		found = true
 	}
@@ -441,7 +442,7 @@ func (state *fastState) verifyASReplyWithKey(cl *Client, reply *messages.ASRep, 
 	} else if len(replyKey.KeyValue) == 0 {
 		et, terr := crypto.GetEtype(reply.EncPart.EType)
 		if terr != nil {
-			return types.EncryptionKey{}, terr
+			return types.EncryptionKey{}, fmt.Errorf("select FAST AS reply encryption type: %w", terr)
 		}
 		replyKey, _, err = cl.Key(et, reply.EncPart.KVNO, nil)
 		if err != nil {
@@ -455,7 +456,14 @@ func (state *fastState) verifyASReplyWithKey(cl *Client, reply *messages.ASRep, 
 		}
 	}
 	reply.PAData = append(types.PADataSequence(nil), response.PAData...)
-	if ok, err := reply.VerifyWithReplyKeyAndRequestBytes(cl.Config, cl.Credentials, request, replyKey, requestBytes); !ok {
+	ok, verifyErr := reply.VerifyWithReplyKeyAndRequestBytes(
+		cl.Config,
+		cl.Credentials,
+		request,
+		replyKey,
+		requestBytes,
+	)
+	if err := checkFASTReplyVerification("AS-REP", ok, verifyErr); err != nil {
 		return types.EncryptionKey{}, err
 	}
 	finishedTime := response.Finished.Timestamp.UTC().Truncate(time.Second).Add(time.Duration(response.Finished.Usec) * time.Microsecond)
@@ -485,14 +493,25 @@ func (state *fastState) verifyTGSReply(cl *Client, reply *messages.TGSRep, reque
 		return fmt.Errorf("strengthen FAST TGS reply key: %w", err)
 	}
 	if err := reply.DecryptEncPartWithKeyUsage(replyKey, keyusage.TGS_REP_ENCPART_AUTHENTICATOR_SUB_KEY); err != nil {
-		return err
+		return krberror.Errorf(err, krberror.DecryptingError, "decrypt FAST TGS-REP encrypted part")
 	}
 	reply.PAData = append(types.PADataSequence(nil), response.PAData...)
-	if ok, err := reply.Verify(cl.Config, request); !ok {
+	ok, verifyErr := reply.Verify(cl.Config, request)
+	if err := checkFASTReplyVerification("TGS-REP", ok, verifyErr); err != nil {
 		return err
 	}
 	finishedTime := response.Finished.Timestamp.UTC().Truncate(time.Second).Add(time.Duration(response.Finished.Usec) * time.Microsecond)
 	cl.setKDCTimeOffset(finishedTime.Sub(clientNow().UTC()).Truncate(time.Microsecond))
+	return nil
+}
+
+func checkFASTReplyVerification(replyType string, ok bool, cause error) error {
+	if cause != nil {
+		return krberror.Errorf(cause, krberror.KRBMsgError, "verify FAST %s", replyType)
+	}
+	if !ok {
+		return fmt.Errorf("FAST %s verification failed", replyType)
+	}
 	return nil
 }
 
@@ -502,7 +521,7 @@ func (state *fastState) verifyFinished(ticket messages.Ticket, cname types.Princ
 	}
 	ticketBytes, err := ticket.Marshal()
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal FAST finished ticket: %w", err)
 	}
 	checksumType, err := crypto.GetChksumEtype(finished.TicketChecksum.CksumType)
 	if err != nil {
@@ -520,7 +539,7 @@ func (state *fastState) verifyFinished(ticket messages.Ticket, cname types.Princ
 func (state *fastState) verifyKDCChallenge(paData types.PADataSequence) error {
 	challengeKey, err := crypto.KRBFXCF2(state.armorKey, state.replyKey, []byte("kdcchallengearmor"), []byte("challengelongterm"))
 	if err != nil {
-		return err
+		return fmt.Errorf("derive KDC FAST challenge key: %w", err)
 	}
 	for i := range paData {
 		if paData[i].PADataType != patype.PA_ENCRYPTED_CHALLENGE {
@@ -528,7 +547,7 @@ func (state *fastState) verifyKDCChallenge(paData types.PADataSequence) error {
 		}
 		challenge, err := paData[i].GetPAEncryptedChallenge()
 		if err != nil {
-			return err
+			return fmt.Errorf("decode KDC FAST PA-ENCRYPTED-CHALLENGE: %w", err)
 		}
 		plain, err := crypto.DecryptEncPart(types.EncryptedData(challenge), challengeKey, keyusage.ENC_CHALLENGE_KDC)
 		if err != nil {
