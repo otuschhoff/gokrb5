@@ -134,8 +134,11 @@ The [Lint workflow](.github/workflows/lint.yml) runs both profiles on both modul
 on pushes, pull requests, weekly schedules, and manual dispatches. It uploads
 uncapped JSON/text inventories and rejects canonical findings on added/changed
 lines across the complete PR diff (or push range). Existing findings elsewhere
-do not block incremental adoption. Diff filtering is not proof that untouched
-callers are unaffected: review the full inventory for each behavioral change.
+do not block incremental adoption. After a force-push, CI fetches the exact
+previous tip if checkout did not include it. If that commit is unavailable,
+the changed-line gate fails rather than substituting a different base.
+Diff filtering is not proof that untouched callers are unaffected: review the
+full inventory for each behavioral change.
 Repository administrators should require the `golangci-lint` status check in
 branch protection; adding a workflow alone cannot enforce merge restrictions.
 
@@ -144,7 +147,10 @@ Running the tests without any particular switches runs only the unit tests.
 
 It is recommended to run tests with the ```-race``` argument.
 
-There are integration tests that run against various other network services such as KDCs, HTTP web servers, DNS servers,
-etc. To run these pass ```-tags=integration``` as an argument to the go test command.
+Set `INTEGRATION=1` to enable tests that use the KDC, HTTP, and DNS fixtures.
+The separate v8 MIT command suite also requires the `interop` build tag.
+The Linux CI jobs run the MIT tests and examples with
+[`with-integration-dns.sh`](scripts/with-integration-dns.sh), which gives the
+test process tree its own fixture resolver without changing runner DNS.
 There are vagrant and docker resources available to spin up these network services. See the
 [readme](https://github.com/otuschhoff/gokrb5/blob/master/testenv/README.md) in the testenv directory for instructions.

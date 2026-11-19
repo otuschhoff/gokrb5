@@ -79,6 +79,9 @@ jobs:
         run: |
           if [ -z "$BASE_REV" ] || [ "$BASE_REV" = 0000000000000000000000000000000000000000 ]; then
             BASE_REV=$(git merge-base HEAD "origin/$DEFAULT_BRANCH")
+          elif ! git cat-file -e "$BASE_REV^{commit}" 2>/dev/null; then
+            # A force-push can make the previous tip unreachable from all current refs.
+            git fetch --no-tags origin "$BASE_REV"
           fi
           bash scripts/lint.sh new "$BASE_REV"
 

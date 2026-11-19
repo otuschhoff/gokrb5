@@ -10,8 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/otuschhoff/gokrb5/v8/client"
-	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/credentials"
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
 	"github.com/otuschhoff/gokrb5/v8/iana/chksumtype"
@@ -28,7 +26,7 @@ import (
 
 func TestVerifyAPREQ(t *testing.T) {
 	t.Parallel()
-	cl := getClient()
+	creds := newAPTestCredentials(t)
 	sname := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
 		NameString: []string{"HTTP", "host.test.gokrb5"},
@@ -40,7 +38,7 @@ func TestVerifyAPREQ(t *testing.T) {
 	}
 
 	st := time.Now().UTC()
-	tkt, sessionKey, err := messages.NewTicket(cl.Credentials.CName(), cl.Credentials.Domain(),
+	tkt, sessionKey, err := messages.NewTicket(creds.CName(), creds.Domain(),
 		sname, "TEST.GOKRB5",
 		types.NewKrbFlags(),
 		kt,
@@ -57,7 +55,7 @@ func TestVerifyAPREQ(t *testing.T) {
 	APReq, err := messages.NewAPReq(
 		tkt,
 		sessionKey,
-		newTestAuthenticator(*cl.Credentials),
+		newTestAuthenticator(t, creds),
 	)
 	if err != nil {
 		t.Fatalf("Error getting test AP_REQ: %v", err)
@@ -148,7 +146,7 @@ func TestVerifyAPREQWithResultWithholdsCredentialsOnDelegationFailure(t *testing
 }
 
 func TestVerifyAPREQIgnoresKerbLocalAndRestrictionEntry(t *testing.T) {
-	cl := getClient()
+	creds := newAPTestCredentials(t)
 	sname := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
 		NameString: []string{"HTTP", "host.test.gokrb5"},
@@ -163,7 +161,7 @@ func TestVerifyAPREQIgnoresKerbLocalAndRestrictionEntry(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	tkt, sessionKey, err := messages.NewTicket(
-		cl.Credentials.CName(), cl.Credentials.Domain(), sname, "TEST.GOKRB5",
+		creds.CName(), creds.Domain(), sname, "TEST.GOKRB5",
 		types.NewKrbFlags(), kt, 18, 1, now, now, now.Add(24*time.Hour), now.Add(48*time.Hour),
 	)
 	if err != nil {
@@ -180,7 +178,7 @@ func TestVerifyAPREQIgnoresKerbLocalAndRestrictionEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authenticator := newTestAuthenticator(*cl.Credentials)
+	authenticator := newTestAuthenticator(t, creds)
 	authenticator.AuthorizationData = types.AuthorizationData{
 		types.NewKerbLocalEntry(),
 		restrictionEntry,
@@ -201,7 +199,7 @@ func TestVerifyAPREQIgnoresKerbLocalAndRestrictionEntry(t *testing.T) {
 
 func TestVerifyAPREQWithPrincipalOverride(t *testing.T) {
 	t.Parallel()
-	cl := getClient()
+	creds := newAPTestCredentials(t)
 	sname := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
 		NameString: []string{"HTTP", "host.test.gokrb5"},
@@ -213,7 +211,7 @@ func TestVerifyAPREQWithPrincipalOverride(t *testing.T) {
 	}
 
 	st := time.Now().UTC()
-	tkt, sessionKey, err := messages.NewTicket(cl.Credentials.CName(), cl.Credentials.Domain(),
+	tkt, sessionKey, err := messages.NewTicket(creds.CName(), creds.Domain(),
 		sname, "TEST.GOKRB5",
 		types.NewKrbFlags(),
 		kt,
@@ -230,7 +228,7 @@ func TestVerifyAPREQWithPrincipalOverride(t *testing.T) {
 	apReq, err := messages.NewAPReq(
 		tkt,
 		sessionKey,
-		newTestAuthenticator(*cl.Credentials),
+		newTestAuthenticator(t, creds),
 	)
 	if err != nil {
 		t.Fatalf("Error getting test AP_REQ: %v", err)
@@ -249,7 +247,7 @@ func TestVerifyAPREQWithPrincipalOverride(t *testing.T) {
 
 func TestVerifyAPREQ_KRB_AP_ERR_BADMATCH(t *testing.T) {
 	t.Parallel()
-	cl := getClient()
+	creds := newAPTestCredentials(t)
 	sname := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
 		NameString: []string{"HTTP", "host.test.gokrb5"},
@@ -261,7 +259,7 @@ func TestVerifyAPREQ_KRB_AP_ERR_BADMATCH(t *testing.T) {
 	}
 
 	st := time.Now().UTC()
-	tkt, sessionKey, err := messages.NewTicket(cl.Credentials.CName(), cl.Credentials.Domain(),
+	tkt, sessionKey, err := messages.NewTicket(creds.CName(), creds.Domain(),
 		sname, "TEST.GOKRB5",
 		types.NewKrbFlags(),
 		kt,
@@ -275,7 +273,7 @@ func TestVerifyAPREQ_KRB_AP_ERR_BADMATCH(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error getting test ticket: %v", err)
 	}
-	a := newTestAuthenticator(*cl.Credentials)
+	a := newTestAuthenticator(t, creds)
 	a.CName = types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
 		NameString: []string{"BADMATCH"},
@@ -304,7 +302,7 @@ func TestVerifyAPREQ_KRB_AP_ERR_BADMATCH(t *testing.T) {
 
 func TestVerifyAPREQ_LargeClockSkew(t *testing.T) {
 	t.Parallel()
-	cl := getClient()
+	creds := newAPTestCredentials(t)
 	sname := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
 		NameString: []string{"HTTP", "host.test.gokrb5"},
@@ -316,7 +314,7 @@ func TestVerifyAPREQ_LargeClockSkew(t *testing.T) {
 	}
 
 	st := time.Now().UTC()
-	tkt, sessionKey, err := messages.NewTicket(cl.Credentials.CName(), cl.Credentials.Domain(),
+	tkt, sessionKey, err := messages.NewTicket(creds.CName(), creds.Domain(),
 		sname, "TEST.GOKRB5",
 		types.NewKrbFlags(),
 		kt,
@@ -330,7 +328,7 @@ func TestVerifyAPREQ_LargeClockSkew(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error getting test ticket: %v", err)
 	}
-	a := newTestAuthenticator(*cl.Credentials)
+	a := newTestAuthenticator(t, creds)
 	a.CTime = a.CTime.Add(time.Duration(-10) * time.Minute)
 	APReq, err := messages.NewAPReq(
 		tkt,
@@ -357,7 +355,7 @@ func TestVerifyAPREQ_LargeClockSkew(t *testing.T) {
 
 func TestVerifyAPREQ_Replay(t *testing.T) {
 	t.Parallel()
-	cl := getClient()
+	creds := newAPTestCredentials(t)
 	sname := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
 		NameString: []string{"HTTP", "host.test.gokrb5"},
@@ -369,7 +367,7 @@ func TestVerifyAPREQ_Replay(t *testing.T) {
 	}
 
 	st := time.Now().UTC()
-	tkt, sessionKey, err := messages.NewTicket(cl.Credentials.CName(), cl.Credentials.Domain(),
+	tkt, sessionKey, err := messages.NewTicket(creds.CName(), creds.Domain(),
 		sname, "TEST.GOKRB5",
 		types.NewKrbFlags(),
 		kt,
@@ -386,7 +384,7 @@ func TestVerifyAPREQ_Replay(t *testing.T) {
 	APReq, err := messages.NewAPReq(
 		tkt,
 		sessionKey,
-		newTestAuthenticator(*cl.Credentials),
+		newTestAuthenticator(t, creds),
 	)
 	if err != nil {
 		t.Fatalf("Error getting test AP_REQ: %v", err)
@@ -418,7 +416,7 @@ func requireServiceWireError(t *testing.T, err error, code int32) messages.KRBEr
 
 func TestVerifyAPREQ_FutureTicket(t *testing.T) {
 	t.Parallel()
-	cl := getClient()
+	creds := newAPTestCredentials(t)
 	sname := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
 		NameString: []string{"HTTP", "host.test.gokrb5"},
@@ -430,7 +428,7 @@ func TestVerifyAPREQ_FutureTicket(t *testing.T) {
 	}
 
 	st := time.Now().UTC()
-	tkt, sessionKey, err := messages.NewTicket(cl.Credentials.CName(), cl.Credentials.Domain(),
+	tkt, sessionKey, err := messages.NewTicket(creds.CName(), creds.Domain(),
 		sname, "TEST.GOKRB5",
 		types.NewKrbFlags(),
 		kt,
@@ -444,7 +442,7 @@ func TestVerifyAPREQ_FutureTicket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error getting test ticket: %v", err)
 	}
-	a := newTestAuthenticator(*cl.Credentials)
+	a := newTestAuthenticator(t, creds)
 	APReq, err := messages.NewAPReq(
 		tkt,
 		sessionKey,
@@ -470,7 +468,7 @@ func TestVerifyAPREQ_FutureTicket(t *testing.T) {
 
 func TestVerifyAPREQ_InvalidTicket(t *testing.T) {
 	t.Parallel()
-	cl := getClient()
+	creds := newAPTestCredentials(t)
 	sname := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
 		NameString: []string{"HTTP", "host.test.gokrb5"},
@@ -484,7 +482,7 @@ func TestVerifyAPREQ_InvalidTicket(t *testing.T) {
 	st := time.Now().UTC()
 	f := types.NewKrbFlags()
 	types.SetFlag(&f, flags.Invalid)
-	tkt, sessionKey, err := messages.NewTicket(cl.Credentials.CName(), cl.Credentials.Domain(),
+	tkt, sessionKey, err := messages.NewTicket(creds.CName(), creds.Domain(),
 		sname, "TEST.GOKRB5",
 		f,
 		kt,
@@ -501,7 +499,7 @@ func TestVerifyAPREQ_InvalidTicket(t *testing.T) {
 	APReq, err := messages.NewAPReq(
 		tkt,
 		sessionKey,
-		newTestAuthenticator(*cl.Credentials),
+		newTestAuthenticator(t, creds),
 	)
 	if err != nil {
 		t.Fatalf("Error getting test AP_REQ: %v", err)
@@ -523,7 +521,7 @@ func TestVerifyAPREQ_InvalidTicket(t *testing.T) {
 
 func TestVerifyAPREQ_ExpiredTicket(t *testing.T) {
 	t.Parallel()
-	cl := getClient()
+	creds := newAPTestCredentials(t)
 	sname := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
 		NameString: []string{"HTTP", "host.test.gokrb5"},
@@ -535,7 +533,7 @@ func TestVerifyAPREQ_ExpiredTicket(t *testing.T) {
 	}
 
 	st := time.Now().UTC()
-	tkt, sessionKey, err := messages.NewTicket(cl.Credentials.CName(), cl.Credentials.Domain(),
+	tkt, sessionKey, err := messages.NewTicket(creds.CName(), creds.Domain(),
 		sname, "TEST.GOKRB5",
 		types.NewKrbFlags(),
 		kt,
@@ -549,7 +547,7 @@ func TestVerifyAPREQ_ExpiredTicket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error getting test ticket: %v", err)
 	}
-	a := newTestAuthenticator(*cl.Credentials)
+	a := newTestAuthenticator(t, creds)
 	APReq, err := messages.NewAPReq(
 		tkt,
 		sessionKey,
@@ -686,24 +684,19 @@ func TestExtractDelegatedCredentials(t *testing.T) {
 	}
 }
 
-func newTestAuthenticator(creds credentials.Credentials) types.Authenticator {
-	auth, _ := types.NewAuthenticator(creds.Domain(), creds.CName())
-	_ = auth.GenerateSeqNumberAndSubKey(18, 32)
-	// auth.Cksum = types.Checksum{
-	//	CksumType: chksumtype.GSSAPI,
-	//	Checksum:  newAuthenticatorChksum([]int{GSS_C_INTEG_FLAG, GSS_C_CONF_FLAG}),
-	//}
+func newTestAuthenticator(t *testing.T, creds *credentials.Credentials) types.Authenticator {
+	t.Helper()
+	auth, err := types.NewAuthenticator(creds.Domain(), creds.CName())
+	require.NoError(t, err)
+	require.NoError(t, auth.GenerateSeqNumberAndSubKey(18, 32))
 	return auth
 }
 
-func getClient() *client.Client {
-	b, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER1_TEST_GOKRB5)
-	kt := keytab.New()
-	if err := kt.Unmarshal(b); err != nil {
-		panic(err)
-	}
-
-	c, _ := config.NewFromString(testdata.KRB5_CONF)
-	cl := client.NewWithKeytab("testuser1", "TEST.GOKRB5", kt, c)
-	return cl
+func newAPTestCredentials(t *testing.T) *credentials.Credentials {
+	t.Helper()
+	creds := credentials.New(t.Name(), testdata.TEST_REALM)
+	// Parallel and repeated tests share the replay cache even when clock ticks coincide.
+	cname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, t.Name()+"-"+creds.SessionID())
+	creds.SetCName(cname)
+	return creds
 }

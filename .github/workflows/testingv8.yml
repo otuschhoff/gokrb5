@@ -247,6 +247,10 @@ jobs:
           go-version: ${{ matrix.go }}
           cache-dependency-path: v8/go.sum
 
+      - name: Download dependencies
+        working-directory: v8
+        run: go mod download
+
       - name: Start integration test dependencies
         run: |
           sudo apt-get update
@@ -260,14 +264,13 @@ jobs:
           sudo docker run -d -h kdc.resdom.gokrb5 -v /etc/localtime:/etc/localtime:ro -p 188:88 -p 188:88/udp --name krb5kdc-resdom jcmturner/gokrb5@sha256:31bd0837cf3a77ab1d3ede7548d6cd168a5afbee7a6a01f970cd4a841d42cefa
           sudo docker run -d -h kdc.test.gokrb5 -v /etc/localtime:/etc/localtime:ro -p 58:88 -p 58:88/udp --name krb5kdc-shorttickets jcmturner/gokrb5@sha256:caafd05390d6e52ba1ef88580b124f3073e6d332037d75dcd67ffd7f4d5b817e
           sudo docker run -d --add-host host.test.gokrb5:127.0.0.88 -v /etc/localtime:/etc/localtime:ro -p 80:80 -p 443:443 --name gokrb5-http jcmturner/gokrb5@sha256:372dfb026206560ac7be571e2b1b176eb2acc7996267024a22a7977a089d0a4e
-          sudo sed -i 's/nameserver .*/nameserver '${DNS_IP}'/g' /etc/resolv.conf
-          dig _kerberos._udp.TEST.GOKRB5
+          dig @"$DNS_IP" _kerberos._udp.TEST.GOKRB5 SRV
         id: intgTestDeps
 
       - name: Build and run examples
         run: |
           cd v8
-          go run -tags="examples" examples/example.go
+          bash ../scripts/with-integration-dns.sh go run -tags="examples" examples/example.go
           for example in example-AD.go httpClient.go httpServer.go longRunningClient.go; do
             go build -tags="examples" -o "${RUNNER_TEMP}/${example%.go}" "examples/${example}"
           done
@@ -276,7 +279,7 @@ jobs:
       - name: Tests including integration tests
         run: |
           cd v8
-          go test -race ./...
+          bash ../scripts/with-integration-dns.sh go test -race ./...
         env:
           INTEGRATION: 1
           TESTPRIVILEGED: 1
@@ -285,7 +288,7 @@ jobs:
       - name: MIT interoperability tests
         run: |
           cd v8
-          go test -race -tags interop ./test/interop/...
+          bash ../scripts/with-integration-dns.sh go test -race -tags interop ./test/interop/...
         env:
           INTEGRATION: 1
         id: interopTests
@@ -293,7 +296,7 @@ jobs:
       - name: Tests (32bit)
         run: |
           cd v8
-          go test ./...
+          bash ../scripts/with-integration-dns.sh go test ./...
         env:
           GOARCH: 386
           INTEGRATION: 1
