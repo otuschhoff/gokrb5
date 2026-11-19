@@ -1,17 +1,18 @@
 package credentials
 
 import (
-	"bufio"
-	"bytes"
-	"fmt"
-	"io"
+	"context"
+	"errors"
 	"os"
 	"os/exec"
-	"os/user"
-	"sync"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/test"
@@ -19,137 +20,43 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
-const (
-	kinitCmd = "kinit"
-	kvnoCmd  = "kvno"
-	klistCmd = "klist"
-	spn      = "HTTP/host.test.gokrb5"
-)
+const spn = "HTTP/host.test.gokrb5"
 
-type output struct {
-	buf   *bytes.Buffer
-	lines []string
-	*sync.Mutex
-}
+func loadNativeCCache(t *testing.T, withServiceTicket bool) *CCache {
+	t.Helper()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "krb5.conf")
+	cachePath := filepath.Join(dir, "ccache")
+	require.NoError(t, os.WriteFile(configPath, []byte(testdata.KRB5_CONF), 0o600), "write test configuration")
 
-func newOutput() *output {
-	return &output{
-		buf:   &bytes.Buffer{},
-		lines: []string{},
-		Mutex: &sync.Mutex{},
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	login := exec.CommandContext(ctx, "kinit", "testuser1@TEST.GOKRB5")
+	login.Stdin = strings.NewReader(testdata.TESTUSER_PASSWORD + "\n")
+	commands := []*exec.Cmd{login}
+	if withServiceTicket {
+		commands = append(commands, exec.CommandContext(ctx, "kvno", spn))
 	}
-}
-
-func (rw *output) Write(p []byte) (int, error) {
-	rw.Lock()
-	defer rw.Unlock()
-	return rw.buf.Write(p)
-}
-
-func (rw *output) Lines() []string {
-	rw.Lock()
-	defer rw.Unlock()
-	s := bufio.NewScanner(rw.buf)
-	for s.Scan() {
-		rw.lines = append(rw.lines, s.Text())
+	for _, cmd := range commands {
+		cmd.Env = append(cmd.Environ(), "KRB5_CONFIG="+configPath, "KRB5CCNAME=FILE:"+cachePath)
+		cmd.WaitDelay = time.Second
+		if _, err := cmd.Output(); err != nil {
+			if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && len(exitErr.Stderr) > 0 {
+				t.Logf("%s stderr: %s", cmd.Args[0], strings.TrimSpace(string(exitErr.Stderr)))
+			}
+			t.Fatalf("run %s: %v", cmd.Args[0], errors.Join(err, ctx.Err()))
+		}
 	}
-	return rw.lines
-}
-
-func login() error {
-	file, err := os.Create("/etc/krb5.conf")
-	if err != nil {
-		return fmt.Errorf("cannot open krb5.conf: %w", err)
-	}
-	if _, err := fmt.Fprintf(file, testdata.KRB5_CONF); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-
-	cmd := exec.Command(kinitCmd, "testuser1@TEST.GOKRB5")
-
-	stdinR, stdinW := io.Pipe()
-	stderrR, stderrW := io.Pipe()
-	cmd.Stdin = stdinR
-	cmd.Stderr = stderrW
-
-	err = cmd.Start()
-	if err != nil {
-		return fmt.Errorf("could not start %s command: %w", kinitCmd, err)
-	}
-
-	go func() {
-		_, _ = io.WriteString(stdinW, "passwordvalue")
-		_ = stdinW.Close()
-	}()
-	errBuf := new(bytes.Buffer)
-	go func() {
-		_, _ = io.Copy(errBuf, stderrR)
-		_ = stderrR.Close()
-	}()
-
-	err = cmd.Wait()
-	if err != nil {
-		return fmt.Errorf("%s did not run successfully: %w stderr: %s", kinitCmd, err, errBuf.String())
-	}
-	return nil
-}
-
-func getServiceTkt() error {
-	cmd := exec.Command(kvnoCmd, spn)
-	err := cmd.Start()
-	if err != nil {
-		return fmt.Errorf("could not start %s command: %w", kvnoCmd, err)
-	}
-	err = cmd.Wait()
-	if err != nil {
-		return fmt.Errorf("%s did not run successfully: %w", kvnoCmd, err)
-	}
-	return nil
-}
-
-func klist() ([]string, error) {
-	cmd := exec.Command(klistCmd, "-Aef")
-
-	stdout := newOutput()
-	cmd.Stdout = stdout
-
-	err := cmd.Start()
-	if err != nil {
-		return []string{}, fmt.Errorf("could not start %s command: %w", klistCmd, err)
-	}
-
-	err = cmd.Wait()
-	if err != nil {
-		return []string{}, fmt.Errorf("%s did not run successfully: %w", klistCmd, err)
-	}
-
-	return stdout.Lines(), nil
-}
-
-func loadCCache() (*CCache, error) {
-	usr, err := user.Current()
-	if err != nil {
-		return nil, fmt.Errorf("resolve current OS user: %w", err)
-	}
-	cpath := "/tmp/krb5cc_" + usr.Uid
-	return LoadCCache(cpath)
+	cache, err := LoadCCache(cachePath)
+	require.NoError(t, err, "load native credential cache")
+	return cache
 }
 
 func TestLoadCCache(t *testing.T) {
 	test.Privileged(t)
 
-	err := login()
-	if err != nil {
-		t.Fatalf("error logging in with kinit: %v", err)
-	}
-	c, err := loadCCache()
-	if err != nil {
-		t.Fatalf("error loading CCache: %v", err)
-	}
+	c := loadNativeCCache(t, false)
 	pn := c.GetClientPrincipalName()
 	assert.Equal(t, "testuser1", pn.PrincipalNameString(), "principal not as expected")
 	assert.Equal(t, "TEST.GOKRB5", c.GetClientRealm(), "realm not as expected")
@@ -158,33 +65,17 @@ func TestLoadCCache(t *testing.T) {
 func TestCCacheEntries(t *testing.T) {
 	test.Privileged(t)
 
-	err := login()
-	if err != nil {
-		t.Fatalf("error logging in with kinit: %v", err)
-	}
-	err = getServiceTkt()
-	if err != nil {
-		t.Fatalf("error getting service ticket: %v", err)
-	}
-	clist, _ := klist()
-	t.Log("OS Creds Cache contents:")
-	for _, l := range clist {
-		t.Log(l)
-	}
-	c, err := loadCCache()
-	if err != nil {
-		t.Fatalf("error loading CCache: %v", err)
-	}
-	creds := c.GetEntries()
-	var found bool
+	// Deliberately give the parent a config and cache that the native tools must not use.
+	dir := t.TempDir()
+	inheritedCache := filepath.Join(dir, "caller.ccache")
+	t.Setenv("KRB5_CONFIG", filepath.Join(dir, "missing.conf"))
+	t.Setenv("KRB5CCNAME", "FILE:"+inheritedCache)
+
+	c := loadNativeCCache(t, true)
+	assert.NoFileExists(t, inheritedCache, "native commands must not create the caller's cache")
 	n := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, spn)
-	for _, cred := range creds {
-		if cred.Server.PrincipalName.Equal(n) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("Entry for %s not found in CCache", spn)
-	}
+	found := slices.ContainsFunc(c.GetEntries(), func(cred *Credential) bool {
+		return cred.Server.PrincipalName.Equal(n)
+	})
+	assert.True(t, found, "entry for %s not found in cache", spn)
 }

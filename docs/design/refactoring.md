@@ -2,14 +2,10 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-18 done (formatter normalization,
-keytab complexity, dead code, mechanical clarity, shadow elimination,
-errorlint, revive mechanical, exported documentation, the NDR carry-over,
-I/O/body-ownership cleanup, checked type assertions, and named-return clarity).
-Remaining canonical debt is concentrated in the classification-heavy
-categories (gosec, NilAway, wrapcheck, errcheck, gocognit/nestif, ireturn,
-nonamedreturns, bodyclose) plus documented intentional categories (iana
-protocol-table naming, public API name stutters, contract error texts).
+(floor raised to 86.0%), and Phase 5 slices 1-68 done. The latest v8
+inventories contain 550 canonical and 3,651 supplemental findings. Most
+remaining canonical findings are from `revive`, complexity and nesting
+checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
 Phase 3/4 interoperability and Windows exit evidence remains an external CI
 obligation.
 Assessment date: 2026-11-17.
@@ -34,7 +30,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | Unit/race tests pass; 1,293 canonical lint findings after Phase 5 slices 1-18 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 87.8% cross-package statement coverage; 550 canonical lint findings after Slice 68 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -823,6 +819,37 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 68 (2026-11-19, v8 credentials native credential-cache fixtures; Q-08):
+Use a private `krb5.conf` and `FILE:` cache for each credentials integration
+test. `kinit` and optional `kvno` receive the same paths in their child
+environments, and Go loads that exact cache. Bound the command sequence and
+pipe shutdown, and report the command, exit error, and captured stderr on
+failure. Remove diagnostic-only `klist` and its ignored failure. Keep the
+`TESTPRIVILEGED=1` gate and the existing client, realm, and service-entry
+assertions. The v8 MIT job no longer makes `/etc/krb5.conf` writable.
+Production code and the v7 workflow are unchanged.
+
+A controlled failure reproduced the old overwrite of a disposable system
+configuration and inheritance of the caller's cache in a private mount
+namespace. The updated fixture left those paths untouched, reported the
+child's failure, and removed its temporary files. A stalled `kinit` probe
+verified the 30-second deadline and cleanup. The service-entry test now
+deliberately supplies unusable inherited settings and checks that no caller
+cache is created.
+
+Both native integration tests passed 25 shuffled, race-enabled runs against
+a scratch MIT Kerberos 1.21.3 KDC in a loopback-only network namespace. The
+system configuration was read-only during the runs and caller cache paths
+remained untouched. Both module suites, credentials build/vet and repeated
+race checks, Linux/386 tests, and a Windows/amd64 test cross-build passed.
+V8 cross-package statement coverage remained 87.8%. The full hosted MIT
+matrix was not run locally.
+
+Both modules passed changed-line lint against `4881573` and `origin/main`.
+The v8 canonical inventory fell from 552 to 550 by removing both `govet`
+shadow findings in the fixture. The supplemental inventory stayed at 3,651.
+Neither inventory introduced new findings or suppressions.
 
 Slice 67 (2026-11-19, v8 client native credential-cache fixtures; Q-08):
 Give each native client test a temporary Kerberos configuration and
