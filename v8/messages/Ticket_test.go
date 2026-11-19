@@ -18,6 +18,7 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana"
 	"github.com/otuschhoff/gokrb5/v8/iana/addrtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/adtype"
+	"github.com/otuschhoff/gokrb5/v8/iana/errorcode"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/iana/flags"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
@@ -266,61 +267,67 @@ func TestNewTicketAndKeytabDecryption(t *testing.T) {
 	cname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
 	sname := types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "HTTP/server.example.org")
 	kt := keytab.New()
-	if err := kt.AddEntry("HTTP/server.example.org", "EXAMPLE.ORG", "password", now, 2, etypeID.AES256_CTS_HMAC_SHA1_96); err != nil {
-		t.Fatal(err)
-	}
-	ticket, _, err := NewTicket(cname, "EXAMPLE.ORG", sname, "EXAMPLE.ORG", types.NewKrbFlags(), kt, etypeID.AES256_CTS_HMAC_SHA1_96, 2, now, now, now.Add(time.Hour), now.Add(2*time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := ticket.DecryptEncPart(kt, nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := ticket.DecryptEncPart(keytab.New(), &sname); err == nil {
-		t.Fatal("missing keytab entry returned no error")
-	}
-	if _, _, err := NewTicket(cname, "EXAMPLE.ORG", sname, "EXAMPLE.ORG", types.NewKrbFlags(), keytab.New(), etypeID.AES256_CTS_HMAC_SHA1_96, 2, now, now, now, now); err == nil {
-		t.Fatal("NewTicket accepted an empty keytab")
-	}
+	require.NoError(t, kt.AddEntry(
+		"HTTP/server.example.org", "EXAMPLE.ORG", "password", now, 2, etypeID.AES256_CTS_HMAC_SHA1_96,
+	))
+	ticket, _, err := NewTicket(
+		cname, "EXAMPLE.ORG", sname, "EXAMPLE.ORG", types.NewKrbFlags(), kt,
+		etypeID.AES256_CTS_HMAC_SHA1_96, 2, now, now, now.Add(time.Hour), now.Add(2*time.Hour),
+	)
+	require.NoError(t, err)
+	require.NoError(t, ticket.DecryptEncPart(kt, nil))
+	assert.Equal(t, cname, ticket.DecryptedEncPart.CName)
+
+	t.Run("a missing override does not fall back to the ticket principal", func(t *testing.T) {
+		override := types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "HTTP/missing.example.org")
+		lookupErr := ticket.DecryptEncPart(kt, &override)
+		var missingKey KRBError
+		require.ErrorAs(t, lookupErr, &missingKey)
+		assert.IsType(t, missingKey, lookupErr)
+		assert.Equal(t, errorcode.KRB_AP_ERR_NOKEY, missingKey.ErrorCode)
+		assert.Equal(t, ticket.SName, missingKey.SName)
+	})
+
+	ticket.SName = types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "HTTP/alias.example.org")
+	require.NoError(t, ticket.DecryptEncPart(kt, &sname))
+	assert.Equal(t, cname, ticket.DecryptedEncPart.CName)
+	err = ticket.DecryptEncPart(kt, nil)
+	var missingKey KRBError
+	require.ErrorAs(t, err, &missingKey)
+	assert.IsType(t, missingKey, err)
+	assert.Equal(t, errorcode.KRB_AP_ERR_NOKEY, missingKey.ErrorCode)
+	assert.Equal(t, ticket.SName, missingKey.SName)
+
+	_, _, err = NewTicket(
+		cname, "EXAMPLE.ORG", sname, "EXAMPLE.ORG", types.NewKrbFlags(), keytab.New(),
+		etypeID.AES256_CTS_HMAC_SHA1_96, 2, now, now, now, now,
+	)
+	require.Error(t, err, "NewTicket must reject an empty keytab")
+}
+
+func ticketPACFixture(t *testing.T) (Ticket, *keytab.Keytab, types.PrincipalName) {
+	t.Helper()
+	var ticket Ticket
+	ticket.Realm = "TEST.GOKRB5"
+	ticket.EncPart.EType = etypeID.AES256_CTS_HMAC_SHA1_96
+	ticket.EncPart.KVNO = 2
+	data := mustDecodeHex(t, testdata.MarshaledPAC_AuthorizationData_GOKRB5)
+	require.NoError(t, ticket.DecryptedEncPart.AuthorizationData.Unmarshal(data))
+	kt := keytab.New()
+	require.NoError(t, kt.Unmarshal(mustDecodeHex(t, testdata.KEYTAB_SYSHTTP_TEST_GOKRB5)))
+	return ticket, kt, types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "sysHTTP")
 }
 
 func TestAuthorizationData_GetPACType_GOKRB5TestData(t *testing.T) {
 	t.Parallel()
-	b, err := hex.DecodeString(testdata.MarshaledPAC_AuthorizationData_GOKRB5)
-	if err != nil {
-		t.Fatalf("Test vector read error: %v", err)
-	}
-	var a types.AuthorizationData
-	err = a.Unmarshal(b)
-	if err != nil {
-		t.Fatalf("Error unmarshaling test data: %v", err)
-	}
-	tkt := Ticket{
-		Realm: "TEST.GOKRB5",
-		EncPart: types.EncryptedData{
-			EType: 18,
-			KVNO:  2,
-		},
-		DecryptedEncPart: EncTicketPart{
-			AuthorizationData: a,
-		},
-	}
-	b, _ = hex.DecodeString(testdata.KEYTAB_SYSHTTP_TEST_GOKRB5)
-	kt := keytab.New()
-	if keytabErr := kt.Unmarshal(b); keytabErr != nil {
-		t.Fatal(keytabErr)
-	}
 
-	sname := types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: []string{"sysHTTP"}}
-	w := bytes.NewBufferString("")
-	l := log.New(w, "", 0)
-	isPAC, parsedPAC, err := tkt.GetPACType(kt, &sname, l)
-	if err != nil {
-		t.Log(w.String())
-		t.Errorf("error getting PAC: %v", err)
-	}
+	tkt, kt, sname := ticketPACFixture(t)
+	var logs bytes.Buffer
+	logger := log.New(&logs, "", 0)
+	isPAC, parsedPAC, err := tkt.GetPACType(kt, &sname, logger)
+	require.NoError(t, err, "PAC logs: %s", logs.String())
 	assert.True(t, isPAC, "PAC should be present")
-	assert.Equal(t, 5, len(parsedPAC.Buffers), "Number of buffers not as expected")
+	assert.Len(t, parsedPAC.Buffers, 5, "Number of buffers not as expected")
 	assert.Equal(t, uint32(5), parsedPAC.CBuffers, "Count of buffers not as expected")
 	assert.Equal(t, uint32(0), parsedPAC.Version, "PAC version not as expected")
 	assert.NotNil(t, parsedPAC.KerbValidationInfo, "PAC Kerb Validation info is nil")
@@ -332,10 +339,66 @@ func TestAuthorizationData_GetPACType_GOKRB5TestData(t *testing.T) {
 	t.Run("option verification retains its cause", func(t *testing.T) {
 		var options pac.VerifyOptions
 		options.ExpectedClientName = "different-client"
-		found, parsed, verifyErr := tkt.GetPACTypeWithOptions(kt, &sname, l, options)
+		found, parsed, verifyErr := tkt.GetPACTypeWithOptions(kt, &sname, nil, options)
 		assert.True(t, found)
 		assert.NotNil(t, parsed.ClientInfo)
 		assert.ErrorContains(t, verifyErr, "verify ticket PAC:")
 		assert.ErrorContains(t, errors.Unwrap(verifyErr), "PAC client name")
 	})
+}
+
+func TestTicketPACVerificationContext(t *testing.T) {
+	t.Parallel()
+
+	ticket, kt, sname := ticketPACFixture(t)
+	ticket.SName = sname
+	found, baseline, err := ticket.GetPACType(kt, nil, nil)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, baseline.ClientInfo)
+
+	client := baseline.ClientInfo.Name
+	authTime := baseline.ClientInfo.ClientID.Time()
+	ticket.DecryptedEncPart.CName = types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "other-client")
+	ticket.DecryptedEncPart.AuthTime = authTime.Add(time.Second)
+	for _, tt := range []struct {
+		name        string
+		override    func(*pac.VerifyOptions)
+		wantContext string
+	}{
+		{
+			name:        "ticket client name is checked by default",
+			override:    func(o *pac.VerifyOptions) { o.ExpectedAuthTime = &authTime },
+			wantContext: "PAC client name",
+		},
+		{
+			name:        "ticket auth time is checked by default",
+			override:    func(o *pac.VerifyOptions) { o.ExpectedClientName = client },
+			wantContext: "PAC client authentication time",
+		},
+		{
+			name: "explicit verification context takes precedence",
+			override: func(o *pac.VerifyOptions) {
+				o.ExpectedClientName = client
+				o.ExpectedAuthTime = &authTime
+			},
+			wantContext: "",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var options pac.VerifyOptions
+			tt.override(&options)
+			found, parsed, err := ticket.GetPACTypeWithOptions(kt, nil, nil, options)
+			assert.True(t, found)
+			assert.Equal(t, baseline.ClientInfo, parsed.ClientInfo)
+			if tt.wantContext == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, "verify ticket PAC:")
+			assert.ErrorContains(t, errors.Unwrap(err), tt.wantContext)
+		})
+	}
 }

@@ -192,16 +192,12 @@ func MarshalTicketSequence(tkts []Ticket) (asn1.RawValue, error) {
 	return raw, nil
 }
 
-// DecryptEncPart decrypts the encrypted part of the ticket.
-// The sname argument can be used to specify which service principal's key should be used to decrypt the ticket.
-// If nil is passed as the sname then the service principal specified within the ticket it used.
-func (t *Ticket) DecryptEncPart(keytab *keytab.Keytab, sname *types.PrincipalName) error {
-	if sname == nil {
-		sname = &t.SName
-	}
-	key, _, err := keytab.GetEncryptionKey(*sname, t.Realm, t.EncPart.KVNO, t.EncPart.EType)
+// DecryptEncPart decrypts the ticket using the key for sname.
+// If sname is nil, it uses the service principal named in the ticket.
+func (t *Ticket) DecryptEncPart(kt *keytab.Keytab, sname *types.PrincipalName) error {
+	key, err := t.lookupServiceKey(kt, sname)
 	if err != nil {
-		return NewKRBError(t.SName, t.Realm, errorcode.KRB_AP_ERR_NOKEY, fmt.Sprintf("Could not get key from keytab: %v", err))
+		return err
 	}
 	return t.Decrypt(key)
 }
@@ -221,30 +217,34 @@ func (t *Ticket) Decrypt(key types.EncryptionKey) error {
 	return nil
 }
 
-// GetPACType returns a Microsoft PAC that has been extracted from the ticket and processed.
-func (t *Ticket) GetPACType(keytab *keytab.Keytab, sname *types.PrincipalName, l *log.Logger) (bool, pac.PACType, error) {
-	return t.GetPACTypeWithOptions(keytab, sname, l, pac.VerifyOptions{})
+// GetPACType extracts and verifies the ticket's Microsoft PAC using the ticket context.
+func (t *Ticket) GetPACType(kt *keytab.Keytab, sname *types.PrincipalName, l *log.Logger) (bool, pac.PACType, error) {
+	var options pac.VerifyOptions
+	return t.GetPACTypeWithOptions(kt, sname, l, options)
 }
 
 // GetPACTypeWithOptions returns a processed PAC with additional verification context.
-func (t *Ticket) GetPACTypeWithOptions(keytab *keytab.Keytab, sname *types.PrincipalName, l *log.Logger, options pac.VerifyOptions) (bool, pac.PACType, error) {
+// A true result indicates a PAC was found; callers must check the error before using it.
+func (t *Ticket) GetPACTypeWithOptions(
+	kt *keytab.Keytab,
+	sname *types.PrincipalName,
+	l *log.Logger,
+	options pac.VerifyOptions,
+) (bool, pac.PACType, error) {
+	var p pac.PACType
 	entries, err := t.DecryptedEncPart.AuthorizationData.EntriesOfType(adtype.ADWin2KPAC)
 	if err != nil {
-		return false, pac.PACType{}, fmt.Errorf("PAC authorization data could not be traversed: %w", err)
+		return false, p, fmt.Errorf("PAC authorization data could not be traversed: %w", err)
 	}
 	if len(entries) == 0 {
-		return false, pac.PACType{}, nil
+		return false, p, nil
 	}
-	var p pac.PACType
-	if ierr := p.Unmarshal(entries[0].ADData); ierr != nil {
-		return true, p, fmt.Errorf("error unmarshaling PAC: %w", ierr)
+	if decodeErr := p.Unmarshal(entries[0].ADData); decodeErr != nil {
+		return true, p, fmt.Errorf("error unmarshaling PAC: %w", decodeErr)
 	}
-	if sname == nil {
-		sname = &t.SName
-	}
-	key, _, err := keytab.GetEncryptionKey(*sname, t.Realm, t.EncPart.KVNO, t.EncPart.EType)
+	key, err := t.lookupServiceKey(kt, sname)
 	if err != nil {
-		return true, p, NewKRBError(t.SName, t.Realm, errorcode.KRB_AP_ERR_NOKEY, fmt.Sprintf("Could not get key from keytab: %v", err))
+		return true, p, err
 	}
 	if err := p.ProcessPACInfoBuffers(key, l); err != nil {
 		return true, p, fmt.Errorf("process ticket PAC buffers: %w", err)
@@ -280,4 +280,16 @@ func (t *Ticket) ValidAt(now time.Time, d time.Duration) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func (t *Ticket) lookupServiceKey(kt *keytab.Keytab, sname *types.PrincipalName) (types.EncryptionKey, error) {
+	if sname == nil {
+		sname = &t.SName
+	}
+	key, _, err := kt.GetEncryptionKey(*sname, t.Realm, t.EncPart.KVNO, t.EncPart.EType)
+	if err != nil {
+		text := fmt.Sprintf("Could not get key from keytab: %v", err)
+		return key, NewKRBError(t.SName, t.Realm, errorcode.KRB_AP_ERR_NOKEY, text)
+	}
+	return key, nil
 }

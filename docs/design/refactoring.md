@@ -2,8 +2,8 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-74 done. The latest v8
-inventories contain 539 canonical and 3,613 supplemental findings. Most
+(floor raised to 86.0%), and Phase 5 slices 1-75 done. The latest v8
+inventories contain 539 canonical and 3,600 supplemental findings. Most
 remaining canonical findings are from `revive`, complexity and nesting
 checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
 Phase 3/4 interoperability and Windows exit evidence remains an external CI
@@ -30,7 +30,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 87.9% cross-package statement coverage; 539 canonical lint findings after Slice 74 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 87.9% cross-package statement coverage; 539 canonical lint findings after Slice 75 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -819,6 +819,28 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 75 (2026-11-19, v8 ticket key lookup and PAC verification context; Q-10):
+Use one service-key lookup for ticket decryption and PAC processing. A nil
+principal selects the service named in the ticket; an explicit principal
+does not fall back on failure. Preserve the concrete `KRB_AP_ERR_NOKEY`
+error, PAC extraction and verification order, and the returned PAC value
+on each failure path. The PAC presence flag is not a verification result.
+
+Characterization passed before and after the change: default and explicit
+key selection, missing-key type and service name, and a signed PAC fixture
+that checks the ticket's client name and authentication time by default
+while respecting explicit verification context. Both module suites passed
+and v8 cross-package statement coverage remained 87.9%. The focused cases
+passed 100 shuffled runs under the race detector. Messages and service
+passed race, build, vet, and Linux/386 checks on Go 1.26.0, plus Windows/amd64
+test cross-builds. `FuzzPACProcessingInfoBuffers` passed 514,733 executions
+in 30 seconds. Live interoperability was not run.
+
+Both modules passed changed-line lint against `6513809` and `origin/main`.
+V8 canonical findings remained at 539. Supplemental findings fell from
+3,613 to 3,600: one `cyclop`, five `exhaustruct_v5`, and seven `lll` findings.
+Neither inventory introduced findings or suppressions.
 
 Slice 74 (2026-11-19, v8 ticket sequence framing; Q-08, Q-10):
 Initialize the decode error at the `unmarshalTicket` call and keep it
