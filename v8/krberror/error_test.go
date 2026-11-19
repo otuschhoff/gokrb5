@@ -6,21 +6,13 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/iana/ntstatus"
 )
 
-func mustKrberrorTestType[T any](t *testing.T, value any) T {
-	t.Helper()
-	result, ok := value.(T)
-	if !ok {
-		t.Fatalf("unexpected type %T", value)
-	}
-	return result
-}
-
 func TestErrorf(t *testing.T) {
-	err := fmt.Errorf("an error")
+	err := errors.New("an error")
 	var a Krberror
 	a = Errorf(err, "cause", "some text")
 	assert.Equal(t, "[Root cause: cause] cause: some text: an error", a.Error())
@@ -70,19 +62,28 @@ func TestKrberrorNTStatus(t *testing.T) {
 func TestPolicyErrorContracts(t *testing.T) {
 	cause := statusError{}
 	err := NewPolicyError(ErrDelegationNotPermitted, cause)
-	if err.Error() != "delegation not permitted: KDC error" || !errors.Is(err, ErrDelegationNotPermitted) || !errors.Is(err, cause) {
-		t.Fatalf("policy error = %q", err)
-	}
+	assert.EqualError(t, err, "delegation not permitted: KDC error")
+	assert.ErrorIs(t, err, ErrDelegationNotPermitted)
+	assert.ErrorIs(t, err, cause)
 	var policy PolicyError
-	if !errors.As(err, &policy) || !errors.Is(policy.Unwrap(), cause) {
-		t.Fatalf("policy unwrap = %v", policy.Unwrap())
-	}
+	require.ErrorAs(t, err, &policy)
+	assert.IsType(t, policy, err)
+	assert.ErrorIs(t, policy.Unwrap(), cause)
 	status, ok := policy.NTStatus()
 	if !ok || status != ntstatus.STATUS_ACCOUNT_DISABLED {
 		t.Fatalf("policy NTStatus = %v, %v", status, ok)
 	}
-	withoutStatus := mustKrberrorTestType[PolicyError](t, NewPolicyError(ErrProtocolTransitionNotPermitted, errors.New("denied"))) //nolint:errorlint // The test verifies exact wrapper identity; errors.As would accept wrapped forms.
-	if status, ok := withoutStatus.NTStatus(); ok || status != 0 {
+}
+
+func TestPolicyErrorWithoutNTStatus(t *testing.T) {
+	cause := errors.New("denied")
+	err := NewPolicyError(ErrProtocolTransitionNotPermitted, cause)
+	assert.ErrorIs(t, err, ErrProtocolTransitionNotPermitted)
+	var policy PolicyError
+	require.ErrorAs(t, err, &policy)
+	assert.IsType(t, policy, err)
+	assert.ErrorIs(t, policy.Unwrap(), cause)
+	if status, ok := policy.NTStatus(); ok || status != 0 {
 		t.Fatalf("missing NTStatus = %v, %v", status, ok)
 	}
 }
@@ -98,5 +99,39 @@ func TestKrberrorConstructorsAndMissingStatus(t *testing.T) {
 	formatted := NewErrorf(EncodingError, "bad field %d", 3)
 	if formatted.Error() != "[Root cause: Encoding_Error] Encoding_Error: bad field 3" {
 		t.Fatalf("formatted error = %q", formatted)
+	}
+}
+
+func TestNewErrorfFormatting(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name     string
+		format   string
+		args     []any
+		wantText string
+	}{
+		{
+			name:     "no arguments preserves percent signs",
+			format:   "literal %d and %%",
+			args:     []any{},
+			wantText: "Encoding_Error: literal %d and %%",
+		},
+		{
+			name:     "arguments expand directives",
+			format:   "field %d uses %%",
+			args:     []any{3},
+			wantText: "Encoding_Error: field 3 uses %",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := NewErrorf(EncodingError, tt.format, tt.args...)
+			assert.EqualError(t, err, "[Root cause: Encoding_Error] "+tt.wantText)
+			assert.Equal(t, EncodingError, err.RootCause)
+			assert.Equal(t, []string{tt.wantText}, err.EText)
+			assert.NoError(t, err.Unwrap())
+		})
 	}
 }

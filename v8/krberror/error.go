@@ -70,6 +70,24 @@ type Krberror struct {
 	cause     error
 }
 
+// New creates a Krberror without an underlying error.
+func New(et, s string) Krberror {
+	return Krberror{
+		RootCause: et,
+		EText:     []string{s},
+		cause:     nil,
+	}
+}
+
+// NewErrorf creates a Krberror from a formatted string without an underlying error.
+// With no arguments, format is used as literal text.
+func NewErrorf(et, format string, a ...any) Krberror {
+	if len(a) > 0 {
+		format = fmt.Sprintf(format, a...)
+	}
+	return New(et, et+": "+format)
+}
+
 // Error function to implement the error interface.
 func (e Krberror) Error() string {
 	return fmt.Sprintf("[Root cause: %s] ", e.RootCause) + strings.Join(e.EText, separator)
@@ -96,35 +114,14 @@ func (e *Krberror) Add(et string, s string) {
 	e.EText = append([]string{fmt.Sprintf("%s: %s", et, s)}, e.EText...)
 }
 
-// New creates a new instance of Krberror.
-func New(et, s string) Krberror {
-	return Krberror{
-		RootCause: et,
-		EText:     []string{s},
-	}
-}
-
 // Errorf appends to or creates a new Krberror.
-func Errorf(err error, et, format string, a ...interface{}) Krberror {
-	if e, ok := err.(Krberror); ok { //nolint:errorlint // Flatten only a bare Krberror; unwrapping here would discard intervening causes and context.
+func Errorf(err error, et, format string, a ...any) Krberror {
+	//nolint:errorlint // Flatten only a bare Krberror to preserve intervening wrappers.
+	if e, ok := err.(Krberror); ok {
 		e.Add(et, fmt.Sprintf(format, a...))
 		return e
 	}
 	e := NewErrorf(et, format+": %s", append(a, err)...)
 	e.cause = err
 	return e
-}
-
-// NewErrorf creates a new Krberror from a formatted string.
-func NewErrorf(et, format string, a ...interface{}) Krberror {
-	var s string
-	if len(a) > 0 {
-		s = fmt.Sprintf("%s: %s", et, fmt.Sprintf(format, a...))
-	} else {
-		s = fmt.Sprintf("%s: %s", et, format)
-	}
-	return Krberror{
-		RootCause: et,
-		EText:     []string{s},
-	}
 }
