@@ -1,7 +1,7 @@
 package client_test
 
 import (
-	"bytes"
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"os/user"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/config"
@@ -27,6 +28,8 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/test"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 )
+
+const testHTTPServiceSPN = "HTTP/host.test.gokrb5"
 
 func mustIntegrationConfig(t testing.TB, content string) *config.Config {
 	t.Helper()
@@ -221,7 +224,7 @@ func TestClient_ASExchange_TGSExchange_EncTypes_Keytab(t *testing.T) {
 		if err != nil {
 			t.Errorf("error on login using enctype %s: %v\n", tst, err)
 		}
-		tkt, key, err := cl.GetServiceTicket("HTTP/host.test.gokrb5")
+		tkt, key, err := cl.GetServiceTicket(testHTTPServiceSPN)
 		if err != nil {
 			t.Errorf("error in TGS exchange using enctype %s: %v", tst, err)
 		}
@@ -258,7 +261,7 @@ func TestClient_ASExchange_TGSExchange_EncTypes_Password(t *testing.T) {
 		if err != nil {
 			t.Errorf("error on login using enctype %s: %v\n", tst, err)
 		}
-		tkt, key, err := cl.GetServiceTicket("HTTP/host.test.gokrb5")
+		tkt, key, err := cl.GetServiceTicket(testHTTPServiceSPN)
 		if err != nil {
 			t.Errorf("error in TGS exchange using enctype %s: %v", tst, err)
 		}
@@ -410,16 +413,15 @@ func TestClient_GetServiceTicket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error on login: %v\n", err)
 	}
-	spn := "HTTP/host.test.gokrb5"
-	tkt, key, err := cl.GetServiceTicket(spn)
+	tkt, key, err := cl.GetServiceTicket(testHTTPServiceSPN)
 	if err != nil {
 		t.Fatalf("error getting service ticket: %v\n", err)
 	}
-	assert.Equal(t, spn, tkt.SName.PrincipalNameString())
+	assert.Equal(t, testHTTPServiceSPN, tkt.SName.PrincipalNameString())
 	assert.Equal(t, int32(18), key.KeyType)
 
 	// Check cache use - should get the same values back again
-	tkt2, key2, err := cl.GetServiceTicket(spn)
+	tkt2, key2, err := cl.GetServiceTicket(testHTTPServiceSPN)
 	if err != nil {
 		t.Fatalf("error getting service ticket: %v\n", err)
 	}
@@ -449,16 +451,15 @@ func TestClient_GetServiceTicket_CanonicalizeTrue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error on login: %v\n", err)
 	}
-	spn := "HTTP/host.test.gokrb5"
-	tkt, key, err := cl.GetServiceTicket(spn)
+	tkt, key, err := cl.GetServiceTicket(testHTTPServiceSPN)
 	if err != nil {
 		t.Fatalf("error getting service ticket: %v\n", err)
 	}
-	assert.Equal(t, spn, tkt.SName.PrincipalNameString())
+	assert.Equal(t, testHTTPServiceSPN, tkt.SName.PrincipalNameString())
 	assert.Equal(t, int32(18), key.KeyType)
 
 	// Check cache use - should get the same values back again
-	tkt2, key2, err := cl.GetServiceTicket(spn)
+	tkt2, key2, err := cl.GetServiceTicket(testHTTPServiceSPN)
 	if err != nil {
 		t.Fatalf("error getting service ticket: %v\n", err)
 	}
@@ -514,12 +515,11 @@ func TestClient_GetServiceTicket_OlderKDC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error on login: %v\n", err)
 	}
-	spn := "HTTP/host.test.gokrb5"
-	tkt, key, err := cl.GetServiceTicket(spn)
+	tkt, key, err := cl.GetServiceTicket(testHTTPServiceSPN)
 	if err != nil {
 		t.Fatalf("error getting service ticket: %v\n", err)
 	}
-	assert.Equal(t, spn, tkt.SName.PrincipalNameString())
+	assert.Equal(t, testHTTPServiceSPN, tkt.SName.PrincipalNameString())
 	assert.Equal(t, int32(18), key.KeyType)
 }
 
@@ -590,7 +590,7 @@ func spnegoGet(cl *client.Client) error {
 	if httpResp.StatusCode != http.StatusUnauthorized {
 		return errors.New("did not get unauthorized code when no SPNEGO header set")
 	}
-	err = spnego.SetSPNEGOHeader(cl, r, "HTTP/host.test.gokrb5")
+	err = spnego.SetSPNEGOHeader(cl, r, testHTTPServiceSPN)
 	if err != nil {
 		return fmt.Errorf("error setting client SPNEGO header: %w", err)
 	}
@@ -667,8 +667,7 @@ func TestClient_GetServiceTicket_Trusted_Resource_Domain(t *testing.T) {
 	c.LibDefaults.DefaultTGSEnctypes = []string{"aes256-cts-hmac-sha1-96"}
 	c.LibDefaults.DefaultTGSEnctypeIDs = []int32{etypeID.ETypesByName["aes256-cts-hmac-sha1-96"]}
 
-	err := cl.Login()
-	if err != nil {
+	if err := cl.Login(); err != nil {
 		t.Fatalf("error on login: %v\n", err)
 	}
 	spn := "HTTP/host.resdom.gokrb5"
@@ -685,93 +684,107 @@ func TestClient_GetServiceTicket_Trusted_Resource_Domain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = tkt.DecryptEncPart(skt, nil)
-	if err != nil {
+	if err := tkt.DecryptEncPart(skt, nil); err != nil {
 		t.Errorf("error decrypting ticket with service keytab: %v", err)
 	}
 }
 
-const (
-	kinitCmd = "kinit"
-	kvnoCmd  = "kvno"
-	spn      = "HTTP/host.test.gokrb5"
-)
+type nativeCCacheFixture struct {
+	configPath string
+	cachePath  string
+}
 
-func login() error {
-	file, err := os.Create("/etc/krb5.conf")
+func newNativeCCacheFixture(t *testing.T) nativeCCacheFixture {
+	t.Helper()
+	dir := t.TempDir()
+	fixture := nativeCCacheFixture{
+		configPath: filepath.Join(dir, "krb5.conf"),
+		cachePath:  filepath.Join(dir, "ccache"),
+	}
+	require.NoError(t, os.WriteFile(fixture.configPath, []byte(testdata.KRB5_CONF), 0o600))
+	return fixture
+}
+
+func (fixture nativeCCacheFixture) run(cmd *exec.Cmd) error {
+	cmd.Env = append(cmd.Environ(), "KRB5_CONFIG="+fixture.configPath, "KRB5CCNAME=FILE:"+fixture.cachePath)
+	cmd.WaitDelay = time.Second
+	_, err := cmd.Output() // Captures bounded stderr on failure.
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && len(exitErr.Stderr) > 0 {
+		return fmt.Errorf("run %s: %w: %s", filepath.Base(cmd.Path), err, strings.TrimSpace(string(exitErr.Stderr)))
+	}
 	if err != nil {
-		return fmt.Errorf("cannot open krb5.conf: %w", err)
-	}
-	if _, err := fmt.Fprintf(file, testdata.KRB5_CONF); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-
-	cmd := exec.Command(kinitCmd, "testuser1@TEST.GOKRB5")
-
-	stdinR, stdinW := io.Pipe()
-	stderrR, stderrW := io.Pipe()
-	cmd.Stdin = stdinR
-	cmd.Stderr = stderrW
-
-	err = cmd.Start()
-	if err != nil {
-		return fmt.Errorf("could not start %s command: %w", kinitCmd, err)
-	}
-
-	go func() {
-		_, _ = io.WriteString(stdinW, "passwordvalue")
-		_ = stdinW.Close()
-	}()
-	errBuf := new(bytes.Buffer)
-	go func() {
-		_, _ = io.Copy(errBuf, stderrR)
-		_ = stderrR.Close()
-	}()
-
-	err = cmd.Wait()
-	if err != nil {
-		return fmt.Errorf("%s did not run successfully: %w stderr: %s", kinitCmd, err, errBuf.String())
+		return fmt.Errorf("run %s: %w", filepath.Base(cmd.Path), err)
 	}
 	return nil
 }
 
-func getServiceTkt() error {
-	cmd := exec.Command(kvnoCmd, spn)
-	err := cmd.Start()
-	if err != nil {
-		return fmt.Errorf("could not start %s command: %w", kvnoCmd, err)
+func loadNativeCCache(t *testing.T, withServiceTicket bool) *credentials.CCache {
+	t.Helper()
+	fixture := newNativeCCacheFixture(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	kinit := exec.CommandContext(ctx, "kinit", "testuser1@TEST.GOKRB5")
+	kinit.Stdin = strings.NewReader(testdata.TESTUSER_PASSWORD + "\n")
+	if err := fixture.run(kinit); err != nil {
+		t.Fatal(errors.Join(err, ctx.Err()))
 	}
-	err = cmd.Wait()
-	if err != nil {
-		return fmt.Errorf("%s did not run successfully: %w", kvnoCmd, err)
+	if withServiceTicket {
+		kvno := exec.CommandContext(ctx, "kvno", testHTTPServiceSPN)
+		if err := fixture.run(kvno); err != nil {
+			t.Fatal(errors.Join(err, ctx.Err()))
+		}
 	}
-	return nil
+	cache, err := credentials.LoadCCache(fixture.cachePath)
+	require.NoError(t, err, "load native credential cache")
+	return cache
 }
 
-func loadCCache() (*credentials.CCache, error) {
-	usr, err := user.Current()
-	if err != nil {
-		return nil, fmt.Errorf("resolve current OS user: %w", err)
+func TestNativeCCacheFixtureCommand(t *testing.T) {
+	fixture := newNativeCCacheFixture(t)
+	wantConfig, err := os.ReadFile(fixture.configPath)
+	require.NoError(t, err)
+	require.Equal(t, testdata.KRB5_CONF, string(wantConfig))
+
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	// #nosec G204 -- Relaunch the running test binary with a fixed test selector.
+	cmd := exec.CommandContext(ctx, executable, "-test.run=^TestNativeCCacheFixtureChild$")
+	cmd.Env = append(cmd.Environ(),
+		"GOKRB5_TEST_NATIVE_CCACHE_CHILD=1",
+		"KRB5_CONFIG=old.conf",
+		"KRB5CCNAME=FILE:old.ccache",
+	)
+	cmd.Stdin = strings.NewReader("fixture input\n")
+
+	err = fixture.run(cmd)
+	require.ErrorContains(t, err, "native fixture subprocess")
+	require.ErrorContains(t, err, "config="+fixture.configPath)
+	require.ErrorContains(t, err, "cache=FILE:"+fixture.cachePath)
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	require.Equal(t, 1, exitErr.ExitCode())
+}
+
+func TestNativeCCacheFixtureChild(t *testing.T) {
+	if os.Getenv("GOKRB5_TEST_NATIVE_CCACHE_CHILD") != "1" {
+		t.Skip("only used as a subprocess")
 	}
-	cpath := "/tmp/krb5cc_" + usr.Uid
-	return credentials.LoadCCache(cpath)
+	input, err := io.ReadAll(os.Stdin)
+	require.NoError(t, err)
+	require.Equal(t, "fixture input\n", string(input))
+	configPath, cacheName := os.Getenv("KRB5_CONFIG"), os.Getenv("KRB5CCNAME")
+	_, err = fmt.Fprintf(os.Stderr, "native fixture subprocess: config=%s cache=%s\n", configPath, cacheName)
+	require.NoError(t, err)
+	t.Fail()
 }
 
 func TestGetServiceTicketFromCCacheTGT(t *testing.T) {
 	test.Privileged(t)
 
-	err := login()
-	if err != nil {
-		t.Fatalf("error logging in with kinit: %v", err)
-	}
-	c, err := loadCCache()
-	if err != nil {
-		t.Errorf("error loading CCache: %v", err)
-	}
+	c := loadNativeCCache(t, false)
 	cfg := mustIntegrationConfig(t, testdata.KRB5_CONF)
 	addr := os.Getenv("TEST_KDC_ADDR")
 	if addr == "" {
@@ -782,16 +795,15 @@ func TestGetServiceTicketFromCCacheTGT(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error generating client from ccache: %v", err)
 	}
-	spn := "HTTP/host.test.gokrb5"
-	tkt, key, err := cl.GetServiceTicket(spn)
+	tkt, key, err := cl.GetServiceTicket(testHTTPServiceSPN)
 	if err != nil {
 		t.Fatalf("error getting service ticket: %v\n", err)
 	}
-	assert.Equal(t, spn, tkt.SName.PrincipalNameString())
+	assert.Equal(t, testHTTPServiceSPN, tkt.SName.PrincipalNameString())
 	assert.Equal(t, int32(18), key.KeyType)
 
 	// Check cache use - should get the same values back again
-	tkt2, key2, err := cl.GetServiceTicket(spn)
+	tkt2, key2, err := cl.GetServiceTicket(testHTTPServiceSPN)
 	if err != nil {
 		t.Fatalf("error getting service ticket: %v\n", err)
 	}
@@ -803,7 +815,7 @@ func TestGetServiceTicketFromCCacheTGT(t *testing.T) {
 		url = testdata.TEST_HTTP_URL
 	}
 	r, _ := http.NewRequest("GET", url+"/modgssapi/index.html", nil) // #nosec G704 -- integration-test URL is explicitly configured by the environment.
-	err = spnego.SetSPNEGOHeader(cl, r, "HTTP/host.test.gokrb5")
+	err = spnego.SetSPNEGOHeader(cl, r, testHTTPServiceSPN)
 	if err != nil {
 		t.Fatalf("error setting client SPNEGO header: %v", err)
 	}
@@ -820,18 +832,7 @@ func TestGetServiceTicketFromCCacheTGT(t *testing.T) {
 func TestGetServiceTicketFromCCacheWithoutKDC(t *testing.T) {
 	test.Privileged(t)
 
-	err := login()
-	if err != nil {
-		t.Fatalf("error logging in with kinit: %v", err)
-	}
-	err = getServiceTkt()
-	if err != nil {
-		t.Fatalf("error getting service ticket: %v", err)
-	}
-	c, err := loadCCache()
-	if err != nil {
-		t.Errorf("error loading CCache: %v", err)
-	}
+	c := loadNativeCCache(t, true)
 	cfg := mustIntegrationConfig(t, "...")
 	cl, err := client.NewFromCCache(c, cfg)
 	if err != nil {
@@ -842,7 +843,7 @@ func TestGetServiceTicketFromCCacheWithoutKDC(t *testing.T) {
 		url = testdata.TEST_HTTP_URL
 	}
 	r, _ := http.NewRequest("GET", url+"/modgssapi/index.html", nil) // #nosec G704 -- integration-test URL is explicitly configured by the environment.
-	err = spnego.SetSPNEGOHeader(cl, r, "HTTP/host.test.gokrb5")
+	err = spnego.SetSPNEGOHeader(cl, r, testHTTPServiceSPN)
 	if err != nil {
 		t.Fatalf("error setting client SPNEGO header: %v", err)
 	}
@@ -915,8 +916,7 @@ func TestClient_Destroy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error on login: %v\n", err)
 	}
-	spn := "HTTP/host.test.gokrb5"
-	_, _, err = cl.GetServiceTicket(spn)
+	_, _, err = cl.GetServiceTicket(testHTTPServiceSPN)
 	if err != nil {
 		t.Fatalf("error getting service ticket: %v\n", err)
 	}

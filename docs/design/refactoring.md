@@ -824,6 +824,33 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 67 (2026-11-19, v8 client native credential-cache fixtures; Q-08):
+Give each native client test a temporary Kerberos configuration and
+`FILE:` credential cache. `kinit` and optional `kvno` use the same paths
+through child-process environment overrides; neither the host configuration
+nor the caller's cache is changed. Replace manually managed pipes with
+subprocess input and bounded stderr capture, retain exit status and diagnostic
+text, and bound command execution and pipe shutdown. Use one constant for
+the test HTTP service principal. Production code is unchanged.
+
+A controlled `kinit` failure reproduced the old configuration overwrite
+and inherited cache selection inside a private mount namespace. After the
+change the same probe left the config unchanged and verified temporary-file
+cleanup. A `kvno` probe confirmed both commands receive the same private
+paths. A self-reexec test checks stdin, environment overrides, stderr, and
+the exit error without requiring MIT tools. Its line-specific `G204`
+exception permits only the running test executable with a fixed test selector.
+
+Both module suites, client race/build/vet and Linux/386 checks, and a
+Windows/amd64 client test cross-build passed. V8 cross-package coverage
+remained 87.8%. Live MIT interoperability was not run locally.
+
+Both modules passed the changed-line gates against the slice baseline and
+`origin/main`. The canonical v8 inventory fell from 555 to 552 after
+removing three `govet` shadow findings; the supplemental inventory fell
+from 3,653 to 3,651 after removing `cyclop` and `goconst` findings. Neither
+inventory introduced any findings.
+
 Slice 66 (2026-11-19, SPNEGO HTTP test cleanup; Q-08):
 Remove the stray blank line in `Client.Do` and give each legacy HTTP method
 its own loopback subtest. Each case checks the method, path, body, content
