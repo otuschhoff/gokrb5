@@ -53,6 +53,23 @@ func TestDecoderRejectsInvalidTargets(t *testing.T) {
 	}
 }
 
+func TestDecoderRejectsGoPointerReferent(t *testing.T) {
+	t.Parallel()
+
+	const original = uint32(37)
+	value := original
+	target := &value
+	data := wrapNDRBody(littleEndianWords(99))
+	err := NewDecoder(bytes.NewReader(data)).Decode(&target)
+	malformed, ok := errors.AsType[Malformed](err)
+	if !ok || malformed.EText != "could not decode: unsupported type" {
+		t.Fatalf("Decode error = %v, want malformed unsupported type", err)
+	}
+	if target != &value || value != original {
+		t.Fatal("Decode modified the unsupported pointer target")
+	}
+}
+
 func TestDecoderMalformedRetainsTruncationCause(t *testing.T) {
 	for _, tt := range []struct {
 		name  string

@@ -163,7 +163,7 @@ func (dec *Decoder) noteConformantValue(v reflect.Value, tag tags) {
 		reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16,
 		reflect.Uint32, reflect.Uint64, reflect.Uintptr, reflect.Float32,
 		reflect.Float64, reflect.Complex64, reflect.Complex128, reflect.Array,
-		reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr,
+		reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer,
 		reflect.Struct, reflect.UnsafePointer:
 		return
 	}
@@ -191,7 +191,7 @@ func getReflectValue(s interface{}) reflect.Value {
 	var v reflect.Value
 	if r, ok := s.(reflect.Value); ok {
 		v = r
-	} else if reflect.ValueOf(s).Kind() == reflect.Ptr {
+	} else if reflect.ValueOf(s).Kind() == reflect.Pointer {
 		v = reflect.ValueOf(s).Elem()
 	}
 	return v
@@ -225,7 +225,7 @@ func (dec *Decoder) fill(s interface{}, tag reflect.StructTag, localDef *[]defer
 		return dec.fillSlice(v, tag, localDef)
 	case reflect.Invalid, reflect.Int, reflect.Uint, reflect.Uintptr,
 		reflect.Complex64, reflect.Complex128, reflect.Chan, reflect.Func,
-		reflect.Interface, reflect.Map, reflect.Ptr, reflect.UnsafePointer:
+		reflect.Interface, reflect.Map, reflect.Pointer, reflect.UnsafePointer:
 		return fmt.Errorf("unsupported type")
 	}
 	return fmt.Errorf("unsupported type")

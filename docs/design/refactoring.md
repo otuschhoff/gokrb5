@@ -2,8 +2,8 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-68 done. The latest v8
-inventories contain 550 canonical and 3,651 supplemental findings. Most
+(floor raised to 86.0%), and Phase 5 slices 1-69 done. The latest v8
+inventories contain 545 canonical and 3,651 supplemental findings. Most
 remaining canonical findings are from `revive`, complexity and nesting
 checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
 Phase 3/4 interoperability and Windows exit evidence remains an external CI
@@ -30,7 +30,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 87.8% cross-package statement coverage; 550 canonical lint findings after Slice 68 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 87.8% cross-package statement coverage; 545 canonical lint findings after Slice 69 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -819,6 +819,28 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 69 (2026-11-19, v8 NDR pointer-kind alias; Q-08):
+Replace the five remaining uses of `reflect.Ptr` with `reflect.Pointer`
+in NDR. This resolves the earlier inline deferral without sacrificing
+readability: the old name is an alias of the same kind on Go 1.26.0.
+Array dimensions, decode target handling, conformant counts, and
+supported wire types are unchanged. Existing nil and non-nil pointer
+cases and a new test that rejects a Go pointer referent without modifying
+it passed before and after the change.
+
+Both module suites passed, including PAC and NDR tests on minimum Go
+1.26.0 and Linux/386, repeated race tests, build and vet, and a
+Windows/amd64 test cross-build. `FuzzDecodeArrays` passed 978,249
+executions in 30 seconds. V8 cross-package coverage remained 87.8%.
+The first full v8 run hit an unrelated PKINIT skew timing assertion.
+The same failure reproduced on the unchanged baseline, and the full
+suite passed on rerun. Live interoperability was not run.
+
+Both modules passed changed-line lint against `8753e69` and `origin/main`.
+The v8 canonical inventory fell from 550 to 545, with zero `govet`
+findings remaining. The supplemental inventory stayed at 3,651. Neither
+inventory introduced new findings or suppressions.
 
 Slice 68 (2026-11-19, v8 credentials native credential-cache fixtures; Q-08):
 Use a private `krb5.conf` and `FILE:` cache for each credentials integration

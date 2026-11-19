@@ -28,7 +28,7 @@ func parseDimensions(v reflect.Value) ([]int, reflect.Type) {
 	if !v.IsValid() {
 		return l, tb
 	}
-	for v.Kind() == reflect.Ptr {
+	for v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			v = reflect.Zero(v.Type().Elem())
 		} else {
@@ -59,7 +59,7 @@ func parseDimensions(v reflect.Value) ([]int, reflect.Type) {
 func sliceDimensions(t reflect.Type) (int, reflect.Type) {
 	var d int
 	var tb reflect.Type
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if t.Kind() == reflect.Slice {
