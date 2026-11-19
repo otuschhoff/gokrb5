@@ -2,6 +2,7 @@ package pac
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"unicode/utf16"
@@ -9,49 +10,59 @@ import (
 	"github.com/jcmturner/rpc/v2/mstypes"
 )
 
-// ClientInfo implements https://msdn.microsoft.com/en-us/library/cc237951.aspx
+const (
+	clientInfoNameLengthOffset = 8
+	clientInfoHeaderSize       = 10
+	utf16CodeUnitSize          = 2
+)
+
+// ClientInfo is the PAC_CLIENT_INFO buffer defined by [MS-PAC].
+//
+// [MS-PAC]: https://msdn.microsoft.com/en-us/library/cc237951.aspx
 type ClientInfo struct {
-	ClientID   mstypes.FileTime // A FILETIME structure in little-endian format that contains the Kerberos initial ticket-granting ticket TGT authentication time
-	NameLength uint16           // An unsigned 16-bit integer in little-endian format that specifies the length, in bytes, of the Name field.
-	Name       string           // An array of 16-bit Unicode characters in little-endian format that contains the client's account name.
+	ClientID   mstypes.FileTime // Authentication time of the initial TGT.
+	NameLength uint16           // Byte length of the UTF-16LE name on the wire.
+	Name       string           // Client account name.
 }
 
-// Unmarshal bytes into the ClientInfo struct
+// Unmarshal decodes a PAC_CLIENT_INFO buffer.
 func (k *ClientInfo) Unmarshal(b []byte) error {
-
-	if len(b) < 10 {
-		return fmt.Errorf("%w: PAC_CLIENT_INFO is %d bytes, want at least 10", ErrPACMalformed, len(b))
+	if len(b) < clientInfoHeaderSize {
+		return fmt.Errorf("%w: PAC_CLIENT_INFO is %d bytes, want at least %d", ErrPACMalformed, len(b), clientInfoHeaderSize)
 	}
-	k.ClientID.LowDateTime = binary.LittleEndian.Uint32(b[0:4])
-	k.ClientID.HighDateTime = binary.LittleEndian.Uint32(b[4:8])
-	k.NameLength = binary.LittleEndian.Uint16(b[8:10])
-	if k.NameLength%2 != 0 || len(b) != 10+int(k.NameLength) {
+	k.ClientID.LowDateTime = binary.LittleEndian.Uint32(b[:4])
+	k.ClientID.HighDateTime = binary.LittleEndian.Uint32(b[4:clientInfoNameLengthOffset])
+	k.NameLength = binary.LittleEndian.Uint16(b[clientInfoNameLengthOffset:clientInfoHeaderSize])
+	name := b[clientInfoHeaderSize:]
+	if k.NameLength%utf16CodeUnitSize != 0 || len(name) != int(k.NameLength) {
 		return fmt.Errorf("%w: invalid PAC_CLIENT_INFO name length %d", ErrPACMalformed, k.NameLength)
 	}
-	units := make([]uint16, int(k.NameLength)/2)
+	units := make([]uint16, len(name)/utf16CodeUnitSize)
 	for i := range units {
-		units[i] = binary.LittleEndian.Uint16(b[10+i*2:])
+		units[i] = binary.LittleEndian.Uint16(name[i*utf16CodeUnitSize:])
 	}
 	k.Name = string(utf16.Decode(units))
 	return nil
 }
 
-// Marshal returns the PAC_CLIENT_INFO encoding.
+// Marshal encodes the PAC_CLIENT_INFO buffer, deriving the wire length from Name.
 func (k ClientInfo) Marshal() ([]byte, error) {
 	units := utf16.Encode([]rune(k.Name))
-	if len(units)*2 > math.MaxUint16 {
-		return nil, fmt.Errorf("PAC_CLIENT_INFO name is too long")
+	if len(units) > math.MaxUint16/utf16CodeUnitSize {
+		return nil, errors.New("PAC_CLIENT_INFO name is too long")
 	}
-	b := make([]byte, 10+len(units)*2)
-	binary.LittleEndian.PutUint32(b[0:4], k.ClientID.LowDateTime)
-	binary.LittleEndian.PutUint32(b[4:8], k.ClientID.HighDateTime)
-	length, err := pacUint16FromInt("PAC_CLIENT_INFO name length", len(units)*2)
+	nameBytes := len(units) * utf16CodeUnitSize
+	length, err := pacUint16FromInt("PAC_CLIENT_INFO name length", nameBytes)
 	if err != nil {
 		return nil, err
 	}
-	binary.LittleEndian.PutUint16(b[8:10], length)
+	b := make([]byte, clientInfoHeaderSize+nameBytes)
+	binary.LittleEndian.PutUint32(b[:4], k.ClientID.LowDateTime)
+	binary.LittleEndian.PutUint32(b[4:clientInfoNameLengthOffset], k.ClientID.HighDateTime)
+	binary.LittleEndian.PutUint16(b[clientInfoNameLengthOffset:clientInfoHeaderSize], length)
+	name := b[clientInfoHeaderSize:]
 	for i, unit := range units {
-		binary.LittleEndian.PutUint16(b[10+i*2:], unit)
+		binary.LittleEndian.PutUint16(name[i*utf16CodeUnitSize:], unit)
 	}
 	return b, nil
 }
