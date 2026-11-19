@@ -169,20 +169,25 @@ func TestKDCReqBodyAdditionalTicketsError(t *testing.T) {
 // TestUnmarshalTicketsSequenceErrors covers the ticket sequence rejections.
 func TestUnmarshalTicketsSequenceErrors(t *testing.T) {
 	// An application-tagged value whose content is not a valid ticket.
-	if _, err := unmarshalTicketsSequence(asn1.RawValue{Bytes: []byte{0x30, 0x05, 0x61, 0x03, 0x1b, 0x01, 0x01}}); err == nil {
-		t.Fatal("garbage ticket sequence was accepted")
-	}
+	var invalid asn1.RawValue
+	invalid.Bytes = []byte{0x30, 0x05, 0x61, 0x03, 0x1b, 0x01, 0x01}
+	tickets, err := unmarshalTicketsSequence(invalid)
+	var structure asn1.StructuralError
+	require.ErrorAs(t, err, &structure)
+	assert.ErrorContains(t, err, "unmarshaling sequence of tickets failed: decode ticket:")
+	assert.Nil(t, tickets)
+
 	valid := mustDecodeHex(t, testdata.MarshaledKRB5ticket)
-	raw, err := MarshalTicketSequence([]Ticket{mustUnmarshalTicket(t, valid)})
+	ticket := mustUnmarshalTicket(t, valid)
+	raw, err := MarshalTicketSequence([]Ticket{ticket, ticket})
 	require.NoError(t, err)
-	tickets, err := unmarshalTicketsSequence(raw)
-	require.NoError(t, err)
-	assert.Len(t, tickets, 1)
-	// Truncate the sequence content so the embedded ticket fails to parse.
-	truncated := asn1.RawValue{Bytes: raw.Bytes[:len(raw.Bytes)-2]}
-	if _, err := unmarshalTicketsSequence(truncated); err == nil {
-		t.Fatal("truncated ticket sequence was accepted")
-	}
+	// A truncated second member must not publish the first one.
+	raw.Bytes = raw.Bytes[:len(raw.Bytes)-1]
+	tickets, err = unmarshalTicketsSequence(raw)
+	var syntax asn1.SyntaxError
+	require.ErrorAs(t, err, &syntax)
+	assert.ErrorContains(t, err, "unmarshaling sequence of tickets failed getting length of ticket:")
+	assert.Nil(t, tickets)
 }
 
 func mustUnmarshalTicket(t *testing.T, b []byte) Ticket {

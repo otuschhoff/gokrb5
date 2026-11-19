@@ -134,21 +134,19 @@ func (t *EncTicketPart) Unmarshal(b []byte) error {
 	return nil
 }
 
-// unmarshalTicket returns a ticket from the bytes provided.
+// unmarshalTicket returns any decoded fields along with the decode error.
 func unmarshalTicket(b []byte) (Ticket, error) {
 	var t Ticket
-	var err error
-	err = t.Unmarshal(b)
+	err := t.Unmarshal(b)
 	return t, err
 }
 
-// UnmarshalTicketsSequence returns a slice of Tickets from a raw ASN1 value.
+// unmarshalTicketsSequence decodes each application-tagged ticket in the sequence.
 func unmarshalTicketsSequence(in asn1.RawValue) ([]Ticket, error) {
-	// This is a workaround to a asn1 decoding issue in golang - https://github.com/golang/go/issues/17321. It's not pretty I'm afraid
-	// We pull out raw values from the larger raw value (that is actually the data of the sequence of raw values) and track our position moving along the data.
+	// Decode members individually to work around https://github.com/golang/go/issues/17321.
 	b := in.Bytes
-	// Ignore the head of the asn1 stream (1 byte for tag and those for the length) as this is what tells us its a sequence but we're handling it ourselves
-	p := 1 + asn1tools.GetNumberBytesInLengthHeader(in.Bytes)
+	// Skip the SEQUENCE identifier and its encoded length.
+	p := 1 + asn1tools.GetNumberBytesInLengthHeader(b)
 	var tkts []Ticket
 	var raw asn1.RawValue
 	for p < len(b) {
@@ -166,14 +164,17 @@ func unmarshalTicketsSequence(in asn1.RawValue) ([]Ticket, error) {
 	return tkts, nil
 }
 
-// MarshalTicketSequence marshals a slice of Tickets returning an ASN1 raw value containing the ticket sequence.
+// MarshalTicketSequence wraps the ticket sequence for an explicit ASN.1 field.
+// The caller sets the field's context-specific tag.
 func MarshalTicketSequence(tkts []Ticket) (asn1.RawValue, error) {
 	raw := asn1.RawValue{
-		Class:      2,
+		Class:      asn1.ClassContextSpecific,
+		Tag:        0,
 		IsCompound: true,
+		Bytes:      nil,
+		FullBytes:  nil,
 	}
 	if len(tkts) < 1 {
-		// There are no tickets to marshal
 		return raw, nil
 	}
 	var btkts []byte
@@ -184,18 +185,10 @@ func MarshalTicketSequence(tkts []Ticket) (asn1.RawValue, error) {
 		}
 		btkts = append(btkts, b...)
 	}
-	// The ASN1 wrapping consists of 2 bytes:
-	// 1st byte -> Identifier Octet - In this case an OCTET STRING (ASN TAG
-	// 2nd byte -> The length (this will be the size indicated in the input bytes + 2 for the additional bytes we add here.
-	// Application Tag:
-	// | Byte:       | 8                            | 7                          | 6                                         | 5 | 4 | 3 | 2 | 1             |
-	// | Value:      | 0                            | 1                          | 1                                         | From the RFC spec 4120        |
-	// | Explanation | Defined by the ASN1 encoding rules for an application tag | A value of 1 indicates a constructed type | The ASN Application tag value |
+	// The explicit field contains a universal, constructed SEQUENCE.
+	const constructedBit = 0x20
 	btkts = append(asn1tools.MarshalLengthBytes(len(btkts)), btkts...)
-	btkts = append([]byte{byte(32 + asn1.TagSequence)}, btkts...)
-	raw.Bytes = btkts
-	// If we need to create the full bytes then identifier octet is "context-specific" = 128 + "constructed" + 32 + the wrapping explicit tag (11)
-	// fmt.Fprintf(os.Stderr, "mRaw fb: %v\n", raw.FullBytes)
+	raw.Bytes = append([]byte{constructedBit | asn1.TagSequence}, btkts...)
 	return raw, nil
 }
 

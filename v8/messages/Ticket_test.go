@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/iana"
 	"github.com/otuschhoff/gokrb5/v8/iana/addrtype"
@@ -43,6 +45,64 @@ func TestTicketDecodeErrorContext(t *testing.T) {
 			if _, ok := errors.AsType[asn1.SyntaxError](err); !ok || !strings.HasPrefix(err.Error(), tt.context) {
 				t.Fatalf("Unmarshal() = %v; want %q and ASN.1 syntax cause", err, tt.context)
 			}
+		})
+	}
+}
+
+func TestUnmarshalTicketRetainsDecodedFieldsOnError(t *testing.T) {
+	t.Parallel()
+
+	// The version and realm are valid, but the explicit service name is empty.
+	data := mustDecodeHex(t, "6111300fa003020105a1061b0454455354a200")
+	ticket, err := unmarshalTicket(data)
+	var structure asn1.StructuralError
+	require.ErrorAs(t, err, &structure)
+	assert.ErrorContains(t, err, "decode ticket:")
+	assert.Equal(t, iana.PVNO, ticket.TktVNO)
+	assert.Equal(t, "TEST", ticket.Realm)
+}
+
+func TestTicketSequenceFraming(t *testing.T) {
+	t.Parallel()
+
+	firstWire := mustDecodeHex(t, testdata.MarshaledKRB5ticket)
+	first := mustUnmarshalTicket(t, firstWire)
+	second := first
+	second.Realm = "SECOND.EXAMPLE"
+	secondWire, err := second.Marshal()
+	require.NoError(t, err)
+
+	for _, tt := range []struct {
+		name        string
+		tickets     []Ticket
+		expectBytes []byte
+	}{
+		{name: "empty", tickets: nil, expectBytes: nil},
+		{
+			name:        "short length",
+			tickets:     []Ticket{first},
+			expectBytes: slices.Concat([]byte{0x30, 0x5e}, firstWire),
+		},
+		{
+			name:        "long length in ticket order",
+			tickets:     []Ticket{first, second},
+			expectBytes: slices.Concat([]byte{0x30, 0x81, 0xbc}, firstWire, secondWire),
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			raw, err := MarshalTicketSequence(tt.tickets)
+			require.NoError(t, err)
+			assert.Equal(t, asn1.ClassContextSpecific, raw.Class)
+			assert.True(t, raw.IsCompound)
+			assert.Zero(t, raw.Tag, "the caller supplies the field tag")
+			assert.Nil(t, raw.FullBytes)
+			assert.Equal(t, tt.expectBytes, raw.Bytes)
+
+			tickets, err := unmarshalTicketsSequence(raw)
+			require.NoError(t, err)
+			assert.Equal(t, tt.tickets, tickets)
 		})
 	}
 }
