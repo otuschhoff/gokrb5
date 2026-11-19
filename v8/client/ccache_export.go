@@ -58,15 +58,15 @@ func (cl *Client) CCache() (*credentials.CCache, error) {
 		cache.AddCredential(credential)
 	}
 	cl.cache.mux.RUnlock()
-	if len(sessionRealms) == 0 && len(serviceNames) == 0 {
+	entries := cache.GetEntries()
+	if len(entries) == 0 {
 		return nil, errors.New("client has no credentials to export")
 	}
 
 	if cl.settings.preAuthType != 0 {
-		entries := cache.GetEntries()
 		principal := entries[0].Server.PrincipalName.PrincipalNameString() + "@" + entries[0].Server.Realm
 		if err := cache.SetConfig("pa_type", principal, strconv.FormatInt(int64(cl.settings.preAuthType), 10)); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("store credential cache preauthentication type: %w", err)
 		}
 	}
 	return cache, nil
@@ -81,7 +81,7 @@ func sessionCredential(cl *Client, session *session) (*credentials.Credential, e
 	}
 	ticket, err := session.tgt.Marshal()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("marshal session ticket for credential cache: %w", err)
 	}
 	return &credentials.Credential{
 		Client:       ccacheClientPrincipal(cl),
@@ -103,7 +103,7 @@ func sessionCredential(cl *Client, session *session) (*credentials.Credential, e
 func cacheEntryCredential(cl *Client, entry CacheEntry) (*credentials.Credential, error) {
 	ticket, err := entry.Ticket.Marshal()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("marshal service ticket for credential cache: %w", err)
 	}
 	return &credentials.Credential{
 		Client:       ccacheClientPrincipal(cl),

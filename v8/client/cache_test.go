@@ -1,12 +1,14 @@
 package client
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/types"
@@ -144,4 +146,19 @@ func TestCache_JSON(t *testing.T) {
 		t.Errorf("error getting json output of cache: %v", err)
 	}
 	assert.Equal(t, expected, j, "json output not as expected")
+}
+
+func TestCacheJSONRetainsEncodingFailure(t *testing.T) {
+	t.Parallel()
+	c := NewCache()
+	var entry CacheEntry
+	entry.SPN = "HTTP/cache-diagnostics.test"
+	entry.EndTime = time.Date(10000, time.January, 1, 0, 0, 0, 0, time.UTC)
+	c.Entries[entry.SPN] = entry
+
+	text, err := c.JSON()
+	require.ErrorContains(t, err, "encode service ticket cache as JSON")
+	var cause *json.MarshalerError
+	require.ErrorAs(t, err, &cause)
+	require.Empty(t, text)
 }

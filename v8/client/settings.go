@@ -252,7 +252,7 @@ func (s *Settings) JSON() (string, error) {
 	}
 	b, err := json.MarshalIndent(js, "", "  ")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("encode client settings as JSON: %w", err)
 	}
 	return string(b), nil
 }

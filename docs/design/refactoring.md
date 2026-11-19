@@ -824,6 +824,30 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 64 (2026-11-19, client credential export and diagnostic errors; Q-03):
+Preserve typed causes and identify the failing operation when encoding session
+and service tickets, writing `pa_type` metadata, or serializing the cache,
+sessions, and settings as JSON. Validate that the export contains a real
+credential before selecting the ticket for `pa_type`: a configuration-only
+cache now returns the same error as an empty cache, with or without
+preauthentication metadata. Successful cache bytes, JSON output, metadata
+association, and lock ordering are unchanged.
+
+Regressions cover ASN.1 and JSON encoding failures, lock release when export
+fails, and rejection of configuration-only caches. Both module suites,
+the full Linux/386 v8 suite, and focused race, build, and vet checks passed.
+The initial Linux/386 run hit the known AS clock-skew test flake; the suite
+passed on an isolated rerun. `FuzzCCacheUnmarshal` passed 891,858 executions
+in 60 seconds with one worker after an initial run ended with a deadline
+error and no failing input. V8 cross-package statement coverage remained
+87.8%. Live interoperability was not run because Docker access was unavailable.
+
+The final six v8 `wrapcheck` findings were resolved without suppressions.
+Both modules passed changed-line lint against the slice baseline and
+`origin/main`. Canonical v8 findings fell from 573 to 567, and supplemental
+findings remained at 3,655. Neither inventory introduced findings or increased
+complexity scores. V8 reported zero `wrapcheck` and zero `gosec` findings.
+
 Slice 63 (2026-11-19, client transport and password-change errors; Q-03):
 Add operation context to UDP/TCP KDC discovery, KKDCP request framing,
 and password-change request construction, discovery, encoding, and reply

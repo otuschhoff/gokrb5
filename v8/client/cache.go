@@ -3,6 +3,7 @@ package client
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -77,7 +78,7 @@ func (c *Cache) JSON() (string, error) {
 	}
 	b, err := json.MarshalIndent(&es, "", "  ")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("encode service ticket cache as JSON: %w", err)
 	}
 	return string(b), nil
 }

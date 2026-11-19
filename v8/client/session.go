@@ -254,7 +254,7 @@ func (s *sessions) JSON() (string, error) {
 	}
 	b, err := json.MarshalIndent(js, "", "  ")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("encode TGT sessions as JSON: %w", err)
 	}
 	return string(b), nil
 }

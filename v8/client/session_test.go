@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
@@ -128,6 +130,21 @@ func TestClient_AutoRenew_Goroutine(t *testing.T) {
 			t.Fatalf("number of goroutines is increasing: should not be more than %d, is %d", n, runtime.NumGoroutine())
 		}
 	}
+}
+
+func TestSessionsJSONRetainsEncodingFailure(t *testing.T) {
+	t.Parallel()
+	var sess session
+	sess.realm = "DIAGNOSTICS.TEST"
+	sess.endTime = time.Date(10000, time.January, 1, 0, 0, 0, 0, time.UTC)
+	var store sessions
+	store.Entries = map[string]*session{sess.realm: &sess}
+
+	text, err := store.JSON()
+	require.ErrorContains(t, err, "encode TGT sessions as JSON")
+	var cause *json.MarshalerError
+	require.ErrorAs(t, err, &cause)
+	require.Empty(t, text)
 }
 
 func TestSessions_JSON(t *testing.T) {
