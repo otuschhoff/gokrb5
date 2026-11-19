@@ -824,6 +824,34 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 62 (2026-11-19, client TGS and S4U error contracts; Q-03):
+Add operation context to ordinary and user-to-user referral requests,
+referral PA-DATA decoding, delegated KRB-CRED encoding, and S4U request
+encoding and reply processing. TGS referral exhaustion now returns an
+original classified error without formatting a nil cause. Reject a reply
+ticket with no server principal components before referral dispatch or
+caching. Preserve partial request and reply values on failure, the referral
+budget and session update order, and the verifying ticket on a user-to-user
+referral. S4U policy failures still return a concrete `krberror.PolicyError`
+with the same classification, KDC cause, and NTSTATUS.
+
+Regression tests cover failed referral rebuilds in both modes, the last
+allowed referral, malformed referral and S4U replies, and S4U verification
+and policy errors. Both module suites, the full Linux/386 v8 suite, and
+focused race, build, and vet checks passed. An initial race run hit the
+one-second tolerance of an unchanged AS clock-skew test; it passed on rerun.
+`FuzzMessageUnmarshal` (1,577,493 executions) and `FuzzMSKILEUnmarshal`
+(850,094 executions) passed 60-second runs. V8 cross-package statement
+coverage reached 87.6%. Live interoperability was not run because Docker
+daemon access was unavailable.
+
+All 11 targeted `wrapcheck` reports were resolved without suppressions.
+Both modules passed the changed-line gate against the slice baseline and
+`origin/main`. Canonical v8 findings fell from 594 to 582 (`wrapcheck`: 26
+to 15), and supplemental findings fell from 3,668 to 3,657. Neither
+inventory introduced findings or increased complexity scores. V8 continued
+to report zero `gosec` findings.
+
 Slice 61 (2026-11-19, client AS, PKINIT, and FAST error contracts; Q-03):
 Add operation context to key lookup and derivation, AS request construction,
 PKINIT request and reply processing, and armored AS/TGS processing. Existing

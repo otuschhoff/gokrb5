@@ -75,47 +75,96 @@ func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messa
 		}
 	}
 
-	if tgsRep.Ticket.SName.NameString[0] == "krbtgt" && !tgsRep.Ticket.SName.Equal(tgsReq.ReqBody.SName) {
-		if referral > 5 {
-			return tgsReq, tgsRep, krberror.Errorf(err, krberror.KRBMsgError, "TGS Exchange Error: maximum number of referrals exceeded")
-		}
-		// Server referral https://tools.ietf.org/html/rfc6806.html#section-8
-		// The TGS Rep contains a TGT for another domain as the service resides in that domain.
-		cl.addSession(tgsRep.Ticket, tgsRep.DecryptedEncPart)
-		realm, rerr := referralRealm(tgsRep.DecryptedEncPart.EncPAData, tgsRep.Ticket.SName.NameString[len(tgsRep.Ticket.SName.NameString)-1])
-		if rerr != nil {
-			return tgsReq, tgsRep, krberror.Errorf(rerr, krberror.EncodingError, "TGS Exchange Error: invalid PA-SVR-REFERRAL-INFO")
-		}
-		options := cl.tgsReqOptions(realm)
-		referral++
-		if types.IsFlagSet(&tgsReq.ReqBody.KDCOptions, flags.EncTktInSkey) && len(tgsReq.ReqBody.AdditionalTickets) > 0 {
-			tgsReq, err = messages.NewUser2UserTGSReqWithOptions(cl.Credentials.CName(), realm, cl.Config, tgsRep.Ticket, tgsRep.DecryptedEncPart.Key, tgsReq.ReqBody.SName, tgsReq.Renewal, tgsReq.ReqBody.AdditionalTickets[0], options)
-			if err != nil {
-				return tgsReq, tgsRep, err
-			}
-		} else {
-			tgsReq, err = messages.NewTGSReqWithOptions(cl.Credentials.CName(), realm, cl.Config, tgsRep.Ticket, tgsRep.DecryptedEncPart.Key, tgsReq.ReqBody.SName, tgsReq.Renewal, options)
-			if err != nil {
-				return tgsReq, tgsRep, err
-			}
-		}
-		return cl.TGSExchange(tgsReq, realm, tgsRep.Ticket, tgsRep.DecryptedEncPart.Key, referral)
+	serverName := tgsRep.Ticket.SName
+	if len(serverName.NameString) == 0 {
+		return tgsReq, tgsRep, newTGSExchangeError("reply ticket has no server principal components")
 	}
+	if serverName.NameString[0] == "krbtgt" && !serverName.Equal(tgsReq.ReqBody.SName) {
+		return cl.followTGSReferral(tgsReq, tgsRep, referral)
+	}
+	cl.cacheTGSReply(tgsRep)
+	return tgsReq, tgsRep, nil
+}
+
+func (cl *Client) cacheTGSReply(reply messages.TGSRep) {
+	ticket, part := reply.Ticket, reply.DecryptedEncPart
 	cl.cache.addEntryWithDetails(
-		tgsRep.Ticket,
-		tgsRep.DecryptedEncPart.AuthTime,
-		tgsRep.DecryptedEncPart.StartTime,
-		tgsRep.DecryptedEncPart.EndTime,
-		tgsRep.DecryptedEncPart.RenewTill,
-		tgsRep.DecryptedEncPart.Key,
-		tgsRep.DecryptedEncPart.Flags,
-		tgsRep.DecryptedEncPart.CAddr,
+		ticket,
+		part.AuthTime,
+		part.StartTime,
+		part.EndTime,
+		part.RenewTill,
+		part.Key,
+		part.Flags,
+		part.CAddr,
 		nil,
 		false,
 		nil,
 	)
-	cl.Log("ticket added to cache for %s (EndTime: %v)", tgsRep.Ticket.SName.PrincipalNameString(), tgsRep.DecryptedEncPart.EndTime)
-	return tgsReq, tgsRep, err
+	cl.Log("ticket added to cache for %s (EndTime: %v)", ticket.SName.PrincipalNameString(), part.EndTime)
+}
+
+func newTGSExchangeError(message string) krberror.Krberror {
+	return krberror.NewErrorf(krberror.KRBMsgError, "TGS Exchange Error: %s", message)
+}
+
+func (cl *Client) followTGSReferral(
+	req messages.TGSReq,
+	rep messages.TGSRep,
+	count int,
+) (messages.TGSReq, messages.TGSRep, error) {
+	if count > 5 {
+		return req, rep, newTGSExchangeError("maximum number of referrals exceeded")
+	}
+	// RFC 6806 section 8: the reply contains the TGT for the next realm.
+	part, ticket := rep.DecryptedEncPart, rep.Ticket
+	cl.addSession(ticket, part)
+	components := ticket.SName.NameString
+	realm, err := referralRealm(part.EncPAData, components[len(components)-1])
+	if err != nil {
+		return req, rep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: invalid PA-SVR-REFERRAL-INFO")
+	}
+	nextReq, err := cl.newReferralRequest(req, rep, realm)
+	if err != nil {
+		return nextReq, rep, err
+	}
+	return cl.TGSExchange(nextReq, realm, ticket, part.Key, count+1)
+}
+
+func (cl *Client) newReferralRequest(req messages.TGSReq, rep messages.TGSRep, realm string) (messages.TGSReq, error) {
+	options := cl.tgsReqOptions(realm)
+	body := req.ReqBody
+	if types.IsFlagSet(&body.KDCOptions, flags.EncTktInSkey) && len(body.AdditionalTickets) > 0 {
+		next, err := messages.NewUser2UserTGSReqWithOptions(
+			cl.Credentials.CName(),
+			realm,
+			cl.Config,
+			rep.Ticket,
+			rep.DecryptedEncPart.Key,
+			body.SName,
+			req.Renewal,
+			body.AdditionalTickets[0],
+			options,
+		)
+		if err != nil {
+			return next, krberror.Errorf(err, krberror.KRBMsgError, "build user-to-user referral TGS-REQ")
+		}
+		return next, nil
+	}
+	next, err := messages.NewTGSReqWithOptions(
+		cl.Credentials.CName(),
+		realm,
+		cl.Config,
+		rep.Ticket,
+		rep.DecryptedEncPart.Key,
+		body.SName,
+		req.Renewal,
+		options,
+	)
+	if err != nil {
+		return next, krberror.Errorf(err, krberror.KRBMsgError, "build referral TGS-REQ")
+	}
+	return next, nil
 }
 
 func (cl *Client) tgsReqOptions(realm string) messages.TGSReqOptions {
@@ -133,7 +182,7 @@ func referralRealm(paData types.PADataSequence, fallback string) (string, error)
 		}
 		referral, err := paData[i].GetPASvrReferralInfo()
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("decode referral realm from PA-SVR-REFERRAL-INFO: %w", err)
 		}
 		if referral.ReferredRealm != "" {
 			return referral.ReferredRealm, nil
@@ -212,5 +261,9 @@ func (cl *Client) GetDelegatedCredential(serviceTicket messages.Ticket, serviceS
 	if err != nil {
 		return nil, fmt.Errorf("could not build delegated KRB_CRED: %w", err)
 	}
-	return credential.Marshal()
+	wire, err := credential.Marshal()
+	if err != nil {
+		return wire, fmt.Errorf("marshal delegated KRB-CRED: %w", err)
+	}
+	return wire, nil
 }

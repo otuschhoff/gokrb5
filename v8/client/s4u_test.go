@@ -2,8 +2,12 @@ package client
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/jcmturner/gofork/encoding/asn1"
+	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/crypto"
@@ -273,24 +277,60 @@ func TestClassifyS4UErrorPreservesNTStatus(t *testing.T) {
 	}
 	kdcError := messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.COM", errorcode.KDC_ERR_BADOPTION, "denied")
 	kdcError.EData = eData
-	classified := classifyS4UError(kdcError, true)
-	if !errors.Is(classified, krberror.ErrDelegationNotPermitted) {
-		t.Fatalf("error = %v, want ErrDelegationNotPermitted", classified)
-	}
-	var statusProvider interface {
-		NTStatus() (ntstatus.Code, bool)
-	}
-	if !errors.As(classified, &statusProvider) {
-		t.Fatal("classified error does not expose NTSTATUS")
-	}
-	status, ok := statusProvider.NTStatus()
-	if !ok || status != ntstatus.STATUS_NO_MATCH {
-		t.Fatalf("NTSTATUS = %v, %v; want STATUS_NO_MATCH", status, ok)
+	cause := fmt.Errorf("kdc reply: %w", kdcError)
+	for _, tt := range []struct {
+		name  string
+		proxy bool
+		kind  error
+	}{
+		{name: "delegation", proxy: true, kind: krberror.ErrDelegationNotPermitted},
+		{name: "protocol transition", proxy: false, kind: krberror.ErrProtocolTransitionNotPermitted},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			classified := classifyS4UError(cause, tt.proxy)
+			require.ErrorIs(t, classified, tt.kind)
+			require.ErrorIs(t, classified, cause)
+			require.IsType(t, krberror.PolicyError{Kind: tt.kind, Cause: cause}, classified)
+			var policy krberror.PolicyError
+			require.ErrorAs(t, classified, &policy)
+			status, ok := policy.NTStatus()
+			require.True(t, ok)
+			require.Equal(t, ntstatus.STATUS_NO_MATCH, status)
+		})
 	}
 	policyError := messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.COM", errorcode.KDC_ERR_POLICY, "denied")
 	if got := classifyS4UError(policyError, true); !errors.Is(got, krberror.ErrDelegationNotPermitted) {
 		t.Fatalf("KDC_ERR_POLICY classification = %v, want ErrDelegationNotPermitted", got)
 	}
+}
+
+func TestS4UExchangeRetainsDecodeError(t *testing.T) {
+	client, request, _, key := newCoverageTGSRequest(t)
+	client.sendToKDCFunc = func([]byte, string) ([]byte, error) {
+		return []byte{0x6d, 0x01}, nil
+	}
+	reply, err := client.exchangeS4URequest(request, request.ReqBody.Realm, key)
+	require.ErrorContains(t, err, "decode S4U TGS-REP")
+	var structural asn1.StructuralError
+	require.ErrorAs(t, err, &structural)
+	require.Zero(t, reply)
+}
+
+func TestS4UExchangeRetainsVerificationError(t *testing.T) {
+	client, request, _, key := newCoverageTGSRequest(t)
+	client.sendToKDCFunc = func(requestBytes []byte, realm string) ([]byte, error) {
+		var decoded messages.TGSReq
+		require.NoError(t, decoded.Unmarshal(requestBytes))
+		decoded.ReqBody.Nonce ^= 1
+		return marshalS4UTGSReply(t, decoded, key, key, decoded.ReqBody.CName, realm, decoded.ReqBody.SName), nil
+	}
+	reply, err := client.exchangeS4URequest(request, request.ReqBody.Realm, key)
+	require.ErrorContains(t, err, "verify S4U TGS-REP")
+	require.ErrorContains(t, err, "nonce in response does not match")
+	var classified krberror.Krberror
+	require.ErrorAs(t, err, &classified)
+	require.Equal(t, krberror.KRBMsgError, classified.RootCause)
+	require.NotEqual(t, request.ReqBody.Nonce, reply.DecryptedEncPart.Nonce)
 }
 
 func s4uClientTestConfig() *config.Config {

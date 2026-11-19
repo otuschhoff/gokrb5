@@ -208,7 +208,7 @@ func (cl *Client) s4u2ProxyExchange(target types.PrincipalName, kdcRealm string,
 func (cl *Client) exchangeS4URequest(request messages.TGSReq, realm string, sessionKey types.EncryptionKey) (messages.TGSRep, error) {
 	requestBytes, err := request.Marshal()
 	if err != nil {
-		return messages.TGSRep{}, err
+		return messages.TGSRep{}, krberror.Errorf(err, krberror.EncodingError, "marshal S4U TGS-REQ")
 	}
 	replyBytes, err := cl.sendKDCRequest(requestBytes, realm)
 	if err != nil {
@@ -216,13 +216,17 @@ func (cl *Client) exchangeS4URequest(request messages.TGSReq, realm string, sess
 	}
 	var reply messages.TGSRep
 	if err := reply.Unmarshal(replyBytes); err != nil {
-		return reply, err
+		return reply, krberror.Errorf(err, krberror.EncodingError, "decode S4U TGS-REP")
 	}
 	if err := reply.DecryptEncPart(sessionKey); err != nil {
-		return reply, err
+		return reply, krberror.Errorf(err, krberror.DecryptingError, "decrypt S4U TGS-REP")
 	}
-	if ok, err := reply.VerifyS4U(cl.Config, request); !ok {
-		return reply, err
+	ok, verifyErr := reply.VerifyS4U(cl.Config, request)
+	if verifyErr != nil {
+		return reply, krberror.Errorf(verifyErr, krberror.KRBMsgError, "verify S4U TGS-REP")
+	}
+	if !ok {
+		return reply, errors.New("S4U TGS-REP verification failed")
 	}
 	return reply, nil
 }
@@ -241,11 +245,14 @@ func classifyS4UError(err error, proxy bool) error {
 	if !errors.As(err, &kdcError) {
 		return err
 	}
-	if proxy && (kdcError.ErrorCode == errorcode.KDC_ERR_BADOPTION || kdcError.ErrorCode == errorcode.KDC_ERR_POLICY) {
-		return krberror.NewPolicyError(krberror.ErrDelegationNotPermitted, err)
+	switch kdcError.ErrorCode {
+	case errorcode.KDC_ERR_BADOPTION, errorcode.KDC_ERR_POLICY:
+		kind := krberror.ErrProtocolTransitionNotPermitted
+		if proxy {
+			kind = krberror.ErrDelegationNotPermitted
+		}
+		return krberror.PolicyError{Kind: kind, Cause: err}
+	default:
+		return err
 	}
-	if !proxy && (kdcError.ErrorCode == errorcode.KDC_ERR_POLICY || kdcError.ErrorCode == errorcode.KDC_ERR_BADOPTION) {
-		return krberror.NewPolicyError(krberror.ErrProtocolTransitionNotPermitted, err)
-	}
-	return err
 }
