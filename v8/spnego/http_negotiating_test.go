@@ -11,10 +11,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/jcmturner/goidentity/v6"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/config"
@@ -587,68 +590,55 @@ func TestNegotiationRequestAndHeaderHelpers(t *testing.T) {
 }
 
 func TestLegacyHTTPClientMethodsWithoutChallenge(t *testing.T) {
-	type receivedRequest struct {
+	tests := []struct {
+		name        string
+		path        string
 		method      string
 		body        string
 		contentType string
+		send        func(*Client, string) (*http.Response, error)
+	}{
+		{name: "get", path: "/get", method: http.MethodGet, body: "", contentType: "", send: (*Client).Get},
+		{
+			name: "post", path: "/post", method: http.MethodPost, body: "post body", contentType: "text/plain",
+			send: func(c *Client, target string) (*http.Response, error) {
+				return c.Post(target, "text/plain", strings.NewReader("post body"))
+			},
+		},
+		{
+			name: "post form", path: "/form", method: http.MethodPost, body: "key=value",
+			contentType: "application/x-www-form-urlencoded",
+			send: func(c *Client, target string) (*http.Response, error) {
+				return c.PostForm(target, map[string][]string{"key": {"value"}})
+			},
+		},
+		{name: "head", path: "/head", method: http.MethodHead, body: "", contentType: "", send: (*Client).Head},
 	}
-	var received []receivedRequest
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		body, _ := io.ReadAll(request.Body)
-		received = append(received, receivedRequest{
-			method: request.Method, body: string(body), contentType: request.Header.Get("Content-Type"),
-		})
-		writer.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	client := NewClient(nil, server.Client(), "HTTP/server.example")
-	getResponse, err := client.Get(server.URL + "/get")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if getResponse.StatusCode != http.StatusNoContent {
-		t.Fatalf("status = %d", getResponse.StatusCode)
-	}
-	if closeErr := getResponse.Body.Close(); closeErr != nil {
-		t.Fatal(closeErr)
-	}
-	postResponse, err := client.Post(server.URL+"/post", "text/plain", strings.NewReader("post body"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if postResponse.StatusCode != http.StatusNoContent {
-		t.Fatalf("status = %d", postResponse.StatusCode)
-	}
-	if err := postResponse.Body.Close(); err != nil {
-		t.Fatal(err)
-	}
-	formResponse, err := client.PostForm(server.URL+"/form", map[string][]string{"key": {"value"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if formResponse.StatusCode != http.StatusNoContent {
-		t.Fatalf("status = %d", formResponse.StatusCode)
-	}
-	if err := formResponse.Body.Close(); err != nil {
-		t.Fatal(err)
-	}
-	headResponse, err := client.Head(server.URL + "/head")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if headResponse.StatusCode != http.StatusNoContent {
-		t.Fatalf("status = %d", headResponse.StatusCode)
-	}
-	if err := headResponse.Body.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if len(received) != 4 || received[0].method != http.MethodGet || received[1].body != "post body" ||
-		received[2].body != "key=value" || received[3].method != http.MethodHead {
-		t.Fatalf("received requests = %+v", received)
-	}
-	if received[1].contentType != "text/plain" || received[2].contentType != "application/x-www-form-urlencoded" {
-		t.Fatalf("content types = %q/%q", received[1].contentType, received[2].contentType)
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				calls.Add(1)
+				body, readErr := io.ReadAll(request.Body)
+				assert.NoError(t, readErr)
+				assert.Equal(t, tt.method, request.Method)
+				assert.Equal(t, tt.path, request.URL.Path)
+				assert.Equal(t, tt.body, string(body))
+				assert.Equal(t, tt.contentType, request.Header.Get("Content-Type"))
+				assert.Empty(t, request.Header.Get(HTTPHeaderAuthRequest))
+				writer.WriteHeader(http.StatusNoContent)
+			}))
+			defer server.Close()
+
+			c := NewClient(nil, server.Client(), "HTTP/server.example")
+			resp, err := tt.send(c, server.URL+tt.path)
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+			assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+			assert.Equal(t, int32(1), calls.Load())
+		})
 	}
 }
 

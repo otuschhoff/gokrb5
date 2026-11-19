@@ -254,7 +254,6 @@ func (c *Client) setContext(context gssapi.Context) {
 
 // Do is the SPNEGO enabled HTTP client's equivalent of the http.Client's Do method.
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
-
 	if req == nil {
 		return nil, errors.New("HTTP request is nil")
 	}

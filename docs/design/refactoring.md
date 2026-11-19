@@ -824,6 +824,24 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 66 (2026-11-19, SPNEGO HTTP test cleanup; Q-08):
+Remove the stray blank line in `Client.Do` and give each legacy HTTP method
+its own loopback subtest. Each case checks the method, path, body, content
+type, and absence of an Authorization header without a challenge. The test
+checks request-body read errors, verifies exactly one request per method,
+and still closes every successful response. Production behavior is unchanged.
+
+Both module suites passed, along with SPNEGO race, build, vet, and Linux/386
+checks. The four method cases passed 100 shuffled race-enabled runs. V8
+cross-package statement coverage remained 87.8%. Live interoperability was
+not run.
+
+The changed-line gate passed for both modules against `d10e35d` (`origin/main`
+at the time of verification). The canonical v8 inventory fell from 558 to
+555: one `gofumpt` and two `govet` shadow findings were removed. The
+supplemental inventory fell from 3,655 to 3,653 as the test no longer
+triggers `cyclop` or `funlen`. No findings were added or suppressed.
+
 Slice 65 (2026-11-19, MS-KILE PA-DATA getter cleanup; Q-08):
 Initialize the error directly in nine getters while keeping decoding separate
 from the return. The getters still return the decoder-populated value and
