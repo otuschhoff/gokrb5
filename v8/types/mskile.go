@@ -393,8 +393,7 @@ func NewKerbPAPACRequestPAData(include bool) (PAData, error) {
 // GetKerbPAPACRequest decodes the KerbPAPACRequest carried by the value.
 func (pa *PAData) GetKerbPAPACRequest() (KerbPAPACRequest, error) {
 	var v KerbPAPACRequest
-	var err error
-	err = getPAData(pa, patype.PA_PAC_REQUEST, &v)
+	err := getPAData(pa, patype.PA_PAC_REQUEST, &v)
 	return v, err
 }
 
@@ -413,8 +412,7 @@ func NewPAPACOptionsPAData(bits ...int) (PAData, error) {
 // GetPAPACOptions decodes the PAPACOptions carried by the value.
 func (pa *PAData) GetPAPACOptions() (PAPACOptions, error) {
 	var v PAPACOptions
-	var err error
-	err = getPAData(pa, patype.PA_PAC_OPTIONS, &v)
+	err := getPAData(pa, patype.PA_PAC_OPTIONS, &v)
 	return v, err
 }
 
@@ -426,8 +424,7 @@ func NewPAForUserPAData(v PAForUser) (PAData, error) {
 // GetPAForUser decodes the PAForUser carried by the value.
 func (pa *PAData) GetPAForUser() (PAForUser, error) {
 	var v PAForUser
-	var err error
-	err = getPAData(pa, patype.PA_FOR_USER, &v)
+	err := getPAData(pa, patype.PA_FOR_USER, &v)
 	return v, err
 }
 
@@ -439,8 +436,7 @@ func NewPAS4UX509UserPAData(v PAS4UX509User) (PAData, error) {
 // GetPAS4UX509User decodes the PAS4UX509User carried by the value.
 func (pa *PAData) GetPAS4UX509User() (PAS4UX509User, error) {
 	var v PAS4UX509User
-	var err error
-	err = getPAData(pa, patype.PA_S4U_X509_USER, &v)
+	err := getPAData(pa, patype.PA_S4U_X509_USER, &v)
 	return v, err
 }
 
@@ -469,8 +465,7 @@ func NewKerbKeyListReqPAData(v KerbKeyListReq) (PAData, error) {
 // GetKerbKeyListReq decodes the KerbKeyListReq carried by the value.
 func (pa *PAData) GetKerbKeyListReq() (KerbKeyListReq, error) {
 	var v KerbKeyListReq
-	var err error
-	err = getPAData(pa, patype.PA_KERB_KEY_LIST_REQ, &v)
+	err := getPAData(pa, patype.PA_KERB_KEY_LIST_REQ, &v)
 	return v, err
 }
 
@@ -482,8 +477,7 @@ func NewKerbKeyListRepPAData(v KerbKeyListRep) (PAData, error) {
 // GetKerbKeyListRep decodes the KerbKeyListRep carried by the value.
 func (pa *PAData) GetKerbKeyListRep() (KerbKeyListRep, error) {
 	var v KerbKeyListRep
-	var err error
-	err = getPAData(pa, patype.PA_KERB_KEY_LIST_REP, &v)
+	err := getPAData(pa, patype.PA_KERB_KEY_LIST_REP, &v)
 	return v, err
 }
 
@@ -495,8 +489,7 @@ func NewPASvrReferralInfoPAData(v PASvrReferralData) (PAData, error) {
 // GetPASvrReferralInfo decodes the PASvrReferralInfo carried by the value.
 func (pa *PAData) GetPASvrReferralInfo() (PASvrReferralData, error) {
 	var v PASvrReferralData
-	var err error
-	err = getPAData(pa, patype.PA_SVR_REFERRAL_INFO, &v)
+	err := getPAData(pa, patype.PA_SVR_REFERRAL_INFO, &v)
 	return v, err
 }
 
@@ -508,8 +501,7 @@ func NewKerbSupersededByUserPAData(v KerbSupersededByUser) (PAData, error) {
 // GetKerbSupersededByUser decodes the KerbSupersededByUser carried by the value.
 func (pa *PAData) GetKerbSupersededByUser() (KerbSupersededByUser, error) {
 	var v KerbSupersededByUser
-	var err error
-	err = getPAData(pa, patype.PA_SUPERSEDED_BY_USER, &v)
+	err := getPAData(pa, patype.PA_SUPERSEDED_BY_USER, &v)
 	return v, err
 }
 
@@ -521,8 +513,7 @@ func NewKerbDMSAKeyPackagePAData(v KerbDMSAKeyPackage) (PAData, error) {
 // GetKerbDMSAKeyPackage decodes the KerbDMSAKeyPackage carried by the value.
 func (pa *PAData) GetKerbDMSAKeyPackage() (KerbDMSAKeyPackage, error) {
 	var v KerbDMSAKeyPackage
-	var err error
-	err = getPAData(pa, patype.PA_DMSA_KEY_PACKAGE, &v)
+	err := getPAData(pa, patype.PA_DMSA_KEY_PACKAGE, &v)
 	return v, err
 }
 

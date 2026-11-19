@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/iana/adtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
@@ -385,6 +386,36 @@ func TestMSKILEPADataConstructors(t *testing.T) {
 	if _, err := NewPAPACOptionsPAData(32); err == nil {
 		t.Fatal("out-of-range PAC option was accepted")
 	}
+}
+
+func TestMSKILEPADataGetterErrorResults(t *testing.T) {
+	t.Parallel()
+
+	t.Run("trailing data returns decoded prefix and error", func(t *testing.T) {
+		pa, err := NewKerbPAPACRequestPAData(true)
+		require.NoError(t, err)
+		pa.PADataValue = append(pa.PADataValue, 0)
+
+		request, err := pa.GetKerbPAPACRequest()
+		require.EqualError(t, err, "trailing ASN.1 data: 1 bytes")
+		require.True(t, request.IncludePAC)
+	})
+
+	t.Run("wrong type is rejected before decoding", func(t *testing.T) {
+		pa, err := NewKerbPAPACRequestPAData(true)
+		require.NoError(t, err)
+		pa.PADataType = patype.PA_FOR_USER
+
+		request, err := pa.GetKerbPAPACRequest()
+		require.ErrorContains(t, err, "PAData type mismatch")
+		require.False(t, request.IncludePAC)
+	})
+
+	t.Run("truncation retains the ASN.1 cause", func(t *testing.T) {
+		pa := PAData{PADataType: patype.PA_SVR_REFERRAL_INFO, PADataValue: []byte{0x30, 0x01}}
+		_, err := pa.GetPASvrReferralInfo()
+		checkASN1ErrorContext[asn1.SyntaxError](t, err, "decode ASN.1 into *types.PASvrReferralData:")
+	})
 }
 
 func TestMSKILESemanticValidation(t *testing.T) {

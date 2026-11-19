@@ -824,6 +824,26 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 65 (2026-11-19, MS-KILE PA-DATA getter cleanup; Q-08):
+Initialize the error directly in nine getters while keeping decoding separate
+from the return. The getters still return the decoder-populated value and
+its error, including when a valid prefix is followed by trailing data.
+Characterization tests passed before and after the change: a mismatched
+PA-DATA type is rejected before decoding, a truncated ASN.1 value retains
+its typed cause, and trailing data still returns an error alongside the
+decoded prefix. Existing wire vectors are unchanged.
+
+Both module suites, the full Linux/386 v8 suite, and focused race, build,
+and vet checks passed. `FuzzMSKILEUnmarshal` passed 869,384 executions in
+60 seconds. V8 cross-package statement coverage remained 87.8%. Live
+interoperability was not run because Docker access was unavailable.
+
+All nine `S1021` findings in `types/mskile.go` were resolved without
+suppressions. Both modules passed the changed-line gates against the slice
+baseline and `origin/main`. The canonical v8 inventory fell from 567 to
+558 (`staticcheck`: 35 to 26), the supplemental inventory remained at
+3,655, and neither introduced findings.
+
 Slice 64 (2026-11-19, client credential export and diagnostic errors; Q-03):
 Preserve typed causes and identify the failing operation when encoding session
 and service tickets, writing `pa_type` metadata, or serializing the cache,
