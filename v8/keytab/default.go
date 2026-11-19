@@ -15,16 +15,9 @@ const (
 	defaultClientKeytabName = "FILE:/var/kerberos/krb5/user/%{euid}/client.keytab"
 )
 
-var defaultClientKeytabNames = []string{
-	defaultClientKeytabName,
-	"FILE:/etc/krb5/user/%{euid}/client.keytab",
-	"FILE:/var/lib/krb5/user/%{euid}/client.keytab",
-}
-
 // ResolveName resolves a FILE or WRFILE keytab name to a filesystem path.
 // The writable result reports whether the WRFILE type was requested.
 func ResolveName(name string, cfg *config.Config) (string, bool, error) {
-
 	var writable bool
 
 	if name == "" {
@@ -39,7 +32,7 @@ func ResolveName(name string, cfg *config.Config) (string, bool, error) {
 	case strings.HasPrefix(name, "WRFILE:"):
 		name = strings.TrimPrefix(name, "WRFILE:")
 		writable = true
-	case !isWindowsDrivePath(name) && strings.Contains(strings.SplitN(name, "/", 2)[0], ":"):
+	case hasKeytabTypePrefix(name):
 		return "", false, fmt.Errorf("unsupported keytab type in %q", name)
 	}
 	if name == "" {
@@ -59,6 +52,14 @@ func ResolveName(name string, cfg *config.Config) (string, bool, error) {
 		return "", false, fmt.Errorf("unsupported parameter in keytab name %q", name)
 	}
 	return name, writable, nil
+}
+
+func hasKeytabTypePrefix(name string) bool {
+	if isWindowsDrivePath(name) {
+		return false
+	}
+	first, _, _ := strings.Cut(name, "/")
+	return strings.Contains(first, ":")
 }
 
 func isWindowsDrivePath(name string) bool {
@@ -88,11 +89,16 @@ func LoadDefaultClient(cfg *config.Config) (*Keytab, error) {
 		name = defaultClientKeytabName
 	}
 	if name == defaultClientKeytabName {
-		name = firstExistingKeytabName(defaultClientKeytabNames)
+		name = firstExistingKeytabName([]string{
+			defaultClientKeytabName,
+			"FILE:/etc/krb5/user/%{euid}/client.keytab",
+			"FILE:/var/lib/krb5/user/%{euid}/client.keytab",
+		})
 	}
 	return Load(name)
 }
 
+// firstExistingKeytabName skips only missing files so Load can report other failures.
 func firstExistingKeytabName(names []string) string {
 	for _, name := range names {
 		path, _, err := ResolveName(name, nil)

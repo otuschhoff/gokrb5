@@ -280,6 +280,13 @@ func TestFirstExistingClientKeytabName(t *testing.T) {
 
 	assert.Equal(t, existing, firstExistingKeytabName([]string{missing, existing}))
 	assert.Equal(t, missing, firstExistingKeytabName([]string{missing, "FILE:" + filepath.Join(dir, "also-missing")}))
+
+	invalidPath := filepath.Join(dir, "invalid\x00path")
+	_, statErr := os.Stat(invalidPath)
+	require.Error(t, statErr)
+	require.False(t, os.IsNotExist(statErr), "expected an error other than a missing file")
+	invalid := "FILE:" + invalidPath
+	assert.Equal(t, invalid, firstExistingKeytabName([]string{invalid, existing}))
 }
 
 func TestKeytabFileAndNameErrors(t *testing.T) {
