@@ -18,6 +18,7 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
+	"github.com/otuschhoff/gokrb5/v8/krberror"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/service"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
@@ -33,6 +34,43 @@ func mustSPNEGOTestType[T any](t *testing.T, value any) T {
 		t.Fatalf("unexpected type %T", value)
 	}
 	return result
+}
+
+func TestSPNEGOInitiatorSetupRetainsCredentialErrors(t *testing.T) {
+	t.Parallel()
+
+	cl := client.NewWithPassword("", "EXAMPLE.COM", "", config.New())
+	s := SPNEGOClient(cl, "HTTP/server.example.com")
+	err := s.AcquireCred()
+	require.ErrorContains(t, err, "acquire SPNEGO initiator credentials:")
+	require.ErrorContains(t, err, "client does not have a username")
+
+	token, err := s.InitSecContext()
+	require.ErrorContains(t, err, "obtain SPNEGO service ticket:")
+	require.ErrorContains(t, err, "client does not have a username")
+	require.Equal(t, new(SPNEGOToken), token)
+	require.Nil(t, s.SecurityContext())
+}
+
+func TestSPNEGOSecurityContextRetainsKeyError(t *testing.T) {
+	t.Parallel()
+
+	s := new(SPNEGO)
+	s.contextKey.KeyType = etypeID.AES128_CTS_HMAC_SHA1_96
+	err := s.completeSecurityContext(true)
+	require.ErrorContains(t, err, "create SPNEGO security context:")
+	require.ErrorContains(t, err, "invalid key length")
+	require.Nil(t, s.SecurityContext())
+}
+
+func TestInitiatorAPRepRetainsSubkeyFailureWithoutTicketKey(t *testing.T) {
+	t.Parallel()
+
+	s := new(SPNEGO)
+	key, err := s.verifyInitiatorAPRep(new(messages.APRep))
+	require.Empty(t, key.KeyValue)
+	require.ErrorContains(t, err, "verify AP_REP with authenticator subkey:")
+	require.ErrorAs(t, err, new(krberror.Krberror))
 }
 
 func TestMutualContextExchange(t *testing.T) {

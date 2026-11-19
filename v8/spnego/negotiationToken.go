@@ -82,7 +82,11 @@ type NegTokenTarg NegTokenResp
 
 // MarshalMechTypeList returns the DER encoding protected by mechListMIC.
 func MarshalMechTypeList(mechTypes []asn1.ObjectIdentifier) ([]byte, error) {
-	return asn1.Marshal(mechTypes)
+	b, err := asn1.Marshal(mechTypes)
+	if err != nil {
+		return b, fmt.Errorf("marshal SPNEGO mechanism list: %w", err)
+	}
+	return b, nil
 }
 
 func makeMechListMIC(mechTypes []asn1.ObjectIdentifier, key types.EncryptionKey, flags byte, sequenceNumber uint64, keyUsage uint32) ([]byte, error) {
@@ -91,10 +95,14 @@ func makeMechListMIC(mechTypes []asn1.ObjectIdentifier, key types.EncryptionKey,
 		return nil, fmt.Errorf("could not marshal MechTypeList: %w", err)
 	}
 	token := gssapi.MICToken{Flags: flags, SndSeqNum: sequenceNumber, Payload: payload}
-	if err := token.SetChecksum(key, keyUsage); err != nil {
-		return nil, fmt.Errorf("could not sign MechTypeList: %w", err)
+	if signErr := token.SetChecksum(key, keyUsage); signErr != nil {
+		return nil, fmt.Errorf("could not sign MechTypeList: %w", signErr)
 	}
-	return token.Marshal()
+	b, err := token.Marshal()
+	if err != nil {
+		return b, fmt.Errorf("marshal mechListMIC: %w", err)
+	}
+	return b, nil
 }
 
 func verifyMechListMIC(mechTypes []asn1.ObjectIdentifier, mic []byte, key types.EncryptionKey, expectFromAcceptor bool, keyUsage uint32) error {
@@ -177,7 +185,7 @@ func (n *NegTokenInit) Marshal() ([]byte, error) {
 		})
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("marshal NegTokenInit payload: %w", err)
 	}
 	nt := asn1.RawValue{
 		Tag:        0,
@@ -187,7 +195,7 @@ func (n *NegTokenInit) Marshal() ([]byte, error) {
 	}
 	nb, err := asn1.Marshal(nt)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("wrap NegTokenInit payload: %w", err)
 	}
 	return nb, nil
 }
@@ -272,7 +280,7 @@ func (n *NegTokenResp) Marshal() ([]byte, error) {
 	}
 	b, err := asn1.Marshal(m)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("marshal NegTokenResp payload: %w", err)
 	}
 	nt := asn1.RawValue{
 		Tag:        1,
@@ -282,7 +290,7 @@ func (n *NegTokenResp) Marshal() ([]byte, error) {
 	}
 	nb, err := asn1.Marshal(nt)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("wrap NegTokenResp payload: %w", err)
 	}
 	return nb, nil
 }

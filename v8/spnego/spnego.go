@@ -85,7 +85,10 @@ func (s *SPNEGO) OID() asn1.ObjectIdentifier {
 
 // AcquireCred is the GSS-API method to acquire a client credential via Kerberos for SPNEGO.
 func (s *SPNEGO) AcquireCred() error {
-	return s.client.AffirmLogin()
+	if err := s.client.AffirmLogin(); err != nil {
+		return fmt.Errorf("acquire SPNEGO initiator credentials: %w", err)
+	}
+	return nil
 }
 
 // InitSecContext is the GSS-API method for the client to a generate a context token to the service via Kerberos.
@@ -93,7 +96,7 @@ func (s *SPNEGO) InitSecContext() (gssapi.ContextToken, error) {
 	s.securityContext = nil
 	tkt, key, err := s.client.GetServiceTicket(s.spn)
 	if err != nil {
-		return &SPNEGOToken{}, err
+		return &SPNEGOToken{}, fmt.Errorf("obtain SPNEGO service ticket: %w", err)
 	}
 	negTokenInit, err := NewNegTokenInitKRB5WithOptions(s.client, tkt, key, s.initiatorOptions)
 	if err != nil {
@@ -368,7 +371,7 @@ func (s *SPNEGO) completeSecurityContext(initiator bool) error {
 	}
 	securityContext, err := gssapi.NewSecurityContext(s.contextKey, initiator, contextSend, contextReceive, s.acceptorSubkey)
 	if err != nil {
-		return err
+		return fmt.Errorf("create SPNEGO security context: %w", err)
 	}
 	s.securityContext = securityContext
 	return nil
@@ -525,7 +528,7 @@ func (s *SPNEGO) verifyInitiatorAPRep(reply *messages.APRep) (types.EncryptionKe
 		return s.replyKey, nil
 	}
 	if len(s.ticketKey.KeyValue) == 0 {
-		return types.EncryptionKey{}, subkeyErr
+		return types.EncryptionKey{}, fmt.Errorf("verify AP_REP with authenticator subkey: %w", subkeyErr)
 	}
 	ticketErr := reply.Verify(s.authenticator, s.ticketKey)
 	if ticketErr == nil {
@@ -603,7 +606,7 @@ func makeInitiatorMechListMIC(mechTypes []asn1.ObjectIdentifier, key types.Encry
 func randomSequenceNumber() (int64, error) {
 	var encoded [4]byte
 	if _, err := rand.Read(encoded[:]); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("generate SPNEGO sequence number: %w", err)
 	}
 	return int64(binary.BigEndian.Uint32(encoded[:]) & 0x3fffffff), nil
 }

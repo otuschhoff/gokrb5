@@ -64,18 +64,20 @@ func (m *KRB5Token) Marshal() ([]byte, error) {
 	if m.raw {
 		switch hex.EncodeToString(m.tokID) {
 		case TOK_ID_KRB_AP_REQ:
-			return m.APReq.Marshal()
+			return marshalRawAPToken("AP-REQ", m.APReq.Marshal)
 		case TOK_ID_KRB_AP_REP:
-			return m.APRep.Marshal()
+			return marshalRawAPToken("AP-REP", m.APRep.Marshal)
 		default:
 			return nil, errors.New("raw Kerberos token has unsupported token type")
 		}
 	}
 	// Create the header
-	b, _ := asn1.Marshal(m.OID)
+	b, err := asn1.Marshal(m.OID)
+	if err != nil {
+		return nil, fmt.Errorf("marshal Kerberos mechanism OID: %w", err)
+	}
 	b = append(b, m.tokID...)
 	var tb []byte
-	var err error
 	switch hex.EncodeToString(m.tokID) {
 	case TOK_ID_KRB_AP_REQ:
 		tb, err = m.APReq.Marshal()
@@ -90,24 +92,30 @@ func (m *KRB5Token) Marshal() ([]byte, error) {
 	case TOK_ID_KRB_ERROR:
 		return []byte{}, errors.New("marshal of KRB_ERROR GSSAPI MechToken not supported by gokrb5")
 	}
-	if err != nil {
-		return []byte{}, fmt.Errorf("error mashalling kerberos message within mech token: %w", err)
-	}
 	b = append(b, tb...)
 	return asn1tools.AddASNAppTag(b, 0), nil
 }
 
-// Unmarshal a KRB5Token.
+func marshalRawAPToken(kind string, marshal func() ([]byte, error)) ([]byte, error) {
+	b, err := marshal()
+	if err != nil {
+		return b, fmt.Errorf("marshal raw %s: %w", kind, err)
+	}
+	return b, nil
+}
+
+// Unmarshal decodes a KRB5Token. Protocol errors from raw AP messages are
+// returned as before, so callers can inspect concrete KRB-ERROR values.
 func (m *KRB5Token) Unmarshal(b []byte) error {
 	if len(b) > 0 && b[0] == byte(0x60+asnAppTag.APREQ) {
 		m.raw = true
 		m.tokID, _ = hex.DecodeString(TOK_ID_KRB_AP_REQ)
-		return m.APReq.Unmarshal(b)
+		return rawAPDecodeError("AP-REQ", m.APReq.Unmarshal(b))
 	}
 	if len(b) > 0 && b[0] == byte(0x60+asnAppTag.APREP) {
 		m.raw = true
 		m.tokID, _ = hex.DecodeString(TOK_ID_KRB_AP_REP)
-		return m.APRep.Unmarshal(b)
+		return rawAPDecodeError("AP-REP", m.APRep.Unmarshal(b))
 	}
 	var oid asn1.ObjectIdentifier
 	r, err := asn1.UnmarshalWithParams(b, &oid, fmt.Sprintf("application,explicit,tag:%v", 0))
@@ -146,6 +154,16 @@ func (m *KRB5Token) Unmarshal(b []byte) error {
 		m.KRBError = a
 	}
 	return nil
+}
+
+func rawAPDecodeError(kind string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := errors.AsType[messages.KRBError](err); ok {
+		return err
+	}
+	return fmt.Errorf("unmarshal raw %s: %w", kind, err)
 }
 
 // Verify a KRB5Token.
@@ -234,7 +252,7 @@ func NewKRB5TokenAPREQWithOptions(cl *client.Client, tkt messages.Ticket, sessio
 		var err error
 		delegatedCredential, err = cl.GetDelegatedCredential(tkt, sessionKey, options.DelegationAddresses, options.ForceDelegation)
 		if err != nil {
-			return m, err
+			return m, fmt.Errorf("obtain delegated Kerberos credential: %w", err)
 		}
 		gssFlags = appendContextFlag(gssFlags, gssapi.ContextFlagDeleg)
 	}
@@ -253,20 +271,20 @@ func NewKRB5TokenAPREQWithOptions(cl *client.Client, tkt messages.Ticket, sessio
 	if options.ChannelBindings != nil {
 		entry, cerr := types.NewADAuthDataAPOptionsEntry(msflags.KERB_AP_OPTIONS_CBT)
 		if cerr != nil {
-			return m, cerr
+			return m, fmt.Errorf("create channel-binding authorization data: %w", cerr)
 		}
 		encoded, merr := asn1.Marshal(types.AuthorizationData{entry})
 		if merr != nil {
-			return m, merr
+			return m, fmt.Errorf("marshal channel-binding authorization data: %w", merr)
 		}
 		auth.AuthorizationData = append(auth.AuthorizationData, types.AuthorizationDataEntry{ADType: adtype.ADIfRelevant, ADData: encoded})
 	}
 	et, err := krbcrypto.GetEtype(sessionKey.KeyType)
 	if err != nil {
-		return m, err
+		return m, fmt.Errorf("select AP-REQ session key enctype: %w", err)
 	}
 	if ierr := auth.GenerateSeqNumberAndSubKey(sessionKey.KeyType, et.GetKeyByteSize()); ierr != nil {
-		return m, ierr
+		return m, fmt.Errorf("generate AP-REQ authenticator sequence and subkey: %w", ierr)
 	}
 	APReq, err := messages.NewAPReq(
 		tkt,
@@ -274,7 +292,7 @@ func NewKRB5TokenAPREQWithOptions(cl *client.Client, tkt messages.Ticket, sessio
 		auth,
 	)
 	if err != nil {
-		return m, err
+		return m, fmt.Errorf("create AP-REQ: %w", err)
 	}
 	for _, o := range options.APOptions {
 		types.SetFlag(&APReq.APOptions, o)

@@ -78,7 +78,7 @@ func (c *mechanismConversation) initStep(input []byte, options ...gssapi.Mechani
 		c.selected = c.mechanisms[0]
 		mechanismToken, context, done, err := c.selected.InitSecContext(c.target, nil, options...)
 		if err != nil {
-			return nil, nil, false, err
+			return nil, nil, false, fmt.Errorf("start SPNEGO initiator mechanism: %w", err)
 		}
 		c.context, c.mechanismDone, c.step = context, done, 1
 		output, err := marshalSPNEGOToken(&SPNEGOToken{Init: true, NegTokenInit: NegTokenInit{
@@ -112,7 +112,7 @@ func (c *mechanismConversation) initStep(input []byte, options ...gssapi.Mechani
 	if !c.mechanismDone || len(mechanismToken) > 0 {
 		output, c.context, c.mechanismDone, err = c.selected.InitSecContext(c.target, mechanismToken, options...)
 		if err != nil {
-			return nil, c.context, false, err
+			return nil, c.context, false, fmt.Errorf("continue SPNEGO initiator mechanism: %w", err)
 		}
 	}
 	if len(token.NegTokenResp.MechListMIC) > 0 {
@@ -124,7 +124,7 @@ func (c *mechanismConversation) initStep(input []byte, options ...gssapi.Mechani
 			return nil, c.context, false, marshalErr
 		}
 		if ierr := c.context.VerifyMIC(mechList, token.NegTokenResp.MechListMIC); ierr != nil {
-			return nil, c.context, false, ierr
+			return nil, c.context, false, fmt.Errorf("verify acceptor mechListMIC: %w", ierr)
 		}
 	} else if state == NegStateRequestMIC {
 		return nil, c.context, false, ErrMissingMechListMIC
@@ -142,7 +142,7 @@ func (c *mechanismConversation) initStep(input []byte, options ...gssapi.Mechani
 		}
 		response.MechListMIC, err = c.context.GetMIC(mechList)
 		if err != nil {
-			return nil, c.context, false, err
+			return nil, c.context, false, fmt.Errorf("generate initiator mechListMIC: %w", err)
 		}
 		response.NegState = asn1.Enumerated(NegStateAcceptCompleted)
 		encoded, marshalErr := marshalSPNEGOToken(&SPNEGOToken{Resp: true, NegTokenResp: response})
@@ -189,7 +189,7 @@ func (c *mechanismConversation) acceptStep(input []byte, options ...gssapi.Mecha
 				return nil, c.context, false, marshalErr
 			}
 			if err := c.context.VerifyMIC(mechList, token.NegTokenResp.MechListMIC); err != nil {
-				return nil, c.context, false, err
+				return nil, c.context, false, fmt.Errorf("verify initiator mechListMIC: %w", err)
 			}
 			c.waitingMIC = false
 			return nil, c.context, true, nil
@@ -206,7 +206,7 @@ func (c *mechanismConversation) acceptStep(input []byte, options ...gssapi.Mecha
 	mechanismOutput, context, done, err := c.selected.AcceptSecContext(mechanismInput, options...)
 	if err != nil {
 		if c.step != 1 {
-			return nil, c.context, false, err
+			return nil, c.context, false, fmt.Errorf("continue SPNEGO acceptor mechanism: %w", err)
 		}
 		response := NegTokenResp{NegState: asn1.Enumerated(NegStateAcceptIncomplete), SupportedMech: c.selected.OID()}
 		encoded, marshalErr := marshalSPNEGOToken(&SPNEGOToken{Resp: true, NegTokenResp: response})
@@ -229,7 +229,7 @@ func (c *mechanismConversation) acceptStep(input []byte, options ...gssapi.Mecha
 		}
 		response.MechListMIC, err = c.context.GetMIC(mechList)
 		if err != nil {
-			return nil, c.context, false, err
+			return nil, c.context, false, fmt.Errorf("generate acceptor mechListMIC: %w", err)
 		}
 		response.NegState = asn1.Enumerated(NegStateRequestMIC)
 		c.waitingMIC = true

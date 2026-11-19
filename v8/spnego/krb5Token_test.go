@@ -12,9 +12,11 @@ import (
 
 	"github.com/otuschhoff/gokrb5/v8/asn1tools"
 	"github.com/otuschhoff/gokrb5/v8/client"
+	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/credentials"
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
 	"github.com/otuschhoff/gokrb5/v8/iana/adtype"
+	"github.com/otuschhoff/gokrb5/v8/iana/errorcode"
 	"github.com/otuschhoff/gokrb5/v8/iana/flags"
 	"github.com/otuschhoff/gokrb5/v8/iana/msflags"
 	"github.com/otuschhoff/gokrb5/v8/iana/msgtype"
@@ -107,6 +109,77 @@ func TestKRB5TokenFramingAndClassificationGuards(t *testing.T) {
 			t.Fatalf("malformed token %d was accepted", i)
 		}
 	}
+}
+
+func TestKRB5TokenMarshalRejectsInvalidOID(t *testing.T) {
+	t.Parallel()
+
+	b, err := hex.DecodeString(KRB5TokenHex)
+	require.NoError(t, err)
+	var token KRB5Token
+	require.NoError(t, token.Unmarshal(b))
+	encoded, err := token.Marshal()
+	require.NoError(t, err)
+	require.Equal(t, b, encoded)
+
+	token.OID = asn1.ObjectIdentifier{1}
+	encoded, err = token.Marshal()
+	require.ErrorContains(t, err, "marshal Kerberos mechanism OID:")
+	require.ErrorAs(t, err, new(asn1.StructuralError))
+	require.Empty(t, encoded)
+}
+
+func TestRawKerberosTokenUnmarshalErrors(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name        string
+		input       []byte
+		wantContext string
+	}{
+		{name: "request", input: []byte{0x6e}, wantContext: "unmarshal raw AP-REQ:"},
+		{name: "reply", input: []byte{0x6f}, wantContext: "unmarshal raw AP-REP:"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var token KRB5Token
+			err := token.Unmarshal(tt.input)
+			require.ErrorContains(t, err, tt.wantContext)
+			require.ErrorAs(t, err, new(asn1.SyntaxError))
+		})
+	}
+}
+
+func TestRawAPReqPreservesProtocolError(t *testing.T) {
+	t.Parallel()
+
+	b, err := hex.DecodeString(KRB5TokenHex)
+	require.NoError(t, err)
+	var token KRB5Token
+	require.NoError(t, token.Unmarshal(b))
+	token.APReq.MsgType = msgtype.KRB_AS_REQ
+	raw, err := token.APReq.Marshal()
+	require.NoError(t, err)
+
+	err = new(KRB5Token).Unmarshal(raw)
+	var protocolErr messages.KRBError
+	require.ErrorAs(t, err, &protocolErr)
+	require.IsType(t, protocolErr, err)
+	require.EqualValues(t, errorcode.KRB_AP_ERR_MSG_TYPE, protocolErr.ErrorCode)
+}
+
+func TestKRB5TokenAPREQRetainsDelegationError(t *testing.T) {
+	t.Parallel()
+
+	cl := client.NewWithPassword("user", "EXAMPLE.COM", "", config.New())
+	var options KRB5TokenAPREQOptions
+	options.Delegate = true
+	var ticket messages.Ticket
+	var key types.EncryptionKey
+	_, err := NewKRB5TokenAPREQWithOptions(cl, ticket, key, options)
+	require.ErrorContains(t, err, "obtain delegated Kerberos credential:")
+	require.ErrorContains(t, err, "service ticket is not trusted for delegation")
 }
 
 func TestKRB5Token_newAuthenticatorChksum(t *testing.T) {

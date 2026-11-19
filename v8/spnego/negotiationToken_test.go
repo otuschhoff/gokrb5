@@ -174,6 +174,42 @@ func TestNegTokenInit2NegHintsRoundTrip(t *testing.T) {
 	require.Equal(t, token.MechListMIC, decoded.MechListMIC)
 }
 
+func TestNegotiationMarshalRetainsASN1Error(t *testing.T) {
+	t.Parallel()
+
+	invalidOID := asn1.ObjectIdentifier{1}
+	mechs := []asn1.ObjectIdentifier{invalidOID}
+	var init NegTokenInit
+	init.MechTypes = mechs
+	var initWithHints NegTokenInit
+	initWithHints.MechTypes = mechs
+	initWithHints.NegHints = new(NegHints)
+	var resp NegTokenResp
+	resp.SupportedMech = invalidOID
+
+	for _, tt := range []struct {
+		name        string
+		marshal     func() ([]byte, error)
+		wantContext string
+	}{
+		{name: "mechanism list", marshal: func() ([]byte, error) {
+			return MarshalMechTypeList(mechs)
+		}, wantContext: "marshal SPNEGO mechanism list:"},
+		{name: "initial token", marshal: init.Marshal, wantContext: "marshal NegTokenInit payload:"},
+		{name: "initial token with hints", marshal: initWithHints.Marshal, wantContext: "marshal NegTokenInit payload:"},
+		{name: "response token", marshal: resp.Marshal, wantContext: "marshal NegTokenResp payload:"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			encoded, err := tt.marshal()
+			require.Nil(t, encoded)
+			require.ErrorContains(t, err, tt.wantContext)
+			require.ErrorAs(t, err, new(asn1.StructuralError))
+		})
+	}
+}
+
 func TestNegotiationTokenValidationBranches(t *testing.T) {
 	responseBytes, err := hex.DecodeString(testNegTokenResp)
 	require.NoError(t, err)

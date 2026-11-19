@@ -824,6 +824,29 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 60 (2026-11-19, SPNEGO mechanism and token error contracts; Q-03):
+The non-HTTP SPNEGO paths identify failures in credential acquisition,
+AP token handling, mechanism negotiation, MIC processing, and security
+context setup without losing the underlying causes. Raw AP-REQ decoding
+still returns a concrete KRB-ERROR for a message-type mismatch. Invalid
+Kerberos mechanism OIDs now stop marshaling rather than producing a token
+without its OID. Valid token bytes, optimistic fallback, and AP-REP key
+selection are unchanged.
+
+Regression tests cover typed ASN.1 errors, credential and key failures,
+mechanism continuation errors, and MIC verification failures that do not
+complete the exchange. Both module suites, the full Linux/386 v8 suite,
+and focused race, build, and vet checks passed. `FuzzUnmarshalNegToken`
+passed a 60-second run with 984,275 executions. V8 cross-package statement
+coverage reached 87.3%. Live interoperability was not run; Docker access
+was unavailable.
+
+All 28 remaining SPNEGO `wrapcheck` reports were resolved without
+suppressions. Both changed-line lint gates passed. Canonical v8 findings
+fell from 647 to 619 (`wrapcheck`: 78 to 50), and supplemental findings
+fell from 3,685 to 3,684. Neither inventory introduced findings, and v8
+continued to report zero gosec findings.
+
 Slice 59 (2026-11-19, PKINIT KDF portability; Q-05):
 The RFC 8636 counter KDF rounds the output length with division and remainder
 instead of an addition that can overflow. It checks the block count against

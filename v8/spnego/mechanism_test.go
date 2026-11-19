@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
@@ -16,6 +17,7 @@ import (
 
 type testMechanismContext struct {
 	negoExKey types.EncryptionKey
+	verifyErr error
 }
 
 func (*testMechanismContext) Wrap(message []byte, _ bool) ([]byte, error) {
@@ -30,7 +32,10 @@ func (*testMechanismContext) GetMIC(message []byte) ([]byte, error) {
 	return append([]byte("MIC:"), message...), nil
 }
 
-func (*testMechanismContext) VerifyMIC(message, token []byte) error {
+func (c *testMechanismContext) VerifyMIC(message, token []byte) error {
+	if c.verifyErr != nil {
+		return c.verifyErr
+	}
 	if !bytes.Equal(token, append([]byte("MIC:"), message...)) {
 		return errors.New("invalid test MIC")
 	}
@@ -50,19 +55,23 @@ type testContextMechanism struct {
 	name        string
 	context     *testMechanismContext
 	acceptCalls int
+	stepErr     error
 }
 
 func newTestContextMechanism(lastOID int, name string) *testContextMechanism {
-	return &testContextMechanism{
-		oid:     asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 55555, lastOID},
-		name:    name,
-		context: new(testMechanismContext),
-	}
+	m := new(testContextMechanism)
+	m.oid = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 55555, lastOID}
+	m.name = name
+	m.context = new(testMechanismContext)
+	return m
 }
 
 func (m *testContextMechanism) OID() asn1.ObjectIdentifier { return m.oid }
 
 func (m *testContextMechanism) InitSecContext(_ string, input []byte, _ ...gssapi.MechanismOption) ([]byte, gssapi.Context, bool, error) {
+	if m.stepErr != nil {
+		return nil, nil, false, m.stepErr
+	}
 	if len(input) == 0 {
 		return []byte(m.name + "-init"), m.context, false, nil
 	}
@@ -74,10 +83,114 @@ func (m *testContextMechanism) InitSecContext(_ string, input []byte, _ ...gssap
 
 func (m *testContextMechanism) AcceptSecContext(input []byte, _ ...gssapi.MechanismOption) ([]byte, gssapi.Context, bool, error) {
 	m.acceptCalls++
+	if m.stepErr != nil {
+		return nil, nil, false, m.stepErr
+	}
 	if string(input) != m.name+"-init" {
 		return nil, m.context, false, errors.New("unexpected acceptor token")
 	}
 	return []byte(m.name + "-challenge"), m.context, true, nil
+}
+
+func TestNegotiatorInitiatorRetainsMechanismErrors(t *testing.T) {
+	t.Parallel()
+
+	const target = "host/server"
+	cause := errors.New("injected mechanism error")
+	mech := newTestContextMechanism(1, "first")
+	mech.stepErr = cause
+	initiator := NewNegotiator(mech)
+	output, context, done, err := initiator.InitSecContext(target, nil)
+	require.Nil(t, output)
+	require.Nil(t, context)
+	require.False(t, done)
+	require.ErrorIs(t, err, cause)
+	require.ErrorContains(t, err, "start SPNEGO initiator mechanism:")
+
+	mech.stepErr = nil
+	initial, _, _, err := initiator.InitSecContext(target, nil)
+	require.NoError(t, err)
+	acceptor := NewNegotiator(newTestContextMechanism(1, "first"))
+	reply, _, _, err := acceptor.AcceptSecContext(initial)
+	require.NoError(t, err)
+	mech.stepErr = cause
+	output, _, done, err = initiator.InitSecContext(target, reply)
+	require.Nil(t, output)
+	require.False(t, done)
+	require.ErrorIs(t, err, cause)
+	require.ErrorContains(t, err, "continue SPNEGO initiator mechanism:")
+}
+
+func TestNegotiatorOptimisticFailureFallsBack(t *testing.T) {
+	t.Parallel()
+
+	const target = "host/server"
+	cause := errors.New("injected mechanism error")
+	mech := newTestContextMechanism(1, "first")
+	mech.stepErr = cause
+	initiator := NewNegotiator(newTestContextMechanism(1, "first"))
+	acceptor := NewNegotiator(mech)
+	initial, _, _, err := initiator.InitSecContext(target, nil)
+	require.NoError(t, err)
+
+	reply, context, done, err := acceptor.AcceptSecContext(initial)
+	require.NoError(t, err)
+	require.Nil(t, context)
+	require.False(t, done)
+	token, err := parseSPNEGOResponse(reply)
+	require.NoError(t, err)
+	require.Equal(t, NegStateAcceptIncomplete, token.NegTokenResp.State())
+	require.Equal(t, mech.OID(), token.NegTokenResp.SupportedMech)
+
+	next, _, _, err := initiator.InitSecContext(target, reply)
+	require.NoError(t, err)
+	output, _, done, err := acceptor.AcceptSecContext(next)
+	require.Nil(t, output)
+	require.False(t, done)
+	require.ErrorIs(t, err, cause)
+	require.ErrorContains(t, err, "continue SPNEGO acceptor mechanism:")
+}
+
+func TestNegotiatorMICVerificationRetainsCause(t *testing.T) {
+	t.Parallel()
+
+	const target = "host/server"
+	backup := newTestContextMechanism(2, "backup")
+	acceptorMech := newTestContextMechanism(2, "backup")
+	initiator := NewNegotiator(newTestContextMechanism(1, "first"), backup)
+	acceptor := NewNegotiator(acceptorMech)
+	initial, _, _, err := initiator.InitSecContext(target, nil)
+	require.NoError(t, err)
+	selection, _, _, err := acceptor.AcceptSecContext(initial)
+	require.NoError(t, err)
+	next, _, _, err := initiator.InitSecContext(target, selection)
+	require.NoError(t, err)
+	micRequest, _, _, err := acceptor.AcceptSecContext(next)
+	require.NoError(t, err)
+
+	cause := errors.New("injected MIC verifier failure")
+	backup.context.verifyErr = cause
+	output, _, done, err := initiator.InitSecContext(target, micRequest)
+	require.Nil(t, output)
+	require.False(t, done)
+	require.ErrorIs(t, err, cause)
+	require.ErrorContains(t, err, "verify acceptor mechListMIC:")
+
+	backup.context.verifyErr = nil
+	micReply, _, done, err := initiator.InitSecContext(target, micRequest)
+	require.NoError(t, err)
+	require.True(t, done)
+	acceptorMech.context.verifyErr = cause
+	output, _, done, err = acceptor.AcceptSecContext(micReply)
+	require.Nil(t, output)
+	require.False(t, done)
+	require.ErrorIs(t, err, cause)
+	require.ErrorContains(t, err, "verify initiator mechListMIC:")
+
+	acceptorMech.context.verifyErr = nil
+	_, _, done, err = acceptor.AcceptSecContext(micReply)
+	require.NoError(t, err)
+	require.True(t, done)
 }
 
 func TestNegotiatorDirectMechanism(t *testing.T) {
@@ -212,10 +325,13 @@ type testNegoExScheme struct {
 func newTestNegoExScheme() *testNegoExScheme {
 	return &testNegoExScheme{
 		id: negoex.AuthScheme{1, 2, 3, 4},
-		context: &testMechanismContext{negoExKey: types.EncryptionKey{
-			KeyType:  etypeID.AES256_CTS_HMAC_SHA1_96,
-			KeyValue: []byte("0123456789abcdef0123456789abcdef"),
-		}},
+		context: &testMechanismContext{
+			negoExKey: types.EncryptionKey{
+				KeyType:  etypeID.AES256_CTS_HMAC_SHA1_96,
+				KeyValue: []byte("0123456789abcdef0123456789abcdef"),
+			},
+			verifyErr: nil,
+		},
 	}
 }
 
