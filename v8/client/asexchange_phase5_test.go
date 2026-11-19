@@ -5,10 +5,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/credentials"
@@ -554,97 +556,104 @@ func TestClientCCacheExportAssociatesPATypeWithInitialService(t *testing.T) {
 	assert.Equal(t, "2", paType)
 }
 
-func TestClockSkewRetry(t *testing.T) {
-	cfg := config.New()
-	cfg.LibDefaults.DNSLookupKDC = true
-	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES128_CTS_HMAC_SHA1_96}
-	cl := NewWithKeytab("user", "EXAMPLE.ORG", phase5Keytab(t, etypeID.AES128_CTS_HMAC_SHA1_96), cfg, AssumePreAuthentication(true))
-	serverTime := time.Now().UTC().Add(10 * time.Minute).Truncate(time.Second).Add(123456 * time.Microsecond)
-	calls := 0
-	var retriedRequest []byte
-	cl.sendToKDCFunc = func(request []byte, _ string) ([]byte, error) {
-		calls++
-		if calls == 1 {
-			err := messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KRB_AP_ERR_SKEW, "skew")
-			err.STime = serverTime
-			err.Susec = serverTime.Nanosecond() / int(time.Microsecond)
-			return nil, err
-		}
-		retriedRequest = append([]byte(nil), request...)
-		return nil, messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KDC_ERR_CLIENT_REVOKED, "stop")
-	}
-	req, err := cl.newASReq()
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = cl.ASExchange("EXAMPLE.ORG", req, 0)
-	assert.Error(t, err)
-	assert.Equal(t, 2, calls)
-	assert.InDelta(t, float64(10*time.Minute), float64(cl.KDCTimeOffset()), float64(2*time.Second))
+func asErrorAt(response messages.KRBError, at time.Time) messages.KRBError {
+	response.STime = at.Truncate(time.Second)
+	response.Susec = at.Nanosecond() / int(time.Microsecond)
+	return response
+}
 
-	var retried messages.ASReq
-	if err := retried.Unmarshal(retriedRequest); err != nil {
-		t.Fatal(err)
-	}
-	for _, pa := range retried.PAData {
+func TestClockSkewRetry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := config.New()
+		cfg.LibDefaults.DNSLookupKDC = true
+		cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES128_CTS_HMAC_SHA1_96}
+		kt := phase5Keytab(t, etypeID.AES128_CTS_HMAC_SHA1_96)
+		cl := NewWithKeytab(
+			"user",
+			"EXAMPLE.ORG",
+			kt,
+			cfg,
+			AssumePreAuthentication(true),
+		)
+		const skew = 10*time.Minute + 123456*time.Microsecond
+		serverTime := clientNow().UTC().Add(skew)
+		calls := 0
+		var retriedRequest []byte
+		cl.sendToKDCFunc = func(request []byte, _ string) ([]byte, error) {
+			calls++
+			if calls == 1 {
+				response := messages.NewKRBError(
+					types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KRB_AP_ERR_SKEW, "skew",
+				)
+				return nil, asErrorAt(response, serverTime)
+			}
+			retriedRequest = append([]byte(nil), request...)
+			return nil, messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KDC_ERR_CLIENT_REVOKED, "stop")
+		}
+		req, err := cl.newASReq()
+		require.NoError(t, err)
+		_, err = cl.ASExchange("EXAMPLE.ORG", req, 0)
+		var terminal messages.KRBError
+		require.ErrorAs(t, err, &terminal)
+		assert.Equal(t, errorcode.KDC_ERR_CLIENT_REVOKED, terminal.ErrorCode)
+		require.Equal(t, 2, calls)
+		assert.Equal(t, skew, cl.KDCTimeOffset())
+		assert.Equal(t, serverTime, decodeASReqTimestamp(t, cl, retriedRequest))
+	})
+}
+
+func decodeASReqTimestamp(t *testing.T, cl *Client, request []byte) time.Time {
+	t.Helper()
+	var req messages.ASReq
+	require.NoError(t, req.Unmarshal(request))
+	for _, pa := range req.PAData {
 		if pa.PADataType != patype.PA_ENC_TIMESTAMP {
 			continue
 		}
 		var encrypted types.PAEncTimestamp
-		if err := encrypted.Unmarshal(pa.PADataValue); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, encrypted.Unmarshal(pa.PADataValue))
 		et, err := crypto.GetEtype(etypeID.AES128_CTS_HMAC_SHA1_96)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		key, _, err := cl.Key(et, 0, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		plain, err := crypto.DecryptMessage(encrypted.Cipher, key, keyusage.AS_REQ_PA_ENC_TIMESTAMP)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		var timestamp types.PAEncTSEnc
-		if err := timestamp.Unmarshal(plain); err != nil {
-			t.Fatal(err)
-		}
-		assert.WithinDuration(t, serverTime, timestamp.PATimestamp.Add(time.Duration(timestamp.PAUSec)*time.Microsecond), 2*time.Second)
-		return
+		require.NoError(t, timestamp.Unmarshal(plain))
+		return timestamp.PATimestamp.Add(time.Duration(timestamp.PAUSec) * time.Microsecond).UTC()
 	}
 	t.Fatal("retried PA-ENC-TIMESTAMP not found")
+	return time.Time{}
 }
 
 func TestPreAuthRequiredLearnsKDCTimeOffset(t *testing.T) {
-	cfg := config.New()
-	cfg.LibDefaults.DNSLookupKDC = true
-	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES128_CTS_HMAC_SHA1_96}
-	cl := NewWithKeytab("user", "EXAMPLE.ORG", phase5Keytab(t, etypeID.AES128_CTS_HMAC_SHA1_96), cfg)
-	serverTime := clientNow().UTC().Add(-time.Hour).Truncate(time.Second)
-	entries := types.ETypeInfo2{{EType: etypeID.AES128_CTS_HMAC_SHA1_96}}
-	info, err := asn1.Marshal(entries)
-	if err != nil {
-		t.Fatal(err)
-	}
-	methodData, err := asn1.Marshal(types.PADataSequence{{PADataType: patype.PA_ETYPE_INFO2, PADataValue: info}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cl.sendToKDCFunc = func(_ []byte, _ string) ([]byte, error) {
-		response := messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KDC_ERR_PREAUTH_REQUIRED, "pre-authentication required")
-		response.STime = serverTime
-		response.Susec = 0
-		response.EData = methodData
-		return nil, response
-	}
-	req, err := cl.newASReq()
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = cl.ASExchange("EXAMPLE.ORG", req, 0)
-	assert.Error(t, err)
-	assert.InDelta(t, float64(-time.Hour), float64(cl.KDCTimeOffset()), float64(2*time.Second))
+	synctest.Test(t, func(t *testing.T) {
+		cfg := config.New()
+		cfg.LibDefaults.DNSLookupKDC = true
+		cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES128_CTS_HMAC_SHA1_96}
+		cl := NewWithKeytab("user", "EXAMPLE.ORG", phase5Keytab(t, etypeID.AES128_CTS_HMAC_SHA1_96), cfg)
+		const skew = -time.Hour
+		serverTime := clientNow().UTC().Add(skew)
+		entries := types.ETypeInfo2{{EType: etypeID.AES128_CTS_HMAC_SHA1_96}}
+		info, err := asn1.Marshal(entries)
+		require.NoError(t, err)
+		methodData, err := asn1.Marshal(types.PADataSequence{{PADataType: patype.PA_ETYPE_INFO2, PADataValue: info}})
+		require.NoError(t, err)
+		cl.sendToKDCFunc = func(_ []byte, _ string) ([]byte, error) {
+			response := messages.NewKRBError(
+				types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KDC_ERR_PREAUTH_REQUIRED, "pre-authentication required",
+			)
+			response.EData = methodData
+			return nil, asErrorAt(response, serverTime)
+		}
+		req, err := cl.newASReq()
+		require.NoError(t, err)
+		_, err = cl.ASExchange("EXAMPLE.ORG", req, 0)
+		var terminal messages.KRBError
+		require.ErrorAs(t, err, &terminal)
+		assert.Equal(t, errorcode.KDC_ERR_PREAUTH_REQUIRED, terminal.ErrorCode)
+		assert.Equal(t, skew, cl.KDCTimeOffset())
+	})
 }
 
 func TestClockSkewRetryDisabled(t *testing.T) {

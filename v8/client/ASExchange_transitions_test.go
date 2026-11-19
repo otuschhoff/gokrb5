@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/big"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
@@ -187,36 +188,30 @@ func TestASExchangePKINITTypedFallbackBudget(t *testing.T) {
 }
 
 func TestASExchangePKINITGenericFailureSkewOrdering(t *testing.T) {
-	cl, req := asPKINITClient(t, true, true)
-	serverTime := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
-	calls := 0
-	cl.sendToKDCFunc = func(b []byte, _ string) ([]byte, error) {
-		var request messages.ASReq
-		require.NoError(t, request.Unmarshal(b))
-		calls++
-		response := asPKINITError(t, errorcode.KDC_ERR_PREAUTH_FAILED, "")
-		switch calls {
-		case 1:
-			require.False(t, request.PAData.Contains(patype.PA_PK_AS_REQ))
-			response = asPKINITError(t, errorcode.KDC_ERR_PREAUTH_REQUIRED, "fresh")
-		case 2:
+	synctest.Test(t, func(t *testing.T) {
+		cl, req := asPKINITClient(t, true, true)
+		const skew = time.Hour
+		serverTime := clientNow().UTC().Add(skew)
+		calls := 0
+		cl.sendToKDCFunc = func(b []byte, _ string) ([]byte, error) {
+			var request messages.ASReq
+			require.NoError(t, request.Unmarshal(b))
+			calls++
+			if calls == 1 {
+				require.False(t, request.PAData.Contains(patype.PA_PK_AS_REQ))
+				return nil, asPKINITError(t, errorcode.KDC_ERR_PREAUTH_REQUIRED, "fresh")
+			}
+			require.LessOrEqual(t, calls, 4, "generic failure exceeded skew and normal preauth budgets")
 			require.Equal(t, []byte("fresh"), asPKINITAuthPack(t, request).PKAuthenticator.FreshnessToken)
-			response.STime = serverTime
-		case 3:
-			require.Equal(t, []byte("fresh"), asPKINITAuthPack(t, request).PKAuthenticator.FreshnessToken)
-			response.STime = serverTime.Add(time.Hour)
-		case 4:
-			require.Equal(t, []byte("fresh"), asPKINITAuthPack(t, request).PKAuthenticator.FreshnessToken)
-			response.STime = serverTime.Add(2 * time.Hour)
-		default:
-			t.Fatal("generic failure exceeded skew and normal preauth budgets")
+			response := asPKINITError(t, errorcode.KDC_ERR_PREAUTH_FAILED, "")
+			// Later times must not replace the first skew correction.
+			return nil, asErrorAt(response, serverTime.Add(time.Duration(calls-2)*skew))
 		}
-		return nil, response
-	}
-	_, err := cl.ASExchange("EXAMPLE.ORG", req, 0)
-	require.ErrorContains(t, err, "kerberos error response from KDC")
-	require.Equal(t, 4, calls)
-	require.InDelta(t, float64(time.Hour), float64(cl.KDCTimeOffset()), float64(time.Second))
+		_, err := cl.ASExchange("EXAMPLE.ORG", req, 0)
+		require.ErrorContains(t, err, "kerberos error response from KDC")
+		require.Equal(t, 4, calls)
+		require.Equal(t, skew, cl.KDCTimeOffset())
+	})
 }
 
 func TestASExchangePKINITMalformedFreshness(t *testing.T) {

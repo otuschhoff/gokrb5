@@ -2,8 +2,8 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-69 done. The latest v8
-inventories contain 545 canonical and 3,651 supplemental findings. Most
+(floor raised to 86.0%), and Phase 5 slices 1-70 done. The latest v8
+inventories contain 545 canonical and 3,646 supplemental findings. Most
 remaining canonical findings are from `revive`, complexity and nesting
 checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
 Phase 3/4 interoperability and Windows exit evidence remains an external CI
@@ -30,7 +30,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 87.8% cross-package statement coverage; 545 canonical lint findings after Slice 69 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 87.8% cross-package statement coverage; 545 canonical lint findings after Slice 70 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -819,6 +819,33 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 70 (2026-11-19, v8 AS-exchange clock-skew fixtures; Q-08):
+Replace real-time tolerances in the PKINIT retry-ordering, keytab skew
+retry, and PREAUTH_REQUIRED clock-learning tests with per-test synthetic
+clocks. The original PKINIT test failed 5 of 300 runs: rounding the KDC
+timestamp down and then processing the reply could consume more than the
+one-second tolerance. A controlled second-boundary rollover reproduced
+the failure without modifying production code.
+
+The tests now check exact offsets. The PKINIT case still checks the
+freshness token and four-request budget, and requires the first skew
+correction to survive subsequent errors. The keytab case checks that the
+decrypted retry timestamp includes the KDC's microseconds. A negative
+probe that omitted those microseconds failed both exact assertions.
+Production code, retry policies, and the Go minimum are unchanged.
+
+The affected tests and the disabled-retry case passed 300 shuffled runs
+under the race detector. Both module suites, the client race/build/vet
+checks, minimum Go 1.26.0, Linux/386, and a Windows/amd64 test cross-build
+passed. The focused `interop`-tag tests passed with a one-hour fake client
+offset; live interoperability was not run. V8 cross-package statement
+coverage remained 87.8%.
+
+Both modules passed changed-line lint against `bd05b20` and `origin/main`.
+The v8 canonical inventory remained at 545. The supplemental inventory fell
+from 3,651 to 3,646 after removing `cyclop`, `funlen`, and three `lll`
+findings. Neither inventory introduced new findings or suppressions.
 
 Slice 69 (2026-11-19, v8 NDR pointer-kind alias; Q-08):
 Replace the five remaining uses of `reflect.Ptr` with `reflect.Pointer`
