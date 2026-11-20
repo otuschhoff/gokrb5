@@ -4,6 +4,7 @@ package pku2u
 
 import (
 	"crypto/x509"
+	"errors"
 	"fmt"
 
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
@@ -24,8 +25,12 @@ func PrincipalFromCertificate(certificate *x509.Certificate) (types.PrincipalNam
 	if len(names) > 0 {
 		return types.NewPrincipalName(nametype.KRB_NT_ENTERPRISE, names[0]), nil
 	}
-	if certificate.Subject.String() == "" {
-		return types.PrincipalName{}, fmt.Errorf("PKU2U certificate has no principal name or subject")
+	var subject string
+	if certificate != nil {
+		subject = certificate.Subject.String()
 	}
-	return types.NewPrincipalName(nametype.KRB_NT_X500_PRINCIPAL, certificate.Subject.String()), nil
+	if subject == "" {
+		return types.PrincipalName{}, errors.New("PKU2U certificate has no principal name or subject")
+	}
+	return types.NewPrincipalName(nametype.KRB_NT_X500_PRINCIPAL, subject), nil
 }

@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"errors"
 	"math/big"
 	"testing"
 	"time"
@@ -36,15 +37,40 @@ func TestPrincipalFromCertificateSubjectFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if principal.NameType != nametype.KRB_NT_X500_PRINCIPAL || principal.PrincipalNameString() != certificate.Subject.String() {
+	if principal.NameType != nametype.KRB_NT_X500_PRINCIPAL || principal.PrincipalNameString() != "CN=Peer,O=Example" {
 		t.Fatalf("principal = %#v", principal)
 	}
 }
 
 func TestPrincipalFromCertificateRejectsMissingIdentity(t *testing.T) {
-	certificate := testCertificate(t, pkix.Name{}, nil)
-	if _, err := PrincipalFromCertificate(certificate); err == nil {
-		t.Fatal("expected missing identity error")
+	t.Parallel()
+
+	var subject pkix.Name
+	certificate := testCertificate(t, subject, nil)
+	principal, err := PrincipalFromCertificate(certificate)
+	const want = "PKU2U certificate has no principal name or subject"
+	if err == nil || err.Error() != want {
+		t.Fatalf("PrincipalFromCertificate error = %v, want %q", err, want)
+	}
+	if principal.NameType != 0 || principal.NameString != nil {
+		t.Fatalf("PrincipalFromCertificate returned a nonzero principal: %#v", principal)
+	}
+}
+
+func TestPrincipalFromCertificateRejectsNilCertificate(t *testing.T) {
+	t.Parallel()
+
+	principal, err := PrincipalFromCertificate(nil)
+	const want = "read PKU2U certificate principal names: PKINIT certificate is required"
+	if err == nil || err.Error() != want {
+		t.Fatalf("PrincipalFromCertificate error = %v, want %q", err, want)
+	}
+	cause := errors.Unwrap(err)
+	if cause == nil || cause.Error() != "PKINIT certificate is required" {
+		t.Fatalf("PrincipalFromCertificate cause = %v, want PKINIT missing certificate error", cause)
+	}
+	if principal.NameType != 0 || principal.NameString != nil {
+		t.Fatalf("PrincipalFromCertificate returned a nonzero principal: %#v", principal)
 	}
 }
 
