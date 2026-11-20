@@ -2,8 +2,8 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-88 done. The latest v8
-inventories contain 528 canonical and 3,506 supplemental findings. Most
+(floor raised to 86.0%), and Phase 5 slices 1-89 done. The latest v8
+inventories contain 528 canonical and 3,502 supplemental findings. Most
 remaining canonical findings are from `revive`, complexity and nesting
 checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
 Phase 3/4 interoperability and Windows exit evidence remains an external CI
@@ -30,7 +30,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.2% cross-package statement coverage; 528 canonical lint findings after Slice 88 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.2% cross-package statement coverage; 528 canonical lint findings after Slice 89 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -819,6 +819,23 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 89 (2026-11-20, v8 PKU2U metadata certificate-chain fixture; Q-10):
+Initialize only the relevant root and leaf certificate fields and share
+their validity bounds. Preserve the subjects, serial numbers, key usages,
+and signing relationships. No production code changed.
+
+The issuer-selection and acceptor metadata preservation tests passed before
+and after the refactor. The focused metadata tests passed 100 shuffled runs
+under the race detector. Both module suites, v8 build and vet, Linux/386
+PKU2U tests, and a Windows/amd64 PKU2U test cross-build passed. Live Windows
+interoperability was not run.
+
+Changed-line lint passed against `c6f8d27` and `origin/main` for both
+modules. V8 cross-package statement coverage stayed at 88.2%. Canonical
+findings stayed at 528; supplemental findings fell from 3,506 to 3,502
+after removing four `exhaustruct_v5` findings. Neither inventory gained
+findings, and no suppressions were added.
 
 Slice 88 (2026-11-20, v8 PKU2U certificate-name fixtures; Q-10):
 Set only the relevant certificate and subject fields, mark the fixture SAN

@@ -6,7 +6,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/hex"
 	"math/big"
 	"reflect"
@@ -125,16 +124,20 @@ func TestTrustedCertifiersSelectIdentity(t *testing.T) {
 func testCertificateChain(t *testing.T) (*x509.Certificate, *x509.Certificate, *ecdsa.PrivateKey) {
 	t.Helper()
 	now := time.Now()
+	notBefore, notAfter := now.Add(-time.Hour), now.Add(time.Hour)
 	rootKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Root"},
-		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
-		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
-	}
-	rootDER, err := x509.CreateCertificate(rand.Reader, rootTemplate, rootTemplate, &rootKey.PublicKey, rootKey)
+	var rootTemplate x509.Certificate
+	rootTemplate.SerialNumber = big.NewInt(1)
+	rootTemplate.Subject.CommonName = "Root"
+	rootTemplate.NotBefore = notBefore
+	rootTemplate.NotAfter = notAfter
+	rootTemplate.IsCA = true
+	rootTemplate.BasicConstraintsValid = true
+	rootTemplate.KeyUsage = x509.KeyUsageCertSign
+	rootDER, err := x509.CreateCertificate(rand.Reader, &rootTemplate, &rootTemplate, &rootKey.PublicKey, rootKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,12 +149,13 @@ func testCertificateChain(t *testing.T) (*x509.Certificate, *x509.Certificate, *
 	if err != nil {
 		t.Fatal(err)
 	}
-	leafTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "Peer"},
-		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature,
-	}
-	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, root, &leafKey.PublicKey, rootKey)
+	var leafTemplate x509.Certificate
+	leafTemplate.SerialNumber = big.NewInt(2)
+	leafTemplate.Subject.CommonName = "Peer"
+	leafTemplate.NotBefore = notBefore
+	leafTemplate.NotAfter = notAfter
+	leafTemplate.KeyUsage = x509.KeyUsageDigitalSignature
+	leafDER, err := x509.CreateCertificate(rand.Reader, &leafTemplate, root, &leafKey.PublicKey, rootKey)
 	if err != nil {
 		t.Fatal(err)
 	}
