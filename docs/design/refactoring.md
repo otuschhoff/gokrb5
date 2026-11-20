@@ -820,6 +820,19 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 149 (2026-11-20, complete v8 RFC 3961 lint cleanup; Q-10):
+Name byte and bit constants, make n-fold carry handling explicit, and
+preallocate the DES3 plaintext and parity buffers. Keep the public API,
+error behavior, and RFC test vectors unchanged. No new lint exceptions.
+
+Uncapped whole-v8 scans report zero RFC 3961 findings, down from 37
+supplemental and zero canonical. Diagnostics outside the package are
+unchanged; whole-v8 totals are 349 canonical and 510 supplemental.
+Package statement coverage remains 90.3%. The v8 build, vet, and race
+suite pass, as do 25 shuffled race-enabled package runs, Linux/386
+crypto tests, and canonical changed-line lint from both baselines.
+Windows/amd64 and interop-tagged package tests compile but were not run.
+
 Slice 148 (2026-11-20, complete v8 command-tree lint cleanup; Q-10):
 Separate cache rendering from loading in `goklist`, share the default
 FILE-cache removal path in `gokdestroy`, and separate duration parsing

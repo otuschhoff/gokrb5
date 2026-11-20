@@ -14,8 +14,8 @@ func Test_nfoldRejectsInvalidInputs(t *testing.T) {
 		input []byte
 		bits  int
 	}{
-		{name: "empty input", bits: 64},
-		{name: "zero bit length", input: []byte("key")},
+		{name: "empty input", input: nil, bits: 64},
+		{name: "zero bit length", input: []byte("key"), bits: 0},
 		{name: "negative bit length", input: []byte("key"), bits: -8},
 		{name: "partial byte", input: []byte("key"), bits: 63},
 	}

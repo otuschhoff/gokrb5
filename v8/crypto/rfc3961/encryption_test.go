@@ -43,8 +43,9 @@ func TestDES3EncryptionRoundTrips(t *testing.T) {
 	}
 	tampered := append([]byte(nil), message...)
 	tampered[len(tampered)-1] ^= 0xff
-	if _, err := rfc3961.DES3DecryptMessage(key, tampered, 2, etype); err == nil || !strings.Contains(err.Error(), "integrity verification failed") {
-		t.Fatalf("tampered message error = %v", err)
+	if _, err := rfc3961.DES3DecryptMessage(key, tampered, 2, etype); err == nil ||
+		!strings.Contains(err.Error(), "integrity verification failed") {
+		t.Fatal("expected integrity verification failure:", err)
 	}
 }
 
@@ -52,16 +53,20 @@ func TestDES3EncryptionRejectsMalformedInputs(t *testing.T) {
 	etype := krbcrypto.Des3CbcSha1Kd{}
 	key := bytes.Repeat([]byte{0x11}, etype.GetKeyByteSize())
 
-	if _, _, err := rfc3961.DES3EncryptData([]byte("short"), []byte("12345678"), etype); err == nil || !strings.Contains(err.Error(), "incorrect keysize") {
+	if _, _, err := rfc3961.DES3EncryptData([]byte("short"), []byte("12345678"), etype); err == nil ||
+		!strings.Contains(err.Error(), "incorrect keysize") {
 		t.Fatalf("EncryptData error = %v", err)
 	}
-	if _, err := rfc3961.DES3DecryptData([]byte("short"), []byte("12345678"), etype); err == nil || !strings.Contains(err.Error(), "incorrect keysize") {
+	if _, err := rfc3961.DES3DecryptData([]byte("short"), []byte("12345678"), etype); err == nil ||
+		!strings.Contains(err.Error(), "incorrect keysize") {
 		t.Fatalf("DecryptData key error = %v", err)
 	}
-	if _, err := rfc3961.DES3DecryptData(key, []byte("short"), etype); err == nil || !strings.Contains(err.Error(), "multiple of the block size") {
+	if _, err := rfc3961.DES3DecryptData(key, []byte("short"), etype); err == nil ||
+		!strings.Contains(err.Error(), "multiple of the block size") {
 		t.Fatalf("DecryptData block error = %v", err)
 	}
-	if _, err := rfc3961.DES3DecryptMessage(key, []byte("short"), 2, etype); err == nil || !strings.Contains(err.Error(), "ciphertext is too short") {
+	if _, err := rfc3961.DES3DecryptMessage(key, []byte("short"), 2, etype); err == nil ||
+		!strings.Contains(err.Error(), "ciphertext is too short") {
 		t.Fatalf("DecryptMessage error = %v", err)
 	}
 	if rfc3961.VerifyIntegrity(key, []byte("short"), nil, 2, etype) {
@@ -76,9 +81,6 @@ func TestKeyDerivationHelpers(t *testing.T) {
 
 	if _, err := rfc3961.DeriveRandom(key, nil, etype); err == nil {
 		t.Fatal("DeriveRandom accepted empty usage")
-	}
-	if _, err := rfc3961.DES3StringToKey("", "", etype); err == nil {
-		t.Fatal("DES3StringToKey accepted empty secret and salt")
 	}
 	random, err := rfc3961.DeriveRandom(key, usage, etype)
 	if err != nil {
@@ -100,6 +102,13 @@ func TestKeyDerivationHelpers(t *testing.T) {
 	if got := rfc3961.DES3RandomToKey(random); len(got) != etype.GetKeyByteSize() {
 		t.Fatalf("DES3RandomToKey length = %d", len(got))
 	}
+}
+
+func TestDES3StringToKey(t *testing.T) {
+	etype := krbcrypto.Des3CbcSha1Kd{}
+	if _, err := rfc3961.DES3StringToKey("", "", etype); err == nil {
+		t.Fatal("DES3StringToKey accepted empty secret and salt")
+	}
 	stringKey, err := rfc3961.DES3StringToKey("password", "ATHENA.MIT.EDUraeburn", etype)
 	if err != nil {
 		t.Fatal(err)
@@ -107,6 +116,11 @@ func TestKeyDerivationHelpers(t *testing.T) {
 	if got := hex.EncodeToString(stringKey); got != "850bb51358548cd05e86768c313e3bfef7511937dcf72c3e" {
 		t.Fatalf("DES3StringToKey = %s", got)
 	}
+}
+
+func TestPseudoRandom(t *testing.T) {
+	etype := krbcrypto.Des3CbcSha1Kd{}
+	key, _ := hex.DecodeString("dce06b1f64c857a11c3db57c51899b2cc1791008ce973b92")
 	prf, err := rfc3961.PseudoRandom(key, []byte("input"), etype)
 	if err != nil {
 		t.Fatal(err)

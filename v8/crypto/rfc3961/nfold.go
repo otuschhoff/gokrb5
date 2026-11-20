@@ -9,9 +9,15 @@ You can find the source code of their open source project along with license inf
 We acknowledge and are grateful to these developers for their contributions to open source
 
 Project: Apache Directory (http://http://directory.apache.org/)
-https://svn.apache.org/repos/asf/directory/apacheds/tags/1.5.1/kerberos-shared/src/main/java/org/apache/directory/server/kerberos/shared/crypto/encryption/NFold.java
+Source: https://svn.apache.org/repos/asf/directory/apacheds/tags/1.5.1/
+File: kerberos-shared/src/main/java/org/apache/directory/server/kerberos/shared/crypto/encryption/NFold.java
 License: http://www.apache.org/licenses/LICENSE-2.0
 */
+
+const (
+	bitsPerByte = 8
+	lowBitMask  = 1
+)
 
 // Nfold expands the key to ensure it is not smaller than one cipher block.
 // Defined in RFC 3961.
@@ -19,28 +25,30 @@ License: http://www.apache.org/licenses/LICENSE-2.0
 // m input bytes that will be "stretched" to the least common multiple of n bits and the bit length of m.
 // It returns nil if m is empty or n is not a positive, byte-aligned bit length.
 func Nfold(m []byte, n int) []byte {
-	if len(m) == 0 || n <= 0 || n%8 != 0 {
+	if len(m) == 0 || n <= 0 || n%bitsPerByte != 0 {
 		return nil
 	}
-	k := len(m) * 8
+	k := len(m) * bitsPerByte
 
 	// Get the lowest common multiple of the two bit sizes
 	lcm := lcm(n, k)
-	relicate := lcm / k
+	replications := lcm / k
 	var sumBytes []byte
 
-	for i := 0; i < relicate; i++ {
-		rotation := 13 * i
+	const rotationBits = 13
+	for i := range replications {
+		rotation := rotationBits * i
 		sumBytes = append(sumBytes, rotateRight(m, rotation)...)
 	}
 
-	nfold := make([]byte, n/8)
-	sum := make([]byte, n/8)
-	if len(sumBytes) < n/8 {
+	foldBytes := n / bitsPerByte
+	nfold := make([]byte, foldBytes)
+	sum := make([]byte, foldBytes)
+	if len(sumBytes) < foldBytes {
 		return nil
 	}
 	for i := 0; i < lcm/n; i++ {
-		for j := 0; j < n/8; j++ {
+		for j := range foldBytes {
 			sum[j] = sumBytes[j+(i*len(sum))]
 		}
 		nfold = onesComplementAddition(nfold, sum)
@@ -49,24 +57,16 @@ func Nfold(m []byte, n int) []byte {
 }
 
 func onesComplementAddition(n1, n2 []byte) []byte {
-	numBits := len(n1) * 8
-	out := make([]byte, numBits/8)
+	numBits := len(n1) * bitsPerByte
+	out := make([]byte, len(n1))
 	carry := 0
 	for i := numBits - 1; i > -1; i-- {
 		n1b := getBit(&n1, i)
 		n2b := getBit(&n2, i)
 		s := n1b + n2b + carry
 
-		switch s {
-		case 0, 1:
-			setBit(&out, i, s)
-			carry = 0
-		case 2:
-			carry = 1
-		case 3:
-			setBit(&out, i, 1)
-			carry = 1
-		}
+		setBit(&out, i, s&lowBitMask)
+		carry = s >> 1
 	}
 	if carry == 1 {
 		carryArray := make([]byte, len(n1))
@@ -78,8 +78,8 @@ func onesComplementAddition(n1, n2 []byte) []byte {
 
 func rotateRight(b []byte, step int) []byte {
 	out := make([]byte, len(b))
-	bitLen := len(b) * 8
-	for i := 0; i < bitLen; i++ {
+	bitLen := len(b) * bitsPerByte
+	for i := range bitLen {
 		v := getBit(&b, i)
 		setBit(&out, (i+step)%bitLen, v)
 	}
@@ -98,17 +98,17 @@ func gcd(x, y int) int {
 }
 
 func getBit(b *[]byte, p int) int {
-	pByte := p / 8
-	pBit := uint(p % 8)
+	pByte := p / bitsPerByte
+	pBit := uint(p % bitsPerByte)
 	vByte := (*b)[pByte]
-	vInt := int(vByte >> (8 - (pBit + 1)) & 0x0001)
+	vInt := int(vByte >> (bitsPerByte - (pBit + 1)) & lowBitMask)
 	return vInt
 }
 
 func setBit(b *[]byte, p, v int) {
-	pByte := p / 8
-	pBit := uint(p % 8)
+	pByte := p / bitsPerByte
+	pBit := uint(p % bitsPerByte)
 	oldByte := (*b)[pByte]
-	newByte := byte(v<<(8-(pBit+1))) | oldByte // #nosec G115 -- v is a one-bit value and the shift is 0..7.
+	newByte := byte(v<<(bitsPerByte-(pBit+1))) | oldByte // #nosec G115 -- v is one bit and the shift is 0..7.
 	(*b)[pByte] = newByte
 }

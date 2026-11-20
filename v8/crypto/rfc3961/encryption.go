@@ -42,7 +42,8 @@ func DES3EncryptData(key, data []byte, e etype.EType) ([]byte, []byte, error) {
 // The encrypted data is concatenated with its integrity hash to create an encrypted message.
 func DES3EncryptMessage(key, message []byte, usage uint32, e etype.EType) ([]byte, []byte, error) {
 	// confounder
-	plainBytes := make([]byte, e.GetConfounderByteSize())
+	confounderSize := e.GetConfounderByteSize()
+	plainBytes := make([]byte, confounderSize, confounderSize+len(message))
 	_, err := rand.Read(plainBytes)
 	if err != nil {
 		return []byte{}, []byte{}, fmt.Errorf("could not generate random confounder: %w", err)
@@ -99,7 +100,7 @@ func DES3DecryptData(key, data []byte, e etype.EType) ([]byte, error) {
 // DES3DecryptMessage decrypts the message provided using DES3 and methods specific to the etype provided.
 // The integrity of the message is also verified.
 func DES3DecryptMessage(key, ciphertext []byte, usage uint32, e etype.EType) ([]byte, error) {
-	checksumSize := e.GetHMACBitLength() / 8
+	checksumSize := e.GetHMACBitLength() / bitsPerByte
 	if checksumSize <= 0 || len(ciphertext) < checksumSize+e.GetConfounderByteSize() {
 		return nil, errors.New("ciphertext is too short")
 	}
@@ -126,7 +127,7 @@ func DES3DecryptMessage(key, ciphertext []byte, usage uint32, e etype.EType) ([]
 
 // VerifyIntegrity verifies the integrity of cipertext bytes ct.
 func VerifyIntegrity(key, ct, pt []byte, usage uint32, etype etype.EType) bool {
-	checksumSize := etype.GetHMACBitLength() / 8
+	checksumSize := etype.GetHMACBitLength() / bitsPerByte
 	if checksumSize <= 0 || len(ct) < checksumSize {
 		return false
 	}

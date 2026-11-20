@@ -7,11 +7,10 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/crypto/etype"
 )
 
-const (
-	prfconstant = "prf"
-)
+const prfconstant = "prf"
 
-// DeriveRandom implements the RFC 3961 defined function: DR(Key, Constant) = k-truncate(E(Key, Constant, initial-cipher-state)).
+// DeriveRandom implements the RFC 3961 function
+// DR(Key, Constant) = k-truncate(E(Key, Constant, initial-cipher-state)).
 //
 // key: base key or protocol key. Likely to be a key from a keytab file.
 //
@@ -25,13 +24,12 @@ const (
 func DeriveRandom(key, usage []byte, e etype.EType) ([]byte, error) {
 	n := e.GetCypherBlockBitLength()
 	k := e.GetKeySeedBitLength()
-	// Ensure the usage constant is at least the size of the cypher block size. Pass it through the nfold algorithm that will "stretch" it if needs be.
+	// Fold the usage constant to the cipher block size before encrypting it.
 	nFoldUsage := Nfold(usage, n)
 	if len(nFoldUsage) == 0 {
 		return nil, fmt.Errorf("invalid n-fold input for block size %d", n)
 	}
-	// k-truncate implemented by creating a byte array the size of k (k is in bits hence /8)
-	out := make([]byte, k/8)
+	out := make([]byte, k/bitsPerByte)
 	// Keep feeding the output back into the encryption function until it is no longer short than k.
 	_, K, err := e.EncryptData(key, nFoldUsage)
 	if err != nil {
@@ -71,7 +69,7 @@ func DES3RandomToKey(b []byte) []byte {
 	return r
 }
 
-// DES3StringToKey returns a key derived from the string provided according to the definition in RFC 3961 for DES3 etypes.
+// DES3StringToKey derives a DES3 key from the secret and salt as defined by RFC 3961.
 func DES3StringToKey(secret, salt string, e etype.EType) ([]byte, error) {
 	s := secret + salt
 	folded := Nfold([]byte(s), e.GetKeySeedBitLength())
@@ -90,7 +88,7 @@ func DES3StringToKey(secret, salt string, e etype.EType) ([]byte, error) {
 func PseudoRandom(key, b []byte, e etype.EType) ([]byte, error) {
 	h := e.GetHashFunc()()
 	h.Write(b)
-	blockSize := e.GetCypherBlockBitLength() / 8
+	blockSize := e.GetCypherBlockBitLength() / bitsPerByte
 	if blockSize <= 0 || blockSize > h.Size() {
 		return nil, fmt.Errorf("invalid pseudo-random block size %d for enctype %d", blockSize, e.GetETypeID())
 	}
@@ -107,7 +105,7 @@ func PseudoRandom(key, b []byte, e etype.EType) ([]byte, error) {
 }
 
 func stretch56Bits(b []byte) []byte {
-	d := make([]byte, len(b))
+	d := make([]byte, len(b), len(b)+1)
 	copy(d, b)
 	var lb byte
 	for i, v := range d {
@@ -125,11 +123,11 @@ func stretch56Bits(b []byte) []byte {
 }
 
 func calcEvenParity(b byte) (uint8, uint8) {
-	lowestbit := b & 0x01
+	lowestbit := b & lowBitMask
 	// c counter of 1s in the first 7 bits of the byte
 	var c int
 	// Iterate over the highest 7 bits (hence p starts at 1 not zero) and count the 1s.
-	for p := 1; p < 8; p++ {
+	for p := 1; p < bitsPerByte; p++ {
 		v := b & (1 << uint(p))
 		if v != 0 {
 			c++
