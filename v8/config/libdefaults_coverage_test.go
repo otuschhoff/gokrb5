@@ -100,22 +100,57 @@ func TestLibDefaultsRejectInvalidValues(t *testing.T) {
 	}
 }
 
-func TestBooleanAndDurationVariants(t *testing.T) {
-	for value, want := range map[string]bool{"true": true, "false": false, "yes": true, "Y": true, "no": false, "N": false} {
-		got, err := parseBoolean(value)
-		if err != nil || got != want {
-			t.Fatalf("parseBoolean(%q) = %v, %v", value, got, err)
-		}
+func TestParseBooleanVariants(t *testing.T) {
+	const trueLiteral = "true"
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "true word", input: trueLiteral, want: true},
+		{name: "false word", input: "false", want: false},
+		{name: "yes word", input: "yes", want: true},
+		{name: "uppercase yes initial", input: "Y", want: true},
+		{name: "no word", input: "no", want: false},
+		{name: "uppercase no initial", input: "N", want: false},
 	}
-	for value, want := range map[string]time.Duration{"2d": 48 * time.Hour, "2d3m4s": 48*time.Hour + 3*time.Minute + 4*time.Second, "90": 90 * time.Second, "1:02": time.Hour + 2*time.Minute, "1:02:03": time.Hour + 2*time.Minute + 3*time.Second} {
-		got, err := parseDuration(value)
-		if err != nil || got != want {
-			t.Fatalf("parseDuration(%q) = %v, %v", value, got, err)
-		}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseBoolean(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
 	}
+}
+
+func TestParseDurationVariants(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  time.Duration
+	}{
+		{name: "days only", input: "2d", want: 48 * time.Hour},
+		{name: "days with suffix", input: "2d3m4s", want: 48*time.Hour + 3*time.Minute + 4*time.Second},
+		{name: "seconds without unit", input: "90", want: 90 * time.Second},
+		{name: "hours and minutes", input: "1:02", want: time.Hour + 2*time.Minute},
+		{name: "hours minutes and seconds", input: "1:02:03", want: time.Hour + 2*time.Minute + 3*time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseDuration(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestParseDurationRejectsInvalidVariants(t *testing.T) {
 	for _, value := range []string{"xd", "1dbad", "1:2:3:4", "1:x"} {
-		if _, err := parseDuration(value); err == nil {
-			t.Fatalf("parseDuration(%q) accepted invalid value", value)
-		}
+		t.Run(value, func(t *testing.T) {
+			_, err := parseDuration(value)
+			require.Error(t, err)
+		})
 	}
 }
