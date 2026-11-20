@@ -2,7 +2,7 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-117 done. The latest measured
+(floor raised to 86.0%), and Phase 5 slices 1-118 done. The latest measured
 v8 inventories (Slice 116) contain 518 canonical and 3,392 supplemental
 findings. Most remaining canonical findings are from `revive`, complexity and
 nesting checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
@@ -819,6 +819,16 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 118 (2026-11-20, v8 config loader example; Q-10):
+Add an executable public API example for `NewFromString`. It rejects fatal
+errors, reports a typed `UnsupportedDirective` warning, and reads the default
+realm from the returned config. The expected output verifies that a later
+valid section is parsed without losing the earlier warning. No production code
+changes; PKINIT and PKU2U remain deferred.
+
+Config vet, 100 shuffled race-enabled config runs, and changed-line lint for
+both modules against `ad4dfa9` and `origin/main` passed.
 
 Slice 117 (2026-11-20, v8 config loader contracts; Q-10):
 Document the scanner's line-token requirement and distinguish fatal
