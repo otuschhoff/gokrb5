@@ -88,6 +88,8 @@ func (initiator *Initiator) InitSecContext(
 }
 
 // AcceptSecContext rejects use of an initiator as an acceptor.
+//
+//nolint:ireturn // gssapi.ContextMechanism requires the gssapi.Context return type.
 func (*Initiator) AcceptSecContext([]byte, ...gssapi.MechanismOption) ([]byte, gssapi.Context, bool, error) {
 	return nil, nil, false, errors.New("PKU2U initiator cannot accept a security context")
 }

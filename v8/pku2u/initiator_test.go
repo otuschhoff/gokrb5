@@ -7,6 +7,20 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/gssapi"
 )
 
+func TestInitiatorRejectsAcceptorRole(t *testing.T) {
+	t.Parallel()
+
+	var mechanism gssapi.ContextMechanism = NewInitiator(nil, nil)
+	output, context, done, err := mechanism.AcceptSecContext(nil)
+	const want = "PKU2U initiator cannot accept a security context"
+	if err == nil || err.Error() != want {
+		t.Fatalf("AcceptSecContext error = %v, want %q", err, want)
+	}
+	if output != nil || context != nil || done {
+		t.Fatalf("AcceptSecContext returned (%x, %v, %t), want (nil, nil, false)", output, context, done)
+	}
+}
+
 func TestInitiatorHandshakeTransitions(t *testing.T) {
 	t.Parallel()
 
