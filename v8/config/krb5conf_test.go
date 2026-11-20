@@ -702,6 +702,29 @@ func TestConfigFatalSectionErrorAfterWarning(t *testing.T) {
 	assert.True(t, ok, "expected wrapped Invalid error, got %v", err)
 }
 
+func TestLoadMissingFile(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "missing.conf")
+
+	cfg, err := Load(path)
+	require.ErrorContains(t, err, "configuration file could not be opened:")
+	assert.ErrorContains(t, err, path)
+	assert.Nil(t, cfg)
+}
+
+func TestLoadInvalidFile(t *testing.T) {
+	t.Parallel()
+
+	const input = "[domain_realm]\nmissing assignment\n"
+
+	cfg, err := Load(writeConfigFixture(t, input))
+	require.ErrorContains(t, err, "error processing domaain_realm section:")
+	_, isInvalid := errors.AsType[Invalid](err)
+	assert.True(t, isInvalid, "expected wrapped Invalid error, got %v", err)
+	assert.Nil(t, cfg)
+}
+
 func TestLoadWithV4Lines(t *testing.T) {
 	t.Parallel()
 
