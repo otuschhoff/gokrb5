@@ -820,6 +820,26 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 136 (2026-11-20, complete v8 SPNEGO lint cleanup; Q-10):
+Separate generic and Kerberos negotiation into mechanism selection, token
+verification, MIC handling, and context completion. Split HTTP negotiation
+into request replay, continuation, and final-response handling while
+preserving response-body ownership, retry limits, and mutual authentication.
+Keep the public API and wire encodings unchanged. Reject typed-nil
+continuation tokens with the defective-token status instead of panicking,
+and cover the SPNEGO, MIC, and raw Kerberos paths in regression tests.
+
+The uncapped whole-v8 scans report zero SPNEGO findings, down from 48
+canonical and 385 supplemental, with no change to the lint configuration
+or to findings outside SPNEGO. Targeted `revive` and `ireturn` exceptions
+preserve published names and intentionally polymorphic contracts. The
+remaining whole-v8 totals are 465 canonical and 2,791 supplemental.
+Default-tag SPNEGO package statement coverage rose from 83.2% to 84.8%;
+this is not the whole-v8 cross-package measurement. SPNEGO passes 100
+shuffled race-enabled runs, and its consumers also pass under race
+detection. The v8 build, vet, and default test suite pass, as does
+changed-line lint for both modules. Live AD interoperability was not run.
+
 Slice 135 (2026-11-20, complete v8 keytab lint cleanup; Q-10):
 Separate file lifetime and lock handling from the append performed under the
 lock. Keep version selection, wire widths, and short-KVNO handling explicit,

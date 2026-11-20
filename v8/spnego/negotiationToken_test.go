@@ -16,7 +16,21 @@ import (
 
 const (
 	// #nosec G101 -- this negotiation vector wraps a TEST.GOKRB5 fixture ticket.
-	testNegTokenInit = "a08202aa308202a6a027302506092a864886f71201020206052b0501050206092a864882f71201020206062b0601050205a2820279048202756082027106092a864886f71201020201006e8202603082025ca003020105a10302010ea20703050000000000a38201706182016c30820168a003020105a10d1b0b544553542e474f4b524235a2233021a003020103a11a30181b04485454501b10686f73742e746573742e676f6b726235a382012b30820127a003020112a103020102a282011904820115d4bd890abc456f44e2e7a2e8111bd6767abf03266dfcda97c629af2ece450a5ae1f145e4a4d1bc2c848e66a6c6b31d9740b26b03cdbd2570bfcf126e90adf5f5ebce9e283ff5086da47b129b14fc0aabd4d1df9c1f3c72b80cc614dfc28783450b2c7b7749651f432b47aaa2ff158c0066b757f3fb00dd7b4f63d68276c76373ecdd3f19c66ebc43a81e577f3c263b878356f57e8d6c4eccd587b81538e70392cf7e73fc12a6f7c537a894a7bb5566c83ac4d69757aa320a51d8d690017aebf952add1889adfc3307b0e6cd8c9b57cf8589fbe52800acb6461c25473d49faa1bdceb8bce3f61db23f9cd6a09d5adceb411e1c4546b30b33331e570fd6bc50aa403557e75f488e759750ea038aab6454667d9b64f41a481d23081cfa003020112a281c70481c4d67ba2ae4cf5d917caab1d863605249320e90482563662ed92408a543b6ad5edeb8f9375e9060a205491df082fd2a5fec93dfb76f41012bb60cae20f07adbb77a1aa56f0521f36e1ea10dc9fb762902b254dd7664d0bcc6f751f2003e41990af1b4330d10477bfad638b9f0b704ac80cc47731f8ec8d801762bad8884b8de90adb1dbe7fc7b0ffafd38fb5eb8b6547cee30d89873281ce63ad70042a13478b1a7c2bdde0f223ace62dbb84e2d06f1070f4265f66e0544449335e2fcc4d0aee5bf81c5999"
+	testNegTokenInit = "a08202aa308202a6a027302506092a864886f71201020206052b0501050206092a864882f71201020206062b06010502" +
+		"05a2820279048202756082027106092a864886f71201020201006e8202603082025ca003020105a10302010ea2070305" +
+		"0000000000a38201706182016c30820168a003020105a10d1b0b544553542e474f4b524235a2233021a003020103a11a" +
+		"30181b04485454501b10686f73742e746573742e676f6b726235a382012b30820127a003020112a103020102a2820119" +
+		"04820115d4bd890abc456f44e2e7a2e8111bd6767abf03266dfcda97c629af2ece450a5ae1f145e4a4d1bc2c848e66a6" +
+		"c6b31d9740b26b03cdbd2570bfcf126e90adf5f5ebce9e283ff5086da47b129b14fc0aabd4d1df9c1f3c72b80cc614df" +
+		"c28783450b2c7b7749651f432b47aaa2ff158c0066b757f3fb00dd7b4f63d68276c76373ecdd3f19c66ebc43a81e577f" +
+		"3c263b878356f57e8d6c4eccd587b81538e70392cf7e73fc12a6f7c537a894a7bb5566c83ac4d69757aa320a51d8d690" +
+		"017aebf952add1889adfc3307b0e6cd8c9b57cf8589fbe52800acb6461c25473d49faa1bdceb8bce3f61db23f9cd6a09" +
+		"d5adceb411e1c4546b30b33331e570fd6bc50aa403557e75f488e759750ea038aab6454667d9b64f41a481d23081cfa0" +
+		"03020112a281c70481c4d67ba2ae4cf5d917caab1d863605249320e90482563662ed92408a543b6ad5edeb8f9375e906" +
+		"0a205491df082fd2a5fec93dfb76f41012bb60cae20f07adbb77a1aa56f0521f36e1ea10dc9fb762902b254dd7664d0b" +
+		"cc6f751f2003e41990af1b4330d10477bfad638b9f0b704ac80cc47731f8ec8d801762bad8884b8de90adb1dbe7fc7b0" +
+		"ffafd38fb5eb8b6547cee30d89873281ce63ad70042a13478b1a7c2bdde0f223ace62dbb84e2d06f1070f4265f66e054" +
+		"4449335e2fcc4d0aee5bf81c5999"
 	testNegTokenResp = "a1143012a0030a0100a10b06092a864886f712010202"
 )
 
@@ -30,7 +44,6 @@ func TestUnmarshal_negTokenInit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error unmarshalling negotiation token: %v", err)
 	}
-	assert.IsType(t, NegTokenInit{}, nt, "Not the expected type NegTokenInit")
 	assert.True(t, isInit, "Boolean indicating type is negTokenInit is not true")
 	nInit := mustSPNEGOTestType[NegTokenInit](t, nt)
 	assert.Equal(t, 4, len(nInit.MechTypes))
@@ -71,11 +84,15 @@ func TestUnmarshal_negTokenResp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error unmarshalling negotiation token: %v", err)
 	}
-	assert.IsType(t, NegTokenResp{}, nt, "Not the expected type NegTokenResp")
 	assert.False(t, isInit, "Boolean indicating type is negTokenInit is not false")
 	nResp := mustSPNEGOTestType[NegTokenResp](t, nt)
 	assert.Equal(t, asn1.Enumerated(0), nResp.NegState)
-	assert.Equal(t, asn1.ObjectIdentifier{1, 2, 840, 113554, 1, 2, 2}, nResp.SupportedMech, "SupportedMech type not as expected.")
+	assert.Equal(
+		t,
+		asn1.ObjectIdentifier{1, 2, 840, 113554, 1, 2, 2},
+		nResp.SupportedMech,
+		"SupportedMech type not as expected.",
+	)
 }
 
 func TestMarshal_negTokenResp(t *testing.T) {
@@ -119,10 +136,18 @@ func TestNegTokenInitMechListMIC(t *testing.T) {
 		KeyType:  etypeID.AES128_CTS_HMAC_SHA1_96,
 		KeyValue: []byte("0123456789abcdef"),
 	}
-	token := NegTokenInit{MechTypes: []asn1.ObjectIdentifier{
-		gssapi.OIDKRB5.OID(),
-		gssapi.OIDMSLegacyKRB5.OID(),
-	}}
+	token := NegTokenInit{
+		ReqFlags:       asn1.BitString{Bytes: nil, BitLength: 0},
+		MechTokenBytes: nil,
+		NegHints:       nil,
+		MechListMIC:    nil,
+		mechToken:      nil,
+		settings:       nil,
+		MechTypes: []asn1.ObjectIdentifier{
+			gssapi.OIDKRB5.OID(),
+			gssapi.OIDMSLegacyKRB5.OID(),
+		},
+	}
 
 	require.NoError(t, token.SetMechListMIC(key, 7))
 	require.NoError(t, token.VerifyMechListMIC(key))
@@ -160,6 +185,11 @@ func TestNegTokenRespMechListMIC(t *testing.T) {
 func TestNegTokenInit2NegHintsRoundTrip(t *testing.T) {
 	t.Parallel()
 	token := NegTokenInit{
+		ReqFlags:       asn1.BitString{Bytes: nil, BitLength: 0},
+		MechTokenBytes: nil,
+		mechToken:      nil,
+		settings:       nil,
+
 		MechTypes:   []asn1.ObjectIdentifier{gssapi.OIDKRB5.OID()},
 		NegHints:    &NegHints{HintName: "HTTP/server.example.com", HintAddress: []byte{1, 2, 3}},
 		MechListMIC: []byte{4, 5, 6},
@@ -210,49 +240,97 @@ func TestNegotiationMarshalRetainsASN1Error(t *testing.T) {
 	}
 }
 
-func TestNegotiationTokenValidationBranches(t *testing.T) {
+func TestNegotiationResponseValidation(t *testing.T) {
 	responseBytes, err := hex.DecodeString(testNegTokenResp)
 	require.NoError(t, err)
 	var response NegTokenResp
 	require.NoError(t, response.Unmarshal(responseBytes))
-	if response.State() != NegStateAcceptCompleted || response.Context() != nil {
-		t.Fatalf("response state/context = %v/%v", response.State(), response.Context())
-	}
-	if ok, status := response.Verify(); ok || status.Code != gssapi.StatusContinueNeeded {
-		t.Fatalf("empty response verification = %v, %+v", ok, status)
+	require.Equal(t, NegStateAcceptCompleted, response.State())
+	require.Nil(t, response.Context())
+	{
+		ok, status := response.Verify()
+		require.False(t, ok)
+		require.Equal(t, gssapi.StatusContinueNeeded, status.Code)
 	}
 	response.ResponseToken = []byte("malformed")
-	if ok, status := response.Verify(); ok || status.Code != gssapi.StatusDefectiveToken {
-		t.Fatalf("malformed response verification = %v, %+v", ok, status)
+	{
+		ok, status := response.Verify()
+		require.False(t, ok)
+		require.Equal(t, gssapi.StatusDefectiveToken, status.Code)
 	}
-	response = NegTokenResp{SupportedMech: asn1.ObjectIdentifier{1, 2, 3}}
-	if ok, status := response.Verify(); ok || status.Code != gssapi.StatusBadMech {
-		t.Fatalf("unsupported response verification = %v, %+v", ok, status)
+	response = NegTokenResp{
+		NegState:      0,
+		ResponseToken: nil,
+		MechListMIC:   nil,
+		mechToken:     nil,
+		settings:      nil,
+		SupportedMech: asn1.ObjectIdentifier{1, 2, 3},
 	}
+	{
+		ok, status := response.Verify()
+		require.False(t, ok)
+		require.Equal(t, gssapi.StatusBadMech, status.Code)
+	}
+}
 
-	init := NegTokenInit{MechTypes: []asn1.ObjectIdentifier{gssapi.OIDKRB5.OID()}}
-	if ok, status := init.Verify(); ok || status.Code != gssapi.StatusContinueNeeded || init.Context() != nil {
-		t.Fatalf("empty init verification = %v, %+v", ok, status)
+func TestNegotiationInitiatorValidation(t *testing.T) {
+	init := NegTokenInit{
+		ReqFlags:       asn1.BitString{Bytes: nil, BitLength: 0},
+		MechTokenBytes: nil,
+		NegHints:       nil,
+		MechListMIC:    nil,
+		mechToken:      nil,
+		settings:       nil,
+		MechTypes:      []asn1.ObjectIdentifier{gssapi.OIDKRB5.OID()},
+	}
+	{
+		ok, status := init.Verify()
+		require.False(t, ok)
+		require.Equal(t, gssapi.StatusContinueNeeded, status.Code)
+		require.Nil(t, init.Context())
 	}
 	init.MechTokenBytes = []byte("malformed")
-	if ok, status := init.Verify(); ok || status.Code != gssapi.StatusDefectiveToken {
-		t.Fatalf("malformed init verification = %v, %+v", ok, status)
+	{
+		ok, status := init.Verify()
+		require.False(t, ok)
+		require.Equal(t, gssapi.StatusDefectiveToken, status.Code)
 	}
-	init = NegTokenInit{MechTypes: []asn1.ObjectIdentifier{{1, 2, 3}}}
-	if ok, status := init.Verify(); ok || status.Code != gssapi.StatusBadMech {
-		t.Fatalf("unsupported init verification = %v, %+v", ok, status)
+	init = NegTokenInit{
+		ReqFlags:       asn1.BitString{Bytes: nil, BitLength: 0},
+		MechTokenBytes: nil,
+		NegHints:       nil,
+		MechListMIC:    nil,
+		mechToken:      nil,
+		settings:       nil,
+		MechTypes:      []asn1.ObjectIdentifier{{1, 2, 3}},
 	}
+	{
+		ok, status := init.Verify()
+		require.False(t, ok)
+		require.Equal(t, gssapi.StatusBadMech, status.Code)
+	}
+}
 
+func TestNegotiationTokenUnmarshalRejectsWrongChoice(t *testing.T) {
+	var init NegTokenInit
+	var response NegTokenResp
+	responseBytes, err := hex.DecodeString(testNegTokenResp)
+	require.NoError(t, err)
 	initBytes, err := hex.DecodeString(testNegTokenInit)
 	require.NoError(t, err)
-	if err := response.Unmarshal(initBytes); err == nil || !strings.Contains(err.Error(), "not that of a NegTokenResp") {
-		t.Fatalf("response accepted init token: %v", err)
+	{
+		err := response.Unmarshal(initBytes)
+		require.Error(t, err)
+		require.True(t, strings.Contains(err.Error(), "not that of a NegTokenResp"))
 	}
-	if err := init.Unmarshal(responseBytes); err == nil || !strings.Contains(err.Error(), "not that of a NegTokenInit") {
-		t.Fatalf("init accepted response token: %v", err)
+	{
+		err := init.Unmarshal(responseBytes)
+		require.Error(t, err)
+		require.True(t, strings.Contains(err.Error(), "not that of a NegTokenInit"))
 	}
-	if err := response.Unmarshal([]byte("malformed")); err == nil {
-		t.Fatal("response accepted malformed token")
+	{
+		err := response.Unmarshal([]byte("malformed"))
+		require.Error(t, err)
 	}
 }
 
@@ -262,8 +340,17 @@ func FuzzUnmarshalNegToken(f *testing.F) {
 	responseToken, err := hex.DecodeString(testNegTokenResp)
 	require.NoError(f, err)
 	init2 := NegTokenInit{
+		ReqFlags:       asn1.BitString{Bytes: nil, BitLength: 0},
+		MechTokenBytes: nil,
+		MechListMIC:    nil,
+		mechToken:      nil,
+		settings:       nil,
+
 		MechTypes: []asn1.ObjectIdentifier{gssapi.OIDKRB5.OID()},
-		NegHints:  &NegHints{HintName: "HTTP/server.example.com"},
+		NegHints: &NegHints{
+			HintAddress: nil,
+			HintName:    "HTTP/server.example.com",
+		},
 	}
 	init2Token, err := init2.Marshal()
 	require.NoError(f, err)

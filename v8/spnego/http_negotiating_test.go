@@ -14,7 +14,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/jcmturner/goidentity/v6"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -54,86 +53,104 @@ func TestLegacyHTTPHelperResponses(t *testing.T) {
 	mechanism := SPNEGOService(keytab.New())
 	request := httptest.NewRequest(http.MethodGet, "http://server.example.org", nil)
 
-	if _, err := SetSPNEGOHeaderWithOptions(nil, request, "HTTP/server.example.org", KRB5TokenAPREQOptions{GSSAPIFlags: []int{gssapi.ContextFlagDCEStyle}}); err == nil {
-		t.Fatal("DCE-style HTTP exchange was accepted")
+	{
+		var options KRB5TokenAPREQOptions
+		options.GSSAPIFlags = []int{gssapi.ContextFlagDCEStyle}
+		_, err := SetSPNEGOHeaderWithOptions(nil, request, "HTTP/server.example.org", options)
+		require.Error(t, err)
 	}
 	localClient := client.NewWithPassword("alice", "EXAMPLE.ORG", "password", config.New())
-	if err := SetSPNEGOHeader(localClient, request, "HTTP/server.example.org"); err == nil {
-		t.Fatal("unconfigured client returned no error")
+	{
+		err := SetSPNEGOHeader(localClient, request, "HTTP/server.example.org")
+		require.Error(t, err)
 	}
 
 	missing := httptest.NewRecorder()
-	if token, err := getAuthorizationNegotiationHeaderAsSPNEGOToken(mechanism, request, missing); token != nil || err == nil || missing.Code != http.StatusUnauthorized {
-		t.Fatalf("missing authorization = %v, %v, %d", token, err, missing.Code)
+	{
+		token, err := getAuthorizationNegotiationHeaderAsSPNEGOToken(mechanism, request, missing)
+		require.Nil(t, token)
+		require.Error(t, err)
+		require.Equal(t, http.StatusUnauthorized, missing.Code)
 	}
-	request.Header.Set(HTTPHeaderAuthRequest, "Negotiate !!!")
+	request.Header.Set(HTTPHeaderAuthRequest, malformedNegotiateHeader)
 	invalid := httptest.NewRecorder()
-	if token, err := getAuthorizationNegotiationHeaderAsSPNEGOToken(mechanism, request, invalid); token != nil || err == nil || invalid.Code != http.StatusUnauthorized || invalid.Header().Get(HTTPHeaderAuthResponse) != spnegoNegTokenRespIncompleteKRB5 {
-		t.Fatalf("invalid authorization = %v, %v, %d, %q", token, err, invalid.Code, invalid.Header().Get(HTTPHeaderAuthResponse))
+	{
+		token, err := getAuthorizationNegotiationHeaderAsSPNEGOToken(mechanism, request, invalid)
+		require.Nil(t, token)
+		require.Error(t, err)
+		require.Equal(t, http.StatusUnauthorized, invalid.Code)
+		require.Equal(t, spnegoNegTokenRespIncompleteKRB5, invalid.Header().Get(HTTPHeaderAuthResponse))
 	}
-	if _, err := getSessionCredentials(mechanism, request); err == nil {
-		t.Fatal("missing session manager returned credentials")
+	{
+		_, err := getSessionCredentials(mechanism, request)
+		require.Error(t, err)
 	}
 	identity := credentials.New("alice", "EXAMPLE.ORG")
-	if err := newSession(mechanism, request, httptest.NewRecorder(), identity); err != nil {
-		t.Fatal(err)
+	{
+		err := newSession(mechanism, request, httptest.NewRecorder(), identity)
+		require.NoError(t, err)
 	}
 
 	continueResponse := httptest.NewRecorder()
 	spnegoNegotiateKRB5MechType(mechanism, continueResponse, "continue")
-	if continueResponse.Code != http.StatusUnauthorized || continueResponse.Header().Get(HTTPHeaderAuthResponse) != spnegoNegTokenRespIncompleteKRB5 {
-		t.Fatalf("continue response = %d/%q", continueResponse.Code, continueResponse.Header().Get(HTTPHeaderAuthResponse))
-	}
+	require.Equal(t, http.StatusUnauthorized, continueResponse.Code)
+	require.Equal(t, spnegoNegTokenRespIncompleteKRB5, continueResponse.Header().Get(HTTPHeaderAuthResponse))
 	rejectResponse := httptest.NewRecorder()
 	spnegoResponseReject(mechanism, rejectResponse, "reject")
-	if rejectResponse.Code != http.StatusUnauthorized || rejectResponse.Header().Get(HTTPHeaderAuthResponse) != spnegoNegTokenRespReject {
-		t.Fatalf("reject response = %d/%q", rejectResponse.Code, rejectResponse.Header().Get(HTTPHeaderAuthResponse))
-	}
+	require.Equal(t, http.StatusUnauthorized, rejectResponse.Code)
+	require.Equal(t, spnegoNegTokenRespReject, rejectResponse.Header().Get(HTTPHeaderAuthResponse))
 	acceptResponse := httptest.NewRecorder()
 	spnegoResponseAcceptCompleted(mechanism, acceptResponse, "accept")
-	if acceptResponse.Header().Get(HTTPHeaderAuthResponse) != spnegoNegTokenRespKRBAcceptCompleted {
-		t.Fatalf("accept response = %q", acceptResponse.Header().Get(HTTPHeaderAuthResponse))
-	}
+	require.Equal(t, spnegoNegTokenRespKRBAcceptCompleted, acceptResponse.Header().Get(HTTPHeaderAuthResponse))
 	internalResponse := httptest.NewRecorder()
 	spnegoInternalServerError(mechanism, internalResponse, "failure")
-	if internalResponse.Code != http.StatusInternalServerError {
-		t.Fatalf("internal response = %d", internalResponse.Code)
-	}
+	require.Equal(t, http.StatusInternalServerError, internalResponse.Code)
 }
 
 func TestLegacyHTTPSessionPaths(t *testing.T) {
 	identity := credentials.New("alice", "EXAMPLE.ORG")
 	identity.SetAuthenticated(true)
 	encoded, err := identity.Marshal()
-	if err != nil {
-		t.Fatal(err)
+	require.NoError(t, err)
+	manager := &coverageSessionManager{
+		getErr: nil,
+		newErr: nil,
+		saved:  nil,
+		value:  encoded,
 	}
-	manager := &coverageSessionManager{value: encoded}
 	mechanism := SPNEGOService(keytab.New(), service.SessionManager(manager))
 	request := httptest.NewRequest(http.MethodGet, "http://server.example.org", nil)
 	got, err := getSessionCredentials(mechanism, request)
-	if err != nil || !got.Authenticated() || got.UserName() != "alice" {
-		t.Fatalf("session credentials = %+v, %v", got, err)
-	}
+	require.NoError(t, err)
+	require.True(t, got.Authenticated())
+	require.Equal(t, "alice", got.UserName())
 	manager.value = []byte("malformed")
-	if _, err := getSessionCredentials(mechanism, request); err == nil || !strings.Contains(err.Error(), "malformed") {
-		t.Fatalf("malformed session error = %v", err)
+	{
+		_, err := getSessionCredentials(mechanism, request)
+		require.Error(t, err)
+		require.True(t, strings.Contains(err.Error(), "malformed"))
 	}
 	manager.value = nil
 	manager.getErr = errors.New("store unavailable")
-	if _, err := getSessionCredentials(mechanism, request); err == nil || !strings.Contains(err.Error(), "getting session") {
-		t.Fatalf("session lookup error = %v", err)
+	{
+		_, err := getSessionCredentials(mechanism, request)
+		require.Error(t, err)
+		require.True(t, strings.Contains(err.Error(), "getting session"))
 	}
 
 	manager.getErr = nil
 	manager.newErr = errors.New("save failed")
 	response := httptest.NewRecorder()
-	if err := newSession(mechanism, request, response, identity); err == nil || response.Code != http.StatusInternalServerError {
-		t.Fatalf("session creation = %v, status %d", err, response.Code)
+	{
+		err := newSession(mechanism, request, response, identity)
+		require.Error(t, err)
+		require.Equal(t, http.StatusInternalServerError, response.Code)
 	}
 	manager.newErr = nil
-	if err := newSession(mechanism, request, httptest.NewRecorder(), identity); err != nil || len(manager.saved) == 0 {
-		t.Fatalf("successful session creation = %v, bytes %d", err, len(manager.saved))
+	{
+		err := newSession(mechanism, request, httptest.NewRecorder(), identity)
+		require.NoError(t, err)
+		require.False(t, len(manager.saved) == 0)
 	}
 }
 
@@ -144,9 +161,14 @@ func TestLegacyHTTPMiddlewareUsesAuthenticatedSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, remoteAddress := range []string{"192.0.2.1:1234", "malformed"} {
+	for _, remoteAddress := range []string{testRemoteAddress, "malformed"} {
 		t.Run(remoteAddress, func(t *testing.T) {
-			manager := &coverageSessionManager{value: encoded}
+			manager := &coverageSessionManager{
+				getErr: nil,
+				newErr: nil,
+				saved:  nil,
+				value:  encoded,
+			}
 			called := false
 			handler := SPNEGOKRB5Authenticate(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 				called = true
@@ -188,7 +210,7 @@ func TestLegacyHTTPMiddlewareAuthenticatesAndCreatesSession(t *testing.T) {
 		writer.WriteHeader(http.StatusNoContent)
 	}), kt, service.SessionManager(manager), service.DecodePAC(false))
 	request := httptest.NewRequest(http.MethodGet, "http://server.example", nil)
-	request.RemoteAddr = "192.0.2.1:1234"
+	request.RemoteAddr = testRemoteAddress
 	request.Header.Set(HTTPHeaderAuthRequest, "Negotiate "+base64.StdEncoding.EncodeToString(tokenBytes))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -220,32 +242,12 @@ func TestNegotiatingClientHTTPExchange(t *testing.T) {
 			if request.Header.Get(HTTPHeaderAuthRequest) != "" {
 				t.Error("initial request unexpectedly had authorization")
 			}
-			http.SetCookie(writer, &http.Cookie{ // #nosec G124 -- plaintext httptest transport needs a non-Secure continuation cookie.
-				Name: contextHTTPExchangeCookie, Value: "exchange-id", Path: "/",
-				HttpOnly: true, SameSite: http.SameSiteStrictMode,
-			})
+			http.SetCookie(writer, contextHTTPExchangeCookieForRequest(request, "exchange-id", 0))
 			writer.Header().Set(HTTPHeaderAuthResponse, HTTPHeaderAuthResponseValueKey)
 			http.Error(writer, UnauthorizedMsg, http.StatusUnauthorized)
 			return
 		}
-		cookie, err := request.Cookie(contextHTTPExchangeCookie)
-		if err != nil || cookie.Value != "exchange-id" {
-			t.Errorf("exchange cookie = %v, %v", cookie, err)
-		}
-		input, present, err := decodeNegotiateHeader(request.Header.Get(HTTPHeaderAuthRequest))
-		if err != nil || !present || len(input) == 0 {
-			t.Errorf("authorization header: present=%v len=%d err=%v", present, len(input), err)
-			http.Error(writer, "bad authorization", http.StatusBadRequest)
-			return
-		}
-		output, _, done, err := acceptor.AcceptSecContext(input)
-		if err != nil || !done {
-			t.Errorf("accept context: done=%v err=%v", done, err)
-			http.Error(writer, "accept failed", http.StatusBadRequest)
-			return
-		}
-		writer.Header().Set(HTTPHeaderAuthResponse, HTTPHeaderAuthResponseValueKey+" "+base64.StdEncoding.EncodeToString(output))
-		writer.WriteHeader(http.StatusOK)
+		finishTestHTTPExchange(t, writer, request, acceptor)
 	}))
 	defer server.Close()
 
@@ -255,48 +257,66 @@ func TestNegotiatingClientHTTPExchange(t *testing.T) {
 		return newTestContextMechanism(1, "http")
 	})
 	request, err := http.NewRequest(http.MethodPost, server.URL, strings.NewReader("request body"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	response, err := client.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer response.Body.Close() //nolint:errcheck // test response cleanup is intentionally best effort
-	if response.StatusCode != http.StatusOK || client.Context() == nil {
-		t.Fatalf("status/context = %d/%v", response.StatusCode, client.Context())
-	}
-	if factoryCalls != 1 || requests != 2 {
-		t.Fatalf("factory/requests = %d/%d", factoryCalls, requests)
-	}
-	if len(bodies) != 2 || bodies[0] != "request body" || bodies[1] != "request body" {
-		t.Fatalf("request bodies = %q", bodies)
-	}
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	require.NotNil(t, client.Context())
+	require.Equal(t, 1, factoryCalls)
+	require.Equal(t, 2, requests)
+	require.Equal(t, 2, len(bodies))
+	require.Equal(t, "request body", bodies[0])
+	require.Equal(t, "request body", bodies[1])
 }
 
-func TestNegotiatingClientProtocolGuards(t *testing.T) {
+func finishTestHTTPExchange(t *testing.T, writer http.ResponseWriter, request *http.Request, acceptor *Negotiator) {
+	t.Helper()
+	cookie, err := request.Cookie(contextHTTPExchangeCookie)
+	if err != nil || cookie.Value != "exchange-id" {
+		t.Errorf("exchange cookie = %v, %v", cookie, err)
+	}
+	input, present, err := decodeNegotiateHeader(request.Header.Get(HTTPHeaderAuthRequest))
+	if err != nil || !present || len(input) == 0 {
+		t.Errorf("authorization header: present=%v len=%d err=%v", present, len(input), err)
+		http.Error(writer, "bad authorization", http.StatusBadRequest)
+		return
+	}
+	output, _, done, err := acceptor.AcceptSecContext(input)
+	if err != nil || !done {
+		t.Errorf("accept context: done=%v err=%v", done, err)
+		http.Error(writer, "accept failed", http.StatusBadRequest)
+		return
+	}
+	header := HTTPHeaderAuthResponseValueKey + " " + base64.StdEncoding.EncodeToString(output)
+	writer.Header().Set(HTTPHeaderAuthResponse, header)
+	writer.WriteHeader(http.StatusOK)
+}
+
+func TestNegotiatingClientRequiresFactoryAndMechanism(t *testing.T) {
 	request := mustHTTPRequest(t, http.MethodGet, "http://server.example", nil)
 	unexpectedResponse, err := NewNegotiatingClient(nil, "service", nil).Do(request)
 	if unexpectedResponse != nil {
 		_ = unexpectedResponse.Body.Close()
 	}
-	if err == nil || !strings.Contains(err.Error(), "factory is required") {
-		t.Fatalf("nil factory error = %v", err)
-	}
-	unexpectedResponse, err = NewNegotiatingClient(nil, "service", func() gssapi.ContextMechanism { return nil }).Do(request)
+	require.Error(t, err)
+	require.True(t, strings.Contains(err.Error(), "factory is required"))
+	nilMechanism := NewNegotiatingClient(nil, "service", func() gssapi.ContextMechanism { return nil })
+	unexpectedResponse, err = nilMechanism.Do(request)
 	if unexpectedResponse != nil {
 		_ = unexpectedResponse.Body.Close()
 	}
-	if err == nil || !strings.Contains(err.Error(), "returned nil") {
-		t.Fatalf("nil mechanism error = %v", err)
-	}
+	require.Error(t, err)
+	require.True(t, strings.Contains(err.Error(), "returned nil"))
+}
 
+func TestNegotiatingClientProtocolGuards(t *testing.T) {
 	response := func(status int, challenge string) *http.Response {
 		header := make(http.Header)
 		if challenge != "" {
 			header.Set(HTTPHeaderAuthResponse, challenge)
 		}
-		return &http.Response{StatusCode: status, Header: header, Body: io.NopCloser(strings.NewReader("body"))}
+		return testHTTPResponse(status, header, io.NopCloser(strings.NewReader("body")))
 	}
 	tests := map[string]struct {
 		transport negotiatingRoundTripFunc
@@ -308,7 +328,7 @@ func TestNegotiatingClientProtocolGuards(t *testing.T) {
 		},
 		"malformed challenge": {
 			transport: func(*http.Request) (*http.Response, error) {
-				return response(http.StatusUnauthorized, "Negotiate !!!"), nil
+				return response(http.StatusUnauthorized, malformedNegotiateHeader), nil
 			},
 			want: "decode HTTP Negotiate",
 		},
@@ -322,29 +342,13 @@ func TestNegotiatingClientProtocolGuards(t *testing.T) {
 			want: "without mutual",
 		},
 		"completed mechanism on unauthorized response": {
-			transport: func() negotiatingRoundTripFunc {
-				acceptor := NewNegotiator(newTestContextMechanism(1, "guard"))
-				return func(current *http.Request) (*http.Response, error) {
-					if current.Header.Get(HTTPHeaderAuthRequest) == "" {
-						return response(http.StatusUnauthorized, HTTPHeaderAuthResponseValueKey), nil
-					}
-					input, _, err := decodeNegotiateHeader(current.Header.Get(HTTPHeaderAuthRequest))
-					if err != nil {
-						return nil, err
-					}
-					output, _, _, err := acceptor.AcceptSecContext(input)
-					if err != nil {
-						return nil, err
-					}
-					return response(http.StatusUnauthorized, "Negotiate "+base64.StdEncoding.EncodeToString(output)), nil
-				}
-			}(),
-			want: "no HTTP continuation token",
+			transport: completedUnauthorizedExchange(response),
+			want:      "no HTTP continuation token",
 		},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			client := NewNegotiatingClient(&http.Client{Transport: test.transport}, "service", func() gssapi.ContextMechanism {
+			client := NewNegotiatingClient(testHTTPClient(test.transport), "service", func() gssapi.ContextMechanism {
 				return newTestContextMechanism(1, "guard")
 			})
 			current, _ := http.NewRequest(http.MethodGet, "http://server.example", nil)
@@ -352,20 +356,40 @@ func TestNegotiatingClientProtocolGuards(t *testing.T) {
 			if unexpectedResponse != nil {
 				_ = unexpectedResponse.Body.Close()
 			}
-			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("protocol guard error = %v, want %q", err, test.want)
-			}
+			require.Error(t, err)
+			require.True(t, strings.Contains(err.Error(), test.want))
 		})
+	}
+}
+
+func completedUnauthorizedExchange(response func(int, string) *http.Response) negotiatingRoundTripFunc {
+	acceptor := NewNegotiator(newTestContextMechanism(1, "guard"))
+	return func(current *http.Request) (*http.Response, error) {
+		header := current.Header.Get(HTTPHeaderAuthRequest)
+		if header == "" {
+			return response(http.StatusUnauthorized, HTTPHeaderAuthResponseValueKey), nil
+		}
+		input, _, err := decodeNegotiateHeader(header)
+		if err != nil {
+			return nil, err
+		}
+		output, _, _, err := acceptor.AcceptSecContext(input)
+		if err != nil {
+			return nil, err
+		}
+		return response(http.StatusUnauthorized, "Negotiate "+base64.StdEncoding.EncodeToString(output)), nil
 	}
 }
 
 func TestContextHTTPExchangeCookieAttributes(t *testing.T) {
 	httpsRequest := mustHTTPRequest(t, http.MethodGet, "https://server.example", nil)
-	httpsRequest.TLS = &tls.ConnectionState{}
+	httpsRequest.TLS = new(tls.ConnectionState)
 	cookie := contextHTTPExchangeCookieForRequest(httpsRequest, "exchange", 60)
-	if !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode || !cookie.Secure || cookie.Path != "/" || cookie.MaxAge != 60 {
-		t.Fatalf("HTTPS exchange cookie attributes = %+v", cookie)
-	}
+	require.True(t, cookie.HttpOnly)
+	require.Equal(t, http.SameSiteStrictMode, cookie.SameSite)
+	require.True(t, cookie.Secure)
+	require.Equal(t, "/", cookie.Path)
+	require.Equal(t, 60, cookie.MaxAge)
 	httpRequest := mustHTTPRequest(t, http.MethodGet, "http://server.example", nil)
 	if contextHTTPExchangeCookieForRequest(httpRequest, "exchange", 60).Secure {
 		t.Fatal("plaintext HTTP exchange cookie unexpectedly marked Secure")
@@ -423,11 +447,30 @@ func TestSPNEGOContextAuthenticateRejectsInvalidExchanges(t *testing.T) {
 		header  string
 		factory ContextMechanismFactory
 	}{
-		{name: "missing authorization", factory: func() gssapi.ContextMechanism { return newTestContextMechanism(1, "http") }},
-		{name: "invalid authorization", header: "Negotiate !!!", factory: func() gssapi.ContextMechanism { return newTestContextMechanism(1, "http") }},
-		{name: "nil factory", header: authorization},
+		{
+			header: "",
+			name:   "missing authorization", factory: func() gssapi.ContextMechanism {
+				return newTestContextMechanism(
+					1,
+					"http",
+				)
+			},
+		},
+		{
+			name:    "invalid authorization",
+			header:  malformedNegotiateHeader,
+			factory: func() gssapi.ContextMechanism { return newTestContextMechanism(1, "http") },
+		},
+		{
+			factory: nil,
+			name:    "nil factory", header: authorization,
+		},
 		{name: "nil mechanism", header: authorization, factory: func() gssapi.ContextMechanism { return nil }},
-		{name: "mechanism failure", header: authorization, factory: func() gssapi.ContextMechanism { return newTestContextMechanism(1, "other") }},
+		{
+			name:    "mechanism failure",
+			header:  authorization,
+			factory: func() gssapi.ContextMechanism { return newTestContextMechanism(1, "other") },
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -443,6 +486,23 @@ func TestSPNEGOContextAuthenticateRejectsInvalidExchanges(t *testing.T) {
 			}
 		})
 	}
+}
+
+const (
+	malformedNegotiateHeader = "Negotiate !!!"
+	testRemoteAddress        = "192.0.2.1:1234"
+)
+
+func testHTTPResponse(status int, header http.Header, body io.ReadCloser) *http.Response {
+	response := new(http.Response)
+	response.StatusCode = status
+	response.Header = header
+	response.Body = body
+	return response
+}
+
+func testHTTPClient(transport http.RoundTripper) *http.Client {
+	return &http.Client{Transport: transport, CheckRedirect: nil, Jar: nil, Timeout: 0}
 }
 
 type negotiatingRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -471,17 +531,15 @@ func TestNegotiatingClientErrors(t *testing.T) {
 	if unexpectedResponse != nil {
 		_ = unexpectedResponse.Body.Close()
 	}
-	if err == nil || !strings.Contains(err.Error(), "factory is required") {
-		t.Fatalf("nil factory error = %v", err)
-	}
+	require.Error(t, err)
+	require.True(t, strings.Contains(err.Error(), "factory is required"))
 	client = NewNegotiatingClient(nil, "target", func() gssapi.ContextMechanism { return nil })
 	unexpectedResponse, err = client.Do(request)
 	if unexpectedResponse != nil {
 		_ = unexpectedResponse.Body.Close()
 	}
-	if err == nil || !strings.Contains(err.Error(), "returned nil") {
-		t.Fatalf("nil mechanism error = %v", err)
-	}
+	require.Error(t, err)
+	require.True(t, strings.Contains(err.Error(), "returned nil"))
 
 	tests := []struct {
 		name       string
@@ -489,21 +547,32 @@ func TestNegotiatingClientErrors(t *testing.T) {
 		wantErr    string
 		statusCode int
 	}{
-		{name: "missing Negotiate", challenge: "Basic", wantErr: "does not advertise Negotiate", statusCode: http.StatusUnauthorized},
-		{name: "malformed challenge", challenge: "Negotiate one two", wantErr: "invalid HTTP Negotiate challenge", statusCode: http.StatusUnauthorized},
-		{name: "invalid base64", challenge: "Negotiate !!!", wantErr: "decode HTTP Negotiate challenge", statusCode: http.StatusUnauthorized},
+		{
+			name:       "missing Negotiate",
+			challenge:  "Basic",
+			wantErr:    "does not advertise Negotiate",
+			statusCode: http.StatusUnauthorized,
+		},
+		{
+			name:       "malformed challenge",
+			challenge:  "Negotiate one two",
+			wantErr:    "invalid HTTP Negotiate challenge",
+			statusCode: http.StatusUnauthorized,
+		},
+		{
+			name:       "invalid base64",
+			challenge:  malformedNegotiateHeader,
+			wantErr:    "decode HTTP Negotiate challenge",
+			statusCode: http.StatusUnauthorized,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			httpClient := &http.Client{Transport: negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
+			httpClient := testHTTPClient(negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
 				header := make(http.Header)
 				header.Set(HTTPHeaderAuthResponse, test.challenge)
-				return &http.Response{
-					StatusCode: test.statusCode,
-					Header:     header,
-					Body:       io.NopCloser(bytes.NewReader(nil)),
-				}, nil
-			})}
+				return testHTTPResponse(test.statusCode, header, io.NopCloser(bytes.NewReader(nil))), nil
+			}))
 			client := NewNegotiatingClient(httpClient, "target", func() gssapi.ContextMechanism {
 				return newTestContextMechanism(1, "http")
 			})
@@ -511,9 +580,8 @@ func TestNegotiatingClientErrors(t *testing.T) {
 			if unexpectedResponse != nil {
 				_ = unexpectedResponse.Body.Close()
 			}
-			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
-				t.Fatalf("error = %v, want containing %q", err, test.wantErr)
-			}
+			require.Error(t, err)
+			require.True(t, strings.Contains(err.Error(), test.wantErr))
 		})
 	}
 }
@@ -521,9 +589,9 @@ func TestNegotiatingClientErrors(t *testing.T) {
 func TestNegotiatingClientTransportAndRoundLimit(t *testing.T) {
 	request := mustHTTPRequest(t, http.MethodGet, "http://example.test", nil)
 	transportErr := errors.New("transport failed")
-	client := NewNegotiatingClient(&http.Client{Transport: negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
+	client := NewNegotiatingClient(testHTTPClient(negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, transportErr
-	})}, "target", func() gssapi.ContextMechanism { return newTestContextMechanism(1, "http") })
+	})), "target", func() gssapi.ContextMechanism { return newTestContextMechanism(1, "http") })
 	unexpectedResponse, err := client.Do(request)
 	if unexpectedResponse != nil {
 		_ = unexpectedResponse.Body.Close()
@@ -532,16 +600,14 @@ func TestNegotiatingClientTransportAndRoundLimit(t *testing.T) {
 		t.Fatalf("transport error = %v", err)
 	}
 
-	challenge, err := marshalSPNEGOToken(&SPNEGOToken{Resp: true, NegTokenResp: NegTokenResp{
-		NegState:      asn1.Enumerated(NegStateAcceptIncomplete),
-		SupportedMech: newTestContextMechanism(1, "http").OID(),
-		ResponseToken: []byte("http-challenge"),
-	}})
+	challenge, err := marshalMechanismResponse(mechanismResponse(
+		NegStateAcceptIncomplete, newTestContextMechanism(1, "http").OID(), []byte("http-challenge"),
+	))
 	if err != nil {
 		t.Fatal(err)
 	}
 	calls := 0
-	httpClient := &http.Client{Transport: negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
+	httpClient := testHTTPClient(negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		calls++
 		header := make(http.Header)
 		if calls == 1 {
@@ -549,8 +615,8 @@ func TestNegotiatingClientTransportAndRoundLimit(t *testing.T) {
 		} else {
 			header.Set(HTTPHeaderAuthResponse, HTTPHeaderAuthResponseValueKey+" "+base64.StdEncoding.EncodeToString(challenge))
 		}
-		return &http.Response{StatusCode: http.StatusUnauthorized, Header: header, Body: io.NopCloser(bytes.NewReader(nil))}, nil
-	})}
+		return testHTTPResponse(http.StatusUnauthorized, header, io.NopCloser(bytes.NewReader(nil))), nil
+	}))
 	client = NewNegotiatingClient(httpClient, "target", func() gssapi.ContextMechanism {
 		return newTestContextMechanism(1, "http")
 	})
@@ -568,25 +634,28 @@ func TestNegotiatingClientTransportAndRoundLimit(t *testing.T) {
 
 func TestNegotiationRequestAndHeaderHelpers(t *testing.T) {
 	request := mustHTTPRequest(t, http.MethodPost, "http://example.test", io.NopCloser(strings.NewReader("body")))
-	if _, err := cloneNegotiationRequest(request, 1); err == nil || !strings.Contains(err.Error(), "cannot be replayed") {
-		t.Fatalf("non-replayable body error = %v", err)
+	{
+		_, err := cloneNegotiationRequest(request, 1)
+		require.Error(t, err)
+		require.True(t, strings.Contains(err.Error(), "cannot be replayed"))
 	}
 	getBodyErr := errors.New("get body failed")
 	request.GetBody = func() (io.ReadCloser, error) { return nil, getBodyErr }
-	if _, err := cloneNegotiationRequest(request, 1); !errors.Is(err, getBodyErr) {
-		t.Fatalf("GetBody error = %v", err)
+	{
+		_, err := cloneNegotiationRequest(request, 1)
+		require.True(t, errors.Is(err, getBodyErr))
 	}
 
 	for _, value := range []string{"", "Basic abc"} {
 		decoded, present, err := decodeNegotiateHeader(value)
-		if err != nil || present || decoded != nil {
-			t.Fatalf("decodeNegotiateHeader(%q) = %x, %v, %v", value, decoded, present, err)
-		}
+		require.NoError(t, err)
+		require.False(t, present)
+		require.Nil(t, decoded)
 	}
 	decoded, present, err := decodeNegotiateHeader("nEgOtIaTe")
-	if err != nil || !present || decoded != nil {
-		t.Fatalf("bare Negotiate = %x, %v, %v", decoded, present, err)
-	}
+	require.NoError(t, err)
+	require.True(t, present)
+	require.Nil(t, decoded)
 }
 
 func TestLegacyHTTPClientMethodsWithoutChallenge(t *testing.T) {
@@ -643,53 +712,63 @@ func TestLegacyHTTPClientMethodsWithoutChallenge(t *testing.T) {
 }
 
 func TestLegacyHTTPHelpers(t *testing.T) {
-	client := NewClientWithOptions(nil, nil, "service", KRB5TokenAPREQOptions{})
-	if client.Jar == nil || client.CheckRedirect == nil {
-		t.Fatal("default HTTP client was not initialized")
-	}
+	var options KRB5TokenAPREQOptions
+	client := NewClientWithOptions(nil, nil, "service", options)
+	require.NotNil(t, client.Jar)
+	require.NotNil(t, client.CheckRedirect)
 	redirectRequest, _ := http.NewRequest(http.MethodGet, "http://example.test/next", nil)
-	if err := client.CheckRedirect(redirectRequest, nil); err == nil || !strings.Contains(err.Error(), "redirect to") {
-		t.Fatalf("redirect error = %v", err)
+	{
+		err := client.CheckRedirect(redirectRequest, nil)
+		require.Error(t, err)
+		require.True(t, strings.Contains(err.Error(), "redirect to"))
 	}
 
-	unauthorized := &http.Response{StatusCode: http.StatusUnauthorized, Header: make(http.Header)}
+	var unauthorized http.Response
+	unauthorized.StatusCode = http.StatusUnauthorized
+	unauthorized.Header = make(http.Header)
 	unauthorized.Header.Set(HTTPHeaderAuthResponse, HTTPHeaderAuthResponseValueKey)
-	if !respUnauthorizedNegotiate(unauthorized) {
-		t.Fatal("Negotiate challenge was not recognized")
-	}
+	require.True(t, respUnauthorizedNegotiate(&unauthorized))
 	unauthorized.StatusCode = http.StatusOK
-	if respUnauthorizedNegotiate(unauthorized) {
-		t.Fatal("successful response treated as an authentication challenge")
-	}
+	require.False(t, respUnauthorizedNegotiate(&unauthorized))
 
 	request := mustHTTPRequest(t, http.MethodGet, "http://127.0.0.1:8080/path", nil)
 	principal, err := setRequestSPN(request)
-	if err != nil || !strings.HasPrefix(principal.PrincipalNameString(), "HTTP/") || request.Host == "" {
-		t.Fatalf("SPN/host/error = %q/%q/%v", principal.PrincipalNameString(), request.Host, err)
-	}
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(principal.PrincipalNameString(), "HTTP/"))
+	require.False(t, request.Host == "")
 	request.URL.Host = "host:port:extra"
-	if _, err := setRequestSPN(request); err == nil {
-		t.Fatal("malformed host accepted")
+	{
+		_, err := setRequestSPN(request)
+		require.Error(t, err)
 	}
 
-	response := &http.Response{Header: make(http.Header)}
-	if token, err := responseSPNEGOToken(response); err != nil || token != nil {
-		t.Fatalf("missing response token = %v, %v", token, err)
+	var response http.Response
+	response.Header = make(http.Header)
+	{
+		_, present, err := responseSPNEGOToken(&response)
+		require.NoError(t, err)
+		require.False(t, present)
 	}
-	response.Header.Set(HTTPHeaderAuthResponse, "Negotiate !!!")
-	if _, err := responseSPNEGOToken(response); err == nil || !strings.Contains(err.Error(), "encoding") {
-		t.Fatalf("invalid response token error = %v", err)
+	response.Header.Set(HTTPHeaderAuthResponse, malformedNegotiateHeader)
+	{
+		_, _, err := responseSPNEGOToken(&response)
+		require.Error(t, err)
+		require.True(t, strings.Contains(err.Error(), "encoding"))
 	}
 }
 
 func TestLegacyHTTPClientChallengeAndRedirectGuards(t *testing.T) {
 	request := mustHTTPRequest(t, http.MethodPost, "http://example.test/start", strings.NewReader("body"))
-	httpClient := &http.Client{Transport: negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
+	httpClient := testHTTPClient(negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		header := make(http.Header)
 		header.Set(HTTPHeaderAuthResponse, HTTPHeaderAuthResponseValueKey)
-		return &http.Response{StatusCode: http.StatusUnauthorized, Header: header, Body: io.NopCloser(strings.NewReader("challenge"))}, nil
-	})}
-	legacy := NewClient(client.NewWithPassword("alice", "EXAMPLE.ORG", "password", config.New()), httpClient, "HTTP/server.example.org")
+		return testHTTPResponse(http.StatusUnauthorized, header, io.NopCloser(strings.NewReader("challenge"))), nil
+	}))
+	legacy := NewClient(
+		client.NewWithPassword("alice", "EXAMPLE.ORG", "password", config.New()),
+		httpClient,
+		"HTTP/server.example.org",
+	)
 	unexpectedResponse, err := legacy.Do(request)
 	if unexpectedResponse != nil {
 		_ = unexpectedResponse.Body.Close()
@@ -720,12 +799,16 @@ func TestLegacyHTTPClientChallengeAndRedirectGuards(t *testing.T) {
 
 func TestLegacyHTTPClientClearsContextBeforeNegotiation(t *testing.T) {
 	initiator, _, _ := newContextExchange(t, []int{gssapi.ContextFlagInteg})
-	httpClient := &http.Client{Transport: negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
+	httpClient := testHTTPClient(negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		header := make(http.Header)
 		header.Set(HTTPHeaderAuthResponse, HTTPHeaderAuthResponseValueKey)
-		return &http.Response{StatusCode: http.StatusUnauthorized, Header: header, Body: http.NoBody}, nil
-	})}
-	legacy := NewClient(client.NewWithPassword("alice", "EXAMPLE.ORG", "password", config.New()), httpClient, "HTTP/server.example.org")
+		return testHTTPResponse(http.StatusUnauthorized, header, http.NoBody), nil
+	}))
+	legacy := NewClient(
+		client.NewWithPassword("alice", "EXAMPLE.ORG", "password", config.New()),
+		httpClient,
+		"HTTP/server.example.org",
+	)
 	legacy.setContext(initiator.SecurityContext())
 	if legacy.Context() == nil {
 		t.Fatal("initial context is nil")
@@ -737,7 +820,7 @@ func TestLegacyHTTPClientClearsContextBeforeNegotiation(t *testing.T) {
 	}
 	response, err := legacy.Do(request)
 	if response != nil {
-		defer response.Body.Close() //nolint:errcheck // test response cleanup is intentionally best effort //nolint:errcheck // test response cleanup is intentionally best effort
+		defer response.Body.Close() //nolint:errcheck // Best-effort test cleanup.
 	}
 	if err == nil {
 		t.Fatal("negotiation unexpectedly succeeded")
@@ -750,7 +833,10 @@ func TestLegacyHTTPClientClearsContextBeforeNegotiation(t *testing.T) {
 func TestLegacyHTTPMutualAndBodyFailureGuards(t *testing.T) {
 	readErr := errors.New("read failed")
 	closeErr := errors.New("close failed")
-	if err := discardAndClose(failingReadCloser{readErr: readErr, closeErr: closeErr}); err == nil || !strings.Contains(err.Error(), "close also failed") {
+	if err := discardAndClose(failingReadCloser{
+		readErr:  readErr,
+		closeErr: closeErr,
+	}); err == nil || !strings.Contains(err.Error(), "close also failed") {
 		t.Fatalf("combined body error = %v", err)
 	}
 	if err := discardAndClose(failingReadCloser{readErr: nil, closeErr: closeErr}); !errors.Is(err, closeErr) {
@@ -758,15 +844,21 @@ func TestLegacyHTTPMutualAndBodyFailureGuards(t *testing.T) {
 	}
 
 	request := httptest.NewRequest(http.MethodGet, "http://example.test", nil)
-	response := &http.Response{Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(nil))}
-	legacy := NewClientWithOptions(nil, nil, "service", KRB5TokenAPREQOptions{GSSAPIFlags: []int{gssapi.ContextFlagMutual}})
+	var response http.Response
+	response.Header = make(http.Header)
+	var options KRB5TokenAPREQOptions
+	options.GSSAPIFlags = []int{gssapi.ContextFlagMutual}
+	legacy := NewClientWithOptions(nil, nil, "service", options)
 	legacy.contexts.Store(request, SPNEGOService(keytab.New()))
-	if err := legacy.verifyMutualResponse(request, response); err == nil || !strings.Contains(err.Error(), "did not return") {
+	if err := legacy.verifyMutualResponse(
+		request,
+		&response,
+	); err == nil || !strings.Contains(err.Error(), "did not return") {
 		t.Fatalf("missing mutual token error = %v", err)
 	}
 	legacy.contexts.Store(request, SPNEGOService(keytab.New()))
-	response.Header.Set(HTTPHeaderAuthResponse, "Negotiate !!!")
-	if err := legacy.verifyMutualResponse(request, response); err == nil || !strings.Contains(err.Error(), "encoding") {
+	response.Header.Set(HTTPHeaderAuthResponse, malformedNegotiateHeader)
+	if err := legacy.verifyMutualResponse(request, &response); err == nil || !strings.Contains(err.Error(), "encoding") {
 		t.Fatalf("invalid mutual token error = %v", err)
 	}
 }
@@ -776,13 +868,19 @@ func TestLegacySPNEGOHandlerUnauthenticatedRequests(t *testing.T) {
 	handler := SPNEGOKRB5Authenticate(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		innerCalls++
 	}), keytab.New())
-	for _, remoteAddr := range []string{"192.0.2.1:1234", "malformed"} {
+	for _, remoteAddr := range []string{testRemoteAddress, "malformed"} {
 		request := httptest.NewRequest(http.MethodGet, "http://example.test", nil)
 		request.RemoteAddr = remoteAddr
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
-		if response.Code != http.StatusUnauthorized || response.Header().Get(HTTPHeaderAuthResponse) != HTTPHeaderAuthResponseValueKey {
-			t.Fatalf("unauthenticated response for %q = %d/%q", remoteAddr, response.Code, response.Header().Get(HTTPHeaderAuthResponse))
+		header := response.Header().Get(HTTPHeaderAuthResponse)
+		if response.Code != http.StatusUnauthorized || header != HTTPHeaderAuthResponseValueKey {
+			t.Fatalf(
+				"unauthenticated response for %q = %d/%q",
+				remoteAddr,
+				response.Code,
+				header,
+			)
 		}
 	}
 	if innerCalls != 0 {

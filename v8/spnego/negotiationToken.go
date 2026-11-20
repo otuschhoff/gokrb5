@@ -25,6 +25,13 @@ const (
 	NegStateRequestMIC       NegState = 3
 )
 
+const (
+	negTokenContextClass  = 2
+	negTokenMICInit2Tag   = 4
+	negTokenMICOrHintsTag = 3
+	constructedSequence   = 0x30
+)
+
 // NegState is a type to indicate the SPNEGO negotiation state.
 type NegState int
 
@@ -80,6 +87,48 @@ type marshalNegTokenResp struct {
 // NegTokenTarg implements Negotiation Token of type Resp/Targ
 type NegTokenTarg NegTokenResp
 
+// NewNegTokenInitKRB5 creates new Init negotiation token for Kerberos 5
+func NewNegTokenInitKRB5(cl *client.Client, tkt messages.Ticket, sessionKey types.EncryptionKey) (NegTokenInit, error) {
+	return NewNegTokenInitKRB5WithOptions(cl, tkt, sessionKey, defaultKerberosTokenOptions())
+}
+
+func defaultKerberosTokenOptions() KRB5TokenAPREQOptions {
+	var options KRB5TokenAPREQOptions
+	options.GSSAPIFlags = []int{gssapi.ContextFlagInteg, gssapi.ContextFlagConf}
+	return options
+}
+
+// NewNegTokenInitKRB5WithOptions creates a Kerberos NegTokenInit with explicit context options.
+func NewNegTokenInitKRB5WithOptions(
+	cl *client.Client,
+	tkt messages.Ticket,
+	sessionKey types.EncryptionKey,
+	options KRB5TokenAPREQOptions,
+) (NegTokenInit, error) {
+	mt, err := NewKRB5TokenAPREQWithOptions(cl, tkt, sessionKey, options)
+	if err != nil {
+		return NegTokenInit{}, fmt.Errorf("error getting KRB5 token; %w", err)
+	}
+	mtb, err := mt.Marshal()
+	if err != nil {
+		return NegTokenInit{}, fmt.Errorf("error marshalling KRB5 token; %w", err)
+	}
+	mechTypes := append([]asn1.ObjectIdentifier(nil), options.MechTypes...)
+	if len(mechTypes) == 0 {
+		mechTypes = []asn1.ObjectIdentifier{gssapi.OIDKRB5.OID()}
+	}
+	for _, oid := range mechTypes {
+		if !isKerberosMech(oid) {
+			return NegTokenInit{}, fmt.Errorf("unsupported SPNEGO mechanism %s", oid.String())
+		}
+	}
+	var token NegTokenInit
+	token.MechTypes = mechTypes
+	token.MechTokenBytes = mtb
+	token.mechToken = &mt
+	return token, nil
+}
+
 // MarshalMechTypeList returns the DER encoding protected by mechListMIC.
 func MarshalMechTypeList(mechTypes []asn1.ObjectIdentifier) ([]byte, error) {
 	b, err := asn1.Marshal(mechTypes)
@@ -89,12 +138,18 @@ func MarshalMechTypeList(mechTypes []asn1.ObjectIdentifier) ([]byte, error) {
 	return b, nil
 }
 
-func makeMechListMIC(mechTypes []asn1.ObjectIdentifier, key types.EncryptionKey, flags byte, sequenceNumber uint64, keyUsage uint32) ([]byte, error) {
+func makeMechListMIC(
+	mechTypes []asn1.ObjectIdentifier,
+	key types.EncryptionKey,
+	flags byte,
+	sequenceNumber uint64,
+	keyUsage uint32,
+) ([]byte, error) {
 	payload, err := MarshalMechTypeList(mechTypes)
 	if err != nil {
 		return nil, fmt.Errorf("could not marshal MechTypeList: %w", err)
 	}
-	token := gssapi.MICToken{Flags: flags, SndSeqNum: sequenceNumber, Payload: payload}
+	token := gssapi.MICToken{Flags: flags, SndSeqNum: sequenceNumber, Payload: payload, Checksum: nil}
 	if signErr := token.SetChecksum(key, keyUsage); signErr != nil {
 		return nil, fmt.Errorf("could not sign MechTypeList: %w", signErr)
 	}
@@ -105,7 +160,13 @@ func makeMechListMIC(mechTypes []asn1.ObjectIdentifier, key types.EncryptionKey,
 	return b, nil
 }
 
-func verifyMechListMIC(mechTypes []asn1.ObjectIdentifier, mic []byte, key types.EncryptionKey, expectFromAcceptor bool, keyUsage uint32) error {
+func verifyMechListMIC(
+	mechTypes []asn1.ObjectIdentifier,
+	mic []byte,
+	key types.EncryptionKey,
+	expectFromAcceptor bool,
+	keyUsage uint32,
+) error {
 	if len(mic) == 0 {
 		return errors.New("mechListMIC is missing")
 	}
@@ -133,26 +194,18 @@ func (n *NegTokenInit) SetMechListMIC(key types.EncryptionKey, sequenceNumber ui
 	return n.setMechListMIC(key, sequenceNumber, false)
 }
 
-func (n *NegTokenInit) setMechListMIC(key types.EncryptionKey, sequenceNumber uint64, acceptorSubkey bool) error {
-	var flags byte
-	if acceptorSubkey {
-		flags = gssapi.MICTokenFlagAcceptorSubkey
-	}
-	mic, err := makeMechListMIC(n.MechTypes, key, flags, sequenceNumber, keyusage.GSSAPI_INITIATOR_SIGN)
-	if err != nil {
-		return err
-	}
-	n.MechListMIC = mic
-	return nil
-}
-
 // VerifyMechListMIC verifies this initiator's protected mechanism list.
 func (n *NegTokenInit) VerifyMechListMIC(key types.EncryptionKey) error {
 	return verifyMechListMIC(n.MechTypes, n.MechListMIC, key, false, keyusage.GSSAPI_INITIATOR_SIGN)
 }
 
 // SetMechListMIC signs the initiator's DER-encoded MechTypeList for an acceptor response.
-func (n *NegTokenResp) SetMechListMIC(mechTypes []asn1.ObjectIdentifier, key types.EncryptionKey, sequenceNumber uint64, acceptorSubkey bool) error {
+func (n *NegTokenResp) SetMechListMIC(
+	mechTypes []asn1.ObjectIdentifier,
+	key types.EncryptionKey,
+	sequenceNumber uint64,
+	acceptorSubkey bool,
+) error {
 	flags := byte(gssapi.MICTokenFlagSentByAcceptor)
 	if acceptorSubkey {
 		flags |= gssapi.MICTokenFlagAcceptorSubkey
@@ -189,9 +242,10 @@ func (n *NegTokenInit) Marshal() ([]byte, error) {
 	}
 	nt := asn1.RawValue{
 		Tag:        0,
-		Class:      2,
+		Class:      negTokenContextClass,
 		IsCompound: true,
 		Bytes:      b,
+		FullBytes:  nil,
 	}
 	nb, err := asn1.Marshal(nt)
 	if err != nil {
@@ -228,7 +282,7 @@ func (n *NegTokenInit) Verify() (bool, gssapi.Status) {
 	for _, m := range n.MechTypes {
 		if m.Equal(gssapi.OIDKRB5.OID()) || m.Equal(gssapi.OIDMSLegacyKRB5.OID()) {
 			if n.mechToken == nil && n.MechTokenBytes == nil {
-				return false, gssapi.Status{Code: gssapi.StatusContinueNeeded}
+				return false, gssapi.Status{Code: gssapi.StatusContinueNeeded, Message: ""}
 			}
 			mtSupported = true
 			break
@@ -270,6 +324,19 @@ func (n *NegTokenInit) Context() context.Context {
 	return nil
 }
 
+func (n *NegTokenInit) setMechListMIC(key types.EncryptionKey, sequenceNumber uint64, acceptorSubkey bool) error {
+	var flags byte
+	if acceptorSubkey {
+		flags = gssapi.MICTokenFlagAcceptorSubkey
+	}
+	mic, err := makeMechListMIC(n.MechTypes, key, flags, sequenceNumber, keyusage.GSSAPI_INITIATOR_SIGN)
+	if err != nil {
+		return err
+	}
+	n.MechListMIC = mic
+	return nil
+}
+
 // Marshal a Resp/Targ negotiation token
 func (n *NegTokenResp) Marshal() ([]byte, error) {
 	m := marshalNegTokenResp{
@@ -284,9 +351,10 @@ func (n *NegTokenResp) Marshal() ([]byte, error) {
 	}
 	nt := asn1.RawValue{
 		Tag:        1,
-		Class:      2,
+		Class:      negTokenContextClass,
 		IsCompound: true,
 		Bytes:      b,
+		FullBytes:  nil,
 	}
 	nb, err := asn1.Marshal(nt)
 	if err != nil {
@@ -317,33 +385,35 @@ func (n *NegTokenResp) Unmarshal(b []byte) error {
 
 // Verify a Resp/Targ negotiation token
 func (n *NegTokenResp) Verify() (bool, gssapi.Status) {
-	if n.SupportedMech.Equal(gssapi.OIDKRB5.OID()) || n.SupportedMech.Equal(gssapi.OIDMSLegacyKRB5.OID()) {
-		if n.mechToken == nil && n.ResponseToken == nil {
-			return false, gssapi.Status{Code: gssapi.StatusContinueNeeded}
+	if !isKerberosMech(n.SupportedMech) {
+		return false, gssapi.Status{
+			Code:    gssapi.StatusBadMech,
+			Message: "no supported mechanism specified in negotiation",
 		}
+	}
+	if n.mechToken == nil && n.ResponseToken == nil {
+		return false, gssapi.Status{Code: gssapi.StatusContinueNeeded, Message: ""}
+	}
+	if n.mechToken == nil {
 		mt := new(KRB5Token)
 		mt.settings = n.settings
-		if n.mechToken == nil {
-			err := mt.Unmarshal(n.ResponseToken)
-			if err != nil {
-				return false, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: err.Error()}
-			}
-			n.mechToken = mt
-		} else {
-			var ok bool
-			mt, ok = n.mechToken.(*KRB5Token)
-			if !ok {
-				return false, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: "MechToken is not a KRB5 token as expected"}
-			}
+		if err := mt.Unmarshal(n.ResponseToken); err != nil {
+			return false, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: err.Error()}
 		}
-		if mt == nil {
-			return false, gssapi.Status{Code: gssapi.StatusContinueNeeded}
-		}
-		mt.settings = n.settings
-		// Verify the mechtoken
-		return mt.Verify()
+		n.mechToken = mt
 	}
-	return false, gssapi.Status{Code: gssapi.StatusBadMech, Message: "no supported mechanism specified in negotiation"}
+	mt, ok := n.mechToken.(*KRB5Token)
+	if !ok {
+		return false, gssapi.Status{
+			Code:    gssapi.StatusDefectiveToken,
+			Message: "MechToken is not a KRB5 token as expected",
+		}
+	}
+	if mt == nil {
+		return false, gssapi.Status{Code: gssapi.StatusContinueNeeded, Message: ""}
+	}
+	mt.settings = n.settings
+	return mt.Verify()
 }
 
 // State returns the negotiation state of the negotiation response.
@@ -363,11 +433,11 @@ func (n *NegTokenResp) Context() context.Context {
 	return nil
 }
 
-// UnmarshalNegToken umarshals and returns either a NegTokenInit or a NegTokenResp.
+// UnmarshalNegToken unmarshals and returns either a NegTokenInit or a NegTokenResp.
 //
 // The boolean indicates if the response is a NegTokenInit.
 // If error is nil and the boolean is false the response is a NegTokenResp.
-func UnmarshalNegToken(b []byte) (bool, interface{}, error) {
+func UnmarshalNegToken(b []byte) (bool, any, error) {
 	var a asn1.RawValue
 	_, err := asn1.Unmarshal(b, &a)
 	if err != nil {
@@ -383,6 +453,7 @@ func UnmarshalNegToken(b []byte) (bool, interface{}, error) {
 			nt := NegTokenInit{
 				MechTypes: n.MechTypes, ReqFlags: n.ReqFlags, MechTokenBytes: n.MechTokenBytes,
 				NegHints: &n.NegHints, MechListMIC: n.MechListMIC,
+				mechToken: nil, settings: nil,
 			}
 			return true, nt, nil
 		}
@@ -395,7 +466,10 @@ func UnmarshalNegToken(b []byte) (bool, interface{}, error) {
 			MechTypes:      n.MechTypes,
 			ReqFlags:       n.ReqFlags,
 			MechTokenBytes: n.MechTokenBytes,
+			NegHints:       nil,
 			MechListMIC:    n.MechListMIC,
+			mechToken:      nil,
+			settings:       nil,
 		}
 		return true, nt, nil
 	case 1:
@@ -409,6 +483,8 @@ func UnmarshalNegToken(b []byte) (bool, interface{}, error) {
 			SupportedMech: n.SupportedMech,
 			ResponseToken: n.ResponseToken,
 			MechListMIC:   n.MechListMIC,
+			mechToken:     nil,
+			settings:      nil,
 		}
 		return false, nt, nil
 	default:
@@ -429,47 +505,17 @@ func isNegTokenInit2(encoded []byte) bool {
 		if err != nil {
 			return false
 		}
-		if field.Class == 2 && field.Tag == 4 {
+		if field.Class != negTokenContextClass {
+			continue
+		}
+		if field.Tag == negTokenMICInit2Tag {
 			return true
 		}
-		if field.Class == 2 && field.Tag == 3 && len(field.Bytes) > 0 && field.Bytes[0] == 0x30 {
+		if field.Tag == negTokenMICOrHintsTag && len(field.Bytes) > 0 && field.Bytes[0] == constructedSequence {
 			return true
 		}
 	}
 	return false
-}
-
-// NewNegTokenInitKRB5 creates new Init negotiation token for Kerberos 5
-func NewNegTokenInitKRB5(cl *client.Client, tkt messages.Ticket, sessionKey types.EncryptionKey) (NegTokenInit, error) {
-	return NewNegTokenInitKRB5WithOptions(cl, tkt, sessionKey, KRB5TokenAPREQOptions{
-		GSSAPIFlags: []int{gssapi.ContextFlagInteg, gssapi.ContextFlagConf},
-	})
-}
-
-// NewNegTokenInitKRB5WithOptions creates a Kerberos NegTokenInit with explicit context options.
-func NewNegTokenInitKRB5WithOptions(cl *client.Client, tkt messages.Ticket, sessionKey types.EncryptionKey, options KRB5TokenAPREQOptions) (NegTokenInit, error) {
-	mt, err := NewKRB5TokenAPREQWithOptions(cl, tkt, sessionKey, options)
-	if err != nil {
-		return NegTokenInit{}, fmt.Errorf("error getting KRB5 token; %w", err)
-	}
-	mtb, err := mt.Marshal()
-	if err != nil {
-		return NegTokenInit{}, fmt.Errorf("error marshalling KRB5 token; %w", err)
-	}
-	mechTypes := append([]asn1.ObjectIdentifier(nil), options.MechTypes...)
-	if len(mechTypes) == 0 {
-		mechTypes = []asn1.ObjectIdentifier{gssapi.OIDKRB5.OID()}
-	}
-	for _, oid := range mechTypes {
-		if !isKerberosMech(oid) {
-			return NegTokenInit{}, fmt.Errorf("unsupported SPNEGO mechanism %s", oid.String())
-		}
-	}
-	return NegTokenInit{
-		MechTypes:      mechTypes,
-		MechTokenBytes: mtb,
-		mechToken:      &mt,
-	}, nil
 }
 
 func isKerberosMech(oid asn1.ObjectIdentifier) bool {

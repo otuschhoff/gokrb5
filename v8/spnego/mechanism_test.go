@@ -68,7 +68,12 @@ func newTestContextMechanism(lastOID int, name string) *testContextMechanism {
 
 func (m *testContextMechanism) OID() asn1.ObjectIdentifier { return m.oid }
 
-func (m *testContextMechanism) InitSecContext(_ string, input []byte, _ ...gssapi.MechanismOption) ([]byte, gssapi.Context, bool, error) {
+//nolint:ireturn // Implements gssapi.ContextMechanism for the test fixture.
+func (m *testContextMechanism) InitSecContext(
+	_ string,
+	input []byte,
+	_ ...gssapi.MechanismOption,
+) ([]byte, gssapi.Context, bool, error) {
 	if m.stepErr != nil {
 		return nil, nil, false, m.stepErr
 	}
@@ -81,7 +86,11 @@ func (m *testContextMechanism) InitSecContext(_ string, input []byte, _ ...gssap
 	return nil, m.context, false, errors.New("unexpected initiator token")
 }
 
-func (m *testContextMechanism) AcceptSecContext(input []byte, _ ...gssapi.MechanismOption) ([]byte, gssapi.Context, bool, error) {
+//nolint:ireturn // Implements gssapi.ContextMechanism for the test fixture.
+func (m *testContextMechanism) AcceptSecContext(
+	input []byte,
+	_ ...gssapi.MechanismOption,
+) ([]byte, gssapi.Context, bool, error) {
 	m.acceptCalls++
 	if m.stepErr != nil {
 		return nil, nil, false, m.stepErr
@@ -219,33 +228,25 @@ func TestNegotiatorUnsupportedOptimisticFallback(t *testing.T) {
 	acceptor := NewNegotiator(secondAcceptor)
 
 	initiatorToken, _, _, err := initiator.InitSecContext("host/server", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	acceptorToken, _, done, err := acceptor.AcceptSecContext(initiatorToken)
-	if err != nil || done {
-		t.Fatalf("selection step: done=%v err=%v", done, err)
-	}
-	if secondAcceptor.acceptCalls != 0 {
-		t.Fatalf("acceptor processed unsupported optimistic token %d times", secondAcceptor.acceptCalls)
-	}
+	require.NoError(t, err)
+	require.False(t, done)
+	require.Equal(t, 0, secondAcceptor.acceptCalls)
 
 	initiatorToken, _, done, err = initiator.InitSecContext("host/server", acceptorToken)
-	if err != nil || done {
-		t.Fatalf("fallback initiator step: done=%v err=%v", done, err)
-	}
+	require.NoError(t, err)
+	require.False(t, done)
 	acceptorToken, _, done, err = acceptor.AcceptSecContext(initiatorToken)
-	if err != nil || done {
-		t.Fatalf("MIC request step: done=%v err=%v", done, err)
-	}
+	require.NoError(t, err)
+	require.False(t, done)
 	initiatorToken, _, done, err = initiator.InitSecContext("host/server", acceptorToken)
-	if err != nil || !done {
-		t.Fatalf("initiator MIC step: done=%v err=%v", done, err)
-	}
+	require.NoError(t, err)
+	require.True(t, done)
 	acceptorToken, _, done, err = acceptor.AcceptSecContext(initiatorToken)
-	if err != nil || !done || len(acceptorToken) != 0 {
-		t.Fatalf("final acceptor step: output=%x done=%v err=%v", acceptorToken, done, err)
-	}
+	require.NoError(t, err)
+	require.True(t, done)
+	require.Equal(t, 0, len(acceptorToken))
 }
 
 func TestNegotiatorRejectsNoCommonMechanism(t *testing.T) {
@@ -266,55 +267,54 @@ func TestNegotiatorRejectsNoCommonMechanism(t *testing.T) {
 
 func TestNegotiatorLifecycleGuardsAndHelpers(t *testing.T) {
 	empty := NewNegotiator(nil)
-	if !empty.OID().Equal(gssapi.OIDSPNEGO.OID()) {
-		t.Fatalf("negotiator OID = %v", empty.OID())
-	}
-	if _, _, _, err := empty.InitSecContext("host/server", []byte("unexpected")); !errors.Is(err, ErrUnexpectedSPNEGO) {
-		t.Fatalf("unexpected initial input error = %v", err)
+	require.True(t, empty.OID().Equal(gssapi.OIDSPNEGO.OID()))
+	{
+		_, _, _, err := empty.InitSecContext("host/server", []byte("unexpected"))
+		require.True(t, errors.Is(err, ErrUnexpectedSPNEGO))
 	}
 	empty = NewNegotiator()
-	if _, _, _, err := empty.InitSecContext("host/server", nil); !errors.Is(err, ErrNoMechanisms) {
-		t.Fatalf("empty mechanism error = %v", err)
+	{
+		_, _, _, err := empty.InitSecContext("host/server", nil)
+		require.True(t, errors.Is(err, ErrNoMechanisms))
 	}
-	if _, _, _, err := empty.AcceptSecContext(nil); !errors.Is(err, ErrUnexpectedSPNEGO) {
-		t.Fatalf("empty acceptor input error = %v", err)
+	{
+		_, _, _, err := empty.AcceptSecContext(nil)
+		require.True(t, errors.Is(err, ErrUnexpectedSPNEGO))
 	}
 
 	mechanism := newTestContextMechanism(1, "first")
 	negotiator := NewNegotiator(nil, mechanism, mechanism)
-	if len(negotiator.mechanisms) != 1 {
-		t.Fatalf("unique mechanisms = %d", len(negotiator.mechanisms))
+	require.Equal(t, 1, len(negotiator.mechanisms))
+	{
+		_, _, _, err := negotiator.InitSecContext("host/server", nil)
+		require.NoError(t, err)
 	}
-	if _, _, _, err := negotiator.InitSecContext("host/server", nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, _, err := negotiator.InitSecContext("other/server", nil); err == nil || !strings.Contains(err.Error(), "target changed") {
-		t.Fatalf("target change error = %v", err)
-	}
-
-	initBytes, err := marshalSPNEGOToken(&SPNEGOToken{Init: true, NegTokenInit: NegTokenInit{MechTypes: []asn1.ObjectIdentifier{mechanism.OID()}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ierr := parseSPNEGOResponse(initBytes); !errors.Is(ierr, ErrUnexpectedSPNEGO) {
-		t.Fatalf("initiator-as-response error = %v", ierr)
-	}
-	responseBytes, err := marshalSPNEGOToken(&SPNEGOToken{Resp: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := parseSPNEGOInitiator(responseBytes); !errors.Is(err, ErrUnexpectedSPNEGO) {
-		t.Fatalf("response-as-initiator error = %v", err)
+	{
+		_, _, _, err := negotiator.InitSecContext("other/server", nil)
+		require.Error(t, err)
+		require.True(t, strings.Contains(err.Error(), "target changed"))
 	}
 
-	conversation := &mechanismConversation{}
-	if conversation.String() != "SPNEGO(unselected)" {
-		t.Fatalf("unselected string = %q", conversation.String())
+	init := new(SPNEGOToken)
+	init.Init = true
+	init.NegTokenInit.MechTypes = []asn1.ObjectIdentifier{mechanism.OID()}
+	initBytes, err := init.Marshal()
+	require.NoError(t, err)
+	{
+		_, ierr := parseSPNEGOResponse(initBytes)
+		require.True(t, errors.Is(ierr, ErrUnexpectedSPNEGO))
 	}
+	responseBytes, err := marshalMechanismResponse(mechanismResponse(NegStateAcceptCompleted, nil, nil))
+	require.NoError(t, err)
+	{
+		_, err := parseSPNEGOInitiator(responseBytes)
+		require.True(t, errors.Is(err, ErrUnexpectedSPNEGO))
+	}
+
+	var conversation mechanismConversation
+	require.Equal(t, "SPNEGO(unselected)", conversation.String())
 	conversation.selected = mechanism
-	if !strings.Contains(conversation.String(), mechanism.OID().String()) {
-		t.Fatalf("selected string = %q", conversation.String())
-	}
+	require.True(t, strings.Contains(conversation.String(), mechanism.OID().String()))
 }
 
 type testNegoExScheme struct {
@@ -337,6 +337,7 @@ func newTestNegoExScheme() *testNegoExScheme {
 
 func (m *testNegoExScheme) AuthScheme() negoex.AuthScheme { return m.id }
 
+//nolint:ireturn // Implements the NEGOEX authentication scheme contract.
 func (m *testNegoExScheme) InitSecContext(_ string, input []byte) ([]byte, gssapi.Context, bool, error) {
 	if len(input) == 0 {
 		return []byte("request"), m.context, false, nil
@@ -347,6 +348,7 @@ func (m *testNegoExScheme) InitSecContext(_ string, input []byte) ([]byte, gssap
 	return nil, m.context, false, errors.New("unexpected NEGOEX initiator token")
 }
 
+//nolint:ireturn // Implements the NEGOEX authentication scheme contract.
 func (m *testNegoExScheme) AcceptSecContext(input []byte) ([]byte, gssapi.Context, bool, error) {
 	switch string(input) {
 	case "request":
@@ -363,23 +365,18 @@ func TestNegotiatorCarriesNegoEx(t *testing.T) {
 	acceptor := NewNegotiator(negoex.New(newTestNegoExScheme()))
 
 	initiatorToken, _, _, err := initiator.InitSecContext("host/server", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	acceptorToken, _, done, err := acceptor.AcceptSecContext(initiatorToken)
-	if err != nil || done {
-		t.Fatalf("initial acceptor step: done=%v err=%v", done, err)
-	}
+	require.NoError(t, err)
+	require.False(t, done)
 	initiatorToken, _, done, err = initiator.InitSecContext("host/server", acceptorToken)
-	if err != nil || done {
-		t.Fatalf("NEGOEX initiator step: done=%v err=%v", done, err)
-	}
+	require.NoError(t, err)
+	require.False(t, done)
 	acceptorToken, _, done, err = acceptor.AcceptSecContext(initiatorToken)
-	if err != nil || !done {
-		t.Fatalf("NEGOEX acceptor completion: done=%v err=%v", done, err)
-	}
+	require.NoError(t, err)
+	require.True(t, done)
 	output, _, done, err := initiator.InitSecContext("host/server", acceptorToken)
-	if err != nil || !done || len(output) != 0 {
-		t.Fatalf("SPNEGO initiator completion: output=%x done=%v err=%v", output, done, err)
-	}
+	require.NoError(t, err)
+	require.True(t, done)
+	require.Equal(t, 0, len(output))
 }

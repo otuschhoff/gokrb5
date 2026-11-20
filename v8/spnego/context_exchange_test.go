@@ -27,6 +27,7 @@ import (
 
 var contextExchangeID atomic.Uint64
 
+//nolint:ireturn // The return type is selected by the caller's concrete type argument.
 func mustSPNEGOTestType[T any](t *testing.T, value any) T {
 	t.Helper()
 	result, ok := value.(T)
@@ -105,7 +106,10 @@ func TestMutualContextExchange(t *testing.T) {
 }
 
 func TestMutualContextExchangeAcceptsTicketKeyAPRep(t *testing.T) {
-	initiator, _, _ := newContextExchange(t, []int{gssapi.ContextFlagMutual, gssapi.ContextFlagInteg, gssapi.ContextFlagConf})
+	initiator, _, _ := newContextExchange(
+		t,
+		[]int{gssapi.ContextFlagMutual, gssapi.ContextFlagInteg, gssapi.ContextFlagConf},
+	)
 	acceptorSubkey := types.EncryptionKey{
 		KeyType: 18, KeyValue: []byte("0123456789abcdef0123456789abcdef"),
 	}
@@ -118,10 +122,9 @@ func TestMutualContextExchangeAcceptsTicketKeyAPRep(t *testing.T) {
 	replyToken := NewKRB5TokenAPREP(reply, false)
 	replyBytes, err := replyToken.Marshal()
 	require.NoError(t, err)
-	response := &SPNEGOToken{Resp: true, NegTokenResp: NegTokenResp{
-		NegState:      asn1.Enumerated(NegStateAcceptCompleted),
-		SupportedMech: initiator.offeredMechTypes[0], ResponseToken: replyBytes,
-	}}
+	response := responseNegotiationToken(mechanismResponse(
+		NegStateAcceptCompleted, initiator.offeredMechTypes[0], replyBytes,
+	))
 	authenticated, _, status := initiator.ContinueSecContext(response)
 	require.True(t, authenticated, status.Error())
 	require.Equal(t, gssapi.StatusComplete, status.Code)
@@ -178,14 +181,23 @@ func TestHTTPClientRejectsInvalidMutualContextType(t *testing.T) {
 	require.Equal(t, gssapi.StatusComplete, status.Code)
 	responseBytes, err := acceptor.ResponseToken().Marshal()
 	require.NoError(t, err)
-	response := &http.Response{Header: make(http.Header), Body: http.NoBody}
+	var response http.Response
+	response.Header = make(http.Header)
 	response.Header.Set(HTTPHeaderAuthResponse, "Negotiate "+base64.StdEncoding.EncodeToString(responseBytes))
 
 	httpClient := NewClientWithOptions(nil, nil, "HTTP/host.test.gokrb5", KRB5TokenAPREQOptions{
+		APOptions:           nil,
+		MechTypes:           nil,
+		ChannelBindings:     nil,
+		DelegatedCredential: nil,
+		Delegate:            false,
+		ForceDelegation:     false,
+		DelegationAddresses: nil,
+
 		GSSAPIFlags: []int{gssapi.ContextFlagMutual},
 	})
 	httpClient.contexts.Store(request, "not a SPNEGO context")
-	err = httpClient.verifyMutualResponse(request, response)
+	err = httpClient.verifyMutualResponse(request, &response)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid type")
 }
@@ -199,14 +211,23 @@ func TestHTTPClientPublishesMutualSecurityContext(t *testing.T) {
 	require.NoError(t, err)
 	request, err := http.NewRequest(http.MethodPost, "http://host.test.gokrb5/wsman", nil)
 	require.NoError(t, err)
-	response := &http.Response{Header: make(http.Header), Body: http.NoBody}
+	var response http.Response
+	response.Header = make(http.Header)
 	response.Header.Set(HTTPHeaderAuthResponse, "Negotiate "+base64.StdEncoding.EncodeToString(responseBytes))
 
 	httpClient := NewClientWithOptions(nil, nil, "HTTP/host.test.gokrb5", KRB5TokenAPREQOptions{
+		APOptions:           nil,
+		MechTypes:           nil,
+		ChannelBindings:     nil,
+		DelegatedCredential: nil,
+		Delegate:            false,
+		ForceDelegation:     false,
+		DelegationAddresses: nil,
+
 		GSSAPIFlags: []int{gssapi.ContextFlagMutual, gssapi.ContextFlagInteg},
 	})
 	httpClient.contexts.Store(request, initiator)
-	require.NoError(t, httpClient.verifyMutualResponse(request, response))
+	require.NoError(t, httpClient.verifyMutualResponse(request, &response))
 	require.Same(t, initiator.SecurityContext(), httpClient.Context())
 
 	wrapped, err := httpClient.Context().Wrap([]byte("request"), true)
@@ -274,6 +295,13 @@ func TestContextExchangeRejectsTamperedMechList(t *testing.T) {
 
 func TestLegacyOIDFirstContextExchange(t *testing.T) {
 	initiator, acceptor, initial := newContextExchangeWithOptions(t, KRB5TokenAPREQOptions{
+		APOptions:           nil,
+		ChannelBindings:     nil,
+		DelegatedCredential: nil,
+		Delegate:            false,
+		ForceDelegation:     false,
+		DelegationAddresses: nil,
+
 		GSSAPIFlags: []int{gssapi.ContextFlagMutual, gssapi.ContextFlagInteg},
 		MechTypes: []asn1.ObjectIdentifier{
 			gssapi.OIDMSLegacyKRB5.OID(),
@@ -296,6 +324,13 @@ func TestLegacyOIDFirstContextExchange(t *testing.T) {
 
 func TestRequestMICContextExchange(t *testing.T) {
 	initiator, acceptor, initial := newContextExchangeWithPreferences(t, KRB5TokenAPREQOptions{
+		APOptions:           nil,
+		ChannelBindings:     nil,
+		DelegatedCredential: nil,
+		Delegate:            false,
+		ForceDelegation:     false,
+		DelegationAddresses: nil,
+
 		GSSAPIFlags: []int{gssapi.ContextFlagMutual, gssapi.ContextFlagInteg},
 		MechTypes: []asn1.ObjectIdentifier{
 			gssapi.OIDMSLegacyKRB5.OID(),
@@ -327,6 +362,13 @@ func TestRequestMICContextExchange(t *testing.T) {
 
 func TestRequestMICContextExchangeWithoutMutualAuth(t *testing.T) {
 	initiator, acceptor, initial := newContextExchangeWithPreferences(t, KRB5TokenAPREQOptions{
+		APOptions:           nil,
+		ChannelBindings:     nil,
+		DelegatedCredential: nil,
+		Delegate:            false,
+		ForceDelegation:     false,
+		DelegationAddresses: nil,
+
 		GSSAPIFlags: []int{gssapi.ContextFlagInteg},
 		MechTypes: []asn1.ObjectIdentifier{
 			gssapi.OIDMSLegacyKRB5.OID(),
@@ -359,6 +401,13 @@ func TestRequestMICContextExchangeRejectsTampering(t *testing.T) {
 	for name, tamperResponse := range tests {
 		t.Run(name, func(t *testing.T) {
 			initiator, acceptor, initial := newContextExchangeWithPreferences(t, KRB5TokenAPREQOptions{
+				APOptions:           nil,
+				ChannelBindings:     nil,
+				DelegatedCredential: nil,
+				Delegate:            false,
+				ForceDelegation:     false,
+				DelegationAddresses: nil,
+
 				GSSAPIFlags: []int{gssapi.ContextFlagMutual, gssapi.ContextFlagInteg},
 				MechTypes: []asn1.ObjectIdentifier{
 					gssapi.OIDMSLegacyKRB5.OID(),
@@ -448,6 +497,8 @@ func TestDCEContextExchangeRejectsWrongFinalSequence(t *testing.T) {
 	require.Equal(t, gssapi.StatusComplete, status.Code)
 
 	wrongFinal, err := messages.NewAPRep(messages.EncAPRepPart{
+		Subkey: types.EncryptionKey{KeyType: 0, KeyValue: nil},
+
 		CTime:          time.Now().UTC(),
 		Cusec:          microseconds(time.Now().UTC()),
 		SequenceNumber: acceptor.sequenceNumber + 1,
@@ -459,29 +510,70 @@ func TestDCEContextExchangeRejectsWrongFinalSequence(t *testing.T) {
 	require.Equal(t, gssapi.StatusDefectiveToken, status.Code)
 }
 
-func TestSPNEGOInvalidStateTransitions(t *testing.T) {
-	clientMechanism := SPNEGOClient(client.NewWithPassword("alice", "EXAMPLE.ORG", "password", config.New()), "HTTP/server")
-	require.True(t, clientMechanism.OID().Equal(gssapi.OIDSPNEGO.OID()))
+func TestSPNEGOInvalidAcceptorTokens(t *testing.T) {
+	acceptor := SPNEGOService(keytab.New())
+	init := new(SPNEGOToken)
+	init.Init = true
+	authenticated, _, status := acceptor.AcceptSecContext(init)
+	require.False(t, authenticated)
+	require.Equal(t, gssapi.StatusDefectiveToken, status.Code)
+	authenticated, _, status = acceptor.AcceptSecContext(new(KRB5Token))
+	require.False(t, authenticated)
+	require.Equal(t, gssapi.StatusDefectiveToken, status.Code)
+}
+
+func TestSPNEGORejectsTypedNilContinuationTokens(t *testing.T) {
+	cl := client.NewWithPassword("alice", "EXAMPLE.ORG", "password", config.New())
+	initiator := SPNEGOClient(cl, "HTTP/server")
+	var missingResponse *SPNEGOToken
+	authenticated, ctx, status := initiator.ContinueSecContext(missingResponse)
+	require.False(t, authenticated)
+	require.Nil(t, ctx)
+	require.Equal(t, gssapi.StatusDefectiveToken, status.Code)
 
 	acceptor := SPNEGOService(keytab.New())
-	authenticated, _, status := acceptor.AcceptSecContext(&SPNEGOToken{Init: true})
+	var missingAPRep *KRB5Token
+	authenticated, ctx, status = acceptor.ContinueSecContext(missingAPRep)
 	require.False(t, authenticated)
-	require.Equal(t, gssapi.StatusDefectiveToken, status.Code)
-	authenticated, _, status = acceptor.AcceptSecContext(&KRB5Token{})
-	require.False(t, authenticated)
+	require.Nil(t, ctx)
 	require.Equal(t, gssapi.StatusDefectiveToken, status.Code)
 
+	acceptor.pendingMechMIC = true
+	authenticated, ctx, status = acceptor.AcceptSecContext(missingResponse)
+	require.False(t, authenticated)
+	require.Nil(t, ctx)
+	require.Equal(t, gssapi.StatusDefectiveToken, status.Code)
+}
+
+func TestSPNEGOInvalidInitiatorTransitions(t *testing.T) {
+	cl := client.NewWithPassword("alice", "EXAMPLE.ORG", "password", config.New())
+	clientMechanism := SPNEGOClient(cl, "HTTP/server")
+	require.True(t, clientMechanism.OID().Equal(gssapi.OIDSPNEGO.OID()))
 	clientMechanism.offeredMechTypes = []asn1.ObjectIdentifier{gssapi.OIDKRB5.OID()}
 	clientMechanism.initiatorOptions.GSSAPIFlags = []int{gssapi.ContextFlagMutual}
+	init := new(SPNEGOToken)
+	init.Init = true
 	tests := []struct {
 		name  string
 		token gssapi.ContextToken
 		code  int
 	}{
-		{"not response", &SPNEGOToken{Init: true}, gssapi.StatusDefectiveToken},
-		{"rejected", &SPNEGOToken{Resp: true, NegTokenResp: NegTokenResp{NegState: asn1.Enumerated(NegStateReject)}}, gssapi.StatusBadMech},
-		{"unoffered mechanism", &SPNEGOToken{Resp: true, NegTokenResp: NegTokenResp{NegState: asn1.Enumerated(NegStateAcceptCompleted), SupportedMech: gssapi.OIDNegoEx.OID()}}, gssapi.StatusBadMech},
-		{"missing AP reply", &SPNEGOToken{Resp: true, NegTokenResp: NegTokenResp{NegState: asn1.Enumerated(NegStateAcceptCompleted), SupportedMech: gssapi.OIDKRB5.OID()}}, gssapi.StatusDefectiveToken},
+		{name: "not response", token: init, code: gssapi.StatusDefectiveToken},
+		{
+			name:  "rejected",
+			token: responseNegotiationToken(mechanismResponse(NegStateReject, nil, nil)),
+			code:  gssapi.StatusBadMech,
+		},
+		{
+			name:  "unoffered mechanism",
+			token: responseNegotiationToken(mechanismResponse(NegStateAcceptCompleted, gssapi.OIDNegoEx.OID(), nil)),
+			code:  gssapi.StatusBadMech,
+		},
+		{
+			name:  "missing AP reply",
+			token: responseNegotiationToken(mechanismResponse(NegStateAcceptCompleted, gssapi.OIDKRB5.OID(), nil)),
+			code:  gssapi.StatusDefectiveToken,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -490,38 +582,68 @@ func TestSPNEGOInvalidStateTransitions(t *testing.T) {
 			require.Equal(t, test.code, gotStatus.Code)
 		})
 	}
+}
 
+func TestSPNEGORejectsUnsolicitedDCEFinalReply(t *testing.T) {
+	acceptor := SPNEGOService(keytab.New())
 	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
-	reply, err := messages.NewAPRep(messages.EncAPRepPart{SequenceNumber: 1}, key)
+	reply, err := messages.NewAPRep(messages.EncAPRepPart{
+		CTime:          time.Time{},
+		Cusec:          0,
+		Subkey:         types.EncryptionKey{KeyType: 0, KeyValue: nil},
+		SequenceNumber: 1,
+	}, key)
 	require.NoError(t, err)
 	rawReply := NewKRB5TokenAPREP(reply, true)
-	authenticated, _, status = acceptor.ContinueSecContext(&rawReply)
+	authenticated, _, status := acceptor.ContinueSecContext(&rawReply)
 	require.False(t, authenticated)
 	require.Equal(t, gssapi.StatusNoContext, status.Code)
 }
 
 func TestSPNEGOContinuationRequiresMIC(t *testing.T) {
-	mechanism := SPNEGOClientWithOptions(client.NewWithPassword("alice", "EXAMPLE.ORG", "password", config.New()), "HTTP/server", KRB5TokenAPREQOptions{})
+	var options KRB5TokenAPREQOptions
+	cl := client.NewWithPassword("alice", "EXAMPLE.ORG", "password", config.New())
+	mechanism := SPNEGOClientWithOptions(cl, "HTTP/server", options)
 	mechanism.offeredMechTypes = []asn1.ObjectIdentifier{gssapi.OIDKRB5.OID()}
 	mechanism.requireMechMIC = true
-	mechanism.replyKey = types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
-	token := &SPNEGOToken{Resp: true, NegTokenResp: NegTokenResp{
-		NegState: asn1.Enumerated(NegStateAcceptCompleted), SupportedMech: gssapi.OIDKRB5.OID(),
-	}}
+	mechanism.replyKey = types.EncryptionKey{
+		KeyType:  etypeID.AES128_CTS_HMAC_SHA1_96,
+		KeyValue: []byte("0123456789abcdef"),
+	}
+	token := responseNegotiationToken(mechanismResponse(NegStateAcceptCompleted, gssapi.OIDKRB5.OID(), nil))
 	authenticated, _, status := mechanism.ContinueSecContext(token)
 	require.False(t, authenticated)
 	require.Equal(t, gssapi.StatusBadMIC, status.Code)
 }
 
+//nolint:ireturn // A fixture can start with either a SPNEGO token or a raw DCE Kerberos token.
 func newContextExchange(t *testing.T, contextFlags []int) (*SPNEGO, *SPNEGO, gssapi.ContextToken) {
-	return newContextExchangeWithOptions(t, KRB5TokenAPREQOptions{GSSAPIFlags: contextFlags})
+	return newContextExchangeWithOptions(t, KRB5TokenAPREQOptions{
+		APOptions:           nil,
+		MechTypes:           nil,
+		ChannelBindings:     nil,
+		DelegatedCredential: nil,
+		Delegate:            false,
+		ForceDelegation:     false,
+		DelegationAddresses: nil,
+		GSSAPIFlags:         contextFlags,
+	})
 }
 
-func newContextExchangeWithOptions(t *testing.T, options KRB5TokenAPREQOptions) (*SPNEGO, *SPNEGO, gssapi.ContextToken) {
+//nolint:ireturn // A fixture can start with either a SPNEGO token or a raw DCE Kerberos token.
+func newContextExchangeWithOptions(
+	t *testing.T,
+	options KRB5TokenAPREQOptions,
+) (*SPNEGO, *SPNEGO, gssapi.ContextToken) {
 	return newContextExchangeWithPreferences(t, options, nil)
 }
 
-func newContextExchangeWithPreferences(t *testing.T, options KRB5TokenAPREQOptions, preferredMechs []asn1.ObjectIdentifier) (*SPNEGO, *SPNEGO, gssapi.ContextToken) {
+//nolint:ireturn // A fixture can start with either a SPNEGO token or a raw DCE Kerberos token.
+func newContextExchangeWithPreferences(
+	t *testing.T,
+	options KRB5TokenAPREQOptions,
+	preferredMechs []asn1.ObjectIdentifier,
+) (*SPNEGO, *SPNEGO, gssapi.ContextToken) {
 	t.Helper()
 	b, err := hex.DecodeString(testdata.HTTP_KEYTAB)
 	require.NoError(t, err)
@@ -542,6 +664,11 @@ func newContextExchangeWithPreferences(t *testing.T, options KRB5TokenAPREQOptio
 	require.NoError(t, err)
 	cache := credentials.NewCCache(cname, realm)
 	cache.AddCredential(&credentials.Credential{
+		IsSKey:       false,
+		Addresses:    nil,
+		AuthData:     nil,
+		SecondTicket: nil,
+
 		Client: credentials.Principal{Realm: realm, PrincipalName: cname},
 		Server: credentials.Principal{Realm: realm, PrincipalName: sname},
 		Key:    sessionKey, AuthTime: now, StartTime: now.Add(-time.Minute), EndTime: now.Add(time.Hour),

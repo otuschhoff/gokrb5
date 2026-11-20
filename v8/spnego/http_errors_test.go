@@ -43,39 +43,45 @@ func TestNegotiatingClientResponseOwnership(t *testing.T) {
 		status    int
 		wantErr   bool
 	}{
-		{name: "invalid challenge", challenge: "Negotiate !!!", status: http.StatusUnauthorized, wantErr: true},
+		{name: "invalid challenge", challenge: malformedNegotiateHeader, status: http.StatusUnauthorized, wantErr: true},
 		{name: "missing mechanism", challenge: "Basic", status: http.StatusUnauthorized, wantErr: true},
-		{name: "caller owns successful body", status: http.StatusOK},
+		{
+			challenge: "",
+			wantErr:   false,
+			name:      "caller owns successful body", status: http.StatusOK,
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			body := &ownedResponseBody{Reader: strings.NewReader("body"), closeErr: cleanup}
-			transport := &http.Client{Transport: negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
+			body := &ownedResponseBody{
+				closes: 0,
+				Reader: strings.NewReader("body"), closeErr: cleanup,
+			}
+			transport := testHTTPClient(negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
 				header := make(http.Header)
 				header.Set(HTTPHeaderAuthResponse, tt.challenge)
-				return &http.Response{StatusCode: tt.status, Header: header, Body: body}, nil
-			})}
+				return testHTTPResponse(tt.status, header, body), nil
+			}))
 			client := NewNegotiatingClient(transport, "target", func() gssapi.ContextMechanism {
 				return newTestContextMechanism(1, "http")
 			})
 			request, err := http.NewRequest(http.MethodGet, "http://example.test", nil)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 			response, err := client.Do(request)
 			if tt.wantErr {
-				if response != nil || !errors.Is(err, cleanup) || body.closes != 1 {
-					t.Fatalf("failed negotiation = %v, %v, closes %d", response, err, body.closes)
-				}
-				if _, ok := errors.AsType[base64.CorruptInputError](err); tt.challenge == "Negotiate !!!" && !ok {
+				require.Nil(t, response)
+				require.True(t, errors.Is(err, cleanup))
+				require.Equal(t, 1, body.closes)
+				if _, ok := errors.AsType[base64.CorruptInputError](err); tt.challenge == malformedNegotiateHeader && !ok {
 					t.Fatalf("malformed challenge lost its decoding cause: %v", err)
 				}
 				return
 			}
-			if err != nil || response == nil || body.closes != 0 {
-				t.Fatalf("successful response ownership = %v, %v, closes %d", response, err, body.closes)
-			}
-			if err := response.Body.Close(); !errors.Is(err, cleanup) {
-				t.Fatal(err)
+			require.NoError(t, err)
+			require.NotNil(t, response)
+			require.Equal(t, 0, body.closes)
+			{
+				err := response.Body.Close()
+				require.True(t, errors.Is(err, cleanup))
 			}
 		})
 	}
@@ -89,9 +95,9 @@ func TestHTTPClientsPreserveCancellationAndRejectNilRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	transport := func() *http.Client {
-		return &http.Client{Transport: negotiatingRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return testHTTPClient(negotiatingRoundTripFunc(func(request *http.Request) (*http.Response, error) {
 			return nil, request.Context().Err()
-		})}
+		}))
 	}
 	for _, tt := range []struct {
 		name        string
@@ -133,15 +139,16 @@ func TestHTTPClientsPreserveCancellationAndRejectNilRequests(t *testing.T) {
 }
 
 func TestLegacyHTTPMissingKerberosReturnsOwnedResponse(t *testing.T) {
-	body := &ownedResponseBody{Reader: strings.NewReader("challenge")}
-	transport := &http.Client{Transport: negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
+	body := &ownedResponseBody{
+		closeErr: nil,
+		closes:   0,
+		Reader:   strings.NewReader("challenge"),
+	}
+	transport := testHTTPClient(negotiatingRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		header := make(http.Header)
 		header.Set(HTTPHeaderAuthResponse, HTTPHeaderAuthResponseValueKey)
-		return &http.Response{
-			StatusCode: http.StatusUnauthorized,
-			Header:     header, Body: body,
-		}, nil
-	})}
+		return testHTTPResponse(http.StatusUnauthorized, header, body), nil
+	}))
 	request, err := http.NewRequest(http.MethodGet, "http://example.test", nil)
 	require.NoError(t, err)
 	response, err := NewClient(nil, transport, "HTTP/server.test").Do(request)
@@ -193,57 +200,24 @@ func TestLegacyHTTPRedirectBodyReplay(t *testing.T) {
 		status     int
 		failReplay bool
 	}{
-		{name: "307 reopens closed file", status: http.StatusTemporaryRedirect},
-		{name: "303 drops POST body", status: http.StatusSeeOther},
+		{
+			failReplay: false,
+			name:       "307 reopens closed file", status: http.StatusTemporaryRedirect,
+		},
+		{
+			failReplay: false,
+			name:       "303 drops POST body", status: http.StatusSeeOther,
+		},
 		{name: "307 reopen failure", status: http.StatusTemporaryRedirect, failReplay: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-				if request.URL.Path == "/start" {
-					http.Redirect(writer, request, "/end", tt.status)
-					return
-				}
-				body, err := io.ReadAll(request.Body)
-				wantMethod, wantBody := http.MethodPost, "payload"
-				if tt.status == http.StatusSeeOther {
-					wantMethod, wantBody = http.MethodGet, ""
-				}
-				if err != nil || request.Method != wantMethod || string(body) != wantBody {
-					writer.WriteHeader(http.StatusBadRequest)
-					return
-				}
-				writer.WriteHeader(http.StatusNoContent)
-			}))
+			server := httptest.NewServer(testRedirectHandler(tt.status))
 			defer server.Close()
-			root, err := os.OpenRoot(t.TempDir())
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, root.Close()) })
-			require.NoError(t, root.WriteFile("request", []byte("payload"), 0o600))
-			body, err := root.Open("request")
-			require.NoError(t, err)
-			opened := []*os.File{body}
-			t.Cleanup(func() {
-				for _, file := range opened {
-					if closeErr := file.Close(); closeErr != nil && !errors.Is(closeErr, os.ErrClosed) {
-						t.Error(closeErr)
-					}
-				}
-			})
-			request, err := http.NewRequest(http.MethodPost, server.URL+"/start", body)
-			require.NoError(t, err)
-			replays := 0
-			request.GetBody = func() (io.ReadCloser, error) {
-				replays++
-				if tt.failReplay && replays == 2 {
-					return nil, cause
-				}
-				file, openErr := root.Open("request")
-				if openErr != nil {
-					return nil, openErr
-				}
-				opened = append(opened, file)
-				return file, nil
+			var replayError error
+			if tt.failReplay {
+				replayError = cause
 			}
+			request, replay := testRedirectRequest(t, server.URL, replayError)
 			response, err := NewClient(nil, server.Client(), "").Do(request)
 			if response != nil {
 				require.NoError(t, response.Body.Close())
@@ -259,13 +233,70 @@ func TestLegacyHTTPRedirectBodyReplay(t *testing.T) {
 			if tt.status == http.StatusSeeOther {
 				wantReplays = 0
 			}
-			require.Equal(t, wantReplays, replays)
-			for _, file := range opened {
+			require.Equal(t, wantReplays, replay.calls)
+			for _, file := range replay.opened {
 				_, err := file.Read(make([]byte, 1))
 				require.ErrorIs(t, err, os.ErrClosed)
 			}
 		})
 	}
+}
+
+func testRedirectHandler(status int) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/start" {
+			http.Redirect(writer, request, "/end", status)
+			return
+		}
+		body, err := io.ReadAll(request.Body)
+		wantMethod, wantBody := http.MethodPost, "payload"
+		if status == http.StatusSeeOther {
+			wantMethod, wantBody = http.MethodGet, ""
+		}
+		if err != nil || request.Method != wantMethod || string(body) != wantBody {
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	}
+}
+
+type redirectReplay struct {
+	calls  int
+	opened []*os.File
+}
+
+func testRedirectRequest(t *testing.T, url string, replayError error) (*http.Request, *redirectReplay) {
+	t.Helper()
+	root, err := os.OpenRoot(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, root.Close()) })
+	require.NoError(t, root.WriteFile("request", []byte("payload"), 0o600))
+	body, err := root.Open("request")
+	require.NoError(t, err)
+	replay := &redirectReplay{calls: 0, opened: []*os.File{body}}
+	t.Cleanup(func() {
+		for _, file := range replay.opened {
+			if closeErr := file.Close(); closeErr != nil && !errors.Is(closeErr, os.ErrClosed) {
+				t.Error(closeErr)
+			}
+		}
+	})
+	request, err := http.NewRequest(http.MethodPost, url+"/start", body)
+	require.NoError(t, err)
+	request.GetBody = func() (io.ReadCloser, error) {
+		replay.calls++
+		if replayError != nil && replay.calls == 2 {
+			return nil, replayError
+		}
+		file, openErr := root.Open("request")
+		if openErr != nil {
+			return nil, openErr
+		}
+		replay.opened = append(replay.opened, file)
+		return file, nil
+	}
+	return request, replay
 }
 
 func newHTTPKerberosClient(t *testing.T) *client.Client {
@@ -284,6 +315,11 @@ func newHTTPKerberosClient(t *testing.T) *client.Client {
 		wire, err := ticket.Marshal()
 		require.NoError(t, err)
 		cache.AddCredential(&credentials.Credential{
+			IsSKey:       false,
+			Addresses:    nil,
+			AuthData:     nil,
+			SecondTicket: nil,
+
 			Client: credentials.Principal{Realm: realm, PrincipalName: cname},
 			Server: credentials.Principal{Realm: realm, PrincipalName: sname},
 			Key:    key, AuthTime: now, StartTime: now, EndTime: now.Add(time.Hour),
@@ -296,81 +332,121 @@ func newHTTPKerberosClient(t *testing.T) *client.Client {
 	return kerberos
 }
 
+type authFailureCase struct {
+	name            string
+	noReplay        bool
+	replayErr       error
+	readErr         error
+	closeErr        error
+	alwaysChallenge bool
+	wantCalls       int
+	wantErr         error
+}
+
 func TestLegacyHTTPAuthenticationFailureContracts(t *testing.T) {
 	replayFailure := errors.New("injected request replay failure")
 	readFailure := errors.New("injected response read failure")
 	closeFailure := errors.New("injected response close failure")
-	for _, tt := range []struct {
-		name            string
-		noReplay        bool
-		replayErr       error
-		readErr         error
-		closeErr        error
-		alwaysChallenge bool
-		wantCalls       int
-		wantErr         error
-	}{
-		{name: "successful replay with nil headers", wantCalls: 2},
-		{name: "unreplayable", noReplay: true, wantCalls: 1},
-		{name: "replay failure", replayErr: replayFailure, wantCalls: 1, wantErr: replayFailure},
-		{name: "read and close", readErr: readFailure, closeErr: closeFailure, wantCalls: 1, wantErr: readFailure},
-		{name: "challenge budget", alwaysChallenge: true, wantCalls: 10},
+	for _, tt := range []authFailureCase{
+		{
+			noReplay:        false,
+			replayErr:       nil,
+			readErr:         nil,
+			closeErr:        nil,
+			alwaysChallenge: false,
+			wantErr:         nil,
+			name:            "successful replay with nil headers", wantCalls: 2,
+		},
+		{
+			replayErr:       nil,
+			readErr:         nil,
+			closeErr:        nil,
+			alwaysChallenge: false,
+			wantErr:         nil,
+			name:            "unreplayable", noReplay: true, wantCalls: 1,
+		},
+		{
+			noReplay:        false,
+			readErr:         nil,
+			closeErr:        nil,
+			alwaysChallenge: false,
+			name:            "replay failure", replayErr: replayFailure, wantCalls: 1, wantErr: replayFailure,
+		},
+		{
+			noReplay:        false,
+			replayErr:       nil,
+			alwaysChallenge: false,
+			name:            "read and close", readErr: readFailure, closeErr: closeFailure, wantCalls: 1, wantErr: readFailure,
+		},
+		{
+			noReplay:  false,
+			replayErr: nil,
+			readErr:   nil,
+			closeErr:  nil,
+			wantErr:   nil,
+			name:      "challenge budget", alwaysChallenge: true, wantCalls: 10,
+		},
 	} {
-		t.Run(tt.name, func(t *testing.T) {
-			kerberos := newHTTPKerberosClient(t)
-			var bodies []*ownedResponseBody
-			calls := 0
-			transport := &http.Client{Transport: negotiatingRoundTripFunc(func(request *http.Request) (*http.Response, error) {
-				calls++
-				data, err := io.ReadAll(request.Body)
-				require.NoError(t, err)
-				require.NoError(t, request.Body.Close())
-				require.Equal(t, "payload", string(data))
-				var reader io.Reader = strings.NewReader("")
-				if tt.readErr != nil {
-					reader = failingReadCloser{readErr: tt.readErr}
-				}
-				body := &ownedResponseBody{Reader: reader, closeErr: tt.closeErr}
-				bodies = append(bodies, body)
-				status := http.StatusOK
-				header := make(http.Header)
-				if calls == 1 || tt.alwaysChallenge {
-					status = http.StatusUnauthorized
-					header.Set(HTTPHeaderAuthResponse, HTTPHeaderAuthResponseValueKey)
-				}
-				return &http.Response{StatusCode: status, Header: header, Body: body}, nil
-			})}
-			negotiating := NewClient(kerberos, transport, "HTTP/server.test")
-			request, err := http.NewRequest(http.MethodPost, "http://server.test", strings.NewReader("payload"))
-			require.NoError(t, err)
-			request.Header = nil
-			if tt.noReplay {
-				request.GetBody = nil
-			}
-			if tt.replayErr != nil {
-				request.GetBody = func() (io.ReadCloser, error) { return nil, tt.replayErr }
-			}
-			response, err := negotiating.Do(request)
-			if response != nil {
-				require.NoError(t, response.Body.Close())
-			}
-			require.Equal(t, tt.wantCalls, calls)
-			if tt.wantErr != nil {
-				require.ErrorIs(t, err, tt.wantErr)
-			}
-			if tt.closeErr != nil {
-				require.ErrorIs(t, err, tt.closeErr)
-			}
-			if tt.noReplay || tt.alwaysChallenge {
-				require.Error(t, err)
-			}
-			if tt.name == "successful replay with nil headers" {
-				require.NoError(t, err)
-			}
-			for _, body := range bodies {
-				require.Equal(t, 1, body.closes)
-			}
-		})
+		t.Run(tt.name, func(t *testing.T) { testHTTPAuthenticationFailure(t, tt) })
+	}
+}
+
+func testHTTPAuthenticationFailure(t *testing.T, tt authFailureCase) {
+	t.Helper()
+	kerberos := newHTTPKerberosClient(t)
+	var bodies []*ownedResponseBody
+	transport := testHTTPClient(negotiatingRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		data, err := io.ReadAll(request.Body)
+		require.NoError(t, err)
+		require.NoError(t, request.Body.Close())
+		require.Equal(t, "payload", string(data))
+		var reader io.Reader = strings.NewReader("")
+		if tt.readErr != nil {
+			reader = failingReadCloser{closeErr: nil, readErr: tt.readErr}
+		}
+		body := &ownedResponseBody{Reader: reader, closeErr: tt.closeErr, closes: 0}
+		bodies = append(bodies, body)
+		status := http.StatusOK
+		header := make(http.Header)
+		if len(bodies) == 1 || tt.alwaysChallenge {
+			status = http.StatusUnauthorized
+			header.Set(HTTPHeaderAuthResponse, HTTPHeaderAuthResponseValueKey)
+		}
+		return testHTTPResponse(status, header, body), nil
+	}))
+	negotiating := NewClient(kerberos, transport, "HTTP/server.test")
+	request := mustHTTPRequest(t, http.MethodPost, "http://server.test", strings.NewReader("payload"))
+	request.Header = nil
+	if tt.noReplay {
+		request.GetBody = nil
+	}
+	if tt.replayErr != nil {
+		request.GetBody = func() (io.ReadCloser, error) { return nil, tt.replayErr }
+	}
+	response, err := negotiating.Do(request)
+	if response != nil {
+		require.NoError(t, response.Body.Close())
+	}
+	checkHTTPAuthOutcome(t, tt, err)
+	require.Len(t, bodies, tt.wantCalls)
+	for _, body := range bodies {
+		require.Equal(t, 1, body.closes)
+	}
+}
+
+func checkHTTPAuthOutcome(t *testing.T, tt authFailureCase, err error) {
+	t.Helper()
+	if tt.wantErr != nil {
+		require.ErrorIs(t, err, tt.wantErr)
+	}
+	if tt.closeErr != nil {
+		require.ErrorIs(t, err, tt.closeErr)
+	}
+	if tt.noReplay || tt.alwaysChallenge {
+		require.Error(t, err)
+	}
+	if tt.name == "successful replay with nil headers" {
+		require.NoError(t, err)
 	}
 }
 
@@ -510,7 +586,7 @@ func TestSPNEGOHTTPNilRequestAndResponseGuards(t *testing.T) {
 	if err := SetSPNEGOHeader(nil, nil, "HTTP/server.example"); err == nil {
 		t.Fatal("nil request/header input was accepted")
 	}
-	if _, err := responseSPNEGOToken(nil); err == nil {
+	if _, _, err := responseSPNEGOToken(nil); err == nil {
 		t.Fatal("nil response was accepted")
 	}
 }

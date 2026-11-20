@@ -31,16 +31,26 @@ func TestSPNEGO_AD_EndToEnd(t *testing.T) {
 	l := log.New(os.Stderr, "SPNEGO AD: ", log.LstdFlags)
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := goidentity.FromHTTPRequestContext(r)
-		_, _ = io.WriteString(w, html.EscapeString(id.UserName())+"@"+html.EscapeString(id.Domain())+"|"+strconv.Itoa(len(id.AuthzAttributes())))
+		_, _ = io.WriteString(
+			w,
+			html.EscapeString(id.UserName())+"@"+html.EscapeString(id.Domain())+"|"+strconv.Itoa(len(id.AuthzAttributes())),
+		)
 	})
 	srv := httptest.NewServer(SPNEGOKRB5Authenticate(inner, env.Keytab, service.Logger(l)))
 	defer srv.Close()
 
-	cl := client.NewWithPassword(env.User, env.UserRealm, env.Password, env.Config, client.Logger(l), client.DisablePAReqEncPARep(true))
+	cl := client.NewWithPassword(
+		env.User,
+		env.UserRealm,
+		env.Password,
+		env.Config,
+		client.Logger(l),
+		client.DisablePAReqEncPARep(true),
+	)
 	if ierr := cl.Login(); ierr != nil {
 		t.Fatalf("Error on login: %v", ierr)
 	}
-	r, _ := http.NewRequest("GET", srv.URL, nil)
+	r, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
 	resp, err := NewClient(cl, srv.Client(), spn).Do(r)
 	if err != nil {
 		t.Fatalf("SPNEGO request failed: %v", err)
@@ -51,7 +61,14 @@ func TestSPNEGO_AD_EndToEnd(t *testing.T) {
 
 	parts := strings.Split(string(body), "|")
 	if assert.Len(t, parts, 2) {
-		assert.True(t, strings.EqualFold(env.User+"@"+env.UserRealm, parts[0]), "authenticated identity %q should match %s@%s", parts[0], env.User, env.UserRealm)
+		assert.True(
+			t,
+			strings.EqualFold(env.User+"@"+env.UserRealm, parts[0]),
+			"authenticated identity %q should match %s@%s",
+			parts[0],
+			env.User,
+			env.UserRealm,
+		)
 		assert.NotEqual(t, "0", parts[1], "PAC group SIDs should be exposed to the handler")
 	}
 }

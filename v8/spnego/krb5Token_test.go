@@ -28,8 +28,20 @@ import (
 
 const (
 	// #nosec G101 -- this AP-REQ vector belongs to the TEST.GOKRB5 test realm.
-	KRB5TokenHex = "6082026306092a864886f71201020201006e8202523082024ea003020105a10302010ea20703050000000000a382015d6182015930820155a003020105a10d1b0b544553542e474f4b524235a2233021a003020101a11a30181b04485454501b10686f73742e746573742e676f6b726235a382011830820114a003020112a103020103a28201060482010230621d868c97f30bf401e03bbffcd724bd9d067dce2afc31f71a356449b070cdafcc1ff372d0eb1e7a708b50c0152f3996c45b1ea312a803907fb97192d39f20cdcaea29876190f51de6e2b4a4df0460122ed97f363434e1e120b0e76c172b4424a536987152ac0b73013ab88af4b13a3fcdc63f739039dd46d839709cf5b51bb0ce6cb3af05fab3844caac280929955495235e9d0424f8a1fb9b4bd4f6bba971f40b97e9da60b9dabfcf0b1feebfca02c9a19b327a0004aa8e19192726cf347561fa8ac74afad5d6a264e50cf495b93aac86c77b2bc2d184234f6c2767dbea431485a25687b9044a20b601e968efaefffa1fc5283ff32aa6a53cb6c5cdd2eddcb26a481d73081d4a003020112a103020103a281c70481c4a1b29e420324f7edf9efae39df7bcaaf196a3160cf07e72f52a4ef8a965721b2f3343719c50699046e4fcc18ca26c2bfc7e4a9eddfc9d9cfc57ff2f6bdbbd1fc40ac442195bc669b9a0dbba12563b3e4cac9f4022fc01b8aa2d1ab84815bb078399ff7f4d5f9815eef896a0c7e3c049e6fd9932b97096cdb5861425b9d81753d0743212ded1a0fb55a00bf71a46be5ce5e1c8a5cc327b914347d9efcb6cb31ca363b1850d95c7b6c4c3cc6301615ad907318a0c5379d343610fab17eca9c7dc0a5a60658"
-	AuthChksum   = "100000000000000000000000000000000000000030000000"
+	KRB5TokenHex = "6082026306092a864886f71201020201006e8202523082024ea003020105a10302010ea20703050000000000a382015d" +
+		"6182015930820155a003020105a10d1b0b544553542e474f4b524235a2233021a003020101a11a30181b04485454501b" +
+		"10686f73742e746573742e676f6b726235a382011830820114a003020112a103020103a28201060482010230621d868c" +
+		"97f30bf401e03bbffcd724bd9d067dce2afc31f71a356449b070cdafcc1ff372d0eb1e7a708b50c0152f3996c45b1ea3" +
+		"12a803907fb97192d39f20cdcaea29876190f51de6e2b4a4df0460122ed97f363434e1e120b0e76c172b4424a5369871" +
+		"52ac0b73013ab88af4b13a3fcdc63f739039dd46d839709cf5b51bb0ce6cb3af05fab3844caac280929955495235e9d0" +
+		"424f8a1fb9b4bd4f6bba971f40b97e9da60b9dabfcf0b1feebfca02c9a19b327a0004aa8e19192726cf347561fa8ac74" +
+		"afad5d6a264e50cf495b93aac86c77b2bc2d184234f6c2767dbea431485a25687b9044a20b601e968efaefffa1fc5283" +
+		"ff32aa6a53cb6c5cdd2eddcb26a481d73081d4a003020112a103020103a281c70481c4a1b29e420324f7edf9efae39df" +
+		"7bcaaf196a3160cf07e72f52a4ef8a965721b2f3343719c50699046e4fcc18ca26c2bfc7e4a9eddfc9d9cfc57ff2f6bd" +
+		"bbd1fc40ac442195bc669b9a0dbba12563b3e4cac9f4022fc01b8aa2d1ab84815bb078399ff7f4d5f9815eef896a0c7e" +
+		"3c049e6fd9932b97096cdb5861425b9d81753d0743212ded1a0fb55a00bf71a46be5ce5e1c8a5cc327b914347d9efcb6" +
+		"cb31ca363b1850d95c7b6c4c3cc6301615ad907318a0c5379d343610fab17eca9c7dc0a5a60658"
+	AuthChksum = "100000000000000000000000000000000000000030000000"
 )
 
 func TestKRB5Token_Unmarshal(t *testing.T) {
@@ -47,54 +59,90 @@ func TestKRB5Token_Unmarshal(t *testing.T) {
 	assert.Equal(t, []byte{1, 0}, mt.tokID, "TokID not as expected")
 	assert.Equal(t, msgtype.KRB_AP_REQ, mt.APReq.MsgType, "KRB5Token AP_REQ does not have the right message type.")
 	assert.Equal(t, int32(0), mt.KRBError.ErrorCode, "KRBError in KRB5Token does not indicate no error.")
-	assert.Equal(t, int32(18), mt.APReq.EncryptedAuthenticator.EType, "Authenticator within AP_REQ does not have the etype expected.")
+	assert.Equal(
+		t,
+		int32(18),
+		mt.APReq.EncryptedAuthenticator.EType,
+		"Authenticator within AP_REQ does not have the etype expected.",
+	)
 }
 
-func TestKRB5TokenFramingAndClassificationGuards(t *testing.T) {
-	tokenID := func(value string) []byte {
-		decoded, err := hex.DecodeString(value)
-		require.NoError(t, err)
-		return decoded
-	}
-	wrapped := func(oid asn1.ObjectIdentifier, id []byte, payload []byte) []byte {
-		header, err := asn1.Marshal(oid)
-		require.NoError(t, err)
-		return asn1tools.AddASNAppTag(append(append(header, id...), payload...), 0)
-	}
+func decodeTestTokenID(t *testing.T, value string) []byte {
+	t.Helper()
+	decoded, err := hex.DecodeString(value)
+	require.NoError(t, err)
+	return decoded
+}
 
-	apReq := &KRB5Token{tokID: tokenID(TOK_ID_KRB_AP_REQ)}
-	apRep := &KRB5Token{tokID: tokenID(TOK_ID_KRB_AP_REP)}
-	krbError := &KRB5Token{tokID: tokenID(TOK_ID_KRB_ERROR)}
-	unknown := &KRB5Token{tokID: []byte{0xff, 0xff}}
+func testKRB5TokenWithID(id []byte, raw bool) *KRB5Token {
+	token := new(KRB5Token)
+	token.tokID = id
+	token.raw = raw
+	return token
+}
+
+func TestKRB5TokenClassificationAndVerification(t *testing.T) {
+	tokenID := func(value string) []byte { return decodeTestTokenID(t, value) }
+
+	apReq := testKRB5TokenWithID(tokenID(TOK_ID_KRB_AP_REQ), false)
+	apRep := testKRB5TokenWithID(tokenID(TOK_ID_KRB_AP_REP), false)
+	krbError := testKRB5TokenWithID(tokenID(TOK_ID_KRB_ERROR), false)
+	unknown := testKRB5TokenWithID([]byte{0xff, 0xff}, false)
 	assert.True(t, apReq.IsAPReq())
 	assert.True(t, apRep.IsAPRep())
 	assert.True(t, krbError.IsKRBError())
 	assert.False(t, unknown.IsAPReq())
 	assert.False(t, unknown.IsAPRep())
 	assert.False(t, unknown.IsKRBError())
-	assert.Equal(t, []int{gssapi.ContextFlagInteg}, appendContextFlag([]int{gssapi.ContextFlagInteg}, gssapi.ContextFlagInteg))
-	assert.Equal(t, []int{gssapi.ContextFlagInteg, gssapi.ContextFlagConf}, appendContextFlag([]int{gssapi.ContextFlagInteg}, gssapi.ContextFlagConf))
+	assert.Equal(
+		t,
+		[]int{gssapi.ContextFlagInteg},
+		appendContextFlag([]int{gssapi.ContextFlagInteg}, gssapi.ContextFlagInteg),
+	)
+	assert.Equal(
+		t,
+		[]int{gssapi.ContextFlagInteg, gssapi.ContextFlagConf},
+		appendContextFlag([]int{gssapi.ContextFlagInteg}, gssapi.ContextFlagConf),
+	)
 
-	if _, err := (&KRB5Token{raw: true, tokID: []byte{0xff, 0xff}}).Marshal(); err == nil {
-		t.Fatal("unsupported raw token was marshaled")
+	{
+		_, err := testKRB5TokenWithID([]byte{0xff, 0xff}, true).Marshal()
+		require.Error(t, err)
 	}
-	if _, err := krbError.Marshal(); err == nil {
-		t.Fatal("KRB_ERROR token was marshaled")
+	{
+		_, err := krbError.Marshal()
+		require.Error(t, err)
 	}
-	if ok, status := apRep.Verify(); ok || status.Code != gssapi.StatusNoContext {
-		t.Fatalf("stateless AP_REP verification = %v, %v", ok, status)
+	{
+		ok, status := apRep.Verify()
+		require.False(t, ok)
+		require.Equal(t, gssapi.StatusNoContext, status.Code)
 	}
-	if ok, status := unknown.Verify(); ok || status.Code != gssapi.StatusDefectiveToken {
-		t.Fatalf("unknown token verification = %v, %v", ok, status)
+	{
+		ok, status := unknown.Verify()
+		require.False(t, ok)
+		require.Equal(t, gssapi.StatusDefectiveToken, status.Code)
 	}
-	if ok, status := krbError.Verify(); ok || status.Code != gssapi.StatusDefectiveToken {
-		t.Fatalf("empty KRB_ERROR verification = %v, %v", ok, status)
+	{
+		ok, status := krbError.Verify()
+		require.False(t, ok)
+		require.Equal(t, gssapi.StatusDefectiveToken, status.Code)
 	}
 	krbError.KRBError.MsgType = msgtype.KRB_ERROR
-	if ok, status := krbError.Verify(); !ok || status.Code != gssapi.StatusUnavailable {
-		t.Fatalf("KRB_ERROR verification = %v, %v", ok, status)
+	{
+		ok, status := krbError.Verify()
+		require.True(t, ok)
+		require.Equal(t, gssapi.StatusUnavailable, status.Code)
 	}
+}
 
+func TestKRB5TokenRejectsMalformedFraming(t *testing.T) {
+	tokenID := func(value string) []byte { return decodeTestTokenID(t, value) }
+	wrapped := func(oid asn1.ObjectIdentifier, id []byte, payload []byte) []byte {
+		header, err := asn1.Marshal(oid)
+		require.NoError(t, err)
+		return asn1tools.AddASNAppTag(append(append(header, id...), payload...), 0)
+	}
 	badInputs := [][]byte{
 		{0x60, 0x00},
 		wrapped(asn1.ObjectIdentifier{1, 2, 3}, tokenID(TOK_ID_KRB_AP_REQ), nil),
@@ -105,9 +153,7 @@ func TestKRB5TokenFramingAndClassificationGuards(t *testing.T) {
 	}
 	for i, input := range badInputs {
 		var token KRB5Token
-		if err := token.Unmarshal(input); err == nil {
-			t.Fatalf("malformed token %d was accepted", i)
-		}
+		require.Error(t, token.Unmarshal(input), "fixture %d", i)
 	}
 }
 
@@ -196,7 +242,10 @@ func TestKRB5Token_newAuthenticatorChksum(t *testing.T) {
 func TestKRB5Token_newAuthenticatorWithSubkeyGeneration(t *testing.T) {
 	t.Parallel()
 	creds := credentials.New("hftsai", testdata.TEST_REALM)
-	creds.SetCName(types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING})
+	creds.SetCName(types.PrincipalName{
+		NameType:   nametype.KRB_NT_PRINCIPAL,
+		NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING,
+	})
 	var etypeID int32 = 18
 	keyLen := 32 // etypeID 18 refers to AES256 -> 32 bytes key
 	a, err := krb5TokenAuthenticator(creds, []int{gssapi.ContextFlagInteg, gssapi.ContextFlagConf})
@@ -206,7 +255,12 @@ func TestKRB5Token_newAuthenticatorWithSubkeyGeneration(t *testing.T) {
 	if err := a.GenerateSeqNumberAndSubKey(etypeID, keyLen); err != nil {
 		t.Fatal(err)
 	}
-	assert.Equal(t, int32(32771), a.Cksum.CksumType, "Checksum type in authenticator for SPNEGO mechtoken not as expected.")
+	assert.Equal(
+		t,
+		int32(32771),
+		a.Cksum.CksumType,
+		"Checksum type in authenticator for SPNEGO mechtoken not as expected.",
+	)
 	assert.Equal(t, etypeID, a.SubKey.KeyType, "Subkey not of the expected type.")
 	assert.Equal(t, keyLen, len(a.SubKey.KeyValue), "Subkey value not of the right length")
 	var nz bool
@@ -228,12 +282,20 @@ func TestKRB5Token_newAuthenticatorWithSubkeyGeneration(t *testing.T) {
 func TestKRB5Token_newAuthenticator(t *testing.T) {
 	t.Parallel()
 	creds := credentials.New("hftsai", testdata.TEST_REALM)
-	creds.SetCName(types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING})
+	creds.SetCName(types.PrincipalName{
+		NameType:   nametype.KRB_NT_PRINCIPAL,
+		NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING,
+	})
 	a, err := krb5TokenAuthenticator(creds, []int{gssapi.ContextFlagInteg, gssapi.ContextFlagConf})
 	if err != nil {
 		t.Fatalf("Error creating authenticator: %v", err)
 	}
-	assert.Equal(t, int32(32771), a.Cksum.CksumType, "Checksum type in authenticator for SPNEGO mechtoken not as expected.")
+	assert.Equal(
+		t,
+		int32(32771),
+		a.Cksum.CksumType,
+		"Checksum type in authenticator for SPNEGO mechtoken not as expected.",
+	)
 	assert.Equal(t, int32(0), a.SubKey.KeyType, "Subkey not of the expected type.")
 	assert.Nil(t, a.SubKey.KeyValue, "Subkey should not be set.")
 
@@ -248,8 +310,13 @@ func TestKRB5Token_newAuthenticator(t *testing.T) {
 func TestNewAPREQKRB5Token_and_Marshal(t *testing.T) {
 	t.Parallel()
 	creds := credentials.New("hftsai", testdata.TEST_REALM)
-	creds.SetCName(types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING})
+	creds.SetCName(types.PrincipalName{
+		NameType:   nametype.KRB_NT_PRINCIPAL,
+		NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING,
+	})
 	cl := client.Client{
+		Config: nil,
+
 		Credentials: creds,
 	}
 
@@ -284,25 +351,41 @@ func TestNewAPREQKRB5Token_and_Marshal(t *testing.T) {
 	assert.Equal(t, []byte{1, 0}, mt.tokID, "TokID not as expected")
 	assert.Equal(t, msgtype.KRB_AP_REQ, mt.APReq.MsgType, "KRB5Token AP_REQ does not have the right message type.")
 	assert.Equal(t, int32(0), mt.KRBError.ErrorCode, "KRBError in KRB5Token does not indicate no error.")
-	assert.Equal(t, testdata.TEST_REALM, mt.APReq.Ticket.Realm, "Realm in ticket within the AP_REQ of the KRB5Token not as expected.")
-	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, mt.APReq.Ticket.SName.NameString, "SName in ticket within the AP_REQ of the KRB5Token not as expected.")
-	assert.Equal(t, int32(18), mt.APReq.EncryptedAuthenticator.EType, "Authenticator within AP_REQ does not have the etype expected.")
+	assert.Equal(t, testdata.TEST_REALM, mt.APReq.Ticket.Realm, "ticket realm")
+	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, mt.APReq.Ticket.SName.NameString, "ticket service")
+	assert.Equal(t, int32(18), mt.APReq.EncryptedAuthenticator.EType, "authenticator enctype")
 }
 
 func TestNewAPREQKRB5TokenWithOptions(t *testing.T) {
 	t.Parallel()
 	creds := credentials.New("hftsai", testdata.TEST_REALM)
-	creds.SetCName(types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING})
-	cl := client.Client{Credentials: creds}
+	creds.SetCName(types.PrincipalName{
+		NameType:   nametype.KRB_NT_PRINCIPAL,
+		NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING,
+	})
+	cl := client.Client{
+		Config:      nil,
+		Credentials: creds,
+	}
 	var tkt messages.Ticket
 	ticketBytes, err := hex.DecodeString(testdata.MarshaledKRB5ticket)
 	require.NoError(t, err)
 	require.NoError(t, tkt.Unmarshal(ticketBytes))
 	key := types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)}
-	bindings := &gssapi.ChannelBindings{ApplicationData: []byte("tls-server-end-point:test")}
+	bindings := &gssapi.ChannelBindings{
+		InitiatorAddress: gssapi.ChannelBindingAddress{AddressType: 0, Address: nil},
+		AcceptorAddress:  gssapi.ChannelBindingAddress{AddressType: 0, Address: nil},
+		ApplicationData:  []byte("tls-server-end-point:test"),
+	}
 	delegated := []byte{0x76, 0x00}
 
 	mt, err := NewKRB5TokenAPREQWithOptions(&cl, tkt, key, KRB5TokenAPREQOptions{
+		APOptions:           nil,
+		MechTypes:           nil,
+		Delegate:            false,
+		ForceDelegation:     false,
+		DelegationAddresses: nil,
+
 		GSSAPIFlags:         []int{gssapi.ContextFlagInteg, gssapi.ContextFlagDeleg},
 		ChannelBindings:     bindings,
 		DelegatedCredential: delegated,
@@ -320,8 +403,14 @@ func TestNewAPREQKRB5TokenWithOptions(t *testing.T) {
 func TestNewAPREQKRB5TokenMutualAndCBTOptions(t *testing.T) {
 	t.Parallel()
 	creds := credentials.New("hftsai", testdata.TEST_REALM)
-	creds.SetCName(types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING})
-	cl := client.Client{Credentials: creds}
+	creds.SetCName(types.PrincipalName{
+		NameType:   nametype.KRB_NT_PRINCIPAL,
+		NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING,
+	})
+	cl := client.Client{
+		Config:      nil,
+		Credentials: creds,
+	}
 	var tkt messages.Ticket
 	ticketBytes, err := hex.DecodeString(testdata.MarshaledKRB5ticket)
 	require.NoError(t, err)
@@ -329,8 +418,19 @@ func TestNewAPREQKRB5TokenMutualAndCBTOptions(t *testing.T) {
 	key := types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)}
 
 	mt, err := NewKRB5TokenAPREQWithOptions(&cl, tkt, key, KRB5TokenAPREQOptions{
-		GSSAPIFlags:     []int{gssapi.ContextFlagMutual},
-		ChannelBindings: &gssapi.ChannelBindings{ApplicationData: []byte("binding")},
+		APOptions:           nil,
+		MechTypes:           nil,
+		DelegatedCredential: nil,
+		Delegate:            false,
+		ForceDelegation:     false,
+		DelegationAddresses: nil,
+
+		GSSAPIFlags: []int{gssapi.ContextFlagMutual},
+		ChannelBindings: &gssapi.ChannelBindings{
+			InitiatorAddress: gssapi.ChannelBindingAddress{AddressType: 0, Address: nil},
+			AcceptorAddress:  gssapi.ChannelBindingAddress{AddressType: 0, Address: nil},
+			ApplicationData:  []byte("binding"),
+		},
 	})
 	require.NoError(t, err)
 	require.NoError(t, mt.APReq.DecryptAuthenticator(key))
@@ -347,10 +447,26 @@ func TestNewAPREQKRB5TokenMutualAndCBTOptions(t *testing.T) {
 func TestNewAPREQKRB5TokenRejectsDelegationWithoutFlag(t *testing.T) {
 	t.Parallel()
 	creds := credentials.New("hftsai", testdata.TEST_REALM)
-	creds.SetCName(types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING})
-	cl := client.Client{Credentials: creds}
+	creds.SetCName(types.PrincipalName{
+		NameType:   nametype.KRB_NT_PRINCIPAL,
+		NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING,
+	})
+	cl := client.Client{
+		Config:      nil,
+		Credentials: creds,
+	}
 
-	_, err := NewKRB5TokenAPREQWithOptions(&cl, messages.Ticket{}, types.EncryptionKey{}, KRB5TokenAPREQOptions{
+	var ticket messages.Ticket
+	var key types.EncryptionKey
+	_, err := NewKRB5TokenAPREQWithOptions(&cl, ticket, key, KRB5TokenAPREQOptions{
+		GSSAPIFlags:         nil,
+		APOptions:           nil,
+		MechTypes:           nil,
+		ChannelBindings:     nil,
+		Delegate:            false,
+		ForceDelegation:     false,
+		DelegationAddresses: nil,
+
 		DelegatedCredential: []byte{1},
 	})
 	require.Error(t, err)
