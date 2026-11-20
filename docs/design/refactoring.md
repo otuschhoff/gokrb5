@@ -2,8 +2,8 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-128 done. The latest measured
-v8 inventories (Slice 116) contain 518 canonical and 3,392 supplemental
+(floor raised to 86.0%), and Phase 5 slices 1-129 done. The latest measured
+v8 inventories (Slice 129) contain 518 canonical and 3,392 supplemental
 findings. Most remaining canonical findings are from `revive`, complexity and
 nesting checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
 Phase 3/4 interoperability and Windows exit evidence remains an external CI
@@ -30,7 +30,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.3%-88.4% local cross-package statement coverage (Slice 128); 518 canonical lint findings after Slice 116 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.3%-88.4% local cross-package statement coverage (Slice 128); 518 canonical lint findings after Slice 129 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -819,6 +819,21 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 129 (2026-11-20, lint inventory refresh; Q-10):
+Rerun `scripts/lint.sh full` and `report` on Linux/amd64 with Go 1.26.11
+and the repository's custom golangci-lint v2.15.0. Compared with Slice 116,
+the v8 supplemental report contained one new `goconst` finding for a
+repeated realm string in the lookup test. Name that fixture value without
+changing the test inputs or expectations. The final inventories match the
+Slice 116 totals: v8 has 518 canonical and 3,392 supplemental findings;
+v7 has 1,573 canonical and 1,163 supplemental findings. The v8 `config`
+package still has no canonical findings.
+
+Realm lookup tests passed 100 shuffled runs with the race detector.
+Changed-line lint passed for both modules against `4c5e7ec` and
+`origin/main`. No production code, lint policies, or CI workflows changed;
+PKINIT and PKU2U remain deferred.
 
 Slice 128 (2026-11-20, v8 coverage baseline refresh):
 Measure the Slice 127 source (`e4c5967`) from `v8` on Linux/amd64 with

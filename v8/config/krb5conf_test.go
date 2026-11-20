@@ -918,10 +918,12 @@ func TestResolveRealm(t *testing.T) {
 func TestResolveRealmMappingRules(t *testing.T) {
 	t.Parallel()
 
+	const hostRealm = "HOST.EXAMPLE"
+
 	cfg := New()
 	cfg.LibDefaults.DefaultRealm = "DEFAULT.EXAMPLE"
 	cfg.DomainRealm = DomainRealm{
-		"host.sub.example.com": "HOST.EXAMPLE",
+		"host.sub.example.com": hostRealm,
 		".sub.example.com":     "SUB.EXAMPLE",
 		".example.com":         "PARENT.EXAMPLE",
 		"example.net":          "EXACT.EXAMPLE",
@@ -932,10 +934,10 @@ func TestResolveRealmMappingRules(t *testing.T) {
 		domainName string
 		want       string
 	}{
-		{name: "exact before suffix", domainName: "host.sub.example.com", want: "HOST.EXAMPLE"},
+		{name: "exact before suffix", domainName: "host.sub.example.com", want: hostRealm},
 		{name: "longest suffix first", domainName: "other.sub.example.com", want: "SUB.EXAMPLE"},
 		{name: "parent suffix fallback", domainName: "other.example.com", want: "PARENT.EXAMPLE"},
-		{name: "trailing dot removed", domainName: "host.sub.example.com.", want: "HOST.EXAMPLE"},
+		{name: "trailing dot removed", domainName: "host.sub.example.com.", want: hostRealm},
 		{name: "only one trailing dot removed", domainName: "host.sub.example.com..", want: ""},
 		{name: "case is preserved", domainName: "host.sub.EXAMPLE.COM", want: ""},
 		{name: "bare domain matches exactly", domainName: "example.net", want: "EXACT.EXAMPLE"},
