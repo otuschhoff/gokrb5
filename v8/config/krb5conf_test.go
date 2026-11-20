@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,16 @@ import (
 )
 
 type failingConfigReader struct{ err error }
+
+type configReadCloser struct {
+	io.Reader
+	isClosed bool
+}
+
+func (r *configReadCloser) Close() error {
+	r.isClosed = true
+	return nil
+}
 
 func TestNewWithoutRealms(t *testing.T) {
 	t.Parallel()
@@ -64,12 +75,29 @@ func TestConfigJSONError(t *testing.T) {
 
 func (reader failingConfigReader) Read([]byte) (int, error) { return 0, reader.err }
 
+func TestNewFromReaderLeavesInputOpen(t *testing.T) {
+	t.Parallel()
+
+	const input = "[libdefaults]\ndefault_realm = EXAMPLE.COM\n"
+	r := &configReadCloser{Reader: strings.NewReader(input), isClosed: false}
+
+	cfg, err := NewFromReader(r)
+	assert.False(t, r.isClosed, "NewFromReader closed its input")
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	assert.Equal(t, "EXAMPLE.COM", cfg.LibDefaults.DefaultRealm)
+}
+
 func TestNewFromReaderReturnsReadError(t *testing.T) {
+	t.Parallel()
+
 	readErr := errors.New("configuration read failed")
-	_, err := NewFromReader(io.Reader(failingConfigReader{err: readErr}))
-	if !errors.Is(err, readErr) {
-		t.Fatalf("error %v does not wrap configuration read failure", err)
-	}
+	r := &configReadCloser{Reader: failingConfigReader{err: readErr}, isClosed: false}
+
+	cfg, err := NewFromReader(r)
+	assert.False(t, r.isClosed, "NewFromReader closed its input")
+	assert.ErrorIs(t, err, readErr)
+	assert.Nil(t, cfg)
 }
 
 const (

@@ -2,7 +2,7 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-118 done. The latest measured
+(floor raised to 86.0%), and Phase 5 slices 1-119 done. The latest measured
 v8 inventories (Slice 116) contain 518 canonical and 3,392 supplemental
 findings. Most remaining canonical findings are from `revive`, complexity and
 nesting checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
@@ -819,6 +819,15 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 119 (2026-11-20, v8 config reader ownership tests; Q-10):
+Verify that `NewFromReader` leaves a close-capable input open after both
+successful parsing and a read failure. On a read failure, check that the
+result is nil and that the original cause remains discoverable with `errors.Is`.
+No production code changes; PKINIT and PKU2U remain deferred.
+
+Config vet, 100 shuffled race-enabled config runs, and changed-line lint for
+both modules against `124ee77` and `origin/main` passed.
 
 Slice 118 (2026-11-20, v8 config loader example; Q-10):
 Add an executable public API example for `NewFromString`. It rejects fatal
