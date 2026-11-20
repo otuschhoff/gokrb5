@@ -33,15 +33,6 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
-func mustPKU2UTestType[T any](t *testing.T, value any) T {
-	t.Helper()
-	result, ok := value.(T)
-	if !ok {
-		t.Fatalf("unexpected type %T", value)
-	}
-	return result
-}
-
 func requirePKU2UError[E error](t *testing.T, err error, prefix string) {
 	t.Helper()
 	_, hasCause := errors.AsType[E](err)
@@ -563,11 +554,13 @@ func TestEndToEndOverNegoEx(t *testing.T) {
 func TestEndToEndOverSPNEGO(t *testing.T) {
 	for _, test := range []struct {
 		name string
-		wrap func(gssapi.ContextMechanism) gssapi.ContextMechanism
+		wrap func(negoex.PKU2UMechanism) gssapi.ContextMechanism
 	}{
-		{name: "standalone", wrap: func(mechanism gssapi.ContextMechanism) gssapi.ContextMechanism { return mechanism }},
-		{name: "NEGOEX", wrap: func(mechanism gssapi.ContextMechanism) gssapi.ContextMechanism {
-			return negoex.New(negoex.NewPKU2UScheme(mustPKU2UTestType[negoex.PKU2UMechanism](t, mechanism)))
+		{name: "standalone", wrap: func(mechanism negoex.PKU2UMechanism) gssapi.ContextMechanism {
+			return mechanism
+		}},
+		{name: "NEGOEX", wrap: func(mechanism negoex.PKU2UMechanism) gssapi.ContextMechanism {
+			return negoex.New(negoex.NewPKU2UScheme(mechanism))
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
