@@ -80,3 +80,36 @@ func TestNewFromScannerReturnsLateReadError(t *testing.T) {
 		})
 	}
 }
+
+func TestNewFromScannerUsesConfiguredBuffer(t *testing.T) {
+	t.Parallel()
+
+	const (
+		header = "[libdefaults]\n"
+		realm  = "EXAMPLE.COM"
+		input  = header + "default_realm = " + realm + "\n"
+	)
+
+	t.Run("line exceeds configured limit", func(t *testing.T) {
+		t.Parallel()
+
+		scanner := bufio.NewScanner(strings.NewReader(input))
+		scanner.Buffer(nil, len(header))
+
+		cfg, err := NewFromScanner(scanner)
+		assert.ErrorIs(t, err, bufio.ErrTooLong)
+		assert.Nil(t, cfg)
+	})
+
+	t.Run("line fits configured limit", func(t *testing.T) {
+		t.Parallel()
+
+		scanner := bufio.NewScanner(strings.NewReader(input))
+		scanner.Buffer(nil, len(input))
+
+		cfg, err := NewFromScanner(scanner)
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+		assert.Equal(t, realm, cfg.LibDefaults.DefaultRealm)
+	})
+}

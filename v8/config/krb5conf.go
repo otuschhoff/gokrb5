@@ -71,7 +71,10 @@ func NewFromReader(r io.Reader) (*Config, error) {
 }
 
 // NewFromScanner parses Kerberos configuration from a scanner that yields one
-// line per token. It returns a config and a nil error if parsing succeeds
+// line per token. To configure the scanner's buffer and token size limit,
+// call [bufio.Scanner.Buffer] before passing the scanner in.
+//
+// It returns a config and a nil error if parsing succeeds
 // without warnings. If parsing succeeds with [UnsupportedDirective] warnings,
 // it returns the config and the last warning. A scanner failure or fatal
 // parse error returns a nil config.

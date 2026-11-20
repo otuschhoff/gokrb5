@@ -2,7 +2,7 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-122 done. The latest measured
+(floor raised to 86.0%), and Phase 5 slices 1-123 done. The latest measured
 v8 inventories (Slice 116) contain 518 canonical and 3,392 supplemental
 findings. Most remaining canonical findings are from `revive`, complexity and
 nesting checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
@@ -819,6 +819,16 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 123 (2026-11-20, v8 config scanner buffer contract; Q-10):
+Document how callers can set the scanner's token size limit. With the same
+input, test that a restrictive limit returns no config and preserves
+`bufio.ErrTooLong`, while a sufficient limit parses the expected realm.
+Parsing behavior is unchanged; PKINIT and PKU2U remain deferred.
+
+Config vet and 100 shuffled race-enabled config suite runs passed.
+Changed-line lint passed for both modules against `22d2201` and
+`origin/main`.
 
 Slice 122 (2026-11-20, v8 config reader test organization; Q-10):
 Move the three reader and scanner contract tests and their private helpers
