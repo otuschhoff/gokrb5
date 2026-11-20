@@ -44,7 +44,7 @@ func TestHostAddressGetAddress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	host := HostAddress{Address: encoded}
+	host := HostAddress{AddrType: 0, Address: encoded}
 	got, err := host.GetAddress()
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +68,8 @@ func TestHostAddressesFromNetIPs(t *testing.T) {
 		assert.Equal(t, net.IPv4(192, 0, 2, 1).To4(), net.IP(addresses[0].Address))
 		assert.Equal(t, addrtype.IPv6, addresses[1].AddrType)
 		assert.Equal(t, ipv6.To16(), net.IP(addresses[1].Address))
-		assert.Equal(t, HostAddress{}, addresses[2])
+		var zero HostAddress
+		assert.Equal(t, zero, addresses[2])
 	}
 }
 

@@ -820,6 +820,24 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 145 (2026-11-20, complete v8 types lint cleanup; Q-10):
+Separate nested authorization-data decoding from traversal and reuse IP
+conversion in local address discovery. Name wire sizes and flags, make
+optional values explicit, and simplify protocol test fixtures. Preserve
+public signatures, wire formats, and validation behavior. One narrow
+Staticcheck exception preserves the exact KKDCP length error.
+
+Uncapped whole-v8 scans report zero types findings, down from 3 canonical
+and 180 supplemental. Diagnostics outside types are unchanged; whole-v8
+totals are 370 canonical and 813 supplemental. All 64 test and fuzz entry
+points were retained, and statement coverage remains 91.5% with both the
+original and updated tests. The full v8 build, vet, and race suite pass,
+as do 100 shuffled race-enabled types runs and changed-line lint from
+both baselines. All three decoder fuzz targets pass 15 seconds each.
+Linux/386 tests pass for types, messages, client, service, and SPNEGO.
+Windows/amd64 types tests and interop-tagged tests compile; native Windows
+and live interoperability were not run.
+
 Slice 144 (2026-11-20, complete v8 messages lint cleanup; Q-10):
 Separate KDC request defaults, flags, times, addresses, and authenticator
 encoding from request assembly. Split KDC reply binding and validation,

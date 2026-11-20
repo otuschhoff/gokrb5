@@ -2,11 +2,14 @@ package types
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
 )
+
+const kkdcpLengthPrefixSize = 4
 
 // KDCProxyMessage implements the KDC-PROXY-MESSAGE type from MS-KKDCP.
 type KDCProxyMessage struct {
@@ -32,15 +35,16 @@ func kkdcpUint64(name string, length int) (uint64, error) {
 // NewKDCProxyMessage wraps a Kerberos message with its network-order length.
 func NewKDCProxyMessage(message []byte, targetDomain string, dcLocatorHint int32) (KDCProxyMessage, error) {
 	if uint64(len(message)) > math.MaxUint32 {
+		//nolint:staticcheck // Preserve the exact error text returned to callers.
 		return KDCProxyMessage{}, fmt.Errorf("Kerberos message length %d exceeds uint32", len(message))
 	}
-	framed := make([]byte, 4+len(message))
+	framed := make([]byte, kkdcpLengthPrefixSize+len(message))
 	messageLength, err := kkdcpUint32("Kerberos message", len(message))
 	if err != nil {
 		return KDCProxyMessage{}, err
 	}
 	binary.BigEndian.PutUint32(framed, messageLength)
-	copy(framed[4:], message)
+	copy(framed[kkdcpLengthPrefixSize:], message)
 	return KDCProxyMessage{KerbMessage: framed, TargetDomain: targetDomain, DCLocatorHint: dcLocatorHint}, nil
 }
 
@@ -67,16 +71,17 @@ func (m *KDCProxyMessage) Unmarshal(b []byte) error {
 
 // KerberosMessage validates and removes the four-byte message-length prefix.
 func (m KDCProxyMessage) KerberosMessage() ([]byte, error) {
-	if len(m.KerbMessage) < 4 {
-		return nil, fmt.Errorf("KKDCP Kerberos message is shorter than its length prefix")
+	if len(m.KerbMessage) < kkdcpLengthPrefixSize {
+		return nil, errors.New("KKDCP Kerberos message is shorter than its length prefix")
 	}
-	length := binary.BigEndian.Uint32(m.KerbMessage[:4])
-	payloadLength, err := kkdcpUint64("KKDCP payload", len(m.KerbMessage)-4)
+	length := binary.BigEndian.Uint32(m.KerbMessage[:kkdcpLengthPrefixSize])
+	payload := m.KerbMessage[kkdcpLengthPrefixSize:]
+	payloadLength, err := kkdcpUint64("KKDCP payload", len(payload))
 	if err != nil {
 		return nil, err
 	}
 	if uint64(length) != payloadLength {
-		return nil, fmt.Errorf("KKDCP Kerberos message length %d does not match payload length %d", length, len(m.KerbMessage)-4)
+		return nil, fmt.Errorf("KKDCP Kerberos message length %d does not match payload length %d", length, payloadLength)
 	}
-	return append([]byte(nil), m.KerbMessage[4:]...), nil
+	return append([]byte(nil), payload...), nil
 }

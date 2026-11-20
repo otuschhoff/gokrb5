@@ -59,7 +59,8 @@ func (a *Checksum) Unmarshal(b []byte) error {
 // GenerateEncryptionKey creates a new EncryptionKey with a random key value.
 func GenerateEncryptionKey(etype etype.EType) (EncryptionKey, error) {
 	k := EncryptionKey{
-		KeyType: etype.GetETypeID(),
+		KeyType:  etype.GetETypeID(),
+		KeyValue: nil,
 	}
 	b := make([]byte, etype.GetKeyByteSize())
 	_, err := rand.Read(b)

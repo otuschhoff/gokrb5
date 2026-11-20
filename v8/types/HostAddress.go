@@ -74,30 +74,25 @@ func LocalHostAddresses() (HostAddresses, error) {
 			continue
 		}
 		for _, addr := range addrs {
-			var ip net.IP
-			switch v := addr.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
-			}
-			var a HostAddress
-			if ip.To16() == nil {
-				// neither IPv4 or IPv6
+			a := HostAddressFromNetIP(interfaceIP(addr))
+			if a.Address == nil {
 				continue
-			}
-			if ip.To4() != nil {
-				// Is IPv4
-				a.AddrType = addrtype.IPv4
-				a.Address = ip.To4()
-			} else {
-				a.AddrType = addrtype.IPv6
-				a.Address = ip.To16()
 			}
 			ha = append(ha, a)
 		}
 	}
 	return ha, nil
+}
+
+func interfaceIP(addr net.Addr) net.IP {
+	switch v := addr.(type) {
+	case *net.IPNet:
+		return v.IP
+	case *net.IPAddr:
+		return v.IP
+	default:
+		return nil
+	}
 }
 
 // HostAddressesFromNetIPs returns a HostAddresses type from a slice of net.IP
@@ -119,7 +114,8 @@ func HostAddressFromNetIP(ip net.IP) HostAddress {
 		}
 	}
 	if ip.To16() == nil {
-		return HostAddress{}
+		var address HostAddress
+		return address
 	}
 	return HostAddress{
 		AddrType: addrtype.IPv6,

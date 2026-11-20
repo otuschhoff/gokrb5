@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,6 +12,13 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/msflags"
 	"github.com/otuschhoff/gokrb5/v8/iana/ntstatus"
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
+)
+
+const (
+	mskileUint32Size           = 4
+	kerbExtErrorSize           = 3 * mskileUint32Size
+	lsapTokenInfoIntegritySize = 2*mskileUint32Size + 2*lsapMachineIDSize
+	lsapMachineIDSize          = 32
 )
 
 // KerbPAPACRequest controls whether the KDC includes a PAC in the ticket.
@@ -113,7 +121,7 @@ type KerbDMSAKeyPackage struct {
 	FetchInterval      time.Time      `asn1:"generalized,explicit,tag:4"`
 }
 
-func marshalMSKILE(v interface{}) ([]byte, error) {
+func marshalMSKILE(v any) ([]byte, error) {
 	b, err := asn1.Marshal(v)
 	if err != nil {
 		return b, fmt.Errorf("encode ASN.1 %T: %w", v, err)
@@ -121,7 +129,7 @@ func marshalMSKILE(v interface{}) ([]byte, error) {
 	return b, nil
 }
 
-func unmarshalMSKILE(b []byte, v interface{}) error {
+func unmarshalMSKILE(b []byte, v any) error {
 	rest, err := asn1.Unmarshal(b, v)
 	if err != nil {
 		return fmt.Errorf("decode ASN.1 into %T: %w", v, err)
@@ -132,12 +140,12 @@ func unmarshalMSKILE(b []byte, v interface{}) error {
 	return nil
 }
 
-func marshalPAData(paType int32, value interface{}) (PAData, error) {
+func marshalPAData(paType int32, value any) (PAData, error) {
 	b, err := marshalMSKILE(value)
 	return PAData{PADataType: paType, PADataValue: b}, err
 }
 
-func getPAData(pa *PAData, expected int32, value interface{}) error {
+func getPAData(pa *PAData, expected int32, value any) error {
 	if pa.PADataType != expected {
 		return fmt.Errorf("PAData type mismatch: expected %d, got %d", expected, pa.PADataType)
 	}
@@ -152,8 +160,8 @@ func (v *KerbPAPACRequest) Unmarshal(b []byte) error { return unmarshalMSKILE(b,
 
 // Marshal marshals PAPACOptions to its DER encoding.
 func (v *PAPACOptions) Marshal() ([]byte, error) {
-	if v.Options.BitLength < 32 {
-		return nil, fmt.Errorf("PA-PAC-OPTIONS must contain at least 32 bits")
+	if v.Options.BitLength < kerberosFlagBits {
+		return nil, errors.New("PA-PAC-OPTIONS must contain at least 32 bits")
 	}
 	return marshalMSKILE(*v)
 }
@@ -163,10 +171,16 @@ func (v *PAPACOptions) Unmarshal(b []byte) error {
 	if err := unmarshalMSKILE(b, v); err != nil {
 		return err
 	}
-	if v.Options.BitLength < 32 {
-		return fmt.Errorf("PA-PAC-OPTIONS must contain at least 32 bits")
+	if v.Options.BitLength < kerberosFlagBits {
+		return errors.New("PA-PAC-OPTIONS must contain at least 32 bits")
 	}
 	return nil
+}
+
+// NewKerbExtErrorData wraps an extended error in KERB-ERROR-DATA.
+func NewKerbExtErrorData(v KerbExtError) (KerbErrorData, error) {
+	b, err := v.Marshal()
+	return KerbErrorData{DataType: int32(msflags.KERB_ERR_TYPE_EXTENDED), DataValue: b}, err
 }
 
 // Marshal marshals KerbErrorData to its DER encoding.
@@ -174,6 +188,12 @@ func (v *KerbErrorData) Marshal() ([]byte, error) { return marshalMSKILE(*v) }
 
 // Unmarshal unmarshals DER bytes into KerbErrorData.
 func (v *KerbErrorData) Unmarshal(b []byte) error { return unmarshalMSKILE(b, v) }
+
+// NewKerbADRestrictionEntryForToken builds a restriction entry carrying LSAP_TOKEN_INFO_INTEGRITY.
+func NewKerbADRestrictionEntryForToken(v LSAPTokenInfoIntegrity) (KerbADRestrictionEntry, error) {
+	b, err := v.Marshal()
+	return KerbADRestrictionEntry{RestrictionType: msflags.KerbADRestrictionTypeTokenIntegrity, Restriction: b}, err
+}
 
 // Marshal marshals KerbADRestrictionEntry to its DER encoding.
 func (v *KerbADRestrictionEntry) Marshal() ([]byte, error) { return marshalMSKILE(*v) }
@@ -219,7 +239,7 @@ func (v *KerbKeyListRep) Unmarshal(b []byte) error { return unmarshalMSKILE(b, v
 
 // Marshal marshals KerbExtError to its DER encoding.
 func (v *KerbExtError) Marshal() ([]byte, error) {
-	b := make([]byte, 12)
+	b := make([]byte, kerbExtErrorSize)
 	binary.LittleEndian.PutUint32(b[0:4], uint32(v.Status))
 	binary.LittleEndian.PutUint32(b[4:8], v.Reserved)
 	binary.LittleEndian.PutUint32(b[8:12], v.Flags)
@@ -228,7 +248,7 @@ func (v *KerbExtError) Marshal() ([]byte, error) {
 
 // Unmarshal unmarshals DER bytes into KerbExtError.
 func (v *KerbExtError) Unmarshal(b []byte) error {
-	if len(b) != 12 {
+	if len(b) != kerbExtErrorSize {
 		return fmt.Errorf("KERB-EXT-ERROR must be 12 bytes, got %d", len(b))
 	}
 	v.Status = ntstatus.Code(binary.LittleEndian.Uint32(b[0:4]))
@@ -237,18 +257,14 @@ func (v *KerbExtError) Unmarshal(b []byte) error {
 	return nil
 }
 
-// NewKerbExtErrorData wraps an extended error in KERB-ERROR-DATA.
-func NewKerbExtErrorData(v KerbExtError) (KerbErrorData, error) {
-	b, err := v.Marshal()
-	return KerbErrorData{DataType: int32(msflags.KERB_ERR_TYPE_EXTENDED), DataValue: b}, err
-}
-
 // GetKerbExtError decodes the KerbExtError carried by the value.
 func (v *KerbErrorData) GetKerbExtError() (KerbExtError, error) {
 	var ext KerbExtError
 	var err error
 	if v.DataType != int32(msflags.KERB_ERR_TYPE_EXTENDED) {
-		return ext, fmt.Errorf("KERB-ERROR-DATA type mismatch: expected %d, got %d", msflags.KERB_ERR_TYPE_EXTENDED, v.DataType)
+		return ext, fmt.Errorf(
+			"KERB-ERROR-DATA type mismatch: expected %d, got %d", msflags.KERB_ERR_TYPE_EXTENDED, v.DataType,
+		)
 	}
 	err = ext.Unmarshal(v.DataValue)
 	return ext, err
@@ -256,7 +272,7 @@ func (v *KerbErrorData) GetKerbExtError() (KerbExtError, error) {
 
 // Marshal marshals LSAPTokenInfoIntegrity to its DER encoding.
 func (v *LSAPTokenInfoIntegrity) Marshal() ([]byte, error) {
-	b := make([]byte, 72)
+	b := make([]byte, lsapTokenInfoIntegritySize)
 	binary.LittleEndian.PutUint32(b[0:4], uint32(v.Flags))
 	binary.LittleEndian.PutUint32(b[4:8], uint32(v.TokenIL))
 	copy(b[8:40], v.PerBootMachineID[:])
@@ -266,7 +282,7 @@ func (v *LSAPTokenInfoIntegrity) Marshal() ([]byte, error) {
 
 // Unmarshal unmarshals DER bytes into LSAPTokenInfoIntegrity.
 func (v *LSAPTokenInfoIntegrity) Unmarshal(b []byte) error {
-	if len(b) != 72 {
+	if len(b) != lsapTokenInfoIntegritySize {
 		return fmt.Errorf("LSAP_TOKEN_INFO_INTEGRITY must be 72 bytes, got %d", len(b))
 	}
 	v.Flags = msflags.TokenInfoFlags(binary.LittleEndian.Uint32(b[0:4]))
@@ -274,12 +290,6 @@ func (v *LSAPTokenInfoIntegrity) Unmarshal(b []byte) error {
 	copy(v.PerBootMachineID[:], b[8:40])
 	copy(v.CrossBootMachineID[:], b[40:72])
 	return nil
-}
-
-// NewKerbADRestrictionEntryForToken builds a restriction entry carrying LSAP_TOKEN_INFO_INTEGRITY.
-func NewKerbADRestrictionEntryForToken(v LSAPTokenInfoIntegrity) (KerbADRestrictionEntry, error) {
-	b, err := v.Marshal()
-	return KerbADRestrictionEntry{RestrictionType: msflags.KerbADRestrictionTypeTokenIntegrity, Restriction: b}, err
 }
 
 // GetLSAPTokenInfoIntegrity decodes the LSAPTokenInfoIntegrity carried by the value.
@@ -295,14 +305,14 @@ func (v *KerbADRestrictionEntry) GetLSAPTokenInfoIntegrity() (LSAPTokenInfoInteg
 
 // Marshal marshals ADAuthDataAPOptions to its DER encoding.
 func (v ADAuthDataAPOptions) Marshal() ([]byte, error) {
-	b := make([]byte, 4)
+	b := make([]byte, mskileUint32Size)
 	binary.LittleEndian.PutUint32(b, uint32(v))
 	return b, nil
 }
 
 // Unmarshal unmarshals DER bytes into ADAuthDataAPOptions.
 func (v *ADAuthDataAPOptions) Unmarshal(b []byte) error {
-	if len(b) != 4 {
+	if len(b) != mskileUint32Size {
 		return fmt.Errorf("KERB-AD-AUTH-DATA-AP-OPTIONS must be 4 bytes, got %d", len(b))
 	}
 	*v = ADAuthDataAPOptions(binary.LittleEndian.Uint32(b))
@@ -311,14 +321,14 @@ func (v *ADAuthDataAPOptions) Unmarshal(b []byte) error {
 
 // Marshal marshals PASupportedEncTypes to its DER encoding.
 func (v PASupportedEncTypes) Marshal() ([]byte, error) {
-	b := make([]byte, 4)
+	b := make([]byte, mskileUint32Size)
 	binary.LittleEndian.PutUint32(b, uint32(v))
 	return b, nil
 }
 
 // Unmarshal unmarshals DER bytes into PASupportedEncTypes.
 func (v *PASupportedEncTypes) Unmarshal(b []byte) error {
-	if len(b) != 4 {
+	if len(b) != mskileUint32Size {
 		return fmt.Errorf("PA-SUPPORTED-ENCTYPES must be 4 bytes, got %d", len(b))
 	}
 	*v = PASupportedEncTypes(binary.LittleEndian.Uint32(b))
@@ -327,8 +337,8 @@ func (v *PASupportedEncTypes) Unmarshal(b []byte) error {
 
 // Marshal marshals S4UUserID to its DER encoding.
 func (v *S4UUserID) Marshal() ([]byte, error) {
-	if v.Options.BitLength > 0 && v.Options.BitLength < 32 {
-		return nil, fmt.Errorf("S4UUserID options must contain at least 32 bits")
+	if v.Options.BitLength > 0 && v.Options.BitLength < kerberosFlagBits {
+		return nil, errors.New("S4UUserID options must contain at least 32 bits")
 	}
 	w := s4UUserIDWire{
 		Nonce:              int64(v.Nonce),
@@ -354,17 +364,11 @@ func (v *S4UUserID) Unmarshal(b []byte) error {
 	v.CRealm = w.CRealm
 	v.SubjectCertificate = w.SubjectCertificate
 	v.Options = w.Options
-	if v.Options.BitLength > 0 && v.Options.BitLength < 32 {
-		return fmt.Errorf("S4UUserID options must contain at least 32 bits")
+	if v.Options.BitLength > 0 && v.Options.BitLength < kerberosFlagBits {
+		return errors.New("S4UUserID options must contain at least 32 bits")
 	}
 	return nil
 }
-
-// Marshal marshals PAS4UX509User to its DER encoding.
-func (v *PAS4UX509User) Marshal() ([]byte, error) { return marshalMSKILE(*v) }
-
-// Unmarshal unmarshals DER bytes into PAS4UX509User.
-func (v *PAS4UX509User) Unmarshal(b []byte) error { return unmarshalMSKILE(b, v) }
 
 // NewPAS4UX509User embeds a DER-encoded S4UUserID in PA-S4U-X509-USER.
 func NewPAS4UX509User(userID S4UUserID, checksum Checksum) (PAS4UX509User, error) {
@@ -373,10 +377,16 @@ func NewPAS4UX509User(userID S4UUserID, checksum Checksum) (PAS4UX509User, error
 		return PAS4UX509User{}, err
 	}
 	return PAS4UX509User{
-		UserID:   asn1.RawValue{Class: asn1.ClassContextSpecific, IsCompound: true, Tag: 0, Bytes: b},
+		UserID:   asn1.RawValue{Class: asn1.ClassContextSpecific, IsCompound: true, Tag: 0, Bytes: b, FullBytes: nil},
 		Checksum: checksum,
 	}, nil
 }
+
+// Marshal marshals PAS4UX509User to its DER encoding.
+func (v *PAS4UX509User) Marshal() ([]byte, error) { return marshalMSKILE(*v) }
+
+// Unmarshal unmarshals DER bytes into PAS4UX509User.
+func (v *PAS4UX509User) Unmarshal(b []byte) error { return unmarshalMSKILE(b, v) }
 
 // GetUserID decodes the S4UUserID carried by PA-S4U-X509-USER.
 func (v *PAS4UX509User) GetUserID() (S4UUserID, error) {
@@ -536,7 +546,7 @@ func (a *AuthorizationDataEntry) GetKerbADRestrictionEntry() (KerbADRestrictionE
 
 // NewKerbLocalEntry wraps KerbLocal in an authorization-data entry of its assigned type.
 func NewKerbLocalEntry() AuthorizationDataEntry {
-	return AuthorizationDataEntry{ADType: adtype.KerbLocal}
+	return AuthorizationDataEntry{ADType: adtype.KerbLocal, ADData: nil}
 }
 
 // IsKerbLocal reports whether the entry is a KERB-LOCAL authorization-data entry.

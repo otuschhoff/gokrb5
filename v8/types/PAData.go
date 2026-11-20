@@ -55,7 +55,7 @@ func GetPAEncTSEncAsnMarshalledAt(t time.Time) ([]byte, error) {
 	t = t.UTC()
 	p := PAEncTSEnc{
 		PATimestamp: t,
-		PAUSec:      int((t.UnixNano() / int64(time.Microsecond)) - (t.Unix() * 1e6)),
+		PAUSec:      microsecondOffset(t),
 	}
 	b, err := asn1.Marshal(p)
 	if err != nil {

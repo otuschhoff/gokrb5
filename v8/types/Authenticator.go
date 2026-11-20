@@ -15,6 +15,11 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/asnAppTag"
 )
 
+const (
+	authenticatorSequenceMask = 0x3fffffff
+	microsecondsPerSecond     = int64(time.Second / time.Microsecond)
+)
+
 // Authenticator - A record containing information that can be shown to have been recently generated using the session
 // key known only by the client and server.
 // https://tools.ietf.org/html/rfc4120#section-5.5.1
@@ -37,15 +42,23 @@ func NewAuthenticator(realm string, cname PrincipalName) (Authenticator, error) 
 		return Authenticator{}, fmt.Errorf("generate authenticator sequence number: %w", err)
 	}
 	t := time.Now().UTC()
+	var checksum Checksum
+	var subkey EncryptionKey
 	return Authenticator{
-		AVNO:      iana.PVNO,
-		CRealm:    realm,
-		CName:     cname,
-		Cksum:     Checksum{},
-		Cusec:     int((t.UnixNano() / int64(time.Microsecond)) - (t.Unix() * 1e6)),
-		CTime:     t,
-		SeqNumber: seq.Int64() & 0x3fffffff,
+		AVNO:              iana.PVNO,
+		CRealm:            realm,
+		CName:             cname,
+		Cksum:             checksum,
+		Cusec:             microsecondOffset(t),
+		CTime:             t,
+		SubKey:            subkey,
+		SeqNumber:         seq.Int64() & authenticatorSequenceMask,
+		AuthorizationData: nil,
 	}, nil
+}
+
+func microsecondOffset(t time.Time) int {
+	return int(t.UnixNano()/int64(time.Microsecond) - t.Unix()*microsecondsPerSecond)
 }
 
 // GenerateSeqNumberAndSubKey sets the Authenticator's sequence number and subkey.
@@ -54,7 +67,7 @@ func (a *Authenticator) GenerateSeqNumberAndSubKey(keyType int32, keySize int) e
 	if err != nil {
 		return fmt.Errorf("generate authenticator sequence number: %w", err)
 	}
-	a.SeqNumber = seq.Int64() & 0x3fffffff
+	a.SeqNumber = seq.Int64() & authenticatorSequenceMask
 	// Generate subkey value
 	sk := make([]byte, keySize)
 	if _, err := rand.Read(sk); err != nil {

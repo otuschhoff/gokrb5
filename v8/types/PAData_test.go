@@ -34,7 +34,11 @@ func TestUnmarshalPADataSequence(t *testing.T) {
 	assert.Equal(t, 2, len(a), "Number of PAData items in the sequence not as expected")
 	for i, pa := range a {
 		assert.Equal(t, patype.PA_SAM_RESPONSE, pa.PADataType, fmt.Sprintf("PAData type for entry %d not as expected", i+1))
-		assert.Equal(t, []byte(testdata.TEST_PADATA_VALUE), pa.PADataValue, fmt.Sprintf("PAData valye for entry %d not as expected", i+1))
+		assert.Equal(t,
+			[]byte(testdata.TEST_PADATA_VALUE),
+			pa.PADataValue,
+			fmt.Sprintf("PAData valye for entry %d not as expected", i+1),
+		)
 	}
 }
 
@@ -179,53 +183,9 @@ func TestUnmarshalETypeInfo2_only1(t *testing.T) {
 }
 
 func TestPADataAccessorsAndUnmarshalMethods(t *testing.T) {
-	fixedTime := time.Date(2026, time.September, 7, 12, 34, 56, 123456000, time.FixedZone("offset", 3600))
-	timestampBytes, err := GetPAEncTSEncAsnMarshalledAt(fixedTime)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var timestamp PAEncTSEnc
-	if ierr := timestamp.Unmarshal(timestampBytes); ierr != nil {
-		t.Fatal(ierr)
-	}
-	if !timestamp.PATimestamp.Equal(fixedTime.UTC().Truncate(time.Second)) || timestamp.PAUSec != 123456 {
-		t.Fatalf("timestamp = %v/%d", timestamp.PATimestamp, timestamp.PAUSec)
-	}
-	if _, ierr := GetPAEncTSEncAsnMarshalled(); ierr != nil {
-		t.Fatal(ierr)
-	}
-
-	info := ETypeInfo{{EType: 17, Salt: []byte("salt")}}
-	infoBytes, _ := asn1.Marshal(info)
-	pa := PAData{PADataType: patype.PA_ETYPE_INFO, PADataValue: infoBytes}
-	decodedInfo, err := pa.GetETypeInfo()
-	if err != nil || len(decodedInfo) != 1 || decodedInfo[0].EType != 17 {
-		t.Fatalf("ETypeInfo = %+v, %v", decodedInfo, err)
-	}
-	if _, ierr := pa.GetETypeInfo2(); ierr == nil {
-		t.Fatal("ETypeInfo accepted as ETypeInfo2")
-	}
-	var infoEntry ETypeInfoEntry
-	entryBytes, _ := asn1.Marshal(info[0])
-	if ierr := infoEntry.Unmarshal(entryBytes); ierr != nil {
-		t.Fatal(ierr)
-	}
-
-	info2 := ETypeInfo2{{EType: 18, Salt: "salt2", S2KParams: []byte{0, 0, 0, 1}}}
-	info2Bytes, _ := asn1.Marshal(info2)
-	pa2 := PAData{PADataType: patype.PA_ETYPE_INFO2, PADataValue: info2Bytes}
-	decodedInfo2, err := pa2.GetETypeInfo2()
-	if err != nil || len(decodedInfo2) != 1 || decodedInfo2[0].EType != 18 {
-		t.Fatalf("ETypeInfo2 = %+v, %v", decodedInfo2, err)
-	}
-	if _, err := pa2.GetETypeInfo(); err == nil {
-		t.Fatal("ETypeInfo2 accepted as ETypeInfo")
-	}
-	var info2Entry ETypeInfo2Entry
-	entry2Bytes, _ := asn1.Marshal(info2[0])
-	if err := info2Entry.Unmarshal(entry2Bytes); err != nil {
-		t.Fatal(err)
-	}
+	timestamp := checkPAEncTSEnc(t)
+	pa, decodedInfo, infoEntry := checkPADataETypeInfo(t)
+	pa2, decodedInfo2, info2Entry := checkPADataETypeInfo2(t)
 
 	request := PAReqEncPARep{ChksumType: 1, Chksum: []byte("checksum")}
 	requestBytes, _ := asn1.Marshal(request)
@@ -243,7 +203,7 @@ func TestPADataAccessorsAndUnmarshalMethods(t *testing.T) {
 		t.Fatal("PADataSequence.Contains returned an unexpected result")
 	}
 
-	encrypted := PAEncTimestamp{EType: 17, Cipher: []byte("ciphertext")}
+	encrypted := PAEncTimestamp{EType: 17, KVNO: 0, Cipher: []byte("ciphertext")}
 	encryptedBytes, _ := asn1.Marshal(encrypted)
 	var decodedEncrypted PAEncTimestamp
 	if err := decodedEncrypted.Unmarshal(encryptedBytes); err != nil {
@@ -259,4 +219,64 @@ func TestPADataAccessorsAndUnmarshalMethods(t *testing.T) {
 			t.Fatalf("%s accepted malformed ASN.1", name)
 		}
 	}
+}
+
+func checkPAEncTSEnc(t *testing.T) PAEncTSEnc {
+	t.Helper()
+	fixedTime := time.Date(2026, time.September, 7, 12, 34, 56, 123456000, time.FixedZone("offset", 3600))
+	timestampBytes, err := GetPAEncTSEncAsnMarshalledAt(fixedTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var timestamp PAEncTSEnc
+	if ierr := timestamp.Unmarshal(timestampBytes); ierr != nil {
+		t.Fatal(ierr)
+	}
+	if !timestamp.PATimestamp.Equal(fixedTime.UTC().Truncate(time.Second)) || timestamp.PAUSec != 123456 {
+		t.Fatalf("timestamp = %v/%d", timestamp.PATimestamp, timestamp.PAUSec)
+	}
+	if _, ierr := GetPAEncTSEncAsnMarshalled(); ierr != nil {
+		t.Fatal(ierr)
+	}
+	return timestamp
+}
+
+func checkPADataETypeInfo(t *testing.T) (PAData, ETypeInfo, ETypeInfoEntry) {
+	t.Helper()
+	info := ETypeInfo{{EType: 17, Salt: []byte("salt")}}
+	infoBytes, _ := asn1.Marshal(info)
+	pa := PAData{PADataType: patype.PA_ETYPE_INFO, PADataValue: infoBytes}
+	decodedInfo, err := pa.GetETypeInfo()
+	if err != nil || len(decodedInfo) != 1 || decodedInfo[0].EType != 17 {
+		t.Fatalf("ETypeInfo = %+v, %v", decodedInfo, err)
+	}
+	if _, ierr := pa.GetETypeInfo2(); ierr == nil {
+		t.Fatal("ETypeInfo accepted as ETypeInfo2")
+	}
+	var infoEntry ETypeInfoEntry
+	entryBytes, _ := asn1.Marshal(info[0])
+	if ierr := infoEntry.Unmarshal(entryBytes); ierr != nil {
+		t.Fatal(ierr)
+	}
+	return pa, decodedInfo, infoEntry
+}
+
+func checkPADataETypeInfo2(t *testing.T) (PAData, ETypeInfo2, ETypeInfo2Entry) {
+	t.Helper()
+	info2 := ETypeInfo2{{EType: 18, Salt: "salt2", S2KParams: []byte{0, 0, 0, 1}}}
+	info2Bytes, _ := asn1.Marshal(info2)
+	pa2 := PAData{PADataType: patype.PA_ETYPE_INFO2, PADataValue: info2Bytes}
+	decodedInfo2, err := pa2.GetETypeInfo2()
+	if err != nil || len(decodedInfo2) != 1 || decodedInfo2[0].EType != 18 {
+		t.Fatalf("ETypeInfo2 = %+v, %v", decodedInfo2, err)
+	}
+	if _, err := pa2.GetETypeInfo(); err == nil {
+		t.Fatal("ETypeInfo2 accepted as ETypeInfo")
+	}
+	var info2Entry ETypeInfo2Entry
+	entry2Bytes, _ := asn1.Marshal(info2[0])
+	if err := info2Entry.Unmarshal(entry2Bytes); err != nil {
+		t.Fatal(err)
+	}
+	return pa2, decodedInfo2, info2Entry
 }

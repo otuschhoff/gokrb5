@@ -21,6 +21,8 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 )
 
+const authenticatorTestRealm = "EXAMPLE.ORG"
+
 func TestAuthenticatorSequenceReadError(t *testing.T) {
 	// rand.Reader is process-wide; keep this test sequential and restore it before parallel tests run.
 	cause := errors.New("test random reader failure")
@@ -29,7 +31,7 @@ func TestAuthenticatorSequenceReadError(t *testing.T) {
 	rand.Reader = iotest.ErrReader(cause)
 
 	var zero Authenticator
-	auth, createErr := NewAuthenticator("EXAMPLE.ORG", NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user"))
+	auth, createErr := NewAuthenticator(authenticatorTestRealm, NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user"))
 	want := zero
 	want.SeqNumber = 23
 	want.SubKey = EncryptionKey{KeyType: 17, KeyValue: []byte{1}}
@@ -81,7 +83,11 @@ func TestUnmarshalAuthenticator(t *testing.T) {
 	assert.Equal(t, iana.PVNO, a.AVNO, "Authenticator version number not as expected")
 	assert.Equal(t, testdata.TEST_REALM, a.CRealm, "CRealm not as expected")
 	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, a.CName.NameType, "CName NameType not as expected")
-	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.CName.NameString), "CName does not have the expected number of NameStrings")
+	assert.Equal(t,
+		len(testdata.TEST_PRINCIPALNAME_NAMESTRING),
+		len(a.CName.NameString),
+		"CName does not have the expected number of NameStrings",
+	)
 	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.CName.NameString, "CName entries not as expected")
 	assert.Equal(t, int32(1), a.Cksum.CksumType, "Checksum type not as expected")
 	assert.Equal(t, []byte("1234"), a.Cksum.Checksum, "Checsum not as expected")
@@ -92,7 +98,11 @@ func TestUnmarshalAuthenticator(t *testing.T) {
 	assert.Equal(t, 2, len(a.AuthorizationData), "Number of Authorization data items not as expected")
 	for i, entry := range a.AuthorizationData {
 		assert.Equal(t, adtype.ADIfRelevant, entry.ADType, fmt.Sprintf("Authorization type of entry %d not as expected", i+1))
-		assert.Equal(t, []byte(testdata.TEST_AUTHORIZATION_DATA_VALUE), entry.ADData, fmt.Sprintf("Authorization data of entry %d not as expected", i+1))
+		assert.Equal(t,
+			[]byte(testdata.TEST_AUTHORIZATION_DATA_VALUE),
+			entry.ADData,
+			fmt.Sprintf("Authorization data of entry %d not as expected", i+1),
+		)
 	}
 }
 
@@ -105,7 +115,11 @@ func TestUnmarshalAuthenticator_optionalsempty(t *testing.T) {
 	assert.Equal(t, iana.PVNO, a.AVNO, "Authenticator version number not as expected")
 	assert.Equal(t, testdata.TEST_REALM, a.CRealm, "CRealm not as expected")
 	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, a.CName.NameType, "CName NameType not as expected")
-	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.CName.NameString), "CName does not have the expected number of NameStrings")
+	assert.Equal(t,
+		len(testdata.TEST_PRINCIPALNAME_NAMESTRING),
+		len(a.CName.NameString),
+		"CName does not have the expected number of NameStrings",
+	)
 	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.CName.NameString, "CName entries not as expected")
 	assert.Equal(t, 123456, a.Cusec, "Client microseconds not as expected")
 	assert.Equal(t, tt, a.CTime, "Client time not as expected")
@@ -120,7 +134,11 @@ func TestUnmarshalAuthenticator_optionalsNULL(t *testing.T) {
 	assert.Equal(t, iana.PVNO, a.AVNO, "Authenticator version number not as expected")
 	assert.Equal(t, testdata.TEST_REALM, a.CRealm, "CRealm not as expected")
 	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, a.CName.NameType, "CName NameType not as expected")
-	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.CName.NameString), "CName does not have the expected number of NameStrings")
+	assert.Equal(t,
+		len(testdata.TEST_PRINCIPALNAME_NAMESTRING),
+		len(a.CName.NameString),
+		"CName does not have the expected number of NameStrings",
+	)
 	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.CName.NameString, "CName entries not as expected")
 	assert.Equal(t, 123456, a.Cusec, "Client microseconds not as expected")
 	assert.Equal(t, tt, a.CTime, "Client time not as expected")
@@ -146,17 +164,28 @@ func TestMarshalAuthenticator(t *testing.T) {
 
 func TestNewAuthenticatorAndGenerateSubKey(t *testing.T) {
 	principal := NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
-	authenticator, err := NewAuthenticator("EXAMPLE.ORG", principal)
+	authenticator, err := NewAuthenticator(authenticatorTestRealm, principal)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if authenticator.AVNO != iana.PVNO || authenticator.CRealm != "EXAMPLE.ORG" || !authenticator.CName.Equal(principal) || authenticator.CTime.IsZero() || authenticator.Cusec < 0 || authenticator.Cusec >= 1000000 {
-		t.Fatalf("authenticator = %+v", authenticator)
-	}
+	checkNewAuthenticator(t, authenticator, principal)
 	if err := authenticator.GenerateSeqNumberAndSubKey(17, 16); err != nil {
 		t.Fatal(err)
 	}
+
 	if authenticator.SubKey.KeyType != 17 || len(authenticator.SubKey.KeyValue) != 16 || authenticator.SeqNumber < 0 {
 		t.Fatalf("generated sequence/subkey = %d/%+v", authenticator.SeqNumber, authenticator.SubKey)
+	}
+}
+
+func checkNewAuthenticator(t *testing.T, authenticator Authenticator, principal PrincipalName) {
+	t.Helper()
+	if authenticator.AVNO != iana.PVNO ||
+		authenticator.CRealm != authenticatorTestRealm ||
+		!authenticator.CName.Equal(principal) ||
+		authenticator.CTime.IsZero() ||
+		authenticator.Cusec < 0 ||
+		authenticator.Cusec >= 1000000 {
+		t.Fatalf("authenticator = %+v", authenticator)
 	}
 }

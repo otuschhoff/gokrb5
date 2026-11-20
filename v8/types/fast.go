@@ -1,6 +1,7 @@
 package types
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/asnAppTag"
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 )
+
+const fastReqBodyTag = 2
 
 // KrbFastArmor identifies and carries a FAST armor value.
 type KrbFastArmor struct {
@@ -108,19 +111,20 @@ func NewKrbFastReq(options asn1.BitString, paData PADataSequence, reqBody []byte
 		ReqBody: asn1.RawValue{
 			Class:      asn1.ClassContextSpecific,
 			IsCompound: true,
-			Tag:        2,
+			Tag:        fastReqBodyTag,
 			Bytes:      append([]byte(nil), reqBody...),
+			FullBytes:  nil,
 		},
 	}
 }
 
 // Marshal marshals KrbFastReq to its DER encoding.
 func (v *KrbFastReq) Marshal() ([]byte, error) {
-	if v.FastOptions.BitLength < 32 {
-		return nil, fmt.Errorf("KrbFastReq fast-options must contain at least 32 bits")
+	if v.FastOptions.BitLength < kerberosFlagBits {
+		return nil, errors.New("KrbFastReq fast-options must contain at least 32 bits")
 	}
-	if v.ReqBody.Class != asn1.ClassContextSpecific || v.ReqBody.Tag != 2 || !v.ReqBody.IsCompound {
-		return nil, fmt.Errorf("KrbFastReq req-body must be an explicit context-specific tag 2")
+	if v.ReqBody.Class != asn1.ClassContextSpecific || v.ReqBody.Tag != fastReqBodyTag || !v.ReqBody.IsCompound {
+		return nil, errors.New("KrbFastReq req-body must be an explicit context-specific tag 2")
 	}
 	return marshalMSKILE(*v)
 }
@@ -130,11 +134,11 @@ func (v *KrbFastReq) Unmarshal(b []byte) error {
 	if err := unmarshalMSKILE(b, v); err != nil {
 		return err
 	}
-	if v.ReqBody.Class != asn1.ClassContextSpecific || v.ReqBody.Tag != 2 || !v.ReqBody.IsCompound {
-		return fmt.Errorf("KrbFastReq req-body must be an explicit context-specific tag 2")
+	if v.ReqBody.Class != asn1.ClassContextSpecific || v.ReqBody.Tag != fastReqBodyTag || !v.ReqBody.IsCompound {
+		return errors.New("KrbFastReq req-body must be an explicit context-specific tag 2")
 	}
-	if v.FastOptions.BitLength < 32 {
-		return fmt.Errorf("KrbFastReq fast-options must contain at least 32 bits")
+	if v.FastOptions.BitLength < kerberosFlagBits {
+		return errors.New("KrbFastReq fast-options must contain at least 32 bits")
 	}
 	return nil
 }
@@ -150,6 +154,7 @@ func (v *PAFXFastRequest) Marshal() ([]byte, error) {
 		IsCompound: true,
 		Tag:        0,
 		Bytes:      b,
+		FullBytes:  nil,
 	})
 	if err != nil {
 		return wrapped, fmt.Errorf("encode PA-FX-FAST-REQUEST wrapper: %w", err)
@@ -168,7 +173,7 @@ func (v *PAFXFastRequest) Unmarshal(b []byte) error {
 		return fmt.Errorf("trailing ASN.1 data: %d bytes", len(rest))
 	}
 	if raw.Class != asn1.ClassContextSpecific || raw.Tag != 0 || !raw.IsCompound {
-		return fmt.Errorf("PA-FX-FAST-REQUEST must contain armored-data tag 0")
+		return errors.New("PA-FX-FAST-REQUEST must contain armored-data tag 0")
 	}
 	return v.ArmoredData.Unmarshal(raw.Bytes)
 }
@@ -184,6 +189,7 @@ func (v *PAFXFastReply) Marshal() ([]byte, error) {
 		IsCompound: true,
 		Tag:        0,
 		Bytes:      b,
+		FullBytes:  nil,
 	})
 	if err != nil {
 		return wrapped, fmt.Errorf("encode PA-FX-FAST-REPLY wrapper: %w", err)
@@ -202,7 +208,7 @@ func (v *PAFXFastReply) Unmarshal(b []byte) error {
 		return fmt.Errorf("trailing ASN.1 data: %d bytes", len(rest))
 	}
 	if raw.Class != asn1.ClassContextSpecific || raw.Tag != 0 || !raw.IsCompound {
-		return fmt.Errorf("PA-FX-FAST-REPLY must contain armored-data tag 0")
+		return errors.New("PA-FX-FAST-REPLY must contain armored-data tag 0")
 	}
 	return v.ArmoredData.Unmarshal(raw.Bytes)
 }
@@ -262,7 +268,7 @@ func (v PAFXError) Marshal() ([]byte, error) {
 // Unmarshal unmarshals DER bytes into PAFXError.
 func (v *PAFXError) Unmarshal(b []byte) error {
 	if v == nil {
-		return fmt.Errorf("cannot unmarshal PA-FX-ERROR into nil receiver")
+		return errors.New("cannot unmarshal PA-FX-ERROR into nil receiver")
 	}
 	var raw asn1.RawValue
 	rest, err := asn1.Unmarshal(b, &raw)
@@ -273,7 +279,7 @@ func (v *PAFXError) Unmarshal(b []byte) error {
 		return fmt.Errorf("trailing ASN.1 data: %d bytes", len(rest))
 	}
 	if raw.Class != asn1.ClassApplication || raw.Tag != asnAppTag.KRBError || !raw.IsCompound {
-		return fmt.Errorf("PA-FX-ERROR must contain an application-tagged KRB-ERROR")
+		return errors.New("PA-FX-ERROR must contain an application-tagged KRB-ERROR")
 	}
 	*v = append((*v)[:0], b...)
 	return nil

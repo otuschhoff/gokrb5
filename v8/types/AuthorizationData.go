@@ -64,33 +64,7 @@ func (a *AuthorizationDataEntry) Unmarshal(b []byte) error {
 // Walk visits every authorization-data entry and recursively expands
 // AD-IF-RELEVANT containers. Top-level entries have depth zero.
 func (a AuthorizationData) Walk(fn func(depth int, entry AuthorizationDataEntry) error) error {
-	var walk func(AuthorizationData, int) error
-	walk = func(entries AuthorizationData, depth int) error {
-		for _, entry := range entries {
-			if err := fn(depth, entry); err != nil {
-				return err
-			}
-			if entry.ADType != adtype.ADIfRelevant {
-				continue
-			}
-			if depth >= maxAuthorizationDataDepth {
-				return fmt.Errorf("%w: depth %d", ErrAuthorizationDataDepth, depth+1)
-			}
-			var nested AuthorizationData
-			rest, err := asn1.Unmarshal(entry.ADData, &nested)
-			if err != nil {
-				return fmt.Errorf("decode AD-IF-RELEVANT at depth %d: %w", depth, err)
-			}
-			if len(rest) != 0 {
-				return fmt.Errorf("decode AD-IF-RELEVANT at depth %d: %d trailing bytes", depth, len(rest))
-			}
-			if err := walk(nested, depth+1); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	return walk(a, 0)
+	return a.walk(0, fn)
 }
 
 // EntriesOfType returns all authorization-data entries with the requested
@@ -104,4 +78,38 @@ func (a AuthorizationData) EntriesOfType(adType int32) ([]AuthorizationDataEntry
 		return nil
 	})
 	return matches, err
+}
+
+func (a AuthorizationData) walk(depth int, fn func(int, AuthorizationDataEntry) error) error {
+	for _, entry := range a {
+		if err := fn(depth, entry); err != nil {
+			return err
+		}
+		if entry.ADType != adtype.ADIfRelevant {
+			continue
+		}
+		nested, err := decodeADIfRelevant(entry.ADData, depth)
+		if err != nil {
+			return err
+		}
+		if err := nested.walk(depth+1, fn); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func decodeADIfRelevant(data []byte, depth int) (AuthorizationData, error) {
+	if depth >= maxAuthorizationDataDepth {
+		return nil, fmt.Errorf("%w: depth %d", ErrAuthorizationDataDepth, depth+1)
+	}
+	var nested AuthorizationData
+	rest, err := asn1.Unmarshal(data, &nested)
+	if err != nil {
+		return nil, fmt.Errorf("decode AD-IF-RELEVANT at depth %d: %w", depth, err)
+	}
+	if len(rest) != 0 {
+		return nil, fmt.Errorf("decode AD-IF-RELEVANT at depth %d: %d trailing bytes", depth, len(rest))
+	}
+	return nested, nil
 }

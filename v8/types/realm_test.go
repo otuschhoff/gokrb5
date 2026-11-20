@@ -3,15 +3,16 @@ package types
 import "testing"
 
 func TestRealmEqual(t *testing.T) {
+	const exampleRealm = "EXAMPLE.COM"
 	tests := []struct {
 		name string
 		a    string
 		b    string
 		want bool
 	}{
-		{name: "same", a: "EXAMPLE.COM", b: "EXAMPLE.COM", want: true},
-		{name: "mixed case", a: "EXAMPLE.COM", b: "example.com", want: true},
-		{name: "different", a: "EXAMPLE.COM", b: "OTHER.COM", want: false},
+		{name: "same", a: exampleRealm, b: exampleRealm, want: true},
+		{name: "mixed case", a: exampleRealm, b: "example.com", want: true},
+		{name: "different", a: exampleRealm, b: "OTHER.COM", want: false},
 		{name: "empty", a: "", b: "", want: true},
 	}
 	for _, test := range tests {

@@ -26,7 +26,10 @@ func mustMarshalAuthorizationData(t *testing.T, a AuthorizationData) []byte {
 
 func TestAuthorizationDataEntriesOfType(t *testing.T) {
 	want := AuthorizationDataEntry{ADType: adtype.ADWin2KPAC, ADData: []byte("pac")}
-	nested := AuthorizationData{{ADType: adtype.ADIfRelevant, ADData: mustMarshalAuthorizationData(t, AuthorizationData{want})}}
+	nested := AuthorizationData{{
+		ADType: adtype.ADIfRelevant,
+		ADData: mustMarshalAuthorizationData(t, AuthorizationData{want}),
+	}}
 	entries, err := nested.EntriesOfType(adtype.ADWin2KPAC)
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +40,7 @@ func TestAuthorizationDataEntriesOfType(t *testing.T) {
 }
 
 func TestAuthorizationDataWalkDepthLimit(t *testing.T) {
-	a := AuthorizationData{{ADType: adtype.ADWin2KPAC}}
+	a := AuthorizationData{{ADType: adtype.ADWin2KPAC, ADData: nil}}
 	for i := 0; i <= maxAuthorizationDataDepth; i++ {
 		a = AuthorizationData{{ADType: adtype.ADIfRelevant, ADData: mustMarshalAuthorizationData(t, a)}}
 	}
@@ -59,7 +62,11 @@ func TestUnmarshalAuthorizationData(t *testing.T) {
 	}
 	assert.Equal(t, 2, len(a), "Number of authorization data entries not as expected")
 	for i, entry := range a {
-		assert.Equal(t, adtype.ADIfRelevant, entry.ADType, fmt.Sprintf("Authorization data type of entry %d not as expected", i+1))
+		assert.Equal(t,
+			adtype.ADIfRelevant,
+			entry.ADType,
+			fmt.Sprintf("Authorization data type of entry %d not as expected", i+1),
+		)
 		assert.Equal(t, []byte("foobar"), entry.ADData, fmt.Sprintf("Authorization data of entry %d not as expected", i+1))
 	}
 }
@@ -79,10 +86,22 @@ func TestUnmarshalAuthorizationData_kdcissued(t *testing.T) {
 	assert.Equal(t, []byte("1234"), a.ADChecksum.Checksum, "Checksum not as expected")
 	assert.Equal(t, testdata.TEST_REALM, a.IRealm, "Issuing realm not as expected")
 	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, a.Isname.NameType, "Issuing name type not as expected")
-	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.Isname.NameString, "Issuing name string entries not as expected")
+	assert.Equal(t,
+		testdata.TEST_PRINCIPALNAME_NAMESTRING,
+		a.Isname.NameString,
+		"Issuing name string entries not as expected",
+	)
 	assert.Equal(t, 2, len(a.Elements), "Number of authorization data elements not as expected")
 	for i, ele := range a.Elements {
-		assert.Equal(t, adtype.ADIfRelevant, ele.ADType, fmt.Sprintf("Authorization data type of element %d not as expected", i+1))
-		assert.Equal(t, []byte(testdata.TEST_AUTHORIZATION_DATA_VALUE), ele.ADData, fmt.Sprintf("Authorization data of element %d not as expected", i+1))
+		assert.Equal(t,
+			adtype.ADIfRelevant,
+			ele.ADType,
+			fmt.Sprintf("Authorization data type of element %d not as expected", i+1),
+		)
+		assert.Equal(t,
+			[]byte(testdata.TEST_AUTHORIZATION_DATA_VALUE),
+			ele.ADData,
+			fmt.Sprintf("Authorization data of element %d not as expected", i+1),
+		)
 	}
 }

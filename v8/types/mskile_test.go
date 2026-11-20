@@ -20,6 +20,11 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 )
 
+const (
+	mskileExampleOrg = "EXAMPLE.ORG"
+	mskileExampleCom = "EXAMPLE.COM"
+)
+
 func mustHex(t *testing.T, value string) []byte {
 	t.Helper()
 	b, err := hex.DecodeString(value)
@@ -33,18 +38,29 @@ func TestMSKILEPADataWrappers(t *testing.T) {
 	principal := NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
 	checksum := Checksum{CksumType: 1, Checksum: []byte("checksum")}
 
+	checkPACOptionsAndForUserWrappers(t, principal, checksum)
+	checkS4UAndSupportedEnctypeWrappers(t, principal, checksum)
+	keyReply := checkKeyListWrappers(t)
+	checkReferralAndSupersededWrappers(t, principal)
+	checkDMSAKeyPackageWrappers(t, keyReply)
+	checkWrongMSKILEPADataType(t)
+}
+
+func checkPACOptionsAndForUserWrappers(t *testing.T, principal PrincipalName, checksum Checksum) {
+	t.Helper()
 	pacOptions, err := NewPAPACOptionsPAData(0, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded, ierr := pacOptions.GetPAPACOptions(); ierr != nil || !IsFlagSet(&decoded.Options, 0) || !IsFlagSet(&decoded.Options, 3) {
+	if decoded, ierr := pacOptions.GetPAPACOptions(); ierr != nil ||
+		!IsFlagSet(&decoded.Options, 0) || !IsFlagSet(&decoded.Options, 3) {
 		t.Fatalf("PAC options = %+v, %v", decoded, ierr)
 	}
 	if _, ierr := NewPAPACOptionsPAData(-1); ierr == nil {
 		t.Fatal("negative PAC option accepted")
 	}
 
-	forUser := PAForUser{UserName: principal, UserRealm: "EXAMPLE.ORG", Cksum: checksum, AuthPackage: "Kerberos"}
+	forUser := PAForUser{UserName: principal, UserRealm: mskileExampleOrg, Cksum: checksum, AuthPackage: "Kerberos"}
 	forUserPA, err := NewPAForUserPAData(forUser)
 	if err != nil {
 		t.Fatal(err)
@@ -52,8 +68,17 @@ func TestMSKILEPADataWrappers(t *testing.T) {
 	if decoded, ierr := forUserPA.GetPAForUser(); ierr != nil || !decoded.UserName.Equal(principal) {
 		t.Fatalf("PA-FOR-USER = %+v, %v", decoded, ierr)
 	}
+}
 
-	userID := S4UUserID{Nonce: 7, CName: principal, CRealm: "EXAMPLE.ORG", Options: NewKrbFlags()}
+func checkS4UAndSupportedEnctypeWrappers(t *testing.T, principal PrincipalName, checksum Checksum) {
+	t.Helper()
+	userID := S4UUserID{
+		Nonce:              7,
+		CName:              principal,
+		CRealm:             mskileExampleOrg,
+		SubjectCertificate: nil,
+		Options:            NewKrbFlags(),
+	}
 	s4u, err := NewPAS4UX509User(userID, checksum)
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +103,10 @@ func TestMSKILEPADataWrappers(t *testing.T) {
 	if decoded, ierr := supportedPA.GetPASupportedEncTypes(); ierr != nil || decoded != 3 {
 		t.Fatalf("supported enctypes = %v, %v", decoded, ierr)
 	}
+}
 
+func checkKeyListWrappers(t *testing.T) KerbKeyListRep {
+	t.Helper()
 	keyRequest := KerbKeyListReq{17, 18}
 	keyRequestPA, err := NewKerbKeyListReqPAData(keyRequest)
 	if err != nil {
@@ -95,7 +123,11 @@ func TestMSKILEPADataWrappers(t *testing.T) {
 	if decoded, ierr := keyReplyPA.GetKerbKeyListRep(); ierr != nil || !reflect.DeepEqual(decoded, keyReply) {
 		t.Fatalf("key reply = %+v, %v", decoded, ierr)
 	}
+	return keyReply
+}
 
+func checkReferralAndSupersededWrappers(t *testing.T, principal PrincipalName) {
+	t.Helper()
 	referral := PASvrReferralData{ReferredName: principal, ReferredRealm: "CHILD.EXAMPLE.ORG"}
 	referralPA, err := NewPASvrReferralInfoPAData(referral)
 	if err != nil {
@@ -104,7 +136,7 @@ func TestMSKILEPADataWrappers(t *testing.T) {
 	if decoded, ierr := referralPA.GetPASvrReferralInfo(); ierr != nil || decoded.ReferredRealm != referral.ReferredRealm {
 		t.Fatalf("referral = %+v, %v", decoded, ierr)
 	}
-	superseded := KerbSupersededByUser{Name: principal, Realm: "EXAMPLE.ORG"}
+	superseded := KerbSupersededByUser{Name: principal, Realm: mskileExampleOrg}
 	supersededPA, err := NewKerbSupersededByUserPAData(superseded)
 	if err != nil {
 		t.Fatal(err)
@@ -112,9 +144,17 @@ func TestMSKILEPADataWrappers(t *testing.T) {
 	if decoded, ierr := supersededPA.GetKerbSupersededByUser(); ierr != nil || !decoded.Name.Equal(principal) {
 		t.Fatalf("superseded user = %+v, %v", decoded, ierr)
 	}
+}
 
+func checkDMSAKeyPackageWrappers(t *testing.T, keyReply KerbKeyListRep) {
+	t.Helper()
 	now := time.Now().UTC().Truncate(time.Second)
-	keyPackage := KerbDMSAKeyPackage{CurrentKeys: keyReply, PreviousKeys: keyReply, ExpirationInterval: now, FetchInterval: now.Add(time.Hour)}
+	keyPackage := KerbDMSAKeyPackage{
+		CurrentKeys:        keyReply,
+		PreviousKeys:       keyReply,
+		ExpirationInterval: now,
+		FetchInterval:      now.Add(time.Hour),
+	}
 	keyPackagePA, err := NewKerbDMSAKeyPackagePAData(keyPackage)
 	if err != nil {
 		t.Fatal(err)
@@ -129,13 +169,20 @@ func TestMSKILEPADataWrappers(t *testing.T) {
 	if decoded, err := keyPackageEntry.GetKerbDMSAKeyPackage(); err != nil || len(decoded.PreviousKeys) != 1 {
 		t.Fatalf("dMSA entry = %+v, %v", decoded, err)
 	}
+}
 
-	wrong := PAData{PADataType: patype.PA_TGS_REQ}
+func checkWrongMSKILEPADataType(t *testing.T) {
+	t.Helper()
+	wrong := PAData{PADataType: patype.PA_TGS_REQ, PADataValue: nil}
 	getters := []func() error{
-		func() error { _, err := wrong.GetPAPACOptions(); return err }, func() error { _, err := wrong.GetPAForUser(); return err },
-		func() error { _, err := wrong.GetPAS4UX509User(); return err }, func() error { _, err := wrong.GetPASupportedEncTypes(); return err },
-		func() error { _, err := wrong.GetKerbKeyListReq(); return err }, func() error { _, err := wrong.GetKerbKeyListRep(); return err },
-		func() error { _, err := wrong.GetPASvrReferralInfo(); return err }, func() error { _, err := wrong.GetKerbSupersededByUser(); return err },
+		func() error { _, err := wrong.GetPAPACOptions(); return err },
+		func() error { _, err := wrong.GetPAForUser(); return err },
+		func() error { _, err := wrong.GetPAS4UX509User(); return err },
+		func() error { _, err := wrong.GetPASupportedEncTypes(); return err },
+		func() error { _, err := wrong.GetKerbKeyListReq(); return err },
+		func() error { _, err := wrong.GetKerbKeyListRep(); return err },
+		func() error { _, err := wrong.GetPASvrReferralInfo(); return err },
+		func() error { _, err := wrong.GetKerbSupersededByUser(); return err },
 		func() error { _, err := wrong.GetKerbDMSAKeyPackage(); return err },
 	}
 	for index, get := range getters {
@@ -150,11 +197,19 @@ func testPrincipal(name string) PrincipalName {
 }
 
 func TestMSKILEExactVectors(t *testing.T) {
-	tests := []struct {
-		name    string
-		wantHex string
-		marshal func() ([]byte, error)
-	}{
+	checkMSKILEMarshalVectors(t)
+	checkMSKILEExtendedErrorVector(t)
+	checkMSKILERestrictionVector(t)
+}
+
+type mskileMarshalVector struct {
+	name    string
+	wantHex string
+	marshal func() ([]byte, error)
+}
+
+func mskileMarshalVectors() []mskileMarshalVector {
+	return []mskileMarshalVector{
 		{
 			name:    "pac request true",
 			wantHex: testdata.MSKILEKerbPAPACRequestTrue,
@@ -172,14 +227,19 @@ func TestMSKILEExactVectors(t *testing.T) {
 			name:    "extended error",
 			wantHex: "720000c00000000001000000",
 			marshal: func() ([]byte, error) {
-				return (&KerbExtError{Status: ntstatus.STATUS_ACCOUNT_DISABLED, Flags: msflags.KerbExtErrorFlagStrongCredentials}).Marshal()
+				return (&KerbExtError{
+					Status:   ntstatus.STATUS_ACCOUNT_DISABLED,
+					Reserved: 0,
+					Flags:    msflags.KerbExtErrorFlagStrongCredentials,
+				}).Marshal()
 			},
 		},
 		{
 			name:    "supported enctypes",
 			wantHex: testdata.MSKILEPASupportedEncTypes,
 			marshal: func() ([]byte, error) {
-				v := PASupportedEncTypes(msflags.SupportedEncTypeAES256CTSHMACSHA196 | msflags.SupportedEncTypeFAST | msflags.SupportedEncTypeClaims)
+				v := PASupportedEncTypes(msflags.SupportedEncTypeAES256CTSHMACSHA196 |
+					msflags.SupportedEncTypeFAST | msflags.SupportedEncTypeClaims)
 				return v.Marshal()
 			},
 		},
@@ -200,8 +260,11 @@ func TestMSKILEExactVectors(t *testing.T) {
 			},
 		},
 	}
+}
 
-	for _, tt := range tests {
+func checkMSKILEMarshalVectors(t *testing.T) {
+	t.Helper()
+	for _, tt := range mskileMarshalVectors() {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := tt.marshal()
 			if err != nil {
@@ -212,7 +275,10 @@ func TestMSKILEExactVectors(t *testing.T) {
 			}
 		})
 	}
+}
 
+func checkMSKILEExtendedErrorVector(t *testing.T) {
+	t.Helper()
 	extended := KerbErrorData{
 		DataType:  int32(msflags.KERB_ERR_TYPE_EXTENDED),
 		DataValue: mustHex(t, "720000c00000000001000000"),
@@ -224,7 +290,10 @@ func TestMSKILEExactVectors(t *testing.T) {
 	if want := mustHex(t, testdata.MSKILEKerbErrorDataAccountDisabled); !bytes.Equal(want, encoded) {
 		t.Fatalf("KERB-ERROR-DATA mismatch\nwant %x\n got %x", want, encoded)
 	}
+}
 
+func checkMSKILERestrictionVector(t *testing.T) {
+	t.Helper()
 	var restriction KerbADRestrictionEntry
 	fixture := mustHex(t, testdata.MSKILEKerbADRestrictionEntry)
 	if ierr := restriction.Unmarshal(fixture); ierr != nil {
@@ -248,54 +317,72 @@ func TestMSKILEASN1RoundTrips(t *testing.T) {
 	SetFlag(&options, flags.PACOptionBranchAware)
 
 	t.Run("error data", func(t *testing.T) {
-		ext, _ := (&KerbExtError{Status: ntstatus.STATUS_ACCOUNT_LOCKED_OUT, Flags: 1}).Marshal()
+		ext, _ := (&KerbExtError{Status: ntstatus.STATUS_ACCOUNT_LOCKED_OUT, Reserved: 0, Flags: 1}).Marshal()
 		want := KerbErrorData{DataType: int32(msflags.KERB_ERR_TYPE_EXTENDED), DataValue: ext}
-		roundTripMSKILE(t, &want, &KerbErrorData{})
+		roundTripMSKILE(t, &want, new(KerbErrorData))
 	})
 	t.Run("restriction", func(t *testing.T) {
-		integrity := LSAPTokenInfoIntegrity{Flags: msflags.TokenInfoUACRestricted, TokenIL: msflags.TokenILMedium}
+		var integrity LSAPTokenInfoIntegrity
+		integrity.Flags = msflags.TokenInfoUACRestricted
+		integrity.TokenIL = msflags.TokenILMedium
 		copy(integrity.PerBootMachineID[:], bytes.Repeat([]byte{0x11}, 32))
 		copy(integrity.CrossBootMachineID[:], bytes.Repeat([]byte{0x22}, 32))
 		payload, _ := integrity.Marshal()
 		want := KerbADRestrictionEntry{RestrictionType: msflags.KerbADRestrictionTypeTokenIntegrity, Restriction: payload}
-		roundTripMSKILE(t, &want, &KerbADRestrictionEntry{})
+		roundTripMSKILE(t, &want, new(KerbADRestrictionEntry))
 	})
 	t.Run("for user", func(t *testing.T) {
-		want := PAForUser{UserName: principal, UserRealm: "EXAMPLE.COM", Cksum: checksum, AuthPackage: "Kerberos"}
-		roundTripMSKILE(t, &want, &PAForUser{})
+		want := PAForUser{UserName: principal, UserRealm: mskileExampleCom, Cksum: checksum, AuthPackage: "Kerberos"}
+		roundTripMSKILE(t, &want, new(PAForUser))
 	})
 	t.Run("s4u x509 user", func(t *testing.T) {
-		userID := S4UUserID{Nonce: ^uint32(0), CName: principal, CRealm: "EXAMPLE.COM", SubjectCertificate: []byte{1, 2, 3}, Options: options}
-		want, err := NewPAS4UX509User(userID, checksum)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var got PAS4UX509User
-		roundTripMSKILE(t, &want, &got)
-		decoded, err := got.GetUserID()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(userID, decoded) {
-			t.Fatalf("S4U user mismatch\nwant %#v\n got %#v", userID, decoded)
-		}
+		checkS4UX509UserRoundTrip(t, principal, checksum, options)
 	})
 	t.Run("key list reply", func(t *testing.T) {
 		want := KerbKeyListRep{key}
 		roundTripMSKILE(t, &want, &KerbKeyListRep{})
 	})
 	t.Run("server referral", func(t *testing.T) {
-		want := PASvrReferralData{ReferredName: principal, ReferredRealm: "EXAMPLE.COM"}
-		roundTripMSKILE(t, &want, &PASvrReferralData{})
+		want := PASvrReferralData{ReferredName: principal, ReferredRealm: mskileExampleCom}
+		roundTripMSKILE(t, &want, new(PASvrReferralData))
 	})
 	t.Run("superseded user", func(t *testing.T) {
-		want := KerbSupersededByUser{Name: principal, Realm: "EXAMPLE.COM"}
-		roundTripMSKILE(t, &want, &KerbSupersededByUser{})
+		want := KerbSupersededByUser{Name: principal, Realm: mskileExampleCom}
+		roundTripMSKILE(t, &want, new(KerbSupersededByUser))
 	})
 	t.Run("dmsa key package", func(t *testing.T) {
-		want := KerbDMSAKeyPackage{CurrentKeys: KerbKeyListRep{key}, PreviousKeys: KerbKeyListRep{key}, ExpirationInterval: now, FetchInterval: now.Add(time.Hour)}
-		roundTripMSKILE(t, &want, &KerbDMSAKeyPackage{})
+		want := KerbDMSAKeyPackage{
+			CurrentKeys:        KerbKeyListRep{key},
+			PreviousKeys:       KerbKeyListRep{key},
+			ExpirationInterval: now,
+			FetchInterval:      now.Add(time.Hour),
+		}
+		roundTripMSKILE(t, &want, new(KerbDMSAKeyPackage))
 	})
+}
+
+func checkS4UX509UserRoundTrip(t *testing.T, principal PrincipalName, checksum Checksum, options asn1.BitString) {
+	t.Helper()
+	userID := S4UUserID{
+		Nonce:              ^uint32(0),
+		CName:              principal,
+		CRealm:             mskileExampleCom,
+		SubjectCertificate: []byte{1, 2, 3},
+		Options:            options,
+	}
+	want, err := NewPAS4UX509User(userID, checksum)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got PAS4UX509User
+	roundTripMSKILE(t, &want, &got)
+	decoded, err := got.GetUserID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(userID, decoded) {
+		t.Fatalf("S4U user mismatch\nwant %#v\n got %#v", userID, decoded)
+	}
 }
 
 type mskileCodec interface {
@@ -319,7 +406,7 @@ func roundTripMSKILE(t *testing.T, want, got mskileCodec) []byte {
 	if !bytes.Equal(b, reencoded) {
 		t.Fatalf("round-trip mismatch\nwant %x\n got %x", b, reencoded)
 	}
-	for i := 0; i < len(b); i++ {
+	for i := range len(b) {
 		if err := got.Unmarshal(b[:i]); err == nil {
 			t.Fatalf("accepted truncation at %d of %d bytes", i, len(b))
 		}
@@ -337,9 +424,14 @@ func TestMSKILEBinaryLengthsAndTruncations(t *testing.T) {
 		marshal   func() ([]byte, error)
 		unmarshal func([]byte) error
 	}{
-		{"extended error", func() ([]byte, error) { return (&KerbExtError{Status: ntstatus.STATUS_PASSWORD_MUST_CHANGE}).Marshal() }, (&KerbExtError{}).Unmarshal},
-		{"token integrity", integrity.Marshal, (&LSAPTokenInfoIntegrity{}).Unmarshal},
-		{"ap options", func() ([]byte, error) { v := ADAuthDataAPOptions(msflags.KERB_AP_OPTIONS_CBT); return v.Marshal() }, func(b []byte) error { var v ADAuthDataAPOptions; return v.Unmarshal(b) }},
+		{"extended error", func() ([]byte, error) {
+			return (&KerbExtError{Status: ntstatus.STATUS_PASSWORD_MUST_CHANGE, Reserved: 0, Flags: 0}).Marshal()
+		}, new(KerbExtError).Unmarshal},
+		{"token integrity", integrity.Marshal, new(LSAPTokenInfoIntegrity).Unmarshal},
+		{"ap options", func() ([]byte, error) {
+			v := ADAuthDataAPOptions(msflags.KERB_AP_OPTIONS_CBT)
+			return v.Marshal()
+		}, func(b []byte) error { var v ADAuthDataAPOptions; return v.Unmarshal(b) }},
 		{"supported enctypes", func() ([]byte, error) {
 			v := PASupportedEncTypes(msflags.SupportedEncTypeAES256CTSHMACSHA196)
 			return v.Marshal()
@@ -351,7 +443,7 @@ func TestMSKILEBinaryLengthsAndTruncations(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for i := 0; i < len(b); i++ {
+			for i := range len(b) {
 				if err := tt.unmarshal(b[:i]); err == nil {
 					t.Fatalf("accepted truncation at %d of %d bytes", i, len(b))
 				}
@@ -427,19 +519,35 @@ func TestMSKILESemanticValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := (&PAPACOptions{}).Unmarshal(pacBytes); err == nil {
+	if err := new(PAPACOptions).Unmarshal(pacBytes); err == nil {
 		t.Fatal("short encoded PA-PAC-OPTIONS was accepted")
 	}
-	if _, err := (&S4UUserID{CRealm: "EXAMPLE.COM", Options: shortOptions}).Marshal(); err == nil {
+	var user S4UUserID
+	user.CRealm = mskileExampleCom
+	user.Options = shortOptions
+	if _, err := user.Marshal(); err == nil {
 		t.Fatal("short S4U options were accepted")
 	}
-	if _, err := (&KrbFastReq{FastOptions: shortOptions}).Marshal(); err == nil {
+	var fastReq KrbFastReq
+	fastReq.FastOptions = shortOptions
+	if _, err := fastReq.Marshal(); err == nil {
 		t.Fatal("short FAST options were accepted")
 	}
 }
 
 func TestMSKILEExtendedErrorAndAuthorizationDataHelpers(t *testing.T) {
-	ext := KerbExtError{Status: ntstatus.STATUS_ACCOUNT_DISABLED, Flags: msflags.KerbExtErrorFlagStrongCredentials}
+	checkMSKILEExtendedErrorData(t)
+	checkMSKILEAuthorizationRestriction(t)
+	checkMSKILELocalAndAPOptions(t)
+}
+
+func checkMSKILEExtendedErrorData(t *testing.T) {
+	t.Helper()
+	ext := KerbExtError{
+		Status:   ntstatus.STATUS_ACCOUNT_DISABLED,
+		Reserved: 0,
+		Flags:    msflags.KerbExtErrorFlagStrongCredentials,
+	}
 	errorData, err := NewKerbExtErrorData(ext)
 	if err != nil {
 		t.Fatal(err)
@@ -452,8 +560,12 @@ func TestMSKILEExtendedErrorAndAuthorizationDataHelpers(t *testing.T) {
 	if _, ierr := errorData.GetKerbExtError(); ierr == nil {
 		t.Fatal("wrong KERB-ERROR-DATA type was accepted")
 	}
+}
 
-	integrity := LSAPTokenInfoIntegrity{TokenIL: msflags.TokenILMedium}
+func checkMSKILEAuthorizationRestriction(t *testing.T) {
+	t.Helper()
+	var integrity LSAPTokenInfoIntegrity
+	integrity.TokenIL = msflags.TokenILMedium
 	restriction, err := NewKerbADRestrictionEntryForToken(integrity)
 	if err != nil {
 		t.Fatal(err)
@@ -473,7 +585,10 @@ func TestMSKILEExtendedErrorAndAuthorizationDataHelpers(t *testing.T) {
 	if _, ierr := entry.GetKerbADRestrictionEntry(); ierr == nil {
 		t.Fatal("wrong restriction authorization-data type was accepted")
 	}
+}
 
+func checkMSKILELocalAndAPOptions(t *testing.T) {
+	t.Helper()
 	local := NewKerbLocalEntry()
 	if !local.IsKerbLocal() {
 		t.Fatal("KERB-LOCAL entry was not recognized")
@@ -498,6 +613,12 @@ func TestMSKILEExtendedErrorAndAuthorizationDataHelpers(t *testing.T) {
 }
 
 func TestFASTPADataHelpers(t *testing.T) {
+	checkPAFXErrorHelpers(t)
+	checkFASTRequestReplyAndChallenge(t)
+}
+
+func checkPAFXErrorHelpers(t *testing.T) {
+	t.Helper()
 	var nilFXError *PAFXError
 	if err := nilFXError.Unmarshal([]byte{0}); err == nil {
 		t.Fatal("nil PA-FX-ERROR receiver accepted input")
@@ -515,12 +636,15 @@ func TestFASTPADataHelpers(t *testing.T) {
 	if _, ierr := pa.GetPAFXError(); ierr == nil {
 		t.Fatal("wrong PA-FX-ERROR PA-DATA type was accepted")
 	}
+}
 
-	request := PAFXFastRequest{}
+func checkFASTRequestReplyAndChallenge(t *testing.T) {
+	t.Helper()
+	var request PAFXFastRequest
 	if ierr := request.Unmarshal(mustHex(t, testdata.MSKILEPAFXFastRequest)); ierr != nil {
 		t.Fatal(ierr)
 	}
-	pa, err = NewPAFXFastRequestPAData(request)
+	pa, err := NewPAFXFastRequestPAData(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,7 +652,7 @@ func TestFASTPADataHelpers(t *testing.T) {
 		t.Fatal(ierr)
 	}
 
-	reply := PAFXFastReply{}
+	var reply PAFXFastReply
 	if ierr := reply.Unmarshal(mustHex(t, testdata.MSKILEPAFXFastReply)); ierr != nil {
 		t.Fatal(ierr)
 	}
@@ -540,7 +664,7 @@ func TestFASTPADataHelpers(t *testing.T) {
 		t.Fatal(ierr)
 	}
 
-	challenge := PAEncryptedChallenge{}
+	var challenge PAEncryptedChallenge
 	if ierr := challenge.Unmarshal(mustHex(t, testdata.MSKILEPAEncryptedChallenge)); ierr != nil {
 		t.Fatal(ierr)
 	}
@@ -555,23 +679,29 @@ func TestFASTPADataHelpers(t *testing.T) {
 
 func TestFASTRoundTrips(t *testing.T) {
 	checksum := Checksum{CksumType: 16, Checksum: []byte{1, 2, 3}}
-	encrypted := EncryptedData{EType: etypeID.AES256_CTS_HMAC_SHA1_96, Cipher: []byte{4, 5, 6}}
+	encrypted := EncryptedData{EType: etypeID.AES256_CTS_HMAC_SHA1_96, KVNO: 0, Cipher: []byte{4, 5, 6}}
 	request := PAFXFastRequest{ArmoredData: KrbFastArmoredReq{
 		Armor:       KrbFastArmor{ArmorType: 1, ArmorValue: []byte{7, 8}},
 		ReqChecksum: checksum,
 		EncFastReq:  encrypted,
 	}}
-	roundTripMSKILE(t, &request, &PAFXFastRequest{})
+	roundTripMSKILE(t, &request, new(PAFXFastRequest))
 
 	options := NewKrbFlags()
-	fastReq := NewKrbFastReq(options, PADataSequence{{PADataType: patype.PA_FX_COOKIE, PADataValue: []byte("cookie")}}, []byte{0x30, 0x00})
-	roundTripMSKILE(t, &fastReq, &KrbFastReq{})
+	fastReq := NewKrbFastReq(
+		options,
+		PADataSequence{{PADataType: patype.PA_FX_COOKIE, PADataValue: []byte("cookie")}},
+		[]byte{0x30, 0x00},
+	)
+	roundTripMSKILE(t, &fastReq, new(KrbFastReq))
 
 	reply := PAFXFastReply{ArmoredData: KrbFastArmoredRep{EncFastRep: encrypted}}
-	roundTripMSKILE(t, &reply, &PAFXFastReply{})
+	roundTripMSKILE(t, &reply, new(PAFXFastReply))
 
-	response := KrbFastResponse{PAData: PADataSequence{}, Nonce: ^uint32(0)}
-	roundTripMSKILE(t, &response, &KrbFastResponse{})
+	var response KrbFastResponse
+	response.PAData = PADataSequence{}
+	response.Nonce = ^uint32(0)
+	roundTripMSKILE(t, &response, new(KrbFastResponse))
 }
 
 func TestMSKILEReferenceFixtures(t *testing.T) {
@@ -582,31 +712,31 @@ func TestMSKILEReferenceFixtures(t *testing.T) {
 		hex   string
 		codec mskileCodec
 	}{
-		{"KERB-PA-PAC-REQUEST", testdata.MSKILEKerbPAPACRequestTrue, &KerbPAPACRequest{}},
-		{"PA-PAC-OPTIONS", testdata.MSKILEPAPACOptionsClaimsRBCD, &PAPACOptions{}},
-		{"KERB-ERROR-DATA", testdata.MSKILEKerbErrorDataAccountDisabled, &KerbErrorData{}},
-		{"KERB-EXT-ERROR", testdata.MSKILEKerbExtErrorAccountDisabled, &KerbExtError{}},
-		{"KERB-AD-RESTRICTION-ENTRY", testdata.MSKILEKerbADRestrictionEntry, &KerbADRestrictionEntry{}},
-		{"LSAP-TOKEN-INFO-INTEGRITY", testdata.MSKILELSAPTokenInfoIntegrity, &LSAPTokenInfoIntegrity{}},
+		{"KERB-PA-PAC-REQUEST", testdata.MSKILEKerbPAPACRequestTrue, new(KerbPAPACRequest)},
+		{"PA-PAC-OPTIONS", testdata.MSKILEPAPACOptionsClaimsRBCD, new(PAPACOptions)},
+		{"KERB-ERROR-DATA", testdata.MSKILEKerbErrorDataAccountDisabled, new(KerbErrorData)},
+		{"KERB-EXT-ERROR", testdata.MSKILEKerbExtErrorAccountDisabled, new(KerbExtError)},
+		{"KERB-AD-RESTRICTION-ENTRY", testdata.MSKILEKerbADRestrictionEntry, new(KerbADRestrictionEntry)},
+		{"LSAP-TOKEN-INFO-INTEGRITY", testdata.MSKILELSAPTokenInfoIntegrity, new(LSAPTokenInfoIntegrity)},
 		{"AD-AUTH-DATA-AP-OPTIONS", testdata.MSKILEADAuthDataAPOptionsCBT, &apOptions},
-		{"PA-FOR-USER", testdata.MSKILEPAForUser, &PAForUser{}},
-		{"S4UUserID", testdata.MSKILES4UUserID, &S4UUserID{}},
-		{"PA-S4U-X509-USER", testdata.MSKILEPAS4UX509User, &PAS4UX509User{}},
+		{"PA-FOR-USER", testdata.MSKILEPAForUser, new(PAForUser)},
+		{"S4UUserID", testdata.MSKILES4UUserID, new(S4UUserID)},
+		{"PA-S4U-X509-USER", testdata.MSKILEPAS4UX509User, new(PAS4UX509User)},
 		{"PA-SUPPORTED-ENCTYPES", testdata.MSKILEPASupportedEncTypes, &supportedEncTypes},
 		{"KERB-KEY-LIST-REQ", testdata.MSKILEKerbKeyListReq, &KerbKeyListReq{}},
 		{"KERB-KEY-LIST-REP", testdata.MSKILEKerbKeyListRep, &KerbKeyListRep{}},
-		{"PA-SVR-REFERRAL-DATA", testdata.MSKILEPASvrReferralData, &PASvrReferralData{}},
-		{"KERB-SUPERSEDED-BY-USER", testdata.MSKILEKerbSupersededByUser, &KerbSupersededByUser{}},
-		{"KERB-DMSA-KEY-PACKAGE", testdata.MSKILEKerbDMSAKeyPackage, &KerbDMSAKeyPackage{}},
-		{"KrbFastArmor", testdata.MSKILEKrbFastArmor, &KrbFastArmor{}},
-		{"KrbFastArmoredReq", testdata.MSKILEKrbFastArmoredReq, &KrbFastArmoredReq{}},
-		{"KrbFastReq", testdata.MSKILEKrbFastReq, &KrbFastReq{}},
-		{"PA-FX-FAST-REQUEST", testdata.MSKILEPAFXFastRequest, &PAFXFastRequest{}},
-		{"KrbFastArmoredRep", testdata.MSKILEKrbFastArmoredRep, &KrbFastArmoredRep{}},
-		{"KrbFastResponse", testdata.MSKILEFastResponse, &KrbFastResponse{}},
-		{"KrbFastFinished", testdata.MSKILEKrbFastFinished, &KrbFastFinished{}},
-		{"PA-FX-FAST-REPLY", testdata.MSKILEPAFXFastReply, &PAFXFastReply{}},
-		{"PA-ENCRYPTED-CHALLENGE", testdata.MSKILEPAEncryptedChallenge, &PAEncryptedChallenge{}},
+		{"PA-SVR-REFERRAL-DATA", testdata.MSKILEPASvrReferralData, new(PASvrReferralData)},
+		{"KERB-SUPERSEDED-BY-USER", testdata.MSKILEKerbSupersededByUser, new(KerbSupersededByUser)},
+		{"KERB-DMSA-KEY-PACKAGE", testdata.MSKILEKerbDMSAKeyPackage, new(KerbDMSAKeyPackage)},
+		{"KrbFastArmor", testdata.MSKILEKrbFastArmor, new(KrbFastArmor)},
+		{"KrbFastArmoredReq", testdata.MSKILEKrbFastArmoredReq, new(KrbFastArmoredReq)},
+		{"KrbFastReq", testdata.MSKILEKrbFastReq, new(KrbFastReq)},
+		{"PA-FX-FAST-REQUEST", testdata.MSKILEPAFXFastRequest, new(PAFXFastRequest)},
+		{"KrbFastArmoredRep", testdata.MSKILEKrbFastArmoredRep, new(KrbFastArmoredRep)},
+		{"KrbFastResponse", testdata.MSKILEFastResponse, new(KrbFastResponse)},
+		{"KrbFastFinished", testdata.MSKILEKrbFastFinished, new(KrbFastFinished)},
+		{"PA-FX-FAST-REPLY", testdata.MSKILEPAFXFastReply, new(PAFXFastReply)},
+		{"PA-ENCRYPTED-CHALLENGE", testdata.MSKILEPAEncryptedChallenge, new(PAEncryptedChallenge)},
 		{"PA-FX-ERROR", testdata.MSKILEPAFXError, &PAFXError{}},
 	}
 	for _, tt := range tests {
@@ -622,7 +752,7 @@ func TestMSKILEReferenceFixtures(t *testing.T) {
 			if !bytes.Equal(fixture, got) {
 				t.Fatalf("fixture round-trip mismatch\nwant %x\n got %x", fixture, got)
 			}
-			for i := 0; i < len(fixture); i++ {
+			for i := range len(fixture) {
 				if err := tt.codec.Unmarshal(fixture[:i]); err == nil {
 					t.Fatalf("accepted truncation at %d of %d bytes", i, len(fixture))
 				}
@@ -655,22 +785,22 @@ func FuzzMSKILEUnmarshal(f *testing.F) {
 	}
 	f.Fuzz(func(_ *testing.T, b []byte) {
 		decoders := []func([]byte) error{
-			(&KerbPAPACRequest{}).Unmarshal,
-			(&PAPACOptions{}).Unmarshal,
-			(&KerbErrorData{}).Unmarshal,
-			(&KerbExtError{}).Unmarshal,
-			(&KerbADRestrictionEntry{}).Unmarshal,
-			(&LSAPTokenInfoIntegrity{}).Unmarshal,
+			new(KerbPAPACRequest).Unmarshal,
+			new(PAPACOptions).Unmarshal,
+			new(KerbErrorData).Unmarshal,
+			new(KerbExtError).Unmarshal,
+			new(KerbADRestrictionEntry).Unmarshal,
+			new(LSAPTokenInfoIntegrity).Unmarshal,
 			func(b []byte) error { var v ADAuthDataAPOptions; return v.Unmarshal(b) },
-			(&PAForUser{}).Unmarshal,
-			(&S4UUserID{}).Unmarshal,
-			(&PAS4UX509User{}).Unmarshal,
+			new(PAForUser).Unmarshal,
+			new(S4UUserID).Unmarshal,
+			new(PAS4UX509User).Unmarshal,
 			func(b []byte) error { var v PASupportedEncTypes; return v.Unmarshal(b) },
 			(&KerbKeyListReq{}).Unmarshal,
 			(&KerbKeyListRep{}).Unmarshal,
-			(&PASvrReferralData{}).Unmarshal,
-			(&KerbSupersededByUser{}).Unmarshal,
-			(&KerbDMSAKeyPackage{}).Unmarshal,
+			new(PASvrReferralData).Unmarshal,
+			new(KerbSupersededByUser).Unmarshal,
+			new(KerbDMSAKeyPackage).Unmarshal,
 		}
 		for _, decode := range decoders {
 			_ = decode(b)
@@ -696,15 +826,15 @@ func FuzzFASTUnmarshal(f *testing.F) {
 	}
 	f.Fuzz(func(_ *testing.T, b []byte) {
 		decoders := []func([]byte) error{
-			(&KrbFastArmor{}).Unmarshal,
-			(&KrbFastArmoredReq{}).Unmarshal,
-			(&KrbFastReq{}).Unmarshal,
-			(&PAFXFastRequest{}).Unmarshal,
-			(&KrbFastArmoredRep{}).Unmarshal,
-			(&PAFXFastReply{}).Unmarshal,
-			(&KrbFastFinished{}).Unmarshal,
-			(&KrbFastResponse{}).Unmarshal,
-			(&PAEncryptedChallenge{}).Unmarshal,
+			new(KrbFastArmor).Unmarshal,
+			new(KrbFastArmoredReq).Unmarshal,
+			new(KrbFastReq).Unmarshal,
+			new(PAFXFastRequest).Unmarshal,
+			new(KrbFastArmoredRep).Unmarshal,
+			new(PAFXFastReply).Unmarshal,
+			new(KrbFastFinished).Unmarshal,
+			new(KrbFastResponse).Unmarshal,
+			new(PAEncryptedChallenge).Unmarshal,
 			(&PAFXError{}).Unmarshal,
 		}
 		for _, decode := range decoders {
