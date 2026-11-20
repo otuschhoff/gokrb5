@@ -244,6 +244,10 @@ func TestLibDefaultsNumericAndEKUBoundaries(t *testing.T) {
 }
 
 func TestLibDefaultsEnctypeFinalizationTiming(t *testing.T) {
+	const (
+		desCBCMD5     = "des-cbc-md5"
+		aes128CTSSHA1 = "aes128-cts-hmac-sha1-96"
+	)
 	for _, weak := range []string{"true", "false"} {
 		t.Run(weak, func(t *testing.T) {
 			l := newLibDefaults()
@@ -254,9 +258,9 @@ func TestLibDefaultsEnctypeFinalizationTiming(t *testing.T) {
 				"allow_weak_crypto=true", "allow_weak_crypto=" + weak,
 			}
 			want := newLibDefaults()
-			want.DefaultTGSEnctypes = []string{"des-cbc-md5", "aes128-cts-hmac-sha1-96"}
-			want.DefaultTktEnctypes = []string{"des-cbc-md5", "aes128-cts-hmac-sha1-96"}
-			want.PermittedEnctypes = []string{"des-cbc-md5", "aes128-cts-hmac-sha1-96"}
+			want.DefaultTGSEnctypes = []string{desCBCMD5, aes128CTSSHA1}
+			want.DefaultTktEnctypes = []string{desCBCMD5, aes128CTSSHA1}
+			want.PermittedEnctypes = []string{desCBCMD5, aes128CTSSHA1}
 			want.AllowWeakCrypto = weak == "true"
 			err := l.parseLines(append(lines, "no equals"))
 			assertLibDefaultsFailure(t, l, want, err, "libdefaults section line (no equals)")
