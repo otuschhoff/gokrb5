@@ -47,6 +47,43 @@ func New() *Config {
 	}
 }
 
+// NewFromString creates a new Config struct from a string.
+func NewFromString(s string) (*Config, error) {
+	reader := strings.NewReader(s)
+	return NewFromReader(reader)
+}
+
+// NewFromReader creates a new Config struct from an io.Reader.
+func NewFromReader(r io.Reader) (*Config, error) {
+	scanner := bufio.NewScanner(r)
+	return NewFromScanner(scanner)
+}
+
+// NewFromScanner creates a new Config struct from a bufio.Scanner.
+func NewFromScanner(scanner *bufio.Scanner) (*Config, error) {
+	c := New()
+	scanned := scanConfigSections(scanner)
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error reading Kerberos configuration: %w", err)
+	}
+
+	var warning error
+	for i, start := range scanned.starts {
+		end := len(scanned.lines)
+		if i+1 < len(scanned.starts) {
+			end = scanned.starts[i+1]
+		}
+		sectionWarning, err := parseConfigSection(c, scanned.names[start], scanned.lines[start:end])
+		if err != nil {
+			return nil, err
+		}
+		if sectionWarning != nil {
+			warning = sectionWarning
+		}
+	}
+	return c, warning
+}
+
 // LibDefaults represents the [libdefaults] section of the configuration.
 type LibDefaults struct {
 	ADSite          string
@@ -420,43 +457,6 @@ func Load(cfgPath string) (*Config, error) {
 		return cfg, err
 	}
 	return cfg, nil
-}
-
-// NewFromString creates a new Config struct from a string.
-func NewFromString(s string) (*Config, error) {
-	reader := strings.NewReader(s)
-	return NewFromReader(reader)
-}
-
-// NewFromReader creates a new Config struct from an io.Reader.
-func NewFromReader(r io.Reader) (*Config, error) {
-	scanner := bufio.NewScanner(r)
-	return NewFromScanner(scanner)
-}
-
-// NewFromScanner creates a new Config struct from a bufio.Scanner.
-func NewFromScanner(scanner *bufio.Scanner) (*Config, error) {
-	c := New()
-	scanned := scanConfigSections(scanner)
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading Kerberos configuration: %w", err)
-	}
-
-	var warning error
-	for i, start := range scanned.starts {
-		end := len(scanned.lines)
-		if i+1 < len(scanned.starts) {
-			end = scanned.starts[i+1]
-		}
-		sectionWarning, err := parseConfigSection(c, scanned.names[start], scanned.lines[start:end])
-		if err != nil {
-			return nil, err
-		}
-		if sectionWarning != nil {
-			warning = sectionWarning
-		}
-	}
-	return c, warning
 }
 
 const realmsSectionName = "realms"
