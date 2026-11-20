@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"net"
-	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -45,48 +44,147 @@ func TestConfig_GetKDCsUsesConfiguredKDC(t *testing.T) {
 }
 
 func TestGetKDCsUsesADSiteDiscoveryOrder(t *testing.T) {
-	original := orderedSRV
-	defer func() { orderedSRV = original }()
-	var names []string
-	orderedSRV = func(service, proto, name string) (int, map[int]*net.SRV, error) {
+	t.Parallel()
+
+	names := []string{}
+	lookup := func(service, proto, name string) (int, map[int]*net.SRV, error) {
 		names = append(names, service+"/"+proto+"/"+name)
 		if name == "dc._msdcs.EXAMPLE.ORG" {
-			return 1, map[int]*net.SRV{1: {Target: "dc.example.org.", Port: 88}}, nil
+			return 2, map[int]*net.SRV{
+				1: {Target: "dc.example.org.", Port: 88, Priority: 0, Weight: 0},
+				2: {Target: "backup.example.org.", Port: 188, Priority: 1, Weight: 0},
+			}, nil
 		}
 		return 0, nil, errors.New("not found")
 	}
 	c := New()
 	c.LibDefaults.DNSLookupKDC = true
 	c.LibDefaults.ADSite = "HQ"
-	c.Realms = nil
-	count, kdcs, err := c.GetKDCs("EXAMPLE.ORG", true)
+	count, kdcs, err := c.getKDCs("EXAMPLE.ORG", true, lookup)
 	assert.NoError(t, err)
-	assert.Equal(t, 1, count)
-	assert.Equal(t, "dc.example.org:88", kdcs[1])
-	assert.True(t, reflect.DeepEqual([]string{
+	assert.Equal(t, 2, count)
+	assert.Equal(t, map[int]string{1: "dc.example.org:88", 2: "backup.example.org:188"}, kdcs)
+	assert.Equal(t, []string{
 		"kerberos/tcp/HQ._sites.dc._msdcs.EXAMPLE.ORG",
 		"kerberos/tcp/dc._msdcs.EXAMPLE.ORG",
-	}, names), "lookup order = %v", names)
+	}, names)
 }
 
 func TestGetKpasswdServersFallsBackAfterLookupError(t *testing.T) {
-	original := orderedSRV
-	defer func() { orderedSRV = original }()
-	var services []string
-	orderedSRV = func(service string, _, _ string) (int, map[int]*net.SRV, error) {
-		services = append(services, service)
+	t.Parallel()
+
+	queries := []string{}
+	lookup := func(service, proto, name string) (int, map[int]*net.SRV, error) {
+		queries = append(queries, service+"/"+proto+"/"+name)
 		if service == "kpasswd" {
 			return 0, nil, errors.New("not found")
 		}
-		return 1, map[int]*net.SRV{1: {Target: "admin.example.org.", Port: 749}}, nil
+		return 1, map[int]*net.SRV{1: {Target: "admin.example.org.", Port: 749, Priority: 0, Weight: 0}}, nil
 	}
 	c := New()
 	c.LibDefaults.DNSLookupKDC = true
-	count, servers, err := c.GetKpasswdServers("EXAMPLE.ORG", true)
+	count, servers, err := c.getKpasswdServers("EXAMPLE.ORG", true, lookup)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, count)
 	assert.Equal(t, "admin.example.org:749", servers[1])
-	assert.Equal(t, []string{"kpasswd", "kerberos-adm"}, services)
+	assert.Equal(t, []string{"kpasswd/tcp/EXAMPLE.ORG", "kerberos-adm/tcp/EXAMPLE.ORG"}, queries)
+}
+
+func TestHostDiscoveryRetainsLastLookupError(t *testing.T) {
+	t.Parallel()
+
+	firstErr := errors.New("first SRV lookup failed")
+	lastErr := errors.New("last SRV lookup failed")
+	for _, tt := range []struct {
+		name        string
+		discover    func(*Config, string, bool, srvLookup) (int, map[int]string, error)
+		lookupErrs  []error
+		wantQueries []string
+	}{
+		{
+			name:       "kdc after empty realm answer",
+			discover:   (*Config).getKDCs,
+			lookupErrs: []error{firstErr, lastErr, nil},
+			wantQueries: []string{
+				"kerberos/udp/HQ._sites.dc._msdcs.EXAMPLE.ORG",
+				"kerberos/udp/dc._msdcs.EXAMPLE.ORG",
+				"kerberos/udp/EXAMPLE.ORG",
+			},
+		},
+		{
+			name:        "password server after lookup failures",
+			discover:    (*Config).getKpasswdServers,
+			lookupErrs:  []error{firstErr, lastErr},
+			wantQueries: []string{"kpasswd/udp/EXAMPLE.ORG", "kerberos-adm/udp/EXAMPLE.ORG"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			queries := make([]string, 0, len(tt.wantQueries))
+			lookup := func(service, proto, name string) (int, map[int]*net.SRV, error) {
+				i := len(queries)
+				if i >= len(tt.lookupErrs) {
+					t.Fatal("unexpected extra SRV lookup")
+				}
+				queries = append(queries, service+"/"+proto+"/"+name)
+				return 0, nil, tt.lookupErrs[i]
+			}
+			cfg := New()
+			cfg.LibDefaults.DNSLookupKDC = true
+			cfg.LibDefaults.ADSite = "HQ"
+			count, hosts, err := tt.discover(cfg, "EXAMPLE.ORG", false, lookup)
+			assert.Equal(t, tt.wantQueries, queries)
+			assert.Same(t, lastErr, err)
+			assert.Zero(t, count)
+			assert.Equal(t, map[int]string{}, hosts)
+		})
+	}
+}
+
+func TestHostDiscoveryWithNoSRVRecords(t *testing.T) {
+	t.Parallel()
+
+	const realmName = "EXAMPLE.ORG"
+	cfg := New()
+	cfg.LibDefaults.DefaultRealm = realmName
+	cfg.LibDefaults.DNSLookupKDC = true
+	var realm Realm
+	realm.Realm = realmName
+	realm.AdminServer = []string{"admin.example.org:749"}
+	cfg.Realms = []Realm{realm}
+	lookup := func(_, _, _ string) (int, map[int]*net.SRV, error) {
+		return 0, nil, nil
+	}
+
+	count, hosts, err := cfg.getKDCs("", false, lookup)
+	assert.EqualError(t, err, "no KDC SRV records found for realm "+realmName)
+	assert.Zero(t, count)
+	assert.Equal(t, map[int]string{}, hosts)
+
+	count, hosts, err = cfg.getKpasswdServers(realmName, false, lookup)
+	assert.EqualError(t, err, "no kpasswd or kadmin SRV records found for realm "+realmName)
+	assert.Zero(t, count)
+	assert.Equal(t, map[int]string{}, hosts)
+}
+
+func TestGetKpasswdServersDoesNotOverwriteConfigStorage(t *testing.T) {
+	t.Parallel()
+
+	backing := []string{"keep"}
+	cfg := New()
+	cfg.LibDefaults.DNSLookupKDC = false
+	var realm Realm
+	realm.Realm = "EXAMPLE.ORG"
+	realm.KPasswdServer = backing[:0]
+	realm.AdminServer = []string{"admin.example.org:749", "missing-port"}
+	cfg.Realms = []Realm{realm}
+
+	count, hosts, err := cfg.GetKpasswdServers("example.org", true)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
+	assert.Equal(t, map[int]string{1: "admin.example.org:464"}, hosts)
+	assert.Equal(t, []string{"keep"}, backing)
 }
 
 func TestResolveKDC(t *testing.T) {

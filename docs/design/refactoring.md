@@ -2,8 +2,8 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-75 done. The latest v8
-inventories contain 539 canonical and 3,600 supplemental findings. Most
+(floor raised to 86.0%), and Phase 5 slices 1-76 done. The latest v8
+inventories contain 536 canonical and 3,594 supplemental findings. Most
 remaining canonical findings are from `revive`, complexity and nesting
 checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
 Phase 3/4 interoperability and Windows exit evidence remains an external CI
@@ -30,7 +30,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 87.9% cross-package statement coverage; 539 canonical lint findings after Slice 75 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 87.9% cross-package statement coverage; 536 canonical lint findings after Slice 76 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -819,6 +819,27 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 76 (2026-11-20, v8 KDC and password-server discovery; Q-10):
+Use per-call SRV lookup functions in discovery tests rather than replacing
+a package global. The public methods still use the same DNS resolver and
+preserve configured-server precedence, AD site/domain/realm and password
+service query order, preference indices, empty results, and the last DNS
+error. Isolate admin-server fallback so it does not append to caller-owned
+configuration storage. The new regression reproduced the overwrite with
+an empty but preallocated `KPasswdServer` slice before the fix.
+
+The focused discovery cases passed 100 shuffled runs under the race
+detector. Both module suites passed, with 87.9% v8 cross-package statement
+coverage. Config and client passed build, vet, repeated race runs, and
+Linux/386 tests on Go 1.26.0, plus Windows/amd64 test cross-builds. The
+live DNS fixture was not run.
+
+Both modules passed changed-line lint against `7120309` and `origin/main`.
+V8 canonical findings fell from 539 to 536, removing `gochecknoglobals`,
+`gocognit`, and `nestif` findings. Supplemental findings fell from 3,600
+to 3,594. Both profiles are clean for `hosts.go` and `hosts_test.go`,
+with no findings or suppressions added.
 
 Slice 75 (2026-11-19, v8 ticket key lookup and PAC verification context; Q-10):
 Use one service-key lookup for ticket decryption and PAC processing. A nil
