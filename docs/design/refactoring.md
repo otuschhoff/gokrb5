@@ -2,8 +2,8 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-105 done. The latest v8
-inventories contain 518 canonical and 3,460 supplemental findings. Most
+(floor raised to 86.0%), and Phase 5 slices 1-106 done. The latest v8
+inventories contain 518 canonical and 3,455 supplemental findings. Most
 remaining canonical findings are from `revive`, complexity and nesting
 checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
 Phase 3/4 interoperability and Windows exit evidence remains an external CI
@@ -30,7 +30,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.3% cross-package statement coverage (Slice 102); 518 canonical lint findings after Slice 105 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.3% cross-package statement coverage (Slice 102); 518 canonical lint findings after Slice 106 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -819,6 +819,16 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 106 (2026-11-20, v8 config characterization test wrapping; Q-10):
+Wrap the five overlong lines in `krb5conf_characterization_test.go`.
+The fixtures, expectations, and failure messages are unchanged, and the
+v8 config test suite passed. PKU2U cleanup remains deferred.
+
+Changed-line lint passed against `19a94a2` and `origin/main` for both
+modules. V8 supplemental findings fell from 3,460 to 3,455 (`lll`). The
+v8 canonical and both v7 inventories were unchanged, with no new findings
+or suppressions.
 
 Slice 105 (2026-11-20, v8 config comment wrapping; Q-10):
 Reflow the package comment and the `PreferredPreauthTypes` and

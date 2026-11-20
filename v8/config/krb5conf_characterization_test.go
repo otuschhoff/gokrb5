@@ -158,7 +158,11 @@ func TestLibDefaultsValueFailureMutation(t *testing.T) {
 		{"eku_case", "pkinit_eku_checking=KDC", ": invalid PKINIT EKU checking mode"},
 		{"preauth_space", "preferred_preauth_types=17, 16", `: strconv.ParseInt: parsing " 16": invalid syntax`},
 		{"preauth_empty", "preferred_preauth_types=", `: strconv.ParseInt: parsing "": invalid syntax`},
-		{"preauth_overflow", "preferred_preauth_types=17,2147483648", `: strconv.ParseInt: parsing "2147483648": value out of range`},
+		{
+			"preauth_overflow",
+			"preferred_preauth_types=17,2147483648",
+			`: strconv.ParseInt: parsing "2147483648": value out of range`,
+		},
 		{"options_partial", "kdc_default_options=00ffz0", ": encoding/hex: invalid byte: U+007A 'z'"},
 		{"options_odd", "kdc_default_options=0x1", ": encoding/hex: odd length hex string"},
 		{"options_upper_prefix", "kdc_default_options=0X10", ": encoding/hex: invalid byte: U+0058 'X'"},
@@ -193,8 +197,24 @@ func TestLibDefaultsNumericAndEKUBoundaries(t *testing.T) {
 		name  string
 		lines []string
 	}{
-		{"lower", []string{"ccache_type=0", "pkinit_dh_min_bits=1024", "kdc_timesync=0", "safe_checksum_type=0", "realm_try_domains=-1", "udp_preference_limit=0", "pkinit_eku_checking=kdc"}},
-		{"upper", []string{"ccache_type=4", "pkinit_dh_min_bits=2147483647", "kdc_timesync=2147483647", "safe_checksum_type=2147483647", "realm_try_domains=2147483647", "udp_preference_limit=32700", "pkinit_eku_checking=kpServerAuth"}},
+		{"lower", []string{
+			"ccache_type=0",
+			"pkinit_dh_min_bits=1024",
+			"kdc_timesync=0",
+			"safe_checksum_type=0",
+			"realm_try_domains=-1",
+			"udp_preference_limit=0",
+			"pkinit_eku_checking=kdc",
+		}},
+		{"upper", []string{
+			"ccache_type=4",
+			"pkinit_dh_min_bits=2147483647",
+			"kdc_timesync=2147483647",
+			"safe_checksum_type=2147483647",
+			"realm_try_domains=2147483647",
+			"udp_preference_limit=32700",
+			"pkinit_eku_checking=kpServerAuth",
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -208,7 +228,10 @@ func TestLibDefaultsNumericAndEKUBoundaries(t *testing.T) {
 				want = []int{4, 2147483647, 2147483647, 2147483647, 2147483647, 32700}
 				eku = "kpServerAuth"
 			}
-			got := []int{l.CCacheType, l.PKINITDHMinBits, l.KDCTimeSync, l.SafeChecksumType, l.RealmTryDomains, l.UDPPreferenceLimit}
+			got := []int{
+				l.CCacheType, l.PKINITDHMinBits, l.KDCTimeSync,
+				l.SafeChecksumType, l.RealmTryDomains, l.UDPPreferenceLimit,
+			}
 			if !reflect.DeepEqual(got, want) || l.PKINITEKUChecking != eku {
 				t.Fatalf("numeric values = %v, EKU = %q; want %v, %q", got, l.PKINITEKUChecking, want, eku)
 			}
@@ -239,7 +262,13 @@ func TestLibDefaultsEnctypeFinalizationTiming(t *testing.T) {
 			ids := []int32{17}
 			if !reflect.DeepEqual(l.DefaultTGSEnctypeIDs, ids) ||
 				!reflect.DeepEqual(l.DefaultTktEnctypeIDs, ids) || !reflect.DeepEqual(l.PermittedEnctypeIDs, ids) {
-				t.Fatalf("final IDs = %v, %v, %v; want %v", l.DefaultTGSEnctypeIDs, l.DefaultTktEnctypeIDs, l.PermittedEnctypeIDs, ids)
+				t.Fatalf(
+					"final IDs = %v, %v, %v; want %v",
+					l.DefaultTGSEnctypeIDs,
+					l.DefaultTktEnctypeIDs,
+					l.PermittedEnctypeIDs,
+					ids,
+				)
 			}
 			l = newLibDefaults()
 			if err := l.parseLines(lines); err != nil {
