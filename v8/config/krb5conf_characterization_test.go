@@ -129,6 +129,10 @@ func TestLibDefaultsBooleanFailureContextAndMutation(t *testing.T) {
 }
 
 func TestLibDefaultsValueFailureMutation(t *testing.T) {
+	const (
+		invalidDHMinimumDetail = ": invalid PKINIT DH minimum"
+		invalidDurationDetail  = ": invalid time duration"
+	)
 	tests := []struct {
 		name   string
 		line   string
@@ -152,9 +156,9 @@ func TestLibDefaultsValueFailureMutation(t *testing.T) {
 		{"udp_bound", "udp_preference_limit=32701", ""},
 		{"udp_overflow", "udp_preference_limit=4294967296", ""},
 		{"udp_syntax", "udp_preference_limit=x", ""},
-		{"dh_bound", "pkinit_dh_min_bits=1023", ": invalid PKINIT DH minimum"},
-		{"dh_syntax", "pkinit_dh_min_bits=x", ": invalid PKINIT DH minimum"},
-		{"dh_overflow", "pkinit_dh_min_bits=9999999999999999999999999", ": invalid PKINIT DH minimum"},
+		{"dh_bound", "pkinit_dh_min_bits=1023", invalidDHMinimumDetail},
+		{"dh_syntax", "pkinit_dh_min_bits=x", invalidDHMinimumDetail},
+		{"dh_overflow", "pkinit_dh_min_bits=9999999999999999999999999", invalidDHMinimumDetail},
 		{"eku_case", "pkinit_eku_checking=KDC", ": invalid PKINIT EKU checking mode"},
 		{"preauth_space", "preferred_preauth_types=17, 16", `: strconv.ParseInt: parsing " 16": invalid syntax`},
 		{"preauth_empty", "preferred_preauth_types=", `: strconv.ParseInt: parsing "": invalid syntax`},
@@ -166,9 +170,9 @@ func TestLibDefaultsValueFailureMutation(t *testing.T) {
 		{"options_partial", "kdc_default_options=00ffz0", ": encoding/hex: invalid byte: U+007A 'z'"},
 		{"options_odd", "kdc_default_options=0x1", ": encoding/hex: odd length hex string"},
 		{"options_upper_prefix", "kdc_default_options=0X10", ": encoding/hex: invalid byte: U+0058 'X'"},
-		{"clockskew", "clockskew=invalid", ": invalid time duration"},
-		{"renew_lifetime", "renew_lifetime=invalid", ": invalid time duration"},
-		{"ticket_lifetime", "ticket_lifetime=invalid", ": invalid time duration"},
+		{"clockskew", "clockskew=invalid", invalidDurationDetail},
+		{"renew_lifetime", "renew_lifetime=invalid", invalidDurationDetail},
+		{"ticket_lifetime", "ticket_lifetime=invalid", invalidDurationDetail},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

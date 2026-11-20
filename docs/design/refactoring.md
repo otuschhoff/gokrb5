@@ -2,8 +2,8 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-109 done. The latest v8
-inventories contain 518 canonical and 3,410 supplemental findings. Most
+(floor raised to 86.0%), and Phase 5 slices 1-110 done. The latest v8
+inventories contain 518 canonical and 3,408 supplemental findings. Most
 remaining canonical findings are from `revive`, complexity and nesting
 checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
 Phase 3/4 interoperability and Windows exit evidence remains an external CI
@@ -30,7 +30,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.3% cross-package statement coverage (Slice 102); 518 canonical lint findings after Slice 109 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.3% cross-package statement coverage (Slice 102); 518 canonical lint findings after Slice 110 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -819,6 +819,17 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 110 (2026-11-20, v8 config failure-message expectations; Q-10):
+Name the repeated PKINIT DH minimum and duration error suffixes with
+test-local constants. Expanding the constants reproduced the original
+test file byte for byte, and the v8 config suite passed. Production
+code is unchanged, and PKU2U cleanup remains deferred.
+
+Changed-line lint passed against `befa6e9` and `origin/main` for both
+modules. V8 supplemental findings fell from 3,410 to 3,408 (`goconst`).
+The v8 canonical and both v7 inventories were unchanged, with no new
+findings or suppressions.
 
 Slice 109 (2026-11-20, v8 config parser modernization; Q-10):
 Use `strings.SplitSeq` for extra addresses and preferred preauthentication
