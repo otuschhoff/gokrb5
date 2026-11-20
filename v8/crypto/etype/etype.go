@@ -4,6 +4,8 @@ package etype
 import "hash"
 
 // EType is the interface defining the Encryption Type.
+//
+//nolint:interfacebloat // Preserve the public method set used by callers and custom enctypes.
 type EType interface {
 	GetETypeID() int32
 	GetHashID() int32

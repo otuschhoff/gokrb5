@@ -34,28 +34,35 @@ func TestEncryptionRoundTrips(t *testing.T) {
 			if !bytes.Equal(decrypted, plaintext) {
 				t.Fatalf("DecryptData = %x, want %x", decrypted, plaintext)
 			}
-
-			_, message, err := rfc8009.EncryptMessage(test.key, plaintext, 42, test.etype)
-			if err != nil {
-				t.Fatal(err)
-			}
-			decrypted, err = rfc8009.DecryptMessage(test.key, message, 42, test.etype)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !bytes.Equal(decrypted, plaintext) {
-				t.Fatalf("DecryptMessage = %q, want %q", decrypted, plaintext)
-			}
-			if !rfc8009.VerifyIntegrity(test.key, message, 42, test.etype) {
-				t.Fatal("valid integrity hash rejected")
-			}
-
-			tampered := append([]byte(nil), message...)
-			tampered[len(tampered)-1] ^= 0xff
-			if _, err := rfc8009.DecryptMessage(test.key, tampered, 42, test.etype); err == nil || !strings.Contains(err.Error(), "integrity verification failed") {
-				t.Fatalf("tampered message error = %v", err)
-			}
+			checkMessageRoundTrip(t, test.etype, test.key, plaintext)
 		})
+	}
+}
+
+func checkMessageRoundTrip(t *testing.T, e etype.EType, key, plaintext []byte) {
+	t.Helper()
+
+	const usage = 42
+	_, message, err := rfc8009.EncryptMessage(key, plaintext, usage, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decrypted, err := rfc8009.DecryptMessage(key, message, usage, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decrypted, plaintext) {
+		t.Fatalf("DecryptMessage = %q, want %q", decrypted, plaintext)
+	}
+	if !rfc8009.VerifyIntegrity(key, message, usage, e) {
+		t.Fatal("valid integrity hash rejected")
+	}
+
+	tampered := append([]byte(nil), message...)
+	tampered[len(tampered)-1] ^= 0xff
+	_, err = rfc8009.DecryptMessage(key, tampered, usage, e)
+	if err == nil || !strings.Contains(err.Error(), "integrity verification failed") {
+		t.Fatalf("tampered message error = %v", err)
 	}
 }
 
@@ -63,16 +70,20 @@ func TestEncryptionRejectsMalformedInputs(t *testing.T) {
 	etype := krbcrypto.Aes128CtsHmacSha256128{}
 	shortKey := []byte("short")
 
-	if _, _, err := rfc8009.EncryptData(shortKey, []byte("plaintext"), etype); err == nil || !strings.Contains(err.Error(), "incorrect keysize") {
+	_, _, err := rfc8009.EncryptData(shortKey, []byte("plaintext"), etype)
+	if err == nil || !strings.Contains(err.Error(), "incorrect keysize") {
 		t.Fatalf("EncryptData error = %v", err)
 	}
-	if _, err := rfc8009.DecryptData(shortKey, []byte("ciphertext"), etype); err == nil || !strings.Contains(err.Error(), "incorrect keysize") {
+	_, err = rfc8009.DecryptData(shortKey, []byte("ciphertext"), etype)
+	if err == nil || !strings.Contains(err.Error(), "incorrect keysize") {
 		t.Fatalf("DecryptData error = %v", err)
 	}
-	if _, _, err := rfc8009.EncryptMessage(shortKey, []byte("plaintext"), 1, etype); err == nil || !strings.Contains(err.Error(), "incorrect keysize") {
+	_, _, err = rfc8009.EncryptMessage(shortKey, []byte("plaintext"), 1, etype)
+	if err == nil || !strings.Contains(err.Error(), "incorrect keysize") {
 		t.Fatalf("EncryptMessage error = %v", err)
 	}
-	if _, err := rfc8009.DecryptMessage(bytes.Repeat([]byte{0x44}, 16), []byte("short"), 1, etype); err == nil || !strings.Contains(err.Error(), "ciphertext is too short") {
+	_, err = rfc8009.DecryptMessage(bytes.Repeat([]byte{0x44}, 16), []byte("short"), 1, etype)
+	if err == nil || !strings.Contains(err.Error(), "ciphertext is too short") {
 		t.Fatalf("DecryptMessage error = %v", err)
 	}
 	if rfc8009.VerifyIntegrity(bytes.Repeat([]byte{0x44}, 16), []byte("short"), 1, etype) {
@@ -138,8 +149,8 @@ func TestStringToKeyAndParameters(t *testing.T) {
 		want   int
 		err    bool
 	}{
-		{params: "00000000", want: 0},
-		{params: "00008000", want: 32768},
+		{params: "00000000", want: 0, err: false},
+		{params: "00008000", want: 32768, err: false},
 		{params: "bad", want: 32768, err: true},
 		{params: "zzzzzzzz", want: 32768, err: true},
 	} {

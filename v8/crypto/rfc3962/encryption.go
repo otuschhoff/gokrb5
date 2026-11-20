@@ -12,12 +12,14 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/crypto/etype"
 )
 
+const bitsPerByte = 8
+
 // EncryptData encrypts the data provided using methods specific to the etype provided as defined in RFC 3962.
 func EncryptData(key, data []byte, e etype.EType) ([]byte, []byte, error) {
 	if len(key) != e.GetKeyByteSize() {
 		return []byte{}, []byte{}, fmt.Errorf("incorrect keysize: expected: %v actual: %v", e.GetKeyByteSize(), len(key))
 	}
-	ivz := make([]byte, e.GetCypherBlockBitLength()/8)
+	ivz := make([]byte, e.GetCypherBlockBitLength()/bitsPerByte)
 	iv, ciphertext, err := aescts.Encrypt(key, ivz, data)
 	if err != nil {
 		return iv, ciphertext, fmt.Errorf("encrypt aes-cts data: %w", err)
@@ -32,7 +34,8 @@ func EncryptMessage(key, message []byte, usage uint32, e etype.EType) ([]byte, [
 		return []byte{}, []byte{}, fmt.Errorf("incorrect keysize: expected: %v actual: %v", e.GetKeyByteSize(), len(key))
 	}
 	// confounder
-	plainBytes := make([]byte, e.GetConfounderByteSize())
+	confounderSize := e.GetConfounderByteSize()
+	plainBytes := make([]byte, confounderSize, confounderSize+len(message))
 	_, err := rand.Read(plainBytes)
 	if err != nil {
 		return []byte{}, []byte{}, fmt.Errorf("could not generate random confounder: %w", err)
@@ -68,7 +71,7 @@ func DecryptData(key, data []byte, e etype.EType) ([]byte, error) {
 	if len(key) != e.GetKeyByteSize() {
 		return []byte{}, fmt.Errorf("incorrect keysize: expected: %v actual: %v", e.GetKeyByteSize(), len(key))
 	}
-	ivz := make([]byte, e.GetCypherBlockBitLength()/8)
+	ivz := make([]byte, e.GetCypherBlockBitLength()/bitsPerByte)
 	plaintext, err := aescts.Decrypt(key, ivz, data)
 	if err != nil {
 		return plaintext, fmt.Errorf("decrypt aes-cts data: %w", err)
@@ -79,7 +82,7 @@ func DecryptData(key, data []byte, e etype.EType) ([]byte, error) {
 // DecryptMessage decrypts the message provided using the methods specific to the etype provided as defined in RFC 3962.
 // The integrity of the message is also verified.
 func DecryptMessage(key, ciphertext []byte, usage uint32, e etype.EType) ([]byte, error) {
-	checksumSize := e.GetHMACBitLength() / 8
+	checksumSize := e.GetHMACBitLength() / bitsPerByte
 	if checksumSize <= 0 || len(ciphertext) < checksumSize+e.GetConfounderByteSize() {
 		return nil, errors.New("ciphertext is too short")
 	}

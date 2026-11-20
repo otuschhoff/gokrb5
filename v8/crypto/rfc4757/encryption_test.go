@@ -26,7 +26,8 @@ func TestEncryptDataRoundTrip(t *testing.T) {
 	if !bytes.Equal(decrypted, plaintext) {
 		t.Fatalf("decrypted = %q, want %q", decrypted, plaintext)
 	}
-	if _, err := rfc4757.EncryptData([]byte("short"), plaintext, etype); err == nil || !strings.Contains(err.Error(), "incorrect keysize") {
+	_, err = rfc4757.EncryptData([]byte("short"), plaintext, etype)
+	if err == nil || !strings.Contains(err.Error(), "incorrect keysize") {
 		t.Fatalf("invalid key error = %v", err)
 	}
 }
@@ -51,11 +52,13 @@ func TestEncryptMessageRoundTripAndIntegrity(t *testing.T) {
 
 		tampered := append([]byte(nil), ciphertext...)
 		tampered[0] ^= 0xff
-		if _, err := rfc4757.DecryptMessage(key, tampered, 9, export, etype); err == nil || !strings.Contains(err.Error(), "integrity checksum incorrect") {
+		_, err = rfc4757.DecryptMessage(key, tampered, 9, export, etype)
+		if err == nil || !strings.Contains(err.Error(), "integrity checksum incorrect") {
 			t.Fatalf("tampered message error = %v", err)
 		}
 	}
-	if _, err := rfc4757.DecryptMessage(key, []byte("short"), 9, false, etype); err == nil || !strings.Contains(err.Error(), "ciphertext is too short") {
+	_, err := rfc4757.DecryptMessage(key, []byte("short"), 9, false, etype)
+	if err == nil || !strings.Contains(err.Error(), "ciphertext is too short") {
 		t.Fatalf("short message error = %v", err)
 	}
 	if rfc4757.VerifyIntegrity(key, nil, []byte("short"), etype) {

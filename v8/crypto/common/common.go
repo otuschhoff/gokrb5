@@ -8,17 +8,26 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/otuschhoff/gokrb5/v8/crypto/etype"
+)
+
+const (
+	bitsPerByte         = 8
+	keyUsageByteSize    = 4
+	checksumKeyMarker   = 0x99
+	encryptionKeyMarker = 0xAA
+	integrityKeyMarker  = 0x55
 )
 
 // ZeroPad pads bytes with zeros to nearest multiple of message size m.
 func ZeroPad(b []byte, m int) ([]byte, error) {
 	if m <= 0 {
-		return nil, errors.New("Invalid message block size when padding")
+		return nil, errors.New("Invalid message block size when padding") //nolint:staticcheck // Preserve error text.
 	}
 	if len(b) == 0 {
-		return nil, errors.New("Data not valid to pad: Zero size")
+		return nil, errors.New("Data not valid to pad: Zero size") //nolint:staticcheck // Preserve error text.
 	}
 	if l := len(b) % m; l != 0 {
 		n := m - l
@@ -31,15 +40,15 @@ func ZeroPad(b []byte, m int) ([]byte, error) {
 // PKCS7Pad pads bytes according to RFC 2315 to nearest multiple of message size m.
 func PKCS7Pad(b []byte, m int) ([]byte, error) {
 	if m <= 0 {
-		return nil, errors.New("Invalid message block size when padding")
+		return nil, errors.New("Invalid message block size when padding") //nolint:staticcheck // Preserve error text.
 	}
 	if len(b) == 0 {
-		return nil, errors.New("Data not valid to pad: Zero size")
+		return nil, errors.New("Data not valid to pad: Zero size") //nolint:staticcheck // Preserve error text.
 	}
 	n := m - (len(b) % m)
 	pb := make([]byte, len(b)+n)
 	copy(pb, b)
-	if n > 255 {
+	if n > math.MaxUint8 {
 		return nil, fmt.Errorf("PKCS7 padding size %d exceeds byte range", n)
 	}
 	copy(pb[len(b):], bytes.Repeat([]byte{byte(n)}, n)) // #nosec G115 -- bounded by 255 above.
@@ -62,7 +71,7 @@ func PKCS7Unpad(b []byte, m int) ([]byte, error) {
 	if n == 0 || n > len(b) {
 		return nil, errors.New("padded data not valid: Data may not have been padded")
 	}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if b[len(b)-n+i] != c {
 			return nil, errors.New("padded data not valid")
 		}
@@ -80,7 +89,7 @@ func GetHash(pt, key []byte, usage []byte, etype etype.EType) ([]byte, error) {
 	p := make([]byte, len(pt))
 	copy(p, pt)
 	mac.Write(p)
-	return mac.Sum(nil)[:etype.GetHMACBitLength()/8], nil
+	return mac.Sum(nil)[:etype.GetHMACBitLength()/bitsPerByte], nil
 }
 
 // GetChecksumHash returns a keyed checksum hash of the bytes provided.
@@ -104,33 +113,33 @@ func VerifyChecksum(key, chksum, msg []byte, usage uint32, etype etype.EType) bo
 //
 // See RFC 3961 5.3 key-derivation function definition.
 func GetUsageKc(un uint32) []byte {
-	return getUsage(un, 0x99)
+	return getUsage(un, checksumKeyMarker)
 }
 
 // GetUsageKe returns the encryption key usage value for the usage number un
 //
 // See RFC 3961 5.3 key-derivation function definition.
 func GetUsageKe(un uint32) []byte {
-	return getUsage(un, 0xAA)
+	return getUsage(un, encryptionKeyMarker)
 }
 
 // GetUsageKi returns the integrity key usage value for the usage number un
 //
 // See RFC 3961 5.3 key-derivation function definition.
 func GetUsageKi(un uint32) []byte {
-	return getUsage(un, 0x55)
+	return getUsage(un, integrityKeyMarker)
 }
 
 func getUsage(un uint32, o byte) []byte {
-	buf := make([]byte, 5)
+	buf := make([]byte, keyUsageByteSize+1)
 	binary.BigEndian.PutUint32(buf, un)
-	buf[4] = o
+	buf[keyUsageByteSize] = o
 	return buf
 }
 
 // IterationsToS2Kparams converts the number of iterations as an integer to a string representation.
 func IterationsToS2Kparams(i uint32) string {
-	b := make([]byte, 4)
+	b := make([]byte, keyUsageByteSize)
 	binary.BigEndian.PutUint32(b, i)
 	return hex.EncodeToString(b)
 }

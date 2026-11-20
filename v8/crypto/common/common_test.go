@@ -82,7 +82,7 @@ func TestPKCS7PadAndUnpad(t *testing.T) {
 	}
 }
 
-func TestChecksumAndUsageHelpers(t *testing.T) {
+func TestChecksumAndIntegrity(t *testing.T) {
 	etype := krbcrypto.Aes128CtsHmacSha256128{}
 	key := bytes.Repeat([]byte{0x42}, etype.GetKeyByteSize())
 	message := []byte("integrity protected")
@@ -98,8 +98,9 @@ func TestChecksumAndUsageHelpers(t *testing.T) {
 	if !common.VerifyChecksum(key, checksum, message, usage, etype) {
 		t.Fatal("valid checksum rejected")
 	}
-	checksum[0] ^= 0xff
-	if common.VerifyChecksum(key, checksum, message, usage, etype) {
+	tampered := bytes.Clone(checksum)
+	tampered[0] ^= 0xff
+	if common.VerifyChecksum(key, tampered, message, usage, etype) {
 		t.Fatal("tampered checksum accepted")
 	}
 	integrity, err := common.GetIntegrityHash(message, key, usage, etype)
@@ -109,7 +110,10 @@ func TestChecksumAndUsageHelpers(t *testing.T) {
 	if bytes.Equal(integrity, checksum) {
 		t.Fatal("integrity and checksum usages produced the same hash")
 	}
+}
 
+func TestUsageEncoding(t *testing.T) {
+	const usage = uint32(0x01020304)
 	if got := common.GetUsageKc(usage); !bytes.Equal(got, []byte{1, 2, 3, 4, 0x99}) {
 		t.Fatalf("Kc usage = %x", got)
 	}
@@ -119,6 +123,9 @@ func TestChecksumAndUsageHelpers(t *testing.T) {
 	if got := common.GetUsageKi(usage); !bytes.Equal(got, []byte{1, 2, 3, 4, 0x55}) {
 		t.Fatalf("Ki usage = %x", got)
 	}
+}
+
+func TestIterationsToS2Kparams(t *testing.T) {
 	if got := common.IterationsToS2Kparams(32768); got != "00008000" {
 		t.Fatalf("S2K params = %q", got)
 	}

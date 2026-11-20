@@ -11,6 +11,8 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/crypto/etype"
 )
 
+const bitsPerByte = 8
+
 // EncryptData encrypts the data provided using methods specific to the etype provided as defined in RFC 4757.
 func EncryptData(key, data []byte, e etype.EType) ([]byte, error) {
 	if len(key) != e.GetKeyByteSize() {
@@ -23,7 +25,8 @@ func EncryptData(key, data []byte, e etype.EType) ([]byte, error) {
 	ed := make([]byte, len(data))
 	copy(ed, data)
 	rc4Cipher.XORKeyStream(ed, ed)
-	rc4Cipher.Reset()
+	// Reset clears this cipher instance but cannot guarantee erasure of every key copy.
+	rc4Cipher.Reset() //nolint:staticcheck // Preserve the existing best-effort cleanup.
 	return ed, nil
 }
 
@@ -33,9 +36,10 @@ func DecryptData(key, data []byte, e etype.EType) ([]byte, error) {
 }
 
 // EncryptMessage encrypts the message provided using the methods specific to the etype provided as defined in RFC 4757.
-// The encrypted data is concatenated with its RC4 header containing integrity checksum and confounder to create an encrypted message.
+// The integrity checksum precedes the encrypted confounder and message.
 func EncryptMessage(key, data []byte, usage uint32, _ bool, e etype.EType) ([]byte, error) {
-	confounder := make([]byte, e.GetConfounderByteSize()) // size = 8
+	confounderSize := e.GetConfounderByteSize()
+	confounder := make([]byte, confounderSize, confounderSize+len(data))
 	_, err := rand.Read(confounder)
 	if err != nil {
 		return []byte{}, fmt.Errorf("error generating confounder: %w", err)
@@ -59,7 +63,7 @@ func EncryptMessage(key, data []byte, usage uint32, _ bool, e etype.EType) ([]by
 // The integrity of the message is also verified.
 // The export-weakened RC4-HMAC-EXP variant is not implemented; the flag is retained for compatibility and ignored.
 func DecryptMessage(key, data []byte, usage uint32, _ bool, e etype.EType) ([]byte, error) {
-	checksumSize := e.GetHMACBitLength() / 8
+	checksumSize := e.GetHMACBitLength() / bitsPerByte
 	if checksumSize <= 0 || len(data) < checksumSize+e.GetConfounderByteSize() {
 		return nil, errors.New("ciphertext is too short")
 	}
@@ -83,7 +87,7 @@ func DecryptMessage(key, data []byte, usage uint32, _ bool, e etype.EType) ([]by
 
 // VerifyIntegrity checks the integrity checksum of the data matches that calculated from the decrypted data.
 func VerifyIntegrity(key, pt, data []byte, e etype.EType) bool {
-	checksumSize := e.GetHMACBitLength() / 8
+	checksumSize := e.GetHMACBitLength() / bitsPerByte
 	if checksumSize <= 0 || len(data) < checksumSize {
 		return false
 	}

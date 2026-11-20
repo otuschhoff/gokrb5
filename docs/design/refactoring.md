@@ -820,6 +820,23 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 150 (2026-11-20, complete v8 crypto-tree lint cleanup; Q-10):
+Clear the remaining findings in `common`, `etype`, `rfc3962`, `rfc4757`,
+and `rfc8009`. Name protocol sizes and key-usage values, preallocate
+internal buffers, and simplify tests without dropping cases or vectors.
+Nine approved local lint exceptions preserve the public `EType` method
+set, the published RFC 8009 function name, exact error text, and legacy
+RC4-HMAC behavior. No linter configuration or dependency changes.
+
+Uncapped scans report zero findings across `v8/crypto`, down from 9
+canonical and 55 supplemental. Diagnostics outside that subtree are
+unchanged; whole-v8 totals are 340 canonical and 455 supplemental.
+Revised crypto tests pass against both baseline and final production code.
+Statement coverage did not fall in any crypto package. The full v8 build,
+vet, and race suite pass, as do 25 shuffled race-enabled crypto runs,
+Linux/386 crypto tests, and both canonical changed-line gates.
+Windows/amd64 and interop-tagged crypto tests compile but were not run.
+
 Slice 149 (2026-11-20, complete v8 RFC 3961 lint cleanup; Q-10):
 Name byte and bit constants, make n-fold carry handling explicit, and
 preallocate the DES3 plaintext and parity buffers. Keep the public API,

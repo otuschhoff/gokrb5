@@ -15,6 +15,8 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 )
 
+const bitsPerByte = 8
+
 // EncryptData encrypts the data provided using methods specific to the etype provided as defined in RFC 8009.
 func EncryptData(key, data []byte, e etype.EType) ([]byte, []byte, error) {
 	kl := e.GetKeyByteSize()
@@ -43,7 +45,8 @@ func EncryptMessage(key, message []byte, usage uint32, e etype.EType) ([]byte, [
 		return []byte{}, []byte{}, fmt.Errorf("incorrect keysize: expected: %v actual: %v", kl, len(key))
 	}
 	// confounder
-	plainBytes := make([]byte, e.GetConfounderByteSize())
+	confounderSize := e.GetConfounderByteSize()
+	plainBytes := make([]byte, confounderSize, confounderSize+len(message))
 	_, err := rand.Read(plainBytes)
 	if err != nil {
 		return []byte{}, []byte{}, fmt.Errorf("could not generate random confounder: %w", err)
@@ -94,7 +97,7 @@ func DecryptData(key, data []byte, e etype.EType) ([]byte, error) {
 // DecryptMessage decrypts the message provided using the methods specific to the etype provided as defined in RFC 8009.
 // The integrity of the message is also verified.
 func DecryptMessage(key, ciphertext []byte, usage uint32, e etype.EType) ([]byte, error) {
-	checksumSize := e.GetHMACBitLength() / 8
+	checksumSize := e.GetHMACBitLength() / bitsPerByte
 	if checksumSize <= 0 || len(ciphertext) < checksumSize+e.GetConfounderByteSize() {
 		return nil, errors.New("ciphertext is too short")
 	}
@@ -132,18 +135,19 @@ func GetIntegityHash(iv, c, key []byte, usage uint32, e etype.EType) ([]byte, er
 	return digest, nil
 }
 
-// VerifyIntegrity verifies the integrity of cipertext bytes ct.
+// VerifyIntegrity verifies the integrity of the ciphertext.
 func VerifyIntegrity(key, ct []byte, usage uint32, etype etype.EType) bool {
-	checksumSize := etype.GetHMACBitLength() / 8
+	checksumSize := etype.GetHMACBitLength() / bitsPerByte
 	if checksumSize <= 0 || len(ct) < checksumSize {
 		return false
 	}
 	h := make([]byte, checksumSize)
 	copy(h, ct[len(ct)-checksumSize:])
-	ivz := make([]byte, etype.GetConfounderByteSize())
-	ivz = append(ivz, ct[:len(ct)-checksumSize]...)
-	ib := ivz
-	expectedMAC, err := common.GetIntegrityHash(ib, key, usage, etype)
+	ivSize := etype.GetConfounderByteSize()
+	ciphertext := ct[:len(ct)-checksumSize]
+	input := make([]byte, ivSize, ivSize+len(ciphertext))
+	input = append(input, ciphertext...)
+	expectedMAC, err := common.GetIntegrityHash(input, key, usage, etype)
 	if err != nil {
 		return false
 	}

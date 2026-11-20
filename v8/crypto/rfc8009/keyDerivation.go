@@ -16,12 +16,13 @@ import (
 
 const (
 	s2kParamsZero = 32768
+	uint32Bytes   = 4
 )
 
 // DeriveRandom for key derivation as defined in RFC 8009
 func DeriveRandom(protocolKey, usage []byte, e etype.EType) ([]byte, error) {
 	h := e.GetHashFunc()()
-	return KDF_HMAC_SHA2(protocolKey, []byte("prf"), usage, h.Size()*8, e), nil
+	return KDF_HMAC_SHA2(protocolKey, []byte("prf"), usage, h.Size()*bitsPerByte, e), nil
 }
 
 // DeriveKey derives a key from the protocol key based on the usage and the etype's specific methods.
@@ -63,7 +64,7 @@ func StringToKeyIter(secret, salt string, iterations int, e etype.EType) ([]byte
 	return key, nil
 }
 
-// StringToPBKDF2 generates an encryption key from a pass phrase and salt string using the PBKDF2 function from PKCS #5 v2.0
+// StringToPBKDF2 derives key material from a passphrase and salt using PBKDF2 (PKCS #5 v2.0).
 func StringToPBKDF2(secret, salt string, iterations int, e etype.EType) []byte {
 	kl := e.GetKeyByteSize()
 	if e.GetETypeID() == etypeID.AES256_CTS_HMAC_SHA384_192 {
@@ -72,16 +73,18 @@ func StringToPBKDF2(secret, salt string, iterations int, e etype.EType) []byte {
 	return pbkdf2.Key([]byte(secret), []byte(salt), iterations, kl, e.GetHashFunc())
 }
 
-// KDF_HMAC_SHA2 key derivation: https://tools.ietf.org/html/rfc8009#section-3
+// KDF_HMAC_SHA2 derives a key according to RFC 8009, section 3.
+//
+//nolint:revive // Preserve the published function name, which matches RFC 8009 notation.
 func KDF_HMAC_SHA2(protocolKey, label, context []byte, kl int, e etype.EType) []byte {
 	// k: Length in bits of the key to be outputted, expressed in big-endian binary representation in 4 bytes.
-	k := make([]byte, 4)
+	k := make([]byte, uint32Bytes)
 	if kl < 0 || uint64(kl) > math.MaxUint32 {
 		return []byte{}
 	}
 	binary.BigEndian.PutUint32(k, uint32(kl)) // #nosec G115 -- bounded by uint32 range above.
 
-	c := make([]byte, 4)
+	c := make([]byte, uint32Bytes)
 	binary.BigEndian.PutUint32(c, uint32(1))
 	c = append(c, label...)
 	c = append(c, byte(0))
@@ -92,7 +95,7 @@ func KDF_HMAC_SHA2(protocolKey, label, context []byte, kl int, e etype.EType) []
 
 	mac := hmac.New(e.GetHashFunc(), protocolKey)
 	mac.Write(c)
-	return mac.Sum(nil)[:(kl / 8)]
+	return mac.Sum(nil)[:(kl / bitsPerByte)]
 }
 
 // GetSaltP returns the salt value based on the etype name: https://tools.ietf.org/html/rfc8009#section-4
@@ -106,8 +109,8 @@ func GetSaltP(salt, ename string) string {
 // S2KparamsToItertions converts the string representation of iterations to an integer for RFC 8009.
 func S2KparamsToItertions(s2kparams string) (int, error) {
 	var i uint32
-	if len(s2kparams) != 8 {
-		return s2kParamsZero, errors.New("Invalid s2kparams length")
+	if len(s2kparams) != hex.EncodedLen(uint32Bytes) {
+		return s2kParamsZero, errors.New("Invalid s2kparams length") //nolint:staticcheck // Preserve the existing error text.
 	}
 	b, err := hex.DecodeString(s2kparams)
 	if err != nil {
