@@ -27,15 +27,16 @@ func characterizationKeytab(records ...[]byte) []byte {
 // realm "R", name type 1, zero timestamp, eight bit key version 7, enctype 18,
 // and a one byte key. The returned slice is 22 bytes with no KVNO32 trailer.
 func characterizationV2Record() []byte {
-	body := []byte{0, 1}            // component count
-	body = append(body, 0, 1, 'R')  // realm
-	body = append(body, 0, 1, 'a')  // component
-	body = append(body, 0, 0, 0, 1) // name type
-	body = append(body, 0, 0, 0, 0) // timestamp
-	body = append(body, 7)          // eight bit key version
-	body = append(body, 0, 18)      // enctype
-	body = append(body, 0, 1, 0xAA) // key length and key
-	return body
+	return []byte{
+		0, 1, // component count
+		0, 1, 'R', // realm
+		0, 1, 'a', // component
+		0, 0, 0, 1, // name type
+		0, 0, 0, 0, // timestamp
+		7,     // eight bit key version
+		0, 18, // enctype
+		0, 1, 0xAA, // key length and key
+	}
 }
 
 func TestUnmarshalRejectsNegativeProtocolIdentifiers(t *testing.T) {
@@ -204,7 +205,8 @@ func TestUnmarshalEntryFieldErrors(t *testing.T) {
 	t.Run("second component truncated", func(t *testing.T) {
 		body := []byte{0, 2, 0, 1, 'R', 0, 1, 'a'}
 		err := New().Unmarshal(characterizationKeytab(body))
-		require.EqualError(t, err, "invalid principal in keytab record at offset 2: need 2 bytes at offset 8, input length is 8")
+		require.EqualError(t, err,
+			"invalid principal in keytab record at offset 2: need 2 bytes at offset 8, input length is 8")
 	})
 }
 
@@ -232,7 +234,7 @@ func TestReadHelpersDefensiveBounds(t *testing.T) {
 	}
 
 	p = -1
-	ke := newEntry()
+	var ke Entry
 	if err := readEntryKVNO([]byte{1, 2, 3, 4}, &p, &ke, &endian); err == nil {
 		t.Fatal("readEntryKVNO should propagate the read failure")
 	}
@@ -277,7 +279,8 @@ func TestUnmarshalPartialStateOnError(t *testing.T) {
 		b := characterizationKeytab(characterizationV2Record(), []byte{0, 1})
 		kt := New()
 		err := kt.Unmarshal(b)
-		require.EqualError(t, err, "invalid principal in keytab record at offset 28: need 2 bytes at offset 2, input length is 2")
+		require.EqualError(t, err,
+			"invalid principal in keytab record at offset 28: need 2 bytes at offset 2, input length is 2")
 		require.Len(t, kt.Entries, 1, "entries decoded before the failure are retained")
 		assert.Equal(t, "R", kt.Entries[0].Principal.Realm)
 	})

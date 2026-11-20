@@ -1,4 +1,5 @@
-// Package keytab implements Kerberos keytabs: https://web.mit.edu/kerberos/krb5-devel/doc/formats/keytab_file_format.html.
+// Package keytab implements Kerberos keytabs.
+// Format: https://web.mit.edu/kerberos/krb5-devel/doc/formats/keytab_file_format.html.
 package keytab
 
 import (
@@ -8,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -20,7 +23,13 @@ import (
 )
 
 const (
-	keytabFirstByte byte = 0o5
+	keytabFirstByte  byte = 0o5
+	keytabVersion1        = 1
+	keytabVersion2        = 2
+	keytabHeaderSize      = 2
+	wireUint16Size        = 2
+	wireUint32Size        = 4
+	maxShortKVNO          = math.MaxUint8
 )
 
 var (
@@ -107,6 +116,7 @@ func ParsePrincipal(s string) (Principal, error) {
 // classifyPrincipalName counts the unescaped realm separators in s and reports
 // whether the name is an enterprise principal with an embedded '@'.
 func classifyPrincipalName(s string) (bool, error) {
+	const enterpriseSeparatorCount = 2
 	escaped := false
 	unescapedAts := 0
 	for _, r := range s {
@@ -121,10 +131,10 @@ func classifyPrincipalName(s string) (bool, error) {
 			unescapedAts++
 		}
 	}
-	if unescapedAts > 2 {
+	if unescapedAts > enterpriseSeparatorCount {
 		return false, errors.New("principal contains too many realm separators")
 	}
-	return unescapedAts == 2, nil
+	return unescapedAts == enterpriseSeparatorCount, nil
 }
 
 // principalSplitter holds the state while splitting a principal name into
@@ -140,7 +150,9 @@ type principalSplitter struct {
 // splitPrincipalName splits s into components and realm. Enterprise names keep
 // the first unescaped '@' literally inside the component.
 func splitPrincipalName(s string, enterprise bool) (Principal, error) {
-	sp := principalSplitter{enterprise: enterprise, firstEnterpriseAt: true}
+	var sp principalSplitter
+	sp.enterprise = enterprise
+	sp.firstEnterpriseAt = true
 	escaped := false
 	for _, r := range s {
 		if escaped {
@@ -249,11 +261,11 @@ func (sp *principalSplitter) finish() (Principal, error) {
 
 // New creates new, empty Keytab type.
 func New() *Keytab {
-	var e []Entry
 	return &Keytab{
-		version:   2,
+		version:   keytabVersion2,
 		byteOrder: binary.BigEndian,
-		Entries:   e,
+		name:      "",
+		Entries:   nil,
 	}
 }
 
@@ -329,10 +341,7 @@ type entryLookup struct {
 // fallback, and ties break on the newest timestamp.
 func (l *entryLookup) consider(candidate Entry, kvno uint32) {
 	if kvno == 0 {
-		if !l.exactFound || candidate.KVNO > l.exact.KVNO || candidate.KVNO == l.exact.KVNO && candidate.Timestamp.After(l.exact.Timestamp) {
-			l.exact = candidate
-			l.exactFound = true
-		}
+		l.considerHighestKVNO(candidate)
 		return
 	}
 	if candidate.KVNO == kvno {
@@ -342,11 +351,19 @@ func (l *entryLookup) consider(candidate Entry, kvno uint32) {
 		}
 		return
 	}
-	if kvno > 255 && candidate.KVNO == kvno&0xff {
+	if kvno > maxShortKVNO && candidate.KVNO == kvno&maxShortKVNO {
 		if !l.fallbackFound || candidate.Timestamp.After(l.fallback.Timestamp) {
 			l.fallback = candidate
 			l.fallbackFound = true
 		}
+	}
+}
+
+func (l *entryLookup) considerHighestKVNO(candidate Entry) {
+	if !l.exactFound || candidate.KVNO > l.exact.KVNO ||
+		(candidate.KVNO == l.exact.KVNO && candidate.Timestamp.After(l.exact.Timestamp)) {
+		l.exact = candidate
+		l.exactFound = true
 	}
 }
 
@@ -380,7 +397,12 @@ func principalMatches(candidate, requested Principal) bool {
 }
 
 // GetEncryptionKey returns the EncryptionKey and KVNO from the best matching keytab entry.
-func (kt *Keytab) GetEncryptionKey(princName types.PrincipalName, realm string, kvno int, etype int32) (types.EncryptionKey, int, error) {
+func (kt *Keytab) GetEncryptionKey(
+	princName types.PrincipalName,
+	realm string,
+	kvno int,
+	etype int32,
+) (types.EncryptionKey, int, error) {
 	if kvno < 0 || uint64(kvno) > uint64(^uint32(0)) {
 		return types.EncryptionKey{}, 0, fmt.Errorf("%w: kvno %d", ErrKVNONotFound, kvno)
 	}
@@ -390,37 +412,28 @@ func (kt *Keytab) GetEncryptionKey(princName types.PrincipalName, realm string, 
 		NameType:   princName.NameType,
 	}, uint32(kvno), etype)
 	if err != nil {
-		return types.EncryptionKey{}, 0, fmt.Errorf("matching key not found in keytab. Looking for %q realm: %v kvno: %v etype: %v: %w", princName.PrincipalNameString(), realm, kvno, etype, err)
+		return types.EncryptionKey{}, 0, fmt.Errorf(
+			"matching key not found in keytab. Looking for %q realm: %v kvno: %v etype: %v: %w",
+			princName.PrincipalNameString(), realm, kvno, etype, err,
+		)
 	}
 	return entry.Key, int(entry.KVNO), nil
 }
 
-// Create a new Keytab entry.
-func newEntry() Entry {
-	var b []byte
-	return Entry{
-		Principal: newPrincipal(),
-		Timestamp: time.Time{},
-		Key: types.EncryptionKey{
-			KeyType:  0,
-			KeyValue: b,
-		},
-		KVNO: 0,
-	}
-}
-
 func (kt Keytab) String() string {
-	var s string
-	s = `KVNO Timestamp         Principal                                                ET Key
----- ----------------- -------------------------------------------------------- -- ----------------------------------------------------------------
-`
+	var s strings.Builder
+	s.WriteString("KVNO Timestamp         Principal                                                ET Key\n" +
+		"---- ----------------- -------------------------------------------------------- -- " +
+		"----------------------------------------------------------------\n")
 	for _, entry := range kt.Entries {
-		s += entry.String() + "\n"
+		s.WriteString(entry.String())
+		s.WriteByte('\n')
 	}
-	return s
+	return s.String()
 }
 
-// AddEntry adds an entry to the keytab. The password should be provided in plain text and it will be converted using the defined enctype to be stored.
+// AddEntry derives a key from the plaintext password using the specified
+// enctype and adds the key to the keytab.
 func (kt *Keytab) AddEntry(principalName, realm, password string, ts time.Time, kvno uint32, encType int32) error {
 	princ, _ := types.ParseSPNString(principalName)
 	key, _, err := crypto.GetKeyFromPassword(password, princ, realm, encType, types.PADataSequence{})
@@ -431,7 +444,12 @@ func (kt *Keytab) AddEntry(principalName, realm, password string, ts time.Time, 
 }
 
 // AddEntryWithSalt derives and adds an entry using the supplied salt and string-to-key parameters.
-func (kt *Keytab) AddEntryWithSalt(principalName, realm, password, salt, s2kparams string, ts time.Time, kvno uint32, encType int32) error {
+func (kt *Keytab) AddEntryWithSalt(
+	principalName, realm, password, salt, s2kparams string,
+	ts time.Time,
+	kvno uint32,
+	encType int32,
+) error {
 	princ, _ := types.ParseSPNString(principalName)
 	et, err := crypto.GetEtype(encType)
 	if err != nil {
@@ -457,10 +475,8 @@ func (kt *Keytab) AddKey(p Principal, kvno uint32, key types.EncryptionKey, ts t
 	if len(p.Components) == 0 {
 		return errors.New("keytab principal must contain at least one component")
 	}
-	for _, component := range p.Components {
-		if component == "" {
-			return errors.New("keytab principal components must not be empty")
-		}
+	if slices.Contains(p.Components, "") {
+		return errors.New("keytab principal components must not be empty")
 	}
 	et, err := crypto.GetEtype(key.KeyType)
 	if err != nil {
@@ -475,14 +491,16 @@ func (kt *Keytab) AddKey(p Principal, kvno uint32, key types.EncryptionKey, ts t
 	}
 	p.Components = append([]string(nil), p.Components...)
 	key.KeyValue = append([]byte(nil), key.KeyValue...)
-	kt.Entries = append(kt.Entries, Entry{Principal: p, Timestamp: ts, Key: key, KVNO: kvno})
+	kt.Entries = append(kt.Entries, Entry{Principal: p, Timestamp: ts, Key: key, KVNO: kvno, kvno32Present: false})
 	return nil
 }
 
 // RemoveEntry removes entries matching p, kvno, and etype. Zero kvno and etype values are wildcards.
 func (kt *Keytab) RemoveEntry(p Principal, kvno uint32, etype int32) int {
 	return kt.removeEntries(func(entry Entry) bool {
-		return principalMatches(entry.Principal, p) && (kvno == 0 || entry.KVNO == kvno) && (etype == 0 || entry.Key.KeyType == etype)
+		return principalMatches(entry.Principal, p) &&
+			(kvno == 0 || entry.KVNO == kvno) &&
+			(etype == 0 || entry.Key.KeyType == etype)
 	})
 }
 
@@ -529,17 +547,14 @@ func (kt *Keytab) Merge(other *Keytab) int {
 	}
 	added := 0
 	for _, candidate := range other.Entries {
-		duplicate := false
-		for _, entry := range kt.Entries {
-			if entry.KVNO == candidate.KVNO && entry.Key.KeyType == candidate.Key.KeyType &&
-				entry.Principal.NameType == candidate.Principal.NameType && entry.Principal.Realm == candidate.Principal.Realm &&
+		if slices.ContainsFunc(kt.Entries, func(entry Entry) bool {
+			return entry.KVNO == candidate.KVNO &&
+				entry.Key.KeyType == candidate.Key.KeyType &&
+				entry.Principal.NameType == candidate.Principal.NameType &&
+				entry.Principal.Realm == candidate.Principal.Realm &&
 				principalMatches(entry.Principal, candidate.Principal) &&
-				bytes.Equal(entry.Key.KeyValue, candidate.Key.KeyValue) {
-				duplicate = true
-				break
-			}
-		}
-		if duplicate {
+				bytes.Equal(entry.Key.KeyValue, candidate.Key.KeyValue)
+		}) {
 			continue
 		}
 		candidate.Principal.Components = append([]string(nil), candidate.Principal.Components...)
@@ -548,20 +563,6 @@ func (kt *Keytab) Merge(other *Keytab) int {
 		added++
 	}
 	return added
-}
-
-func (kt *Keytab) removeEntries(remove func(Entry) bool) int {
-	kept := kt.Entries[:0]
-	removed := 0
-	for _, entry := range kt.Entries {
-		if remove(entry) {
-			removed++
-			continue
-		}
-		kept = append(kept, entry)
-	}
-	kt.Entries = kept
-	return removed
 }
 
 // Create a new principal.
@@ -605,7 +606,7 @@ func (kt *Keytab) Read(r io.Reader) error {
 func (kt *Keytab) Marshal() ([]byte, error) {
 	b := []byte{keytabFirstByte, kt.version}
 	endian := kt.byteOrder
-	if endian == nil || kt.version == 2 {
+	if endian == nil || kt.version == keytabVersion2 {
 		endian = binary.BigEndian
 	}
 	for _, e := range kt.Entries {
@@ -648,10 +649,34 @@ func (kt *Keytab) Unmarshal(b []byte) error {
 	return kt.unmarshalRecords(b)
 }
 
+// JSON returns information about the keys held in the keytab in a JSON format.
+// The output contains raw key material and must not be logged or disclosed.
+func (kt *Keytab) JSON() (string, error) {
+	b, err := json.MarshalIndent(kt, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("encode keytab JSON: %w", err)
+	}
+	return string(b), nil
+}
+
+func (kt *Keytab) removeEntries(remove func(Entry) bool) int {
+	kept := kt.Entries[:0]
+	removed := 0
+	for _, entry := range kt.Entries {
+		if remove(entry) {
+			removed++
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	kt.Entries = kept
+	return removed
+}
+
 // unmarshalHeader validates the two-byte keytab header, records the format
 // version and byte order, and reports whether record bytes follow the header.
 func (kt *Keytab) unmarshalHeader(b []byte) (bool, error) {
-	if len(b) < 2 {
+	if len(b) < keytabHeaderSize {
 		return false, fmt.Errorf("byte array is less than 2 bytes: %d", len(b))
 	}
 
@@ -662,11 +687,11 @@ func (kt *Keytab) unmarshalHeader(b []byte) (bool, error) {
 	// Get keytab version
 	// The 2nd byte contains the version number (1 or 2)
 	kt.version = b[1]
-	if kt.version != 1 && kt.version != 2 {
+	if kt.version != keytabVersion1 && kt.version != keytabVersion2 {
 		return false, errors.New("invalid keytab data. Keytab version is neither 1 nor 2")
 	}
 	kt.byteOrder = keytabByteOrder(b, kt.version)
-	return len(b) > 2, nil
+	return len(b) > keytabHeaderSize, nil
 }
 
 // keytabByteOrder determines the record byte order. Version 1 of the file
@@ -675,7 +700,7 @@ func (kt *Keytab) unmarshalHeader(b []byte) (bool, error) {
 // record length is invalid in native order but valid in the other order uses
 // the other order.
 func keytabByteOrder(b []byte, version uint8) binary.ByteOrder {
-	if version != 1 {
+	if version != keytabVersion1 {
 		return binary.BigEndian
 	}
 	if firstRecordLengthValid(b, binary.NativeEndian) {
@@ -694,14 +719,18 @@ func keytabByteOrder(b []byte, version uint8) binary.ByteOrder {
 // firstRecordLengthValid reports whether the bytes following the header start
 // with a plausible record length in the given byte order.
 func firstRecordLengthValid(b []byte, endian binary.ByteOrder) bool {
-	return len(b) < 6 || validRecordLength(b[2:6], endian, len(b)-6)
+	const recordBodyStart = keytabHeaderSize + wireUint32Size
+	if len(b) < recordBodyStart {
+		return true
+	}
+	return validRecordLength(b[keytabHeaderSize:recordBodyStart], endian, len(b)-recordBodyStart)
 }
 
 // unmarshalRecords decodes the length-prefixed record stream that follows the
 // two-byte header.
 func (kt *Keytab) unmarshalRecords(b []byte) error {
 	// n tracks position in the byte array
-	n := 2
+	n := keytabHeaderSize
 	l, err := readInt32(b, &n, &kt.byteOrder)
 	if err != nil {
 		return err
@@ -724,7 +753,7 @@ func (kt *Keytab) unmarshalRecords(b []byte) error {
 func nextRecordLength(b []byte, n *int, e *binary.ByteOrder) (int32, error) {
 	// Check if there are still 4 bytes left to read
 	// Also check that n is greater than zero
-	if *n < 0 || *n > len(b) || len(b[*n:]) < 4 {
+	if *n < 0 || *n > len(b) || len(b[*n:]) < wireUint32Size {
 		return 0, nil
 	}
 	return readInt32(b, n, e)
@@ -749,11 +778,11 @@ func (kt *Keytab) unmarshalRecordOrHole(b []byte, n *int, l int32) error {
 // number of hole bytes to skip after the length field ending at n.
 func holeLength(b []byte, n int, l int32) (int, error) {
 	if l == -1<<31 {
-		return 0, fmt.Errorf("invalid keytab hole length at offset %d", n-4)
+		return 0, fmt.Errorf("invalid keytab hole length at offset %d", n-wireUint32Size)
 	}
 	hole := int(-l)
 	if hole > len(b)-n {
-		return 0, fmt.Errorf("keytab hole at offset %d exceeds remaining data", n-4)
+		return 0, fmt.Errorf("keytab hole at offset %d exceeds remaining data", n-wireUint32Size)
 	}
 	return hole, nil
 }
@@ -761,10 +790,11 @@ func holeLength(b []byte, n int, l int32) (int, error) {
 // unmarshalRecord decodes the entry record of length l at n and appends it to
 // the keytab. n advances past the record.
 func (kt *Keytab) unmarshalRecord(b []byte, n *int, l int32) error {
+	offset := *n - wireUint32Size
 	if int(l) > len(b)-*n {
-		return fmt.Errorf("keytab record at offset %d has length %d with only %d bytes remaining", *n-4, l, len(b)-*n)
+		return fmt.Errorf("keytab record at offset %d has length %d with only %d bytes remaining", offset, l, len(b)-*n)
 	}
-	entry, err := kt.unmarshalEntry(b[*n:*n+int(l)], *n-4)
+	entry, err := kt.unmarshalEntry(b[*n:*n+int(l)], offset)
 	if err != nil {
 		return err
 	}
@@ -777,7 +807,7 @@ func (kt *Keytab) unmarshalRecord(b []byte, n *int, l int32) error {
 // unmarshalEntry decodes one record body into an Entry. offset is the
 // record's position within the keytab, used only for error context.
 func (kt *Keytab) unmarshalEntry(eb []byte, offset int) (Entry, error) {
-	ke := newEntry()
+	var ke Entry
 	// p keeps track as to where we are in the byte stream
 	var p int
 	principal, err := parsePrincipal(eb, &p, kt.version, &kt.byteOrder)
@@ -829,7 +859,7 @@ func readEntryKey(b []byte, p *int, ke *Entry, e *binary.ByteOrder) (uint8, erro
 // bytes are left after the other fields are read and they are non-zero this
 // indicates the 32-bit version is present and overrides the 8-bit key version.
 func readEntryKVNO(b []byte, p *int, ke *Entry, e *binary.ByteOrder) error {
-	if len(b)-*p < 4 {
+	if len(b)-*p < wireUint32Size {
 		return nil
 	}
 	// The 32-bit key version may be present
@@ -866,14 +896,14 @@ func (e Entry) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
 	}
 	var t [9]byte
 	endian.PutUint32(t[:4], uint32(timestamp)) // #nosec G115 -- encode the signed timestamp's two's-complement bits.
-	t[4] = byte(e.KVNO & 0xff)
+	t[4] = byte(e.KVNO & maxShortKVNO)
 	endian.PutUint16(t[5:7], keyType)
 	endian.PutUint16(t[7:], keyLength)
 	b = append(b, t[:]...)
 	b = append(b, e.Key.KeyValue...)
 
-	if v == 2 || e.kvno32Present || e.KVNO > 255 {
-		var kvno [4]byte
+	if v == keytabVersion2 || e.kvno32Present || e.KVNO > maxShortKVNO {
+		var kvno [wireUint32Size]byte
 		endian.PutUint32(kvno[:], e.KVNO)
 		b = append(b, kvno[:]...)
 	}
@@ -883,7 +913,7 @@ func (e Entry) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
 	if err != nil {
 		return b, err
 	}
-	header := make([]byte, 4)
+	header := make([]byte, wireUint32Size, wireUint32Size+len(b))
 	endian.PutUint32(header, recordLength)
 	b = append(header, b...)
 	return b, nil
@@ -896,7 +926,7 @@ func parsePrincipal(b []byte, p *int, version uint8, e *binary.ByteOrder) (Princ
 	if err != nil {
 		return Principal{}, err
 	}
-	if version == 1 {
+	if version == keytabVersion1 {
 		// In version 1 the number of components includes the realm. Minus 1 to make consistent with version 2
 		componentCount--
 	}
@@ -915,7 +945,7 @@ func parsePrincipal(b []byte, p *int, version uint8, e *binary.ByteOrder) (Princ
 		}
 		principal.Components = append(principal.Components, string(component))
 	}
-	if version != 1 {
+	if version != keytabVersion1 {
 		// Name Type is omitted in version 1
 		principal.NameType, err = readInt32(b, p, e)
 		if err != nil {
@@ -929,9 +959,9 @@ func parsePrincipal(b []byte, p *int, version uint8, e *binary.ByteOrder) (Princ
 }
 
 func (p Principal) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
-	b := make([]byte, 2)
+	b := make([]byte, wireUint16Size)
 	componentCount := len(p.Components)
-	if v == 1 {
+	if v == keytabVersion1 {
 		componentCount++
 	}
 	count, err := keytabUint16("principal component count", int64(componentCount))
@@ -951,12 +981,12 @@ func (p Principal) marshal(v int, endian binary.ByteOrder) ([]byte, error) {
 		}
 		b = append(b, cb...)
 	}
-	if v != 1 {
+	if v != keytabVersion1 {
 		nameType, err := keytabUint32("principal name type", int64(p.NameType))
 		if err != nil {
 			return b, err
 		}
-		t := make([]byte, 4)
+		t := make([]byte, wireUint32Size)
 		endian.PutUint32(t, nameType)
 		b = append(b, t...)
 	}
@@ -989,7 +1019,7 @@ func marshalString(s string, endian binary.ByteOrder) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	b := make([]byte, 2, 2+len(s))
+	b := make([]byte, wireUint16Size, wireUint16Size+len(s))
 	endian.PutUint16(b, length)
 	return append(b, s...), nil
 }
@@ -1023,12 +1053,12 @@ func readInt16(b []byte, p *int, e *binary.ByteOrder) (int16, error) {
 		return 0, fmt.Errorf("%d cannot be less than zero", *p)
 	}
 
-	if len(b)-*p < 2 {
+	if len(b)-*p < wireUint16Size {
 		return 0, fmt.Errorf("need 2 bytes at offset %d, input length is %d", *p, len(b))
 	}
 
-	i := int16((*e).Uint16(b[*p : *p+2])) // #nosec G115 -- interpret the wire bits as a signed 16-bit field.
-	*p += 2
+	i := int16((*e).Uint16(b[*p : *p+wireUint16Size])) // #nosec G115 -- interpret a signed 16-bit wire field.
+	*p += wireUint16Size
 	return i, nil
 }
 
@@ -1047,12 +1077,12 @@ func readUint32(b []byte, p *int, e *binary.ByteOrder) (uint32, error) {
 		return 0, fmt.Errorf("%d cannot be less than zero", *p)
 	}
 
-	if len(b)-*p < 4 {
+	if len(b)-*p < wireUint32Size {
 		return 0, fmt.Errorf("need 4 bytes at offset %d, input length is %d", *p, len(b))
 	}
 
-	i := (*e).Uint32(b[*p : *p+4])
-	*p += 4
+	i := (*e).Uint32(b[*p : *p+wireUint32Size])
+	*p += wireUint32Size
 	return i, nil
 }
 
@@ -1097,14 +1127,4 @@ func validRecordLength(b []byte, endian binary.ByteOrder, remaining int) bool {
 		l = -l
 	}
 	return int64(l) <= int64(remaining)
-}
-
-// JSON returns information about the keys held in the keytab in a JSON format.
-// The output contains raw key material and must not be logged or disclosed.
-func (kt *Keytab) JSON() (string, error) {
-	b, err := json.MarshalIndent(kt, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("encode keytab JSON: %w", err)
-	}
-	return string(b), nil
 }

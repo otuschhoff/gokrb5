@@ -17,11 +17,12 @@ import (
 // TestParsePrincipalExactErrors pins the exact error text of every reachable
 // rejection branch in ParsePrincipal.
 func TestParsePrincipalExactErrors(t *testing.T) {
+	const emptyComponent = "principal contains an empty component"
 	for input, expected := range map[string]string{
 		`a@b@c@d`:            "principal contains too many realm separators",
-		"":                   "principal contains an empty component",
-		"/host@REALM":        "principal contains an empty component",
-		"a//b@REALM":         "principal contains an empty component",
+		"":                   emptyComponent,
+		"/host@REALM":        emptyComponent,
+		"a//b@REALM":         emptyComponent,
 		"user@":              "principal contains an empty realm",
 		`user\`:              "principal ends with an incomplete escape",
 		"user@REALM/EXTRA":   "realm contains an unescaped component separator",
@@ -41,7 +42,7 @@ func TestParsePrincipalBranches(t *testing.T) {
 	t.Run("realm-less name", func(t *testing.T) {
 		p, err := ParsePrincipal("single")
 		require.NoError(t, err)
-		assert.Equal(t, Principal{Components: []string{"single"}, NameType: nametype.KRB_NT_PRINCIPAL}, p)
+		assert.Equal(t, Principal{Realm: "", Components: []string{"single"}, NameType: nametype.KRB_NT_PRINCIPAL}, p)
 	})
 	t.Run("escaped backslash", func(t *testing.T) {
 		p, err := ParsePrincipal(`a\\b@REALM`)
@@ -53,7 +54,7 @@ func TestParsePrincipalBranches(t *testing.T) {
 		p, err := ParsePrincipal("user/dept@corp.example@EXAMPLE.ORG")
 		require.NoError(t, err)
 		assert.Equal(t, Principal{
-			Realm:      "EXAMPLE.ORG",
+			Realm:      exampleRealm,
 			Components: []string{"user/dept@corp.example"},
 			NameType:   nametype.KRB_NT_ENTERPRISE,
 		}, p)
@@ -70,7 +71,7 @@ func TestParsePrincipalBranches(t *testing.T) {
 		p, err := ParsePrincipal(`u\/ser@corp.example@EXAMPLE.ORG`)
 		require.NoError(t, err)
 		assert.Equal(t, Principal{
-			Realm:      "EXAMPLE.ORG",
+			Realm:      exampleRealm,
 			Components: []string{"u/ser@corp.example"},
 			NameType:   nametype.KRB_NT_ENTERPRISE,
 		}, p)
@@ -91,13 +92,14 @@ func TestParsePrincipalBranches(t *testing.T) {
 // TestGetEntryTieBreaks pins the newest-timestamp tie-break rules for exact
 // KVNO matches and the 8-bit KVNO fallback.
 func TestGetEntryTieBreaks(t *testing.T) {
-	p := Principal{Realm: "EXAMPLE.ORG", Components: []string{"user"}}
+	p := Principal{Realm: exampleRealm, Components: []string{exampleUser}, NameType: 0}
 	mk := func(kvno uint32, ts int64, key byte) Entry {
 		return Entry{
-			Principal: p,
-			Timestamp: time.Unix(ts, 0),
-			KVNO:      kvno,
-			Key:       types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte{key}},
+			Principal:     p,
+			Timestamp:     time.Unix(ts, 0),
+			KVNO:          kvno,
+			Key:           types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte{key}},
+			kvno32Present: false,
 		}
 	}
 
@@ -131,19 +133,27 @@ func TestAppendToFileNoEntries(t *testing.T) {
 	t.Run("empty file gets header", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "empty.kt")
 		require.NoError(t, AppendToFile(path))
-		b, err := os.ReadFile(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
+		b, err := os.ReadFile(path) // #nosec G304 -- path is inside t.TempDir.
 		require.NoError(t, err)
 		assert.Equal(t, []byte{keytabFirstByte, 2}, b)
 	})
 	t.Run("existing file untouched", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "existing.kt")
 		kt := New()
-		require.NoError(t, kt.AddEntry("user", "EXAMPLE.ORG", "password", time.Unix(1700000000, 0), 1, etypeID.AES128_CTS_HMAC_SHA1_96))
+		err := kt.AddEntry(
+			exampleUser,
+			exampleRealm,
+			"password",
+			time.Unix(1700000000, 0),
+			1,
+			etypeID.AES128_CTS_HMAC_SHA1_96,
+		)
+		require.NoError(t, err)
 		require.NoError(t, kt.WriteFile(path))
-		before, err := os.ReadFile(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
+		before, err := os.ReadFile(path) // #nosec G304 -- path is inside t.TempDir.
 		require.NoError(t, err)
 		require.NoError(t, AppendToFile(path))
-		after, err := os.ReadFile(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
+		after, err := os.ReadFile(path) // #nosec G304 -- path is inside t.TempDir.
 		require.NoError(t, err)
 		assert.Equal(t, before, after)
 	})

@@ -2,8 +2,8 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-134 done. The latest measured
-v8 inventories (Slice 134) contain 513 canonical and 3,299 supplemental
+(floor raised to 86.0%), and Phase 5 slices 1-135 done. The latest measured
+v8 inventories (Slice 135) contain 513 canonical and 3,176 supplemental
 findings. Most remaining canonical findings are from `revive`, complexity and
 nesting checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
 Phase 3/4 interoperability and Windows exit evidence remains an external CI
@@ -819,6 +819,21 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 135 (2026-11-20, complete v8 keytab lint cleanup; Q-10):
+Separate file lifetime and lock handling from the append performed under the
+lock. Keep version selection, wire widths, and short-KVNO handling explicit,
+and simplify entry lookup and duplicate detection without changing their
+precedence or equality rules. Preserve the exported API and file format.
+Clean up the tests without changing their fixtures or scenarios.
+
+Both whole-v8 lint scans report zero keytab findings, down from zero
+canonical and 123 supplemental, without adding suppressions or changing
+lint configuration. Keytab passes 100 shuffled runs under the race
+detector, and both byte-exact MIT `ktutil` comparisons pass. The v8 build,
+vet, and test suite pass, as do race tests for keytab consumers and
+changed-line lint for both modules. Keytab cross-builds for Windows and
+FreeBSD amd64 and Linux 386; these are build checks, not native test runs.
 
 Slice 134 (2026-11-20, complete v8 GSSAPI lint cleanup; Q-10):
 Clear all four canonical findings and 93 supplemental advisories without

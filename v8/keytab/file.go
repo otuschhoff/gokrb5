@@ -11,6 +11,8 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/internal/fileio"
 )
 
+const keytabFileMode = 0o600
+
 // WriteFile atomically writes kt to path with mode 0600.
 func (kt *Keytab) WriteFile(name string) error {
 	path, _, err := ResolveName(name, nil)
@@ -36,7 +38,8 @@ func AppendToFile(name string, entries ...Entry) (err error) {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o600) // #nosec G304 -- name is the credential file explicitly selected by the caller.
+	// #nosec G304 -- the caller explicitly selects the credential file.
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE, keytabFileMode)
 	if err != nil {
 		return fmt.Errorf("open keytab for append: %w", err)
 	}
@@ -55,6 +58,11 @@ func AppendToFile(name string, entries ...Entry) (err error) {
 		}
 	}()
 
+	return appendLocked(f, entries)
+}
+
+// appendLocked requires the caller to hold the file lock through the sync.
+func appendLocked(f *os.File, entries []Entry) error {
 	version, endian, writeHeader, err := appendTarget(f)
 	if err != nil {
 		return err
@@ -93,10 +101,10 @@ func appendTarget(f *os.File) (uint8, binary.ByteOrder, bool, error) {
 		return 0, nil, false, fmt.Errorf("stat keytab for append: %w", err)
 	}
 	if info.Size() == 0 {
-		if cerr := f.Chmod(0o600); cerr != nil {
+		if cerr := f.Chmod(keytabFileMode); cerr != nil {
 			return 0, nil, false, fmt.Errorf("set permissions on empty keytab: %w", cerr)
 		}
-		return 2, binary.BigEndian, true, nil
+		return keytabVersion2, binary.BigEndian, true, nil
 	}
 	if _, serr := f.Seek(0, io.SeekStart); serr != nil {
 		return 0, nil, false, fmt.Errorf("seek to keytab header: %w", serr)

@@ -24,10 +24,11 @@ import (
 
 func testEntry(kvno uint32) Entry {
 	return Entry{
-		Principal: Principal{Realm: "EXAMPLE.ORG", Components: []string{"user"}, NameType: 1},
-		Timestamp: time.Unix(1700000000+int64(kvno), 0),
-		KVNO:      kvno,
-		Key:       types.EncryptionKey{KeyType: 17, KeyValue: bytes.Repeat([]byte{keytabTestByte(kvno)}, 16)},
+		Principal:     Principal{Realm: exampleRealm, Components: []string{exampleUser}, NameType: 1},
+		Timestamp:     time.Unix(1700000000+int64(kvno), 0),
+		KVNO:          kvno,
+		Key:           types.EncryptionKey{KeyType: 17, KeyValue: bytes.Repeat([]byte{keytabTestByte(kvno)}, 16)},
+		kvno32Present: false,
 	}
 }
 
@@ -121,12 +122,10 @@ func TestAppendToFileCreatesHeaderAndAppendsConcurrently(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 1; i <= writers; i++ {
 		entry := testEntry(uint32(i))
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			errs <- AppendToFile(path, entry)
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()
@@ -165,7 +164,7 @@ func TestAppendToFileRejectsInvalidExistingFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Error(t, AppendToFile(path, testEntry(1)))
-	after, err := os.ReadFile(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
+	after, err := os.ReadFile(path) // #nosec G304 -- path is inside t.TempDir.
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +234,12 @@ func TestResolveNameAndLoadDefault(t *testing.T) {
 	assert.Equal(t, "/etc/krb5.keytab", defaultPath)
 	_, _, err = ResolveName("DIR:/tmp/keytab", nil)
 	assert.Error(t, err)
-	for _, windowsPath := range []string{`C:\keytabs\service.keytab`, "C:/keytabs/service.keytab", `C:service.keytab`, `z:\keytabs\service.keytab`} {
+	for _, windowsPath := range []string{
+		`C:\keytabs\service.keytab`,
+		"C:/keytabs/service.keytab",
+		`C:service.keytab`,
+		`z:\keytabs\service.keytab`,
+	} {
 		resolved, writable, resolveErr := ResolveName(windowsPath, nil)
 		assert.NoError(t, resolveErr)
 		assert.False(t, writable)
@@ -301,27 +305,15 @@ func TestKeytabFileAndNameErrors(t *testing.T) {
 
 	missingParent := filepath.Join(t.TempDir(), "missing", "service.keytab")
 	kt := New()
-	if err := kt.WriteFile(missingParent); err == nil {
-		t.Fatal("WriteFile with missing parent returned no error")
-	}
-	if err := AppendToFile(missingParent, testEntry(1)); err == nil {
-		t.Fatal("AppendToFile with missing parent returned no error")
-	}
-	if err := kt.WriteFile("DIR:/unsupported"); err == nil {
-		t.Fatal("WriteFile accepted unsupported keytab type")
-	}
-	if err := AppendToFile("DIR:/unsupported", testEntry(1)); err == nil {
-		t.Fatal("AppendToFile accepted unsupported keytab type")
-	}
+	require.Error(t, kt.WriteFile(missingParent), "WriteFile with missing parent returned no error")
+	require.Error(t, AppendToFile(missingParent, testEntry(1)), "AppendToFile with missing parent returned no error")
+	require.Error(t, kt.WriteFile("DIR:/unsupported"), "WriteFile accepted unsupported keytab type")
+	require.Error(t, AppendToFile("DIR:/unsupported", testEntry(1)), "AppendToFile accepted unsupported keytab type")
 
 	path := filepath.Join(t.TempDir(), "empty-append.keytab")
-	if err := AppendToFile(path); err != nil {
-		t.Fatal(err)
-	}
-	if err := AppendToFile(path); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
+	require.NoError(t, AppendToFile(path))
+	require.NoError(t, AppendToFile(path))
+	data, err := os.ReadFile(path) // #nosec G304 -- path is inside t.TempDir.
 	if err != nil || !bytes.Equal(data, []byte{5, 2}) {
 		t.Fatalf("empty append data = %x, %v", data, err)
 	}
