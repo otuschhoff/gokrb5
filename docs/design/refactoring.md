@@ -2,7 +2,7 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-121 done. The latest measured
+(floor raised to 86.0%), and Phase 5 slices 1-122 done. The latest measured
 v8 inventories (Slice 116) contain 518 canonical and 3,392 supplemental
 findings. Most remaining canonical findings are from `revive`, complexity and
 nesting checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
@@ -819,6 +819,16 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 122 (2026-11-20, v8 config reader test organization; Q-10):
+Move the three reader and scanner contract tests and their private helpers
+into `krb5conf_reader_test.go` in the same package. Test names, inputs, and
+assertions are unchanged. No production code changes; PKINIT and PKU2U remain
+deferred.
+
+All 47 discovered tests and examples retained their names. Config vet, 100
+shuffled race-enabled config runs, and changed-line lint for both modules
+against `3704b6a` and `origin/main` passed.
 
 Slice 121 (2026-11-20, v8 config scanner failure precedence; Q-10):
 Exercise `NewFromScanner` directly with a read failure after a complete
