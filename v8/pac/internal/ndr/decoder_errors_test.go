@@ -38,7 +38,7 @@ func TestDecoderRejectsInvalidTargets(t *testing.T) {
 		name   string
 		target any
 	}{
-		{name: "nil"},
+		{name: "nil", target: nil},
 		{name: "typed nil", target: (*uint32)(nil)},
 		{name: "value", target: uint32(1)},
 		{name: "invalid reflection", target: reflect.Value{}},
@@ -76,7 +76,7 @@ func TestDecoderMalformedRetainsTruncationCause(t *testing.T) {
 		data  []byte
 		cause error
 	}{
-		{name: "empty value", cause: io.EOF},
+		{name: "empty value", data: nil, cause: io.EOF},
 		{name: "partial value", data: []byte{1, 2}, cause: io.ErrUnexpectedEOF},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

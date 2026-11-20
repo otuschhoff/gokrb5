@@ -95,7 +95,7 @@ func TestDecodeSignedExtrema(t *testing.T) {
 
 func TestDecodePrimitiveRecordRejectsEveryTruncatedPrefix(t *testing.T) {
 	input := marshalPrimitiveRecord(binary.LittleEndian)
-	for length := 0; length < len(input); length++ {
+	for length := range len(input) {
 		var got primitiveRecord
 		err := NewDecoder(bytes.NewReader(input[:length])).Decode(&got)
 		_, malformed := errors.AsType[Malformed](err)
@@ -107,84 +107,80 @@ func TestDecodePrimitiveRecordRejectsEveryTruncatedPrefix(t *testing.T) {
 }
 
 func TestDecodeArraysAndString(t *testing.T) {
+	var fixed struct{ Value [4]uint8 }
+	var conformant struct {
+		Value []uint32 `ndr:"conformant"`
+	}
+	var varying struct {
+		Value []uint32 `ndr:"varying"`
+	}
+	var conformantVarying struct {
+		Value []uint32 `ndr:"conformant,varying"`
+	}
+	var text struct{ Value string }
+
 	tests := []struct {
 		name  string
 		body  []byte
-		value interface{}
-		check func(t *testing.T)
+		value any
 	}{
 		{
 			name:  "fixed array",
 			body:  []byte{1, 2, 3, 4},
-			value: new(struct{ Value [4]uint8 }),
-			check: func(_ *testing.T) {},
+			value: &fixed,
 		},
 		{
-			name: "conformant array",
-			body: littleEndianWords(3, 10, 20, 30),
-			value: new(struct {
-				Value []uint32 `ndr:"conformant"`
-			}),
-			check: func(_ *testing.T) {},
+			name:  "conformant array",
+			body:  littleEndianWords(3, 10, 20, 30),
+			value: &conformant,
 		},
 		{
-			name: "varying array",
-			body: littleEndianWords(0, 3, 10, 20, 30),
-			value: new(struct {
-				Value []uint32 `ndr:"varying"`
-			}),
-			check: func(_ *testing.T) {},
+			name:  "varying array",
+			body:  littleEndianWords(0, 3, 10, 20, 30),
+			value: &varying,
 		},
 		{
-			name: "conformant varying array",
-			body: littleEndianWords(3, 0, 3, 10, 20, 30),
-			value: new(struct {
-				Value []uint32 `ndr:"conformant,varying"`
-			}),
-			check: func(_ *testing.T) {},
+			name:  "conformant varying array",
+			body:  littleEndianWords(3, 0, 3, 10, 20, 30),
+			value: &conformantVarying,
 		},
 		{
 			name:  "varying string",
 			body:  append(littleEndianWords(0, 3), 'O', 0, 'K', 0, 0, 0),
-			value: new(struct{ Value string }),
-			check: func(_ *testing.T) {},
+			value: &text,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if err := NewDecoder(bytes.NewReader(wrapNDRBody(test.body))).Decode(test.value); err != nil {
-				t.Fatalf("Decode() error = %v", err)
-			}
-			test.check(t)
+			decodeTestBody(t, test.body, test.value)
 		})
 	}
 
-	if got := *mustNDRTestType[*struct{ Value [4]uint8 }](t, tests[0].value); got.Value != [4]uint8{1, 2, 3, 4} {
-		t.Fatalf("fixed array = %v", got.Value)
+	if fixed.Value != [4]uint8{1, 2, 3, 4} {
+		t.Fatalf("fixed array = %v", fixed.Value)
 	}
-	for _, index := range []int{1, 2, 3} {
-		var got []uint32
-		switch index {
-		case 1:
-			got = mustNDRTestType[*struct {
-				Value []uint32 `ndr:"conformant"`
-			}](t, tests[index].value).Value
-		case 2:
-			got = mustNDRTestType[*struct {
-				Value []uint32 `ndr:"varying"`
-			}](t, tests[index].value).Value
-		case 3:
-			got = mustNDRTestType[*struct {
-				Value []uint32 `ndr:"conformant,varying"`
-			}](t, tests[index].value).Value
-		}
-		if len(got) != 3 || got[0] != 10 || got[1] != 20 || got[2] != 30 {
-			t.Fatalf("%s = %v", tests[index].name, got)
-		}
-	}
-	if got := mustNDRTestType[*struct{ Value string }](t, tests[4].value).Value; got != "OK" {
+	checkDecodedUint32Array(t, tests[1].name, conformant.Value)
+	checkDecodedUint32Array(t, tests[2].name, varying.Value)
+	checkDecodedUint32Array(t, tests[3].name, conformantVarying.Value)
+	if got := text.Value; got != "OK" {
 		t.Fatalf("string = %q, want OK", got)
+	}
+}
+
+func decodeTestBody(t *testing.T, body []byte, target any) {
+	t.Helper()
+
+	if err := NewDecoder(bytes.NewReader(wrapNDRBody(body))).Decode(target); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+}
+
+func checkDecodedUint32Array(t *testing.T, name string, got []uint32) {
+	t.Helper()
+
+	if len(got) != 3 || got[0] != 10 || got[1] != 20 || got[2] != 30 {
+		t.Fatalf("%s = %v", name, got)
 	}
 }
 
@@ -273,15 +269,15 @@ func wrapNDRBody(body []byte) []byte {
 		objectAlignment = 8
 	)
 	objectLength := uint64(len(body)) + SizePtr
-	objectLengthAligned := (objectLength + objectAlignment - 1) &^ (objectAlignment - 1)
-	if objectLengthAligned > math.MaxUint32 || objectLengthAligned > math.MaxInt-headerLength {
+	alignedLength := (objectLength + objectAlignment - 1) &^ (objectAlignment - 1)
+	if alignedLength > math.MaxUint32 || alignedLength > math.MaxInt-headerLength {
 		panic("NDR test object length exceeds wire or platform range")
 	}
-	data := make([]byte, headerLength+int(objectLengthAligned))
+	data := make([]byte, headerLength+int(alignedLength))
 	data[0] = protocolVersion
 	data[1] = 0x10
 	binary.LittleEndian.PutUint16(data[2:4], commonHeaderBytes)
-	binary.LittleEndian.PutUint32(data[8:12], uint32(objectLengthAligned)) // #nosec G115 -- checked against MaxUint32 above.
+	binary.LittleEndian.PutUint32(data[8:12], uint32(alignedLength)) // #nosec G115 -- checked against MaxUint32 above.
 	binary.LittleEndian.PutUint32(data[headerLength:headerLength+SizePtr], 1)
 	copy(data[headerLength+SizePtr:], body)
 	return data

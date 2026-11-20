@@ -16,7 +16,7 @@ type decoderUnion struct {
 	Bytes  [4]byte `ndr:"unionField"`
 }
 
-func (decoderUnion) SwitchFunc(discriminant interface{}) string {
+func (decoderUnion) SwitchFunc(discriminant any) string {
 	value, ok := discriminant.(uint16)
 	if ok && value == 1 {
 		return "Number"
@@ -29,7 +29,7 @@ type nonEncapsulatedDecoderUnion struct {
 	Number uint32 `ndr:"unionField"`
 }
 
-func (nonEncapsulatedDecoderUnion) SwitchFunc(interface{}) string { return "Number" }
+func (nonEncapsulatedDecoderUnion) SwitchFunc(any) string { return "Number" }
 
 type invalidDecoderUnion struct {
 	Tag   uint16 `ndr:"unionTag,encapsulated"`
@@ -38,7 +38,7 @@ type invalidDecoderUnion struct {
 
 type parentSizedBytes []byte
 
-func (parentSizedBytes) Size(parent interface{}) int {
+func (parentSizedBytes) Size(parent any) int {
 	length := reflect.ValueOf(parent).FieldByName("Length").Uint()
 	if length > uint64(^uint(0)>>1) {
 		return 0
@@ -69,7 +69,7 @@ func TestDecodeRejectsMalformedHeaders(t *testing.T) {
 			}
 		})
 	}
-	for length := 0; length < 20; length++ {
+	for length := range 20 {
 		if err := NewDecoder(bytes.NewReader(valid[:length])).Decode(&struct{}{}); err == nil {
 			t.Fatalf("Decode() accepted %d-byte header", length)
 		}
@@ -98,7 +98,7 @@ func TestDecodeReaderFailureAndUnsupportedTarget(t *testing.T) {
 func TestDecodeMultidimensionalArrays(t *testing.T) {
 	t.Run("fixed", func(t *testing.T) {
 		body := make([]byte, 12)
-		for index := 0; index < 6; index++ {
+		for index := range 6 {
 			binary.LittleEndian.PutUint16(body[index*2:], uint16(index+1))
 		}
 
@@ -135,15 +135,15 @@ func TestDecodeMultidimensionalArrays(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			value := reflect.New(reflect.StructOf([]reflect.StructField{{
-				Name: "Values",
-				Type: reflect.TypeOf([][]uint32{}),
-				Tag:  test.tag,
-			}}))
+			value := newMultidimensionalArrayTarget(test.tag)
 			if err := NewDecoder(bytes.NewReader(wrapNDRBody(test.body))).Decode(value.Interface()); err != nil {
 				t.Fatal(err)
 			}
-			got := mustNDRTestType[[][]uint32](t, value.Elem().Field(0).Interface())
+			field := value.Elem().Field(0).Interface()
+			got, ok := field.([][]uint32)
+			if !ok {
+				t.Fatalf("unexpected type %T", field)
+			}
 			want := [][]uint32{{1, 2, 3}, {4, 5, 6}}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("array = %v, want %v", got, want)
@@ -152,14 +152,26 @@ func TestDecodeMultidimensionalArrays(t *testing.T) {
 	}
 }
 
+func newMultidimensionalArrayTarget(tag reflect.StructTag) reflect.Value {
+	return reflect.New(reflect.StructOf([]reflect.StructField{{
+		Name:      "Values",
+		PkgPath:   "",
+		Type:      reflect.TypeFor[[][]uint32](),
+		Tag:       tag,
+		Offset:    0,
+		Index:     nil,
+		Anonymous: false,
+	}}))
+}
+
 func TestDecodeEmptyMultidimensionalArrays(t *testing.T) {
 	tests := []struct {
 		name  string
 		body  []byte
 		value any
 	}{
-		{name: "fixed outer", value: new(struct{ Values [0][2]uint32 })},
-		{name: "fixed inner", value: new(struct{ Values [2][0]uint32 })},
+		{name: "fixed outer", body: nil, value: new(struct{ Values [0][2]uint32 })},
+		{name: "fixed inner", body: nil, value: new(struct{ Values [2][0]uint32 })},
 		{
 			name: "conformant outer",
 			body: littleEndianWords(0, 2),

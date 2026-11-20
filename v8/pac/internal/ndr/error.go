@@ -13,11 +13,11 @@ func (e Malformed) Unwrap() error { return e.cause }
 
 // Error implements the error interface on the Malformed struct.
 func (e Malformed) Error() string {
-	return fmt.Sprintf("malformed NDR stream: %s", e.EText)
+	return "malformed NDR stream: " + e.EText
 }
 
 // Errorf formats an error message into a malformed NDR error.
-func Errorf(format string, a ...interface{}) Malformed {
+func Errorf(format string, a ...any) Malformed {
 	err := fmt.Errorf(format, a...)
 	return Malformed{EText: err.Error(), cause: err}
 }

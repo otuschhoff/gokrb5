@@ -4,6 +4,7 @@ package ndr
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -25,7 +26,7 @@ type Decoder struct {
 	ch            CommonHeader  // NDR common header
 	ph            PrivateHeader // NDR private header
 	conformantMax []uint32      // conformant max values that were moved to the beginning of the structure
-	s             interface{}   // pointer to the structure being populated
+	s             any           // pointer to the structure being populated
 	current       []string      // keeps track of the current field being populated
 	resourceErr   error
 	initErr       error
@@ -44,10 +45,7 @@ func NewDecoder(r io.Reader) *Decoder {
 		dec.initErr = err
 	}
 	dec.size = len(b)
-	bufferSize := dec.size
-	if bufferSize < int(commonHeaderBytes) {
-		bufferSize = int(commonHeaderBytes)
-	}
+	bufferSize := max(dec.size, int(commonHeaderBytes))
 	dec.r = bufio.NewReaderSize(bytes.NewReader(b), bufferSize)
 	if dec.initErr == nil {
 		_, dec.initErr = dec.r.Peek(dec.size)
@@ -56,7 +54,7 @@ func NewDecoder(r io.Reader) *Decoder {
 }
 
 // Decode unmarshals the NDR encoded bytes into the pointer of a struct provided.
-func (dec *Decoder) Decode(s interface{}) error {
+func (dec *Decoder) Decode(s any) error {
 	target := getReflectValue(s)
 	if !target.IsValid() || !target.CanSet() {
 		return Errorf("NDR decode target must be a non-nil pointer or settable reflect.Value")
@@ -73,7 +71,7 @@ func (dec *Decoder) Decode(s interface{}) error {
 	if err != nil {
 		return err
 	}
-	_, err = dec.r.Discard(4) // The next 4 bytes are an RPC unique pointer referent. We just skip these.
+	_, err = dec.r.Discard(SizePtr) // Skip the RPC unique pointer referent.
 	if err != nil {
 		return Errorf("unable to process byte stream: %w", err)
 	}
@@ -81,7 +79,7 @@ func (dec *Decoder) Decode(s interface{}) error {
 	return dec.process(s, reflect.StructTag(""))
 }
 
-func (dec *Decoder) process(s interface{}, tag reflect.StructTag) error {
+func (dec *Decoder) process(s any, tag reflect.StructTag) error {
 	// Scan for conformant fields as their max counts are moved to the beginning
 	// http://pubs.opengroup.org/onlinepubs/9629399/chap14.htm#tagfcjh_37
 	err := dec.scanConformantArrays(s, tag)
@@ -109,7 +107,7 @@ func (dec *Decoder) process(s interface{}, tag reflect.StructTag) error {
 
 // scanConformantArrays scans the structure for embedded conformant fields and captures the maximum element counts for
 // dimensions of the array that are moved to the beginning of the structure.
-func (dec *Decoder) scanConformantArrays(s interface{}, tag reflect.StructTag) error {
+func (dec *Decoder) scanConformantArrays(s any, tag reflect.StructTag) error {
 	err := dec.conformantScan(s, tag)
 	if err != nil {
 		return fmt.Errorf("failed to scan for embedded conformant arrays: %w", err)
@@ -124,7 +122,7 @@ func (dec *Decoder) scanConformantArrays(s interface{}, tag reflect.StructTag) e
 }
 
 // conformantScan inspects the structure's fields for whether they are conformant.
-func (dec *Decoder) conformantScan(s interface{}, tag reflect.StructTag) error {
+func (dec *Decoder) conformantScan(s any, tag reflect.StructTag) error {
 	ndrTag := parseTags(tag)
 	if ndrTag.HasValue(TagPointer) {
 		return nil
@@ -153,7 +151,7 @@ func (dec *Decoder) noteConformantValue(v reflect.Value, tag tags) {
 		dec.conformantMax = append(dec.conformantMax, 0)
 	case reflect.Slice:
 		dimensions, base := sliceDimensions(v.Type())
-		for i := 0; i < dimensions; i++ {
+		for range dimensions {
 			dec.conformantMax = append(dec.conformantMax, 0)
 		}
 		if base.Kind() == reflect.String {
@@ -187,7 +185,7 @@ func (dec *Decoder) isPointer(v reflect.Value, tag reflect.StructTag, def *[]def
 	return false, nil
 }
 
-func getReflectValue(s interface{}) reflect.Value {
+func getReflectValue(s any) reflect.Value {
 	var v reflect.Value
 	if r, ok := s.(reflect.Value); ok {
 		v = r
@@ -198,7 +196,7 @@ func getReflectValue(s interface{}) reflect.Value {
 }
 
 // fill populates fields with values from the NDR byte stream.
-func (dec *Decoder) fill(s interface{}, tag reflect.StructTag, localDef *[]deferedPtr) error {
+func (dec *Decoder) fill(s any, tag reflect.StructTag, localDef *[]deferedPtr) error {
 	v := getReflectValue(s)
 
 	//// Pointer so defer filling the referent
@@ -226,9 +224,8 @@ func (dec *Decoder) fill(s interface{}, tag reflect.StructTag, localDef *[]defer
 	case reflect.Invalid, reflect.Int, reflect.Uint, reflect.Uintptr,
 		reflect.Complex64, reflect.Complex128, reflect.Chan, reflect.Func,
 		reflect.Interface, reflect.Map, reflect.Pointer, reflect.UnsafePointer:
-		return fmt.Errorf("unsupported type")
 	}
-	return fmt.Errorf("unsupported type")
+	return errors.New("unsupported type")
 }
 
 // readBytes returns a number of bytes from the NDR byte stream.

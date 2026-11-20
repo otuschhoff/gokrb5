@@ -6,13 +6,13 @@ import (
 	"reflect"
 )
 
-// Union interface must be implemented by structs that will be unmarshaled into from the NDR byte stream union representation.
+// Union is implemented by structs decoded from an NDR union representation.
 // The union's discriminating tag will be passed to the SwitchFunc method.
 // The discriminating tag field must have the struct tag: `ndr:"unionTag"`
 // If the union is encapsulated the discriminating tag field must have the struct tag: `ndr:"encapsulated"`
 // The possible value fields that can be selected from must have the struct tag: `ndr:"unionField"`
 type Union interface {
-	SwitchFunc(t interface{}) string
+	SwitchFunc(t any) string
 }
 
 // Union related constants such as struct tag values
@@ -43,18 +43,20 @@ func (dec *Decoder) isUnion(field reflect.Value, tag reflect.StructTag) reflect.
 
 // unionSelectedField returns the field name of which of the union values to fill
 func unionSelectedField(union, discriminant reflect.Value) (string, error) {
-	if !union.Type().Implements(reflect.TypeOf(new(Union)).Elem()) {
+	if !union.Type().Implements(reflect.TypeFor[Union]()) {
 		return "", errors.New("struct does not implement union interface")
 	}
 	args := []reflect.Value{discriminant}
 	// Call the SelectFunc of the union struct to find the name of the field to fill with the value selected.
 	sf := union.MethodByName(unionSelectionFuncName)
 	if !sf.IsValid() {
-		return "", fmt.Errorf("could not find a selection function called %s in the unions struct representation", unionSelectionFuncName)
+		return "", fmt.Errorf(
+			"could not find a selection function called %s in the unions struct representation", unionSelectionFuncName,
+		)
 	}
 	f := sf.Call(args)
 	if f[0].Kind() != reflect.String || f[0].String() == "" {
-		return "", fmt.Errorf("the union select function did not return a string for the name of the field to fill")
+		return "", errors.New("the union select function did not return a string for the name of the field to fill")
 	}
 	return f[0].String(), nil
 }

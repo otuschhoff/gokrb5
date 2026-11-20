@@ -54,7 +54,7 @@ func (dec *Decoder) readStringsArray(v reflect.Value, tag reflect.StructTag, def
 	ndrTag := parseTags(tag)
 	if ndrTag.HasValue(TagConformant) {
 		// Per-dimension maximum counts, consumed from the stream but unused.
-		for i := 0; i < d; i++ {
+		for range d {
 			_ = dec.precedingMax()
 		}
 		// common max size

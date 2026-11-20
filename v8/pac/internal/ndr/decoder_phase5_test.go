@@ -39,13 +39,19 @@ func TestCommonHeaderCharacterization(t *testing.T) {
 				}
 				return
 			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if dec.ch.Version != protocolVersion || dec.ch.Endianness != test.order || dec.ch.CharacterEncoding != test.encoding {
-				t.Fatalf("header = %+v", dec.ch)
-			}
+			checkCommonHeader(t, dec, err, test.order, test.encoding)
 		})
+	}
+}
+
+func checkCommonHeader(t *testing.T, dec *Decoder, err error, order binary.ByteOrder, encoding uint8) {
+	t.Helper()
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.ch.Version != protocolVersion || dec.ch.Endianness != order || dec.ch.CharacterEncoding != encoding {
+		t.Fatalf("header = %+v", dec.ch)
 	}
 }
 
@@ -155,7 +161,8 @@ func TestConformantScanCharacterization(t *testing.T) {
 		Pointer *[]byte `ndr:"conformant,pointer"`
 	}
 	dec := NewDecoder(bytes.NewReader(nil))
-	if err := dec.conformantScan(reflect.ValueOf(wire{}), ""); err != nil {
+	var value wire
+	if err := dec.conformantScan(reflect.ValueOf(value), ""); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(dec.conformantMax, []uint32{0, 0, 0, 0}) {

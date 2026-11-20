@@ -9,22 +9,22 @@ import (
 
 type fixedRawBytes []byte
 
-func mustNDRTestType[T any](t *testing.T, value any) T {
-	t.Helper()
-	result, ok := value.(T)
-	if !ok {
-		t.Fatalf("unexpected type %T", value)
-	}
-	return result
-}
-
-func (fixedRawBytes) Size(interface{}) int { return 3 }
+func (fixedRawBytes) Size(any) int { return 3 }
 
 type invalidSizeBytes []byte
 
-func (invalidSizeBytes) Size(interface{}) string { return "three" }
+func (invalidSizeBytes) Size(any) string { return "three" }
 
 func TestDimensionHelpers(t *testing.T) {
+	checkDimensionTags(t)
+	checkArrayDimensions(t)
+	checkOtherDimensions(t)
+	checkSubSlicesAndPermutations(t)
+}
+
+func checkDimensionTags(t *testing.T) {
+	t.Helper()
+
 	if got, err := intFromTag(``, "dimensions"); err != nil || got != 1 {
 		t.Fatalf("default dimension = %d, %v", got, err)
 	}
@@ -34,6 +34,10 @@ func TestDimensionHelpers(t *testing.T) {
 	if _, err := intFromTag(`ndr:"dimensions:invalid"`, "dimensions"); err == nil {
 		t.Fatal("invalid dimension was accepted")
 	}
+}
+
+func checkArrayDimensions(t *testing.T) {
+	t.Helper()
 
 	array := [2][3]uint16{}
 	lengths, elementType := parseDimensions(reflect.ValueOf(array))
@@ -50,23 +54,33 @@ func TestDimensionHelpers(t *testing.T) {
 	if !reflect.DeepEqual(lengths, []int{2, 3}) || elementType.Kind() != reflect.Uint16 {
 		t.Fatalf("pointer dimensions = %v, %v", lengths, elementType)
 	}
-	if lengths, elementType = parseDimensions(reflect.ValueOf(1)); lengths != nil || elementType != nil {
+}
+
+func checkOtherDimensions(t *testing.T) {
+	t.Helper()
+
+	if lengths, elementType := parseDimensions(reflect.ValueOf(1)); lengths != nil || elementType != nil {
 		t.Fatalf("scalar dimensions = %v, %v", lengths, elementType)
 	}
-	if lengths, elementType = parseDimensions(reflect.Value{}); lengths != nil || elementType != nil {
+	if lengths, elementType := parseDimensions(reflect.Value{}); lengths != nil || elementType != nil {
 		t.Fatalf("invalid dimensions = %v, %v", lengths, elementType)
 	}
 	var nilArray *[2][3]uint16
-	lengths, elementType = parseDimensions(reflect.ValueOf(nilArray))
+	lengths, elementType := parseDimensions(reflect.ValueOf(nilArray))
 	if elementType == nil || !reflect.DeepEqual(lengths, []int{2, 3}) || elementType.Kind() != reflect.Uint16 {
 		t.Fatalf("nil pointer dimensions = %v, %v", lengths, elementType)
 	}
-	if dimensions, base := sliceDimensions(reflect.TypeOf(&[][]uint32{})); dimensions != 2 || base.Kind() != reflect.Uint32 {
+	dimensions, base := sliceDimensions(reflect.TypeFor[*[][]uint32]())
+	if dimensions != 2 || base.Kind() != reflect.Uint32 {
 		t.Fatalf("slice dimensions = %d, %v", dimensions, base)
 	}
+}
+
+func checkSubSlicesAndPermutations(t *testing.T) {
+	t.Helper()
 
 	makeSubSlices(reflect.Value{}, nil)
-	value := reflect.MakeSlice(reflect.TypeOf([][]uint8{}), 2, 2)
+	value := reflect.MakeSlice(reflect.TypeFor[[][]uint8](), 2, 2)
 	makeSubSlices(value, []int{3})
 	if value.Index(0).Len() != 3 || value.Index(1).Len() != 3 {
 		t.Fatalf("sub-slice lengths = %d, %d", value.Index(0).Len(), value.Index(1).Len())
@@ -120,6 +134,13 @@ func TestTagHelpers(t *testing.T) {
 }
 
 func TestStringAndRawByteHelpers(t *testing.T) {
+	checkUTF16Strings(t)
+	checkRawByteHelpers(t)
+}
+
+func checkUTF16Strings(t *testing.T) {
+	t.Helper()
+
 	if got := uint16SliceToString([]uint16{'O', 'K', 0}); got != "OK" {
 		t.Fatalf("terminated string = %q", got)
 	}
@@ -129,6 +150,10 @@ func TestStringAndRawByteHelpers(t *testing.T) {
 	if got := uint16SliceToString(nil); got != "" {
 		t.Fatalf("empty string = %q", got)
 	}
+}
+
+func checkRawByteHelpers(t *testing.T) {
+	t.Helper()
 
 	parent := reflect.ValueOf(struct{}{})
 	if size, err := rawBytesSize(parent, reflect.ValueOf(fixedRawBytes{})); err != nil || size != 3 {

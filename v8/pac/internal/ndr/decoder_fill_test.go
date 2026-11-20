@@ -87,62 +87,75 @@ func TestFillPreservesReflectionAliases(t *testing.T) {
 	})
 }
 
-func TestFillErrorTracker(t *testing.T) {
-	for _, tt := range []struct {
-		name    string
-		target  any
-		data    []byte
-		tag     reflect.StructTag
-		want    string
-		current []string
-		cause   error
-	}{
+const (
+	trackerRoot = "root"
+	valueField  = "Value"
+)
+
+type fillErrorCase struct {
+	name    string
+	target  any
+	data    []byte
+	tag     reflect.StructTag
+	want    string
+	current []string
+	cause   error
+}
+
+func fillErrorCases() []fillErrorCase {
+	return []fillErrorCase{
 		{
-			name: "nested scalar", target: new(fillOuter),
+			name: "nested scalar", target: new(fillOuter), data: nil, tag: "",
 			want: "could not fill struct field(root/fillOuter/Nested/fillNested/Value): " +
 				"could not fill struct field(root/fillOuter/Nested/fillNested/Value): " +
 				"could not fill uint32: cannot read 4 bytes from 0 remaining NDR bytes: EOF",
-			current: []string{"root", "fillOuter", "Nested", "fillNested", "Value"}, cause: io.EOF,
+			current: []string{trackerRoot, "fillOuter", "Nested", "fillNested", valueField}, cause: io.EOF,
 		},
 		{
-			name: "private field before field push", target: new(fillPrivate),
-			want: "NDR field private cannot be set", current: []string{"root", "fillPrivate"},
+			name: "private field before field push", target: new(fillPrivate), data: nil, tag: "",
+			want: "NDR field private cannot be set", current: []string{trackerRoot, "fillPrivate"}, cause: nil,
 		},
 		{
-			name: "pointer", target: new(uint32), tag: `ndr:"pointer"`,
-			want:    "could not process struct field(root): could not read pointer: cannot read 4 bytes from 0 remaining NDR bytes: EOF",
-			current: []string{"root"}, cause: io.EOF,
+			name: "pointer", target: new(uint32), data: nil, tag: `ndr:"pointer"`,
+			want: "could not process struct field(root): could not read pointer: " +
+				"cannot read 4 bytes from 0 remaining NDR bytes: EOF",
+			current: []string{trackerRoot}, cause: io.EOF,
 		},
 		{
-			name: "raw pointer", target: new(fillRawPointer),
+			name: "raw pointer", target: new(fillRawPointer), data: nil, tag: "",
 			want: "could not process struct field(root/fillRawPointer/Value): " +
 				"could not read pointer: cannot read 4 bytes from 0 remaining NDR bytes: EOF",
-			current: []string{"root", "fillRawPointer", "Value"}, cause: io.EOF,
+			current: []string{trackerRoot, "fillRawPointer", valueField}, cause: io.EOF,
 		},
 		{
-			name: "raw bytes", target: new(fillRaw), data: []byte{1},
+			name: "raw bytes", target: new(fillRaw), data: []byte{1}, tag: "",
 			want: "could not fill raw bytes struct field(root/fillRaw/Value): " +
 				"cannot read 3 bytes from 1 remaining NDR bytes: unexpected EOF",
-			current: []string{"root", "fillRaw", "Value"}, cause: io.ErrUnexpectedEOF,
+			current: []string{trackerRoot, "fillRaw", valueField}, cause: io.ErrUnexpectedEOF,
 		},
 		{
-			name: "raw slice", target: new(fixedRawBytes),
-			want: "could not fill raw bytes struct field(root): size tag not available", current: []string{"root"},
+			name: "raw slice", target: new(fixedRawBytes), data: nil, tag: "",
+			want:    "could not fill raw bytes struct field(root): size tag not available",
+			current: []string{trackerRoot}, cause: nil,
 		},
 		{
-			name: "unsupported", target: new(complex64),
-			want: "unsupported type", current: []string{"root"},
+			name: "unsupported", target: new(complex64), data: nil, tag: "",
+			want: "unsupported type", current: []string{trackerRoot}, cause: nil,
 		},
 		{
-			name: "fixed array", target: new([1]uint32),
+			name: "fixed array", target: new([1]uint32), data: nil, tag: "",
 			want: "could not fill uni-dimensional fixed array: could not fill index 0 of fixed array: " +
 				"could not fill uint32: cannot read 4 bytes from 0 remaining NDR bytes: EOF",
-			current: []string{"root"}, cause: io.EOF,
+			current: []string{trackerRoot}, cause: io.EOF,
 		},
-	} {
+	}
+}
+
+func TestFillErrorTracker(t *testing.T) {
+	for _, tt := range fillErrorCases() {
 		t.Run(tt.name, func(t *testing.T) {
 			dec := newFillDecoder(tt.data)
-			dec.current = []string{"root"}
+			dec.current = []string{trackerRoot}
 			var deferred []deferedPtr
 			err := dec.fill(tt.target, tt.tag, &deferred)
 			if err == nil || err.Error() != tt.want || !reflect.DeepEqual(dec.current, tt.current) {
@@ -175,9 +188,9 @@ type fillEmptyUnion struct {
 func (fillEmptyUnion) SwitchFunc(any) string { return "" }
 
 func TestFillUnionSelectionAndTracker(t *testing.T) {
-	value := fillUnion{Skipped: 99}
+	value := fillUnion{Tag: 0, Skipped: 99, Selected: 0, Tail: 0}
 	dec := newFillDecoder(littleEndianWords(1, 7, 8))
-	dec.current = []string{"root"}
+	dec.current = []string{trackerRoot}
 	var deferred []deferedPtr
 	if err := dec.fill(&value, "", &deferred); err != nil {
 		t.Fatal(err)
@@ -185,7 +198,7 @@ func TestFillUnionSelectionAndTracker(t *testing.T) {
 	if value.Skipped != 99 || value.Selected != 7 || value.Tail != 8 {
 		t.Fatalf("union = %+v", value)
 	}
-	if !reflect.DeepEqual(dec.current, []string{"root"}) || dec.r.Buffered() != 0 {
+	if !reflect.DeepEqual(dec.current, []string{trackerRoot}) || dec.r.Buffered() != 0 {
 		t.Fatalf("tracker = %v, remaining = %d", dec.current, dec.r.Buffered())
 	}
 }
@@ -215,7 +228,7 @@ func TestFillUnionSelectionFailureContract(t *testing.T) {
 			if err == nil || err.Error() != want || errors.Unwrap(err) != nil {
 				t.Fatalf("fill = %v, want unwrapped %q", err, want)
 			}
-			if !reflect.DeepEqual(dec.current, []string{tt.typ, "Value"}) || dec.r.Buffered() != 6 {
+			if !reflect.DeepEqual(dec.current, []string{tt.typ, valueField}) || dec.r.Buffered() != 6 {
 				t.Fatalf("tracker = %v, remaining = %d", dec.current, dec.r.Buffered())
 			}
 		})
@@ -246,11 +259,11 @@ func TestFillSliceDispatchPrecedence(t *testing.T) {
 		},
 		{
 			name: "string array before varying array", target: new([]string),
-			data: littleEndianWords(0, 1, 0, 2, 0x0041), tag: `ndr:"varying"`, want: []string{"A"},
+			data: littleEndianWords(0, 1, 0, 2, 0x0041), tag: `ndr:"varying"`, want: []string{"A"}, left: 0,
 		},
 		{
 			name: "substring elements use varying array", target: new([]uint16),
-			data: littleEndianWords(0, 2, 0x0041), tag: subStringArrayTag, want: []uint16{65, 0},
+			data: littleEndianWords(0, 2, 0x0041), tag: subStringArrayTag, want: []uint16{65, 0}, left: 0,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -276,14 +289,14 @@ func TestFillDeferredRawPointerOrder(t *testing.T) {
 		Tail uint32
 	}
 	dec := newFillDecoder(append(littleEndianWords(1, 7), 1, 2, 3))
-	dec.current = []string{"root"}
+	dec.current = []string{trackerRoot}
 	if err := dec.process(&value, ""); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(value.Raw, []byte{1, 2, 3}) || value.Tail != 7 || dec.r.Buffered() != 0 {
 		t.Fatalf("decoded = %+v, remaining = %d", value, dec.r.Buffered())
 	}
-	if !reflect.DeepEqual(dec.current, []string{"root"}) {
+	if !reflect.DeepEqual(dec.current, []string{trackerRoot}) {
 		t.Fatalf("tracker = %v", dec.current)
 	}
 }
@@ -294,7 +307,8 @@ func TestFillConformantStringFailure(t *testing.T) {
 	dec.conformantMax = []uint32{1}
 	var deferred []deferedPtr
 	err := dec.fill(&value, `ndr:"conformant"`, &deferred)
-	want := "could not fill with conformant varying string: could not read offset of uni-dimensional conformant varying array: " +
+	want := "could not fill with conformant varying string: " +
+		"could not read offset of uni-dimensional conformant varying array: " +
 		"cannot read 4 bytes from 0 remaining NDR bytes: EOF"
 	if err == nil || err.Error() != want || !errors.Is(err, io.EOF) {
 		t.Fatalf("fill = %v, want %q wrapping EOF", err, want)

@@ -1,6 +1,7 @@
 package ndr
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -59,7 +60,7 @@ func (dec *Decoder) skipUnionField(v reflect.Value, i int, selection *unionSelec
 func (dec *Decoder) fillStructField(parent reflect.Value, i int, localDef *[]deferedPtr) error {
 	v := parent.Field(i)
 	tag := parent.Type().Field(i).Tag
-	if v.Type().Implements(reflect.TypeOf(new(RawBytes)).Elem()) &&
+	if v.Type().Implements(reflect.TypeFor[RawBytes]()) &&
 		v.Type().Kind() == reflect.Slice && v.Type().Elem().Kind() == reflect.Uint8 {
 		return dec.fillRawField(parent, v, tag, localDef)
 	}
@@ -101,10 +102,26 @@ func (dec *Decoder) fillScalar(v reflect.Value) error {
 	return nil
 }
 
-func (dec *Decoder) readScalar(kind reflect.Kind) (interface{}, error) {
+func (dec *Decoder) readScalar(kind reflect.Kind) (any, error) {
 	switch kind {
 	case reflect.Bool:
 		return dec.readBool()
+	case reflect.Float32:
+		return dec.readFloat32()
+	case reflect.Float64:
+		return dec.readFloat64()
+	case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return dec.readInteger(kind)
+	case reflect.Invalid, reflect.Int, reflect.Uint, reflect.Uintptr, reflect.Complex64, reflect.Complex128,
+		reflect.Array, reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer,
+		reflect.Slice, reflect.String, reflect.Struct, reflect.UnsafePointer:
+	}
+	return nil, errors.New("unsupported type")
+}
+
+func (dec *Decoder) readInteger(kind reflect.Kind) (any, error) {
+	switch kind {
 	case reflect.Uint8:
 		return dec.readUint8()
 	case reflect.Uint16:
@@ -121,17 +138,12 @@ func (dec *Decoder) readScalar(kind reflect.Kind) (interface{}, error) {
 		return dec.readInt32()
 	case reflect.Int64:
 		return dec.readInt64()
-	case reflect.Float32:
-		return dec.readFloat32()
-	case reflect.Float64:
-		return dec.readFloat64()
-	case reflect.Invalid, reflect.Int, reflect.Uint, reflect.Uintptr, reflect.Complex64, reflect.Complex128,
+	case reflect.Invalid, reflect.Bool, reflect.Int, reflect.Uint, reflect.Uintptr,
+		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128,
 		reflect.Array, reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer,
 		reflect.Slice, reflect.String, reflect.Struct, reflect.UnsafePointer:
-		return nil, fmt.Errorf("unsupported type")
-	default:
-		return nil, fmt.Errorf("unsupported type")
 	}
+	return nil, errors.New("unsupported type")
 }
 
 func (dec *Decoder) fillString(v reflect.Value, tag reflect.StructTag, localDef *[]deferedPtr) error {
@@ -155,7 +167,7 @@ func (dec *Decoder) fillString(v reflect.Value, tag reflect.StructTag, localDef 
 }
 
 func (dec *Decoder) fillSlice(v reflect.Value, tag reflect.StructTag, localDef *[]deferedPtr) error {
-	if v.Type().Implements(reflect.TypeOf(new(RawBytes)).Elem()) && v.Type().Elem().Kind() == reflect.Uint8 {
+	if v.Type().Implements(reflect.TypeFor[RawBytes]()) && v.Type().Elem().Kind() == reflect.Uint8 {
 		if err := dec.readRawBytes(v, tag); err != nil {
 			return fmt.Errorf("could not fill raw bytes struct field(%s): %w", strings.Join(dec.current, "/"), err)
 		}
@@ -174,7 +186,7 @@ func (dec *Decoder) fillSlice(v reflect.Value, tag reflect.StructTag, localDef *
 	if conformant && varying {
 		return dec.fillConformantVaryingArray(v, tag, localDef)
 	}
-	if !conformant && varying {
+	if varying {
 		return dec.fillVaryingArray(v, tag, localDef)
 	}
 	return dec.fillConformantArray(v, tag, localDef)

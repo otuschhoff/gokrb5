@@ -16,7 +16,7 @@ const (
 
 // RawBytes interface should be implemented if reading just a number of bytes from the NDR stream
 type RawBytes interface {
-	Size(interface{}) int
+	Size(any) int
 }
 
 func rawBytesSize(parent reflect.Value, v reflect.Value) (int, error) {

@@ -2,6 +2,7 @@ package ndr
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -22,10 +23,9 @@ func parseTags(st reflect.StructTag) tags {
 	}
 	if s != "" {
 		ndrTags := strings.Trim(s, `"`)
-		for _, tag := range strings.Split(ndrTags, ",") {
-			if strings.Contains(tag, ":") {
-				m := strings.SplitN(tag, ":", 2)
-				t.Map[m[0]] = m[1]
+		for tag := range strings.SplitSeq(ndrTags, ",") {
+			if key, value, ok := strings.Cut(tag, ":"); ok {
+				t.Map[key] = value
 			} else {
 				t.Values = append(t.Values, tag)
 			}
@@ -49,6 +49,10 @@ func (t *tags) StructTag() reflect.StructTag {
 	return reflect.StructTag(s)
 }
 
+func (t *tags) HasValue(s string) bool {
+	return slices.Contains(t.Values, s)
+}
+
 func (t *tags) delete(s string) {
 	for i, x := range t.Values {
 		if x == s {
@@ -56,13 +60,4 @@ func (t *tags) delete(s string) {
 		}
 	}
 	delete(t.Map, s)
-}
-
-func (t *tags) HasValue(s string) bool {
-	for _, v := range t.Values {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }

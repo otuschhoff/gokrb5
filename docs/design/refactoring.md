@@ -820,6 +820,23 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 141 (2026-11-20, internal v8 NDR lint cleanup; Q-10):
+Separate common-header encoding checks from the remaining header reads,
+and simplify scalar and slice dispatch. Preserve wire layout, validation
+order, error types and causes, and the decoder API used by PAC.
+Modernize tag parsing and test fixtures without changing fixture bytes or
+removing any of the 48 test and fuzz entry points. No lint suppressions
+were added.
+
+Uncapped whole-v8 scans report zero NDR findings, down from 1 canonical
+and 94 supplemental. Diagnostics outside NDR are unchanged; whole-v8
+totals are 388 canonical and 1,791 supplemental. NDR statement coverage
+rose from 94.0% to 94.1%. NDR and PAC pass 100 shuffled race-enabled runs
+and Linux/386 tests. The existing array fuzz target passes a 15-second
+run (509,719 executions). The full v8 build, vet, and race suite pass, as
+does changed-line lint for both modules. Interop-tagged tests compile;
+live interoperability was not run.
+
 Slice 140 (2026-11-20, complete v8 NEGOEX lint cleanup; Q-10):
 Separate scheme selection, mechanism continuation, and message emission
 while preserving negotiation order, transcript verification, and the
