@@ -580,8 +580,8 @@ func TestEndToEndOverSPNEGO(t *testing.T) {
 			anchors.AddCert(root)
 			initiator := spnego.NewNegotiator(test.wrap(NewInitiator(clientIdentity, anchors)))
 			acceptor := spnego.NewNegotiator(test.wrap(NewAcceptor(serverIdentity, anchors)))
-			initiatorContext, acceptorContext := establishSPNEGO(t, initiator, acceptor)
-			assertProtectedMessage(t, initiatorContext, acceptorContext, []byte("spnego secret"), true)
+			exchange := establishSPNEGO(t, initiator, acceptor)
+			assertProtectedMessage(t, exchange.initiatorContext, exchange.acceptorContext, []byte("spnego secret"), true)
 		})
 	}
 }
@@ -688,48 +688,80 @@ func TestConcurrentHTTPExchanges(t *testing.T) {
 	}
 }
 
-func establishSPNEGO(t *testing.T, initiator, acceptor *spnego.Negotiator) (gssapi.Context, gssapi.Context) {
+const spnegoTestTarget = "host/server.example.com"
+
+type spnegoTestExchange struct {
+	token            []byte
+	initiatorContext gssapi.Context
+	acceptorContext  gssapi.Context
+	initiatorDone    bool
+	acceptorDone     bool
+}
+
+func establishSPNEGO(t *testing.T, initiator, acceptor *spnego.Negotiator) spnegoTestExchange {
 	t.Helper()
-	initiatorToken, initiatorContext, initiatorDone, err := initiator.InitSecContext("host/server.example.com", nil)
+	var exchange spnegoTestExchange
+	var err error
+	exchange.token, exchange.initiatorContext, exchange.initiatorDone, err = initiator.InitSecContext(
+		spnegoTestTarget, nil,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var acceptorContext gssapi.Context
-	acceptorDone := false
-	for turn := 0; turn < 10; turn++ {
-		acceptorToken, context, done, err := acceptor.AcceptSecContext(initiatorToken)
-		if err != nil {
-			t.Fatalf("SPNEGO acceptor turn %d: %v", turn, err)
-		}
-		if context != nil {
-			acceptorContext = context
-		}
-		acceptorDone = done
-		if acceptorDone && initiatorDone && len(acceptorToken) == 0 {
+	const maxTurns = 10
+	for turn := range maxTurns {
+		if exchange.runTurn(t, turn, initiator, acceptor) {
 			break
 		}
-		if len(acceptorToken) == 0 {
-			t.Fatalf("SPNEGO acceptor stalled on turn %d", turn)
-		}
-		initiatorToken, context, done, err = initiator.InitSecContext("host/server.example.com", acceptorToken)
-		if err != nil {
-			t.Fatalf("SPNEGO initiator turn %d: %v", turn, err)
-		}
-		if context != nil {
-			initiatorContext = context
-		}
-		initiatorDone = done
-		if acceptorDone && initiatorDone && len(initiatorToken) == 0 {
-			break
-		}
-		if len(initiatorToken) == 0 {
-			t.Fatalf("SPNEGO initiator stalled on turn %d", turn)
-		}
 	}
-	if !initiatorDone || !acceptorDone || initiatorContext == nil || acceptorContext == nil {
-		t.Fatalf("SPNEGO did not complete: initiator=%t acceptor=%t", initiatorDone, acceptorDone)
+	hasContexts := exchange.initiatorContext != nil && exchange.acceptorContext != nil
+	if !exchange.initiatorDone || !exchange.acceptorDone || !hasContexts {
+		t.Fatalf("SPNEGO did not complete: initiator=%t acceptor=%t", exchange.initiatorDone, exchange.acceptorDone)
 	}
-	return initiatorContext, acceptorContext
+
+	return exchange
+}
+
+func (e *spnegoTestExchange) runTurn(
+	t *testing.T,
+	turn int,
+	initiator, acceptor *spnego.Negotiator,
+) bool {
+	t.Helper()
+	output, established, done, err := acceptor.AcceptSecContext(e.token)
+	if err != nil {
+		t.Fatalf("SPNEGO acceptor turn %d: %v", turn, err)
+	}
+	if established != nil {
+		e.acceptorContext = established
+	}
+	e.acceptorDone = done
+	e.token = output
+	if e.checkTurnOutput(t, turn, "acceptor") {
+		return true
+	}
+
+	output, established, done, err = initiator.InitSecContext(spnegoTestTarget, e.token)
+	if err != nil {
+		t.Fatalf("SPNEGO initiator turn %d: %v", turn, err)
+	}
+	if established != nil {
+		e.initiatorContext = established
+	}
+	e.initiatorDone = done
+	e.token = output
+	return e.checkTurnOutput(t, turn, "initiator")
+}
+
+func (e *spnegoTestExchange) checkTurnOutput(t *testing.T, turn int, peer string) bool {
+	t.Helper()
+	if len(e.token) != 0 {
+		return false
+	}
+	if !e.initiatorDone || !e.acceptorDone {
+		t.Fatalf("SPNEGO %s stalled on turn %d", peer, turn)
+	}
+	return true
 }
 
 func assertProtectedMessage(t *testing.T, sender, receiver gssapi.Context, message []byte, confidential bool) {
