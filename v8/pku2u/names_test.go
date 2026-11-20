@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/hex"
 	"errors"
 	"math/big"
 	"testing"
@@ -21,7 +22,9 @@ var (
 )
 
 func TestPrincipalFromCertificateUPN(t *testing.T) {
-	certificate := testCertificate(t, pkix.Name{CommonName: "Alice"}, upnSAN(t, "alice@example.com"))
+	var subject pkix.Name
+	subject.CommonName = "Alice"
+	certificate := testCertificate(t, subject, upnSAN(t, "alice@example.com"))
 	principal, err := PrincipalFromCertificate(certificate)
 	if err != nil {
 		t.Fatal(err)
@@ -32,7 +35,10 @@ func TestPrincipalFromCertificateUPN(t *testing.T) {
 }
 
 func TestPrincipalFromCertificateSubjectFallback(t *testing.T) {
-	certificate := testCertificate(t, pkix.Name{CommonName: "Peer", Organization: []string{"Example"}}, nil)
+	var subject pkix.Name
+	subject.CommonName = "Peer"
+	subject.Organization = []string{"Example"}
+	certificate := testCertificate(t, subject, nil)
 	principal, err := PrincipalFromCertificate(certificate)
 	if err != nil {
 		t.Fatal(err)
@@ -91,21 +97,31 @@ func TestPrincipalFromCertificatePreservesSANError(t *testing.T) {
 	}
 }
 
+func TestUPNSANFixtureDER(t *testing.T) {
+	t.Parallel()
+
+	const want = "3023a021060a2b060104018237140203a0130c11616c696365406578616d706c652e636f6d"
+	if got := hex.EncodeToString(upnSAN(t, "alice@example.com")); got != want {
+		t.Fatalf("UPN SAN DER = %s, want %s", got, want)
+	}
+}
+
 func testCertificate(t *testing.T, subject pkix.Name, san []byte) *x509.Certificate {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	template := &x509.Certificate{
-		SerialNumber: big.NewInt(1), Subject: subject,
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature,
-	}
+	var template x509.Certificate
+	template.SerialNumber = big.NewInt(1)
+	template.Subject = subject
+	template.NotBefore = time.Now().Add(-time.Hour)
+	template.NotAfter = time.Now().Add(time.Hour)
+	template.KeyUsage = x509.KeyUsageDigitalSignature
 	if san != nil {
-		template.ExtraExtensions = []pkix.Extension{{Id: oidSubjectAlternativeName, Value: san}}
+		template.ExtraExtensions = []pkix.Extension{{Id: oidSubjectAlternativeName, Critical: false, Value: san}}
 	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,17 +142,23 @@ func upnSAN(t *testing.T, upn string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	valueDER, err := asn1.Marshal(asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: upnDER})
+	valueDER := marshalConstructedDER(t, asn1.ClassContextSpecific, 0, upnDER)
+	otherName := marshalConstructedDER(t, asn1.ClassContextSpecific, 0, append(typeDER, valueDER...))
+	return marshalConstructedDER(t, asn1.ClassUniversal, asn1.TagSequence, otherName)
+}
+
+func marshalConstructedDER(t *testing.T, class, tag int, content []byte) []byte {
+	t.Helper()
+
+	encoded, err := asn1.Marshal(asn1.RawValue{
+		Class:      class,
+		Tag:        tag,
+		IsCompound: true,
+		Bytes:      content,
+		FullBytes:  nil,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherName, err := asn1.Marshal(asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: append(typeDER, valueDER...)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	san, err := asn1.Marshal(asn1.RawValue{Class: asn1.ClassUniversal, Tag: asn1.TagSequence, IsCompound: true, Bytes: otherName})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return san
+	return encoded
 }

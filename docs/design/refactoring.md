@@ -2,8 +2,8 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-87 done. The latest v8
-inventories contain 528 canonical and 3,515 supplemental findings. Most
+(floor raised to 86.0%), and Phase 5 slices 1-88 done. The latest v8
+inventories contain 528 canonical and 3,506 supplemental findings. Most
 remaining canonical findings are from `revive`, complexity and nesting
 checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
 Phase 3/4 interoperability and Windows exit evidence remains an external CI
@@ -30,7 +30,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.2% cross-package statement coverage; 528 canonical lint findings after Slice 87 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.2% cross-package statement coverage; 528 canonical lint findings after Slice 88 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -819,6 +819,23 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 88 (2026-11-20, v8 PKU2U certificate-name fixtures; Q-10):
+Set only the relevant certificate and subject fields, mark the fixture SAN
+as noncritical, and share the constructed DER encoding in the UPN fixture.
+No production code changed. A golden test pinned the UPN SAN bytes before
+and after the refactor.
+
+The fixture and principal mapping tests and the direct and NEGOEX handshakes
+passed 100 shuffled runs under the race detector. Both module suites, v8
+build and vet, Linux/386 PKU2U tests, and a Windows/amd64 PKU2U test
+cross-build passed. Live Windows interoperability was not run.
+
+Changed-line lint passed against `7d2c004` and `origin/main` for both
+modules. V8 cross-package statement coverage stayed at 88.2%. The canonical
+inventory stayed at 528, and the supplemental inventory fell from 3,515
+to 3,506: seven `exhaustruct_v5` and two `lll` findings were removed, with
+no new findings or suppressions.
 
 Slice 87 (2026-11-20, v8 PKU2U initiator role contract; Q-10):
 Document a method-scoped `ireturn` exception for `Initiator.AcceptSecContext`.
