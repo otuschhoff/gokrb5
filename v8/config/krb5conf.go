@@ -432,12 +432,14 @@ func (d *DomainRealm) parseLines(lines []string) error {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		if !strings.Contains(line, "=") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
 			return InvalidErrorf("realm line (%s)", line)
 		}
-		p := strings.Split(line, "=")
-		domain := strings.TrimSpace(strings.ToLower(p[0]))
-		realm := strings.TrimSpace(p[1])
+		// Preserve the legacy rule that fields after the second '=' are ignored.
+		value, _, _ = strings.Cut(value, "=")
+		domain := strings.TrimSpace(strings.ToLower(key))
+		realm := strings.TrimSpace(value)
 		d.addMapping(domain, realm)
 	}
 	return nil
