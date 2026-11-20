@@ -6,7 +6,12 @@ import (
 	"fmt"
 )
 
-const authenticatorChecksumBindingLength = 16
+const (
+	authenticatorChecksumBindingLength = 16
+	authenticatorChecksumHeaderLen     = 4 + authenticatorChecksumBindingLength + 4
+	delegationHeaderLen                = 2 + 2
+	checksumExtensionHeaderLen         = 4 + 4
+)
 
 // AuthenticatorChecksumExtension is an RFC 4121 checksum extension.
 type AuthenticatorChecksumExtension struct {
@@ -26,7 +31,7 @@ type AuthenticatorChecksum struct {
 
 // NewAuthenticatorChecksum creates a checksum for the requested context flags.
 func NewAuthenticatorChecksum(bindings *ChannelBindings, flags ...int) AuthenticatorChecksum {
-	checksum := AuthenticatorChecksum{}
+	var checksum AuthenticatorChecksum
 	if bindings != nil {
 		checksum.Bnd = bindings.MD5Hash()
 	}
@@ -46,10 +51,10 @@ func (c AuthenticatorChecksum) Marshal() ([]byte, error) {
 	if len(c.Deleg) > 0 && c.Flags&ContextFlagDeleg == 0 {
 		return nil, errors.New("delegated KRB-CRED requires the delegation flag")
 	}
-	b := make([]byte, 24, 28+len(c.Deleg))
+	b := make([]byte, authenticatorChecksumHeaderLen, authenticatorChecksumHeaderLen+delegationHeaderLen+len(c.Deleg))
 	binary.LittleEndian.PutUint32(b[0:4], authenticatorChecksumBindingLength)
 	copy(b[4:20], c.Bnd[:])
-	binary.LittleEndian.PutUint32(b[20:24], c.Flags)
+	binary.LittleEndian.PutUint32(b[20:authenticatorChecksumHeaderLen], c.Flags)
 	if c.Flags&ContextFlagDeleg != 0 {
 		b = appendUint16LE(b, c.DelegationOption)
 		delegLength, err := gssUint16Length("delegation", len(c.Deleg))
@@ -79,25 +84,25 @@ func appendUint16LE(b []byte, value uint16) []byte {
 
 // Unmarshal decodes an RFC 4121 authenticator checksum.
 func (c *AuthenticatorChecksum) Unmarshal(b []byte) error {
-	if len(b) < 24 {
+	if len(b) < authenticatorChecksumHeaderLen {
 		return errors.New("authenticator checksum is shorter than 24 bytes")
 	}
 	if length := binary.LittleEndian.Uint32(b[0:4]); length != authenticatorChecksumBindingLength {
 		return fmt.Errorf("authenticator checksum channel-binding length is %d, want 16", length)
 	}
 	copy(c.Bnd[:], b[4:20])
-	c.Flags = binary.LittleEndian.Uint32(b[20:24])
+	c.Flags = binary.LittleEndian.Uint32(b[20:authenticatorChecksumHeaderLen])
 	c.DelegationOption = 0
 	c.Deleg = nil
 	c.Exts = nil
-	offset := 24
+	offset := authenticatorChecksumHeaderLen
 	if c.Flags&ContextFlagDeleg != 0 {
-		if len(b)-offset < 4 {
+		if len(b)-offset < delegationHeaderLen {
 			return errors.New("authenticator checksum delegation header is truncated")
 		}
 		c.DelegationOption = binary.LittleEndian.Uint16(b[offset : offset+2])
-		length := int(binary.LittleEndian.Uint16(b[offset+2 : offset+4]))
-		offset += 4
+		length := int(binary.LittleEndian.Uint16(b[offset+2 : offset+delegationHeaderLen]))
+		offset += delegationHeaderLen
 		if length > len(b)-offset {
 			return errors.New("authenticator checksum delegated KRB-CRED is truncated")
 		}
@@ -105,16 +110,19 @@ func (c *AuthenticatorChecksum) Unmarshal(b []byte) error {
 		offset += length
 	}
 	for offset < len(b) {
-		if len(b)-offset < 8 {
+		if len(b)-offset < checksumExtensionHeaderLen {
 			return errors.New("authenticator checksum extension header is truncated")
 		}
 		typeID := binary.LittleEndian.Uint32(b[offset : offset+4])
-		length := int(binary.LittleEndian.Uint32(b[offset+4 : offset+8]))
-		offset += 8
+		length := int(binary.LittleEndian.Uint32(b[offset+4 : offset+checksumExtensionHeaderLen]))
+		offset += checksumExtensionHeaderLen
 		if length > len(b)-offset {
 			return errors.New("authenticator checksum extension data is truncated")
 		}
-		c.Exts = append(c.Exts, AuthenticatorChecksumExtension{Type: typeID, Data: append([]byte(nil), b[offset:offset+length]...)})
+		c.Exts = append(c.Exts, AuthenticatorChecksumExtension{
+			Type: typeID,
+			Data: append([]byte(nil), b[offset:offset+length]...),
+		})
 		offset += length
 	}
 	return nil

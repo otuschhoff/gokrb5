@@ -10,7 +10,8 @@ import (
 )
 
 func TestTLSChannelBindings(t *testing.T) {
-	if _, err := TLSServerEndPoint(tls.ConnectionState{}); err == nil {
+	var emptyState tls.ConnectionState
+	if _, err := TLSServerEndPoint(emptyState); err == nil {
 		t.Fatal("missing peer certificate accepted")
 	}
 	for algorithm, digestBytes := range map[x509.SignatureAlgorithm]int{
@@ -18,7 +19,12 @@ func TestTLSChannelBindings(t *testing.T) {
 		x509.SHA384WithRSA: 48,
 		x509.SHA512WithRSA: 64,
 	} {
-		state := tls.ConnectionState{PeerCertificates: []*x509.Certificate{{Raw: []byte("certificate"), SignatureAlgorithm: algorithm}}}
+		var cert x509.Certificate
+		cert.Raw = []byte("certificate")
+		cert.SignatureAlgorithm = algorithm
+
+		var state tls.ConnectionState
+		state.PeerCertificates = []*x509.Certificate{&cert}
 		bindings, err := TLSServerEndPoint(state)
 		if err != nil || !bytes.HasPrefix(bindings.ApplicationData, []byte("tls-server-end-point:")) {
 			t.Fatalf("TLS server endpoint for %v = %x, %v", algorithm, bindings.ApplicationData, err)
@@ -28,10 +34,12 @@ func TestTLSChannelBindings(t *testing.T) {
 			t.Fatalf("binding length for %v = %d, want %d", algorithm, len(bindings.ApplicationData), wantLength)
 		}
 	}
-	if _, err := TLSUnique(tls.ConnectionState{}); err == nil {
+	if _, err := TLSUnique(emptyState); err == nil {
 		t.Fatal("missing TLS unique data accepted")
 	}
-	unique, err := TLSUnique(tls.ConnectionState{TLSUnique: []byte{1, 2, 3}})
+	var uniqueState tls.ConnectionState
+	uniqueState.TLSUnique = []byte{1, 2, 3}
+	unique, err := TLSUnique(uniqueState)
 	if err != nil || !bytes.Equal(unique.ApplicationData, append([]byte("tls-unique:"), 1, 2, 3)) {
 		t.Fatalf("TLS unique = %x, %v", unique.ApplicationData, err)
 	}
@@ -43,7 +51,8 @@ func TestContextFlagsAndNegoExKeys(t *testing.T) {
 		t.Fatalf("context flags = %+v", flags)
 	}
 	original := []byte{1, 2, 3, 4}
-	context := &SecurityContext{key: types.EncryptionKey{KeyType: 17, KeyValue: original}}
+	var context SecurityContext
+	context.key = types.EncryptionKey{KeyType: 17, KeyValue: original}
 	key, ok := context.NegoExKey()
 	if !ok || !bytes.Equal(key.KeyValue, original) {
 		t.Fatalf("NEGOEX key = %+v, %v", key, ok)

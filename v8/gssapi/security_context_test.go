@@ -16,7 +16,13 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
-func mustSecurityContext(t testing.TB, key types.EncryptionKey, initiator bool, sendSequence, receiveSequence uint64, acceptorSubkey bool) *SecurityContext {
+func mustSecurityContext(
+	t testing.TB,
+	key types.EncryptionKey,
+	initiator bool,
+	sendSequence, receiveSequence uint64,
+	acceptorSubkey bool,
+) *SecurityContext {
 	t.Helper()
 	context, err := NewSecurityContext(key, initiator, sendSequence, receiveSequence, acceptorSubkey)
 	if err != nil {
@@ -57,7 +63,10 @@ func TestSecurityContextBidirectionalProtection(t *testing.T) {
 }
 
 func TestSecurityContextAcceptsADStyleRotation(t *testing.T) {
-	key := types.EncryptionKey{KeyType: etypeID.AES256_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef0123456789abcdef")}
+	key := types.EncryptionKey{
+		KeyType:  etypeID.AES256_CTS_HMAC_SHA1_96,
+		KeyValue: []byte("0123456789abcdef0123456789abcdef"),
+	}
 	initiator, err := NewSecurityContext(key, true, 0, 0, true)
 	require.NoError(t, err)
 	acceptor, err := NewSecurityContext(key, false, 0, 0, true)
@@ -168,7 +177,10 @@ func TestSecurityContextRejectsTamperingAndReplay(t *testing.T) {
 }
 
 func TestSecurityContextMICProtection(t *testing.T) {
-	key := types.EncryptionKey{KeyType: etypeID.AES256_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef0123456789abcdef")}
+	key := types.EncryptionKey{
+		KeyType:  etypeID.AES256_CTS_HMAC_SHA1_96,
+		KeyValue: []byte("0123456789abcdef0123456789abcdef"),
+	}
 	initiator, err := NewSecurityContext(key, true, 4, 0, true)
 	require.NoError(t, err)
 	acceptor, err := NewSecurityContext(key, false, 0, 4, true)
@@ -210,9 +222,12 @@ func TestNilSecurityContextOperationsReturnErrors(t *testing.T) {
 }
 
 func TestNewSecurityContextRejectsUnsupportedKeys(t *testing.T) {
-	_, err := NewSecurityContext(types.EncryptionKey{KeyType: etypeID.RC4_HMAC, KeyValue: make([]byte, 16)}, true, 0, 0, false)
+	rc4Key := types.EncryptionKey{KeyType: etypeID.RC4_HMAC, KeyValue: make([]byte, 16)}
+	_, err := NewSecurityContext(rc4Key, true, 0, 0, false)
 	assert.ErrorContains(t, err, "requires an AES key")
-	_, err = NewSecurityContext(types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: make([]byte, 15)}, true, 0, 0, false)
+
+	shortKey := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: make([]byte, 15)}
+	_, err = NewSecurityContext(shortKey, true, 0, 0, false)
 	assert.ErrorContains(t, err, "invalid key length")
 	_, err = NewSecurityContext(types.EncryptionKey{KeyType: 999, KeyValue: make([]byte, 16)}, true, 0, 0, false)
 	assert.ErrorContains(t, err, "select RFC 4121 context enctype:")
@@ -264,7 +279,8 @@ func TestSecurityContextRejectsAuthenticatedHeaderMismatch(t *testing.T) {
 	innerHeader := wrapHeader(MICTokenFlagSealed|MICTokenFlagAcceptorSubkey, 0, 0, 1)
 	etype, err := crypto.GetEtype(key.KeyType)
 	require.NoError(t, err)
-	_, body, err := etype.EncryptMessage(key.KeyValue, append([]byte("message"), innerHeader...), keyusage.GSSAPI_INITIATOR_SEAL)
+	plaintext := append([]byte("message"), innerHeader...)
+	_, body, err := etype.EncryptMessage(key.KeyValue, plaintext, keyusage.GSSAPI_INITIATOR_SEAL)
 	require.NoError(t, err)
 	acceptor := mustSecurityContext(t, key, false, 0, 0, true)
 	_, _, err = acceptor.Unwrap(append(outerHeader, body...))
@@ -276,7 +292,8 @@ func TestSecurityContextRejectsInvalidConfidentialExtraCount(t *testing.T) {
 	header := wrapHeader(MICTokenFlagSealed|MICTokenFlagAcceptorSubkey, 100, 0, 0)
 	etype, err := crypto.GetEtype(key.KeyType)
 	require.NoError(t, err)
-	_, body, err := etype.EncryptMessage(key.KeyValue, append([]byte("message"), header...), keyusage.GSSAPI_INITIATOR_SEAL)
+	plaintext := append([]byte("message"), header...)
+	_, body, err := etype.EncryptMessage(key.KeyValue, plaintext, keyusage.GSSAPI_INITIATOR_SEAL)
 	require.NoError(t, err)
 	acceptor := mustSecurityContext(t, key, false, 0, 0, true)
 	_, _, err = acceptor.Unwrap(append(header, body...))
@@ -404,6 +421,7 @@ func TestWrapTokenSealedRotationRoundTrip(t *testing.T) {
 		RRC:       28,
 		SndSeqNum: 42,
 		Payload:   []byte("encrypted-body"),
+		CheckSum:  nil,
 	}
 	encoded, err := original.Marshal()
 	require.NoError(t, err)
@@ -413,7 +431,14 @@ func TestWrapTokenSealedRotationRoundTrip(t *testing.T) {
 }
 
 func TestWrapTokenRejectsInvalidSealedState(t *testing.T) {
-	token := &WrapToken{Flags: MICTokenFlagSealed, Payload: []byte("ciphertext"), CheckSum: []byte("separate")}
+	token := &WrapToken{
+		Flags:     MICTokenFlagSealed,
+		EC:        0,
+		RRC:       0,
+		SndSeqNum: 0,
+		Payload:   []byte("ciphertext"),
+		CheckSum:  []byte("separate"),
+	}
 	_, err := token.Marshal()
 	assert.ErrorContains(t, err, "separate checksum")
 	assert.Error(t, token.SetCheckSum(getSessionKey(), initiatorSeal))
@@ -421,7 +446,14 @@ func TestWrapTokenRejectsInvalidSealedState(t *testing.T) {
 	assert.False(t, valid)
 	assert.Error(t, err)
 
-	token = &WrapToken{Payload: []byte("message"), CheckSum: []byte{1}, EC: 2}
+	token = &WrapToken{
+		Flags:     0,
+		EC:        2,
+		RRC:       0,
+		SndSeqNum: 0,
+		Payload:   []byte("message"),
+		CheckSum:  []byte{1},
+	}
 	_, err = token.Marshal()
 	assert.ErrorContains(t, err, "does not match EC")
 }

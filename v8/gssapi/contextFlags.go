@@ -22,8 +22,9 @@ type ContextFlags asn1.BitString
 // NewContextFlags creates a new ContextFlags instance
 // DEPRECATED - do not use
 func NewContextFlags() ContextFlags {
+	const bitLength = 32
 	var c ContextFlags
-	c.BitLength = 32
-	c.Bytes = make([]byte, 4)
+	c.BitLength = bitLength
+	c.Bytes = make([]byte, bitLength/bitsPerByte)
 	return c
 }

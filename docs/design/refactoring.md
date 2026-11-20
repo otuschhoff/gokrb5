@@ -2,8 +2,8 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-133 done. The latest measured
-v8 inventories (Slice 129) contain 518 canonical and 3,392 supplemental
+(floor raised to 86.0%), and Phase 5 slices 1-134 done. The latest measured
+v8 inventories (Slice 134) contain 513 canonical and 3,299 supplemental
 findings. Most remaining canonical findings are from `revive`, complexity and
 nesting checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
 Phase 3/4 interoperability and Windows exit evidence remains an external CI
@@ -819,6 +819,21 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 134 (2026-11-20, complete v8 GSSAPI lint cleanup; Q-10):
+Clear all four canonical findings and 93 supplemental advisories without
+changing lint configuration or adding suppressions. Separate RFC 4121
+wrap header validation, sealed unwrap, and integrity-only verification;
+advance the receive sequence only after successful verification. Compose
+the existing public interfaces from narrower capability interfaces without
+changing their method sets. Preserve token encodings, error diagnostics,
+and status text; cover zero, combined, and out-of-range status codes.
+
+Both whole-v8 scans report zero GSSAPI findings, including tests. GSSAPI
+passes 100 shuffled runs with the race detector. SPNEGO, PKU2U, NEGOEX,
+client, and service also pass under race detection; the full v8 build, vet,
+and test suite pass. Changed-line lint passes for both modules against the
+slice base and `origin/main`.
 
 Slice 133 (2026-11-20, v8 GSSAPI wrap token naming; Q-10):
 Shift the Phase 5 focus from config to GSSAPI, keytab, and SPNEGO. At the

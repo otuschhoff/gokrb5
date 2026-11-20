@@ -29,6 +29,7 @@ func TestOID(t *testing.T) {
 }
 
 func TestStatusError(t *testing.T) {
+	const unknownStatus = "unknown GSS-API error status"
 	testCases := []struct {
 		code int
 		want string
@@ -58,11 +59,14 @@ func TestStatusError(t *testing.T) {
 		{StatusOldToken, "timed-out per-message token detected"},
 		{StatusUnseqToken, "reordered (early) per-message token detected"},
 		{StatusGapToken, "skipped predecessor token(s) detected"},
-		{-1, "unknown GSS-API error status"},
+		{-1, unknownStatus},
+		{0, unknownStatus},
+		{StatusBadBindings | StatusBadMech, unknownStatus},
+		{StatusGapToken << 1, unknownStatus},
 	}
 	for _, testCase := range testCases {
 		t.Run(fmt.Sprintf("code-%d", testCase.code), func(t *testing.T) {
-			assert.Equal(t, testCase.want, (Status{Code: testCase.code}).Error())
+			assert.Equal(t, testCase.want, (Status{Code: testCase.code, Message: ""}).Error())
 			assert.Equal(t, testCase.want+": detail", (Status{Code: testCase.code, Message: "detail"}).Error())
 		})
 	}

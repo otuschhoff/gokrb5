@@ -93,7 +93,9 @@ func TLSServerEndPoint(state tls.ConnectionState) (ChannelBindings, error) {
 		digest = sha256.New()
 	}
 	_, _ = digest.Write(certificate.Raw)
-	return ChannelBindings{ApplicationData: append([]byte("tls-server-end-point:"), digest.Sum(nil)...)}, nil
+	var bindings ChannelBindings
+	bindings.ApplicationData = append([]byte("tls-server-end-point:"), digest.Sum(nil)...)
+	return bindings, nil
 }
 
 // TLSUnique creates a tls-unique channel binding from the TLS Finished data.
@@ -101,5 +103,7 @@ func TLSUnique(state tls.ConnectionState) (ChannelBindings, error) {
 	if len(state.TLSUnique) == 0 {
 		return ChannelBindings{}, errors.New("TLS connection does not expose tls-unique data")
 	}
-	return ChannelBindings{ApplicationData: append([]byte("tls-unique:"), state.TLSUnique...)}, nil
+	var bindings ChannelBindings
+	bindings.ApplicationData = append([]byte("tls-unique:"), state.TLSUnique...)
+	return bindings, nil
 }

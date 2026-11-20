@@ -16,7 +16,8 @@ import (
 // RFC 4121, section 4.2.6.1
 
 const (
-	// MICTokenFlagSentByAcceptor - this flag indicates the sender is the context acceptor.  When not set, it indicates the sender is the context initiator
+	// MICTokenFlagSentByAcceptor indicates the sender is the context acceptor.
+	// When not set, the sender is the context initiator.
 	MICTokenFlagSentByAcceptor = 1 << iota
 	// MICTokenFlagSealed - this flag indicates confidentiality is provided for.  It SHALL NOT be set in MIC tokens
 	MICTokenFlagSealed
@@ -39,6 +40,17 @@ type MICToken struct {
 	SndSeqNum uint64 // sender's sequence number. big-endian
 	Payload   []byte // your data! :)
 	Checksum  []byte // checksum of { payload | header }
+}
+
+// NewInitiatorMICToken builds and authenticates a MIC token sent by the initiator.
+// The flags and sequence number are initialized to zero.
+func NewInitiatorMICToken(payload []byte, key types.EncryptionKey) (*MICToken, error) {
+	var token MICToken
+	token.Payload = payload
+	if err := token.SetChecksum(key, keyusage.GSSAPI_INITIATOR_SIGN); err != nil {
+		return nil, err
+	}
+	return &token, nil
 }
 
 // Return the 2 bytes identifying a GSS API MIC token
@@ -78,37 +90,6 @@ func (mt *MICToken) SetChecksum(key types.EncryptionKey, keyUsage uint32) error 
 	}
 	mt.Checksum = checksum
 	return nil
-}
-
-// Compute and return the checksum of this token, computed using the passed key and key usage.
-// Note: This will NOT update the struct's Checksum field.
-func (mt *MICToken) checksum(key types.EncryptionKey, keyUsage uint32) ([]byte, error) {
-	if mt.Payload == nil {
-		return nil, errors.New("cannot compute checksum with uninitialized payload")
-	}
-	d := make([]byte, micHdrLen+len(mt.Payload))
-	copy(d[0:], mt.Payload)
-	copy(d[len(mt.Payload):], mt.getMICChecksumHeader())
-
-	encType, err := crypto.GetEtype(key.KeyType)
-	if err != nil {
-		return nil, fmt.Errorf("select MIC checksum enctype: %w", err)
-	}
-	checksum, err := encType.GetChecksumHash(key.KeyValue, d, keyUsage)
-	if err != nil {
-		return nil, fmt.Errorf("compute MIC checksum: %w", err)
-	}
-	return checksum, nil
-}
-
-// Build a header suitable for a checksum computation
-func (mt *MICToken) getMICChecksumHeader() []byte {
-	header := make([]byte, micHdrLen)
-	copy(header[0:2], getGSSMICTokenID()[:])
-	header[2] = mt.Flags
-	copy(header[3:8], fillerBytes()[:])
-	binary.BigEndian.PutUint64(header[8:16], mt.SndSeqNum)
-	return header
 }
 
 // Verify computes the token's checksum with the provided key and usage,
@@ -157,20 +138,32 @@ func (mt *MICToken) Unmarshal(b []byte, expectFromAcceptor bool) error {
 	return nil
 }
 
-// NewInitiatorMICToken builds a new initiator token (acceptor flag will be set to 0) and computes the authenticated checksum.
-// Other flags are set to 0.
-// Note that in certain circumstances you may need to provide a sequence number that has been defined earlier.
-// This is currently not supported.
-func NewInitiatorMICToken(payload []byte, key types.EncryptionKey) (*MICToken, error) {
-	token := MICToken{
-		Flags:     0x00,
-		SndSeqNum: 0,
-		Payload:   payload,
+// checksum computes the checksum without updating the token.
+func (mt *MICToken) checksum(key types.EncryptionKey, keyUsage uint32) ([]byte, error) {
+	if mt.Payload == nil {
+		return nil, errors.New("cannot compute checksum with uninitialized payload")
 	}
+	d := make([]byte, micHdrLen+len(mt.Payload))
+	copy(d[0:], mt.Payload)
+	copy(d[len(mt.Payload):], mt.getMICChecksumHeader())
 
-	if err := token.SetChecksum(key, keyusage.GSSAPI_INITIATOR_SIGN); err != nil {
-		return nil, err
+	encType, err := crypto.GetEtype(key.KeyType)
+	if err != nil {
+		return nil, fmt.Errorf("select MIC checksum enctype: %w", err)
 	}
+	checksum, err := encType.GetChecksumHash(key.KeyValue, d, keyUsage)
+	if err != nil {
+		return nil, fmt.Errorf("compute MIC checksum: %w", err)
+	}
+	return checksum, nil
+}
 
-	return &token, nil
+// Build a header suitable for a checksum computation
+func (mt *MICToken) getMICChecksumHeader() []byte {
+	header := make([]byte, micHdrLen)
+	copy(header[0:2], getGSSMICTokenID()[:])
+	header[2] = mt.Flags
+	copy(header[3:8], fillerBytes()[:])
+	binary.BigEndian.PutUint64(header[8:16], mt.SndSeqNum)
+	return header
 }

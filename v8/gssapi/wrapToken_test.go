@@ -89,7 +89,8 @@ func TestUnmarshalFailure_Challenge(t *testing.T) {
 	}
 	var wt WrapToken
 	err := wt.Unmarshal(challenge, false)
-	assert.NotNil(t, err, "Expected error did not occur: a message from the acceptor cannot be expected to be sent from the initiator.")
+	assert.NotNil(t, err,
+		"Expected error did not occur: a message from the acceptor cannot be expected to be sent from the initiator.")
 	assert.Nil(t, wt.Payload, "Token fields should not have been initialised")
 	assert.Nil(t, wt.CheckSum, "Token fields should not have been initialised")
 	assert.Equal(t, byte(0x00), wt.Flags, "Token fields should not have been initialised")
@@ -118,7 +119,8 @@ func TestUnmarshalFailure_ChallengeReply(t *testing.T) {
 	}
 	var wt WrapToken
 	err := wt.Unmarshal(response, true)
-	assert.NotNil(t, err, "Expected error did not occur: a message from the initiator cannot be expected to be sent from the acceptor.")
+	assert.NotNil(t, err,
+		"Expected error did not occur: a message from the initiator cannot be expected to be sent from the acceptor.")
 	assert.Nil(t, wt.Payload, "Token fields should not have been initialised")
 	assert.Nil(t, wt.CheckSum, "Token fields should not have been initialised")
 	assert.Equal(t, byte(0x00), wt.Flags, "Token fields should not have been initialised")
@@ -144,7 +146,10 @@ func TestChallengeChecksumVerification(t *testing.T) {
 
 func TestResponseChecksumVerification(t *testing.T) {
 	t.Parallel()
-	reply, _ := hex.DecodeString(testChallengeReplyFromInitiator)
+	reply, err := hex.DecodeString(testChallengeReplyFromInitiator)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var wt WrapToken
 	if err := wt.Unmarshal(reply, false); err != nil {
 		t.Fatal(err)
@@ -218,7 +223,7 @@ func TestNewInitiatorTokenSignatureAndMarshalling(t *testing.T) {
 
 func TestWrapTokenAdditionalErrorPaths(t *testing.T) {
 	badKey := types.EncryptionKey{KeyType: 999, KeyValue: []byte("bad")}
-	token := WrapToken{}
+	var token WrapToken
 	assert.Error(t, token.SetCheckSum(getSessionKey(), initiatorSeal))
 	token.Payload = []byte("payload")
 	token.CheckSum = []byte{1}
@@ -228,7 +233,8 @@ func TestWrapTokenAdditionalErrorPaths(t *testing.T) {
 	assert.ErrorContains(t, err, "select wrap checksum enctype:")
 	assert.ErrorContains(t, errors.Unwrap(err), "unsupported EType")
 
-	withoutPayload := WrapToken{CheckSum: []byte{1}}
+	var withoutPayload WrapToken
+	withoutPayload.CheckSum = []byte{1}
 	valid, err := withoutPayload.Verify(getSessionKey(), initiatorSeal)
 	assert.False(t, valid)
 	assert.Error(t, err)
@@ -252,7 +258,8 @@ func TestWrapTokenAdditionalErrorPaths(t *testing.T) {
 	_, err = NewInitiatorWrapToken([]byte("payload"), badKey)
 	assert.ErrorContains(t, err, "select initiator wrap enctype:")
 	assert.ErrorContains(t, errors.Unwrap(err), "unsupported EType")
-	_, err = NewInitiatorWrapToken([]byte("payload"), types.EncryptionKey{KeyType: sessionKeyType, KeyValue: []byte("short")})
+	shortKey := types.EncryptionKey{KeyType: sessionKeyType, KeyValue: []byte("short")}
+	_, err = NewInitiatorWrapToken([]byte("payload"), shortKey)
 	assert.ErrorContains(t, err, "compute wrap token checksum:")
 	assert.ErrorContains(t, errors.Unwrap(err), "incorrect keysize")
 }

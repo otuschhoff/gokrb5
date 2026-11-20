@@ -36,9 +36,25 @@ type WrapToken struct {
 	CheckSum  []byte // authenticated checksum of { payload | header }
 }
 
-// Return the 2 bytes identifying a GSS API Wrap token
-func wrapTokenID() *[2]byte {
-	return &[2]byte{0x05, 0x04}
+// NewInitiatorWrapToken builds and authenticates a token sent by the initiator.
+// The flags, rotation count, and sequence number are initialized to zero.
+func NewInitiatorWrapToken(payload []byte, key types.EncryptionKey) (*WrapToken, error) {
+	encType, err := crypto.GetEtype(key.KeyType)
+	if err != nil {
+		return nil, fmt.Errorf("select initiator wrap enctype: %w", err)
+	}
+
+	checksumLength, err := gssUint16Length("wrap checksum", encType.GetHMACBitLength()/bitsPerByte)
+	if err != nil {
+		return nil, err
+	}
+	var token WrapToken
+	token.EC = checksumLength
+	token.Payload = payload
+	if err := token.SetCheckSum(key, keyusage.GSSAPI_INITIATOR_SEAL); err != nil {
+		return nil, err
+	}
+	return &token, nil
 }
 
 // Marshal the WrapToken into a byte slice.
@@ -88,36 +104,6 @@ func (wt *WrapToken) SetCheckSum(key types.EncryptionKey, keyUsage uint32) error
 	return nil
 }
 
-// ComputeCheckSum computes and returns the checksum of this token, computed using the passed key and key usage.
-// Note: This will NOT update the struct's Checksum field.
-func (wt *WrapToken) computeCheckSum(key types.EncryptionKey, keyUsage uint32) ([]byte, error) {
-	if wt.Payload == nil {
-		return nil, errors.New("cannot compute checksum with uninitialized payload")
-	}
-	// Build a slice containing { payload | header }
-	checksumMe := make([]byte, HdrLen+len(wt.Payload))
-	copy(checksumMe[0:], wt.Payload)
-	copy(checksumMe[len(wt.Payload):], getChecksumHeader(wt.Flags, wt.SndSeqNum))
-
-	encType, err := crypto.GetEtype(key.KeyType)
-	if err != nil {
-		return nil, fmt.Errorf("select wrap checksum enctype: %w", err)
-	}
-	checksum, err := encType.GetChecksumHash(key.KeyValue, checksumMe, keyUsage)
-	if err != nil {
-		return nil, fmt.Errorf("compute wrap token checksum: %w", err)
-	}
-	return checksum, nil
-}
-
-// Build a header suitable for a checksum computation
-func getChecksumHeader(flags byte, senderSeqNum uint64) []byte {
-	header := make([]byte, 16)
-	copy(header[0:], []byte{0x05, 0x04, flags, 0xFF, 0x00, 0x00, 0x00, 0x00})
-	binary.BigEndian.PutUint64(header[8:], senderSeqNum)
-	return header
-}
-
 // Verify computes the token's checksum with the provided key and usage,
 // and compares it to the checksum present in the token.
 // In case of any failure, (false, Err) is returned, with Err an explanatory error.
@@ -139,29 +125,13 @@ func (wt *WrapToken) Verify(key types.EncryptionKey, keyUsage uint32) (bool, err
 // If expectFromAcceptor is true, we expect the token to have been emitted by the gss acceptor,
 // and will check the according flag, returning an error if the token does not match the expectation.
 func (wt *WrapToken) Unmarshal(b []byte, expectFromAcceptor bool) error {
-	// Check if we can read a whole header
-	if len(b) < 16 {
+	if len(b) < HdrLen {
 		return errors.New("bytes shorter than header length")
 	}
-	// Is the Token ID correct?
-	if !bytes.Equal(wrapTokenID()[:], b[0:2]) {
-		return fmt.Errorf("wrong Token ID. Expected %s, was %s",
-			hex.EncodeToString(wrapTokenID()[:]),
-			hex.EncodeToString(b[0:2]))
+	if err := validateWrapTokenHeader(b[:HdrLen], expectFromAcceptor); err != nil {
+		return err
 	}
-	// Check the acceptor flag
 	flags := b[2]
-	isFromAcceptor := flags&0x01 == 1
-	if isFromAcceptor && !expectFromAcceptor {
-		return errors.New("unexpected acceptor flag is set: not expecting a token from the acceptor")
-	}
-	if !isFromAcceptor && expectFromAcceptor {
-		return errors.New("expected acceptor flag is not set: expecting a token from the acceptor, not the initiator")
-	}
-	// Check the filler byte
-	if b[3] != FillerByte {
-		return fmt.Errorf("unexpected filler byte: expecting 0xFF, was %s ", hex.EncodeToString(b[3:4]))
-	}
 	ec := binary.BigEndian.Uint16(b[4:6])
 	rrc := binary.BigEndian.Uint16(b[6:8])
 	body := append([]byte(nil), b[HdrLen:]...)
@@ -184,32 +154,45 @@ func (wt *WrapToken) Unmarshal(b []byte, expectFromAcceptor bool) error {
 	return nil
 }
 
-// NewInitiatorWrapToken builds a new initiator token (acceptor flag will be set to 0) and computes the authenticated checksum.
-// Other flags are set to 0, and the RRC and sequence number are initialized to 0.
-// Note that in certain circumstances you may need to provide a sequence number that has been defined earlier.
-// This is currently not supported.
-func NewInitiatorWrapToken(payload []byte, key types.EncryptionKey) (*WrapToken, error) {
+func validateWrapTokenHeader(b []byte, expectFromAcceptor bool) error {
+	if !bytes.Equal(wrapTokenID()[:], b[0:2]) {
+		return fmt.Errorf("wrong Token ID. Expected %s, was %s",
+			hex.EncodeToString(wrapTokenID()[:]),
+			hex.EncodeToString(b[0:2]))
+	}
+	isFromAcceptor := b[2]&MICTokenFlagSentByAcceptor != 0
+	if isFromAcceptor && !expectFromAcceptor {
+		return errors.New("unexpected acceptor flag is set: not expecting a token from the acceptor")
+	}
+	if !isFromAcceptor && expectFromAcceptor {
+		return errors.New("expected acceptor flag is not set: expecting a token from the acceptor, not the initiator")
+	}
+	if b[3] != FillerByte {
+		return fmt.Errorf("unexpected filler byte: expecting 0xFF, was %s ", hex.EncodeToString(b[3:4]))
+	}
+	return nil
+}
+
+// computeCheckSum computes the checksum without updating the token.
+func (wt *WrapToken) computeCheckSum(key types.EncryptionKey, keyUsage uint32) ([]byte, error) {
+	if wt.Payload == nil {
+		return nil, errors.New("cannot compute checksum with uninitialized payload")
+	}
+	checksumMe := make([]byte, HdrLen+len(wt.Payload))
+	copy(checksumMe, wt.Payload)
+	copy(checksumMe[len(wt.Payload):], wrapHeader(wt.Flags, 0, 0, wt.SndSeqNum))
+
 	encType, err := crypto.GetEtype(key.KeyType)
 	if err != nil {
-		return nil, fmt.Errorf("select initiator wrap enctype: %w", err)
+		return nil, fmt.Errorf("select wrap checksum enctype: %w", err)
 	}
-
-	checksumLength, err := gssUint16Length("wrap checksum", encType.GetHMACBitLength()/8)
+	checksum, err := encType.GetChecksumHash(key.KeyValue, checksumMe, keyUsage)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("compute wrap token checksum: %w", err)
 	}
-	token := WrapToken{
-		Flags: 0x00, // all zeroed out (this is a token sent by the initiator)
-		// Checksum size: length of output of the HMAC function, in bytes.
-		EC:        checksumLength,
-		RRC:       0,
-		SndSeqNum: 0,
-		Payload:   payload,
-	}
+	return checksum, nil
+}
 
-	if err := token.SetCheckSum(key, keyusage.GSSAPI_INITIATOR_SEAL); err != nil {
-		return nil, err
-	}
-
-	return &token, nil
+func wrapTokenID() *[2]byte {
+	return &[2]byte{0x05, 0x04}
 }

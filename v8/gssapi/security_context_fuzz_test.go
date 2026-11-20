@@ -8,7 +8,10 @@ import (
 )
 
 func FuzzSecurityContextUnwrap(f *testing.F) {
-	key := types.EncryptionKey{KeyType: etypeID.AES256_CTS_HMAC_SHA384_192, KeyValue: []byte("0123456789abcdef0123456789abcdef")}
+	key := types.EncryptionKey{
+		KeyType:  etypeID.AES256_CTS_HMAC_SHA384_192,
+		KeyValue: []byte("0123456789abcdef0123456789abcdef"),
+	}
 	for _, confidential := range []bool{false, true} {
 		initiator := mustSecurityContext(f, key, true, 0, 0, true)
 		token, err := initiator.Wrap([]byte("seed message"), confidential)

@@ -76,7 +76,8 @@ func TestUnmarshalFailure_MICChallenge(t *testing.T) {
 	}
 	var mt MICToken
 	err := mt.Unmarshal(challenge, false)
-	assert.NotNil(t, err, "Expected error did not occur: a message from the acceptor cannot be expected to be sent from the initiator.")
+	assert.NotNil(t, err,
+		"Expected error did not occur: a message from the acceptor cannot be expected to be sent from the initiator.")
 	assert.Nil(t, mt.Payload, "Token fields should not have been initialised")
 	assert.Nil(t, mt.Checksum, "Token fields should not have been initialised")
 	assert.Equal(t, byte(0x00), mt.Flags, "Token fields should not have been initialised")
@@ -103,7 +104,8 @@ func TestUnmarshalFailure_MICChallengeReply(t *testing.T) {
 	}
 	var mt MICToken
 	err := mt.Unmarshal(response, true)
-	assert.NotNil(t, err, "Expected error did not occur: a message from the initiator cannot be expected to be sent from the acceptor.")
+	assert.NotNil(t, err,
+		"Expected error did not occur: a message from the initiator cannot be expected to be sent from the acceptor.")
 	assert.Nil(t, mt.Payload, "Token fields should not have been initialised")
 	assert.Nil(t, mt.Checksum, "Token fields should not have been initialised")
 	assert.Equal(t, byte(0x00), mt.Flags, "Token fields should not have been initialised")
@@ -208,7 +210,7 @@ func TestNewInitiatorMICTokenSignatureAndMarshalling(t *testing.T) {
 
 func TestMICTokenErrorPaths(t *testing.T) {
 	badKey := types.EncryptionKey{KeyType: 999, KeyValue: []byte("bad")}
-	token := MICToken{}
+	var token MICToken
 	assert.Error(t, token.SetChecksum(getSessionKey(), initiatorSign))
 	token.Payload = []byte("payload")
 	err := token.SetChecksum(badKey, initiatorSign)
@@ -222,7 +224,8 @@ func TestMICTokenErrorPaths(t *testing.T) {
 	token.Checksum = []byte{1}
 	assert.Error(t, token.SetChecksum(getSessionKey(), initiatorSign))
 
-	withoutPayload := MICToken{Checksum: []byte{1}}
+	var withoutPayload MICToken
+	withoutPayload.Checksum = []byte{1}
 	valid, err := withoutPayload.Verify(getSessionKey(), initiatorSign)
 	assert.False(t, valid)
 	assert.Error(t, err)
@@ -240,6 +243,7 @@ func TestMICTokenErrorPaths(t *testing.T) {
 
 	_, err = NewInitiatorMICToken([]byte("payload"), badKey)
 	assert.Error(t, err)
-	_, err = NewInitiatorMICToken([]byte("payload"), types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("short")})
+	shortAES128Key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("short")}
+	_, err = NewInitiatorMICToken([]byte("payload"), shortAES128Key)
 	assert.Error(t, err)
 }

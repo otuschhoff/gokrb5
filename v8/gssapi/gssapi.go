@@ -1,9 +1,10 @@
-// Package gssapi implements Generic Security Services Application Program Interface required for SPNEGO kerberos authentication.
+// Package gssapi implements the Generic Security Services Application Program
+// Interface used for SPNEGO Kerberos authentication.
 package gssapi
 
 import (
 	"context"
-	"fmt"
+	"math/bits"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
 )
@@ -14,9 +15,10 @@ const (
 	OIDKRB5         OIDName = "KRB5"         // MechType OID for Kerberos 5
 	OIDMSLegacyKRB5 OIDName = "MSLegacyKRB5" // MechType OID for Kerberos 5
 	OIDSPNEGO       OIDName = "SPNEGO"
-	OIDGSSIAKerb    OIDName = "GSSIAKerb" // Indicates the client cannot get a service ticket and asks the server to serve as an intermediate to the target KDC. http://k5wiki.kerberos.org/wiki/Projects/IAKERB#IAKERB_mech
-	OIDNegoEx       OIDName = "NEGOEX"
-	OIDPKU2U        OIDName = "PKU2U"
+	// OIDGSSIAKerb lets a client reach the target KDC via the server.
+	OIDGSSIAKerb OIDName = "GSSIAKerb"
+	OIDNegoEx    OIDName = "NEGOEX"
+	OIDPKU2U     OIDName = "PKU2U"
 )
 
 // GSS-API status values
@@ -106,14 +108,26 @@ GSS_Duplicate_name           duplicate name object
 
 // Mechanism is the GSS-API interface for authentication mechanisms.
 type Mechanism interface {
+	TokenContextMechanism
+	TokenMessageProtector
+}
+
+// TokenContextMechanism acquires credentials and establishes contexts using
+// the original token-oriented API.
+type TokenContextMechanism interface {
 	OID() asn1.ObjectIdentifier
-	AcquireCred() error                                               // acquire credentials for use (eg. AS exchange for KRB5)
-	InitSecContext() (ContextToken, error)                            // initiate outbound security context (eg TGS exchange builds AP_REQ to go into ContextToken to send to service)
-	AcceptSecContext(ct ContextToken) (bool, context.Context, Status) // service verifies the token server side to establish a context
-	MIC() MICToken                                                    // apply integrity check, receive as token separate from message
-	VerifyMIC(mt MICToken) (bool, error)                              // validate integrity check token along with message
-	Wrap(msg []byte) WrapToken                                        // sign, optionally encrypt, encapsulate
-	Unwrap(wt WrapToken) []byte                                       // decapsulate, decrypt if needed, validate integrity check
+	AcquireCred() error
+	InitSecContext() (ContextToken, error)
+	AcceptSecContext(ct ContextToken) (bool, context.Context, Status)
+}
+
+// TokenMessageProtector provides integrity and optional confidentiality using
+// the original token-oriented API.
+type TokenMessageProtector interface {
+	MIC() MICToken
+	VerifyMIC(mt MICToken) (bool, error)
+	Wrap(msg []byte) WrapToken
+	Unwrap(wt WrapToken) []byte
 }
 
 // OIDName is the type for defined GSS-API OIDs.
@@ -146,63 +160,44 @@ type Status struct {
 
 // Error returns the Status description.
 func (s Status) Error() string {
-	var str string
-	switch s.Code {
-	case StatusBadBindings:
-		str = "channel binding mismatch"
-	case StatusBadMech:
-		str = "unsupported mechanism requested"
-	case StatusBadName:
-		str = "invalid name provided"
-	case StatusBadNameType:
-		str = "name of unsupported type provided"
-	case StatusBadStatus:
-		str = "invalid input status selector"
-	case StatusBadSig:
-		str = "token had invalid integrity check"
-	case StatusBadMIC:
-		str = "preferred alias for GSS_S_BAD_SIG"
-	case StatusContextExpired:
-		str = "specified security context expired"
-	case StatusCredentialsExpired:
-		str = "expired credentials detected"
-	case StatusDefectiveCredential:
-		str = "defective credential detected"
-	case StatusDefectiveToken:
-		str = "defective token detected"
-	case StatusFailure:
-		str = "failure, unspecified at GSS-API level"
-	case StatusNoContext:
-		str = "no valid security context specified"
-	case StatusNoCred:
-		str = "no valid credentials provided"
-	case StatusBadQOP:
-		str = "unsupported QOP valu"
-	case StatusUnauthorized:
-		str = "operation unauthorized"
-	case StatusUnavailable:
-		str = "operation unavailable"
-	case StatusDuplicateElement:
-		str = "duplicate credential element requested"
-	case StatusNameNotMN:
-		str = "name contains multi-mechanism elements"
-	case StatusComplete:
-		str = "normal completion"
-	case StatusContinueNeeded:
-		str = "continuation call to routine required"
-	case StatusDuplicateToken:
-		str = "duplicate per-message token detected"
-	case StatusOldToken:
-		str = "timed-out per-message token detected"
-	case StatusUnseqToken:
-		str = "reordered (early) per-message token detected"
-	case StatusGapToken:
-		str = "skipped predecessor token(s) detected"
-	default:
-		str = "unknown GSS-API error status"
-	}
+	str := statusDescription(s.Code)
 	if s.Message != "" {
-		return fmt.Sprintf("%s: %s", str, s.Message)
+		return str + ": " + s.Message
 	}
 	return str
+}
+
+func statusDescription(code int) string {
+	// Descriptions follow the bit positions of the Status constants.
+	descriptions := [...]string{
+		"channel binding mismatch",                     // StatusBadBindings
+		"unsupported mechanism requested",              // StatusBadMech
+		"invalid name provided",                        // StatusBadName
+		"name of unsupported type provided",            // StatusBadNameType
+		"invalid input status selector",                // StatusBadStatus
+		"token had invalid integrity check",            // StatusBadSig
+		"preferred alias for GSS_S_BAD_SIG",            // StatusBadMIC
+		"specified security context expired",           // StatusContextExpired
+		"expired credentials detected",                 // StatusCredentialsExpired
+		"defective credential detected",                // StatusDefectiveCredential
+		"defective token detected",                     // StatusDefectiveToken
+		"failure, unspecified at GSS-API level",        // StatusFailure
+		"no valid security context specified",          // StatusNoContext
+		"no valid credentials provided",                // StatusNoCred
+		"unsupported QOP valu",                         // StatusBadQOP
+		"operation unauthorized",                       // StatusUnauthorized
+		"operation unavailable",                        // StatusUnavailable
+		"duplicate credential element requested",       // StatusDuplicateElement
+		"name contains multi-mechanism elements",       // StatusNameNotMN
+		"normal completion",                            // StatusComplete
+		"continuation call to routine required",        // StatusContinueNeeded
+		"duplicate per-message token detected",         // StatusDuplicateToken
+		"timed-out per-message token detected",         // StatusOldToken
+		"reordered (early) per-message token detected", // StatusUnseqToken
+		"skipped predecessor token(s) detected",        // StatusGapToken
+	}
+	if code <= 0 || code > StatusGapToken || code&(code-1) != 0 {
+		return "unknown GSS-API error status"
+	}
+	return descriptions[bits.TrailingZeros(uint(code))]
 }

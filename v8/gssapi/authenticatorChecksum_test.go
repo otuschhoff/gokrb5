@@ -37,7 +37,8 @@ func TestChannelBindingsMD5Hash(t *testing.T) {
 }
 
 func TestAuthenticatorChecksumRoundTrip(t *testing.T) {
-	bindings := ChannelBindings{ApplicationData: []byte("binding")}
+	var bindings ChannelBindings
+	bindings.ApplicationData = []byte("binding")
 	want := NewAuthenticatorChecksum(&bindings, ContextFlagDeleg, ContextFlagMutual, ContextFlagInteg)
 	want.DelegationOption = 1
 	want.Deleg = []byte{1, 2, 3, 4}
@@ -64,9 +65,15 @@ func TestAuthenticatorChecksumRejectsTruncation(t *testing.T) {
 }
 
 func TestAuthenticatorChecksumRejectsInvalidValues(t *testing.T) {
-	_, err := (AuthenticatorChecksum{Deleg: make([]byte, 1<<16), Flags: ContextFlagDeleg}).Marshal()
+	var oversizedDelegation AuthenticatorChecksum
+	oversizedDelegation.Flags = ContextFlagDeleg
+	oversizedDelegation.Deleg = make([]byte, 1<<16)
+	_, err := oversizedDelegation.Marshal()
 	assert.Error(t, err)
-	_, err = (AuthenticatorChecksum{Deleg: []byte{1}}).Marshal()
+
+	var unflaggedDelegation AuthenticatorChecksum
+	unflaggedDelegation.Deleg = []byte{1}
+	_, err = unflaggedDelegation.Marshal()
 	assert.Error(t, err)
 
 	badBindingLength := make([]byte, 24)
