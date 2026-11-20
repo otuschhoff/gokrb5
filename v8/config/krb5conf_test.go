@@ -801,7 +801,7 @@ func assertLoadedConfig(t *testing.T, c *Config, wantRealms int) {
 		"[libdefaults] default_tkt_enctypes not as expected",
 	)
 
-	is.Equal(wantRealms, len(c.Realms), "Number of realms not as expected")
+	require.Len(t, c.Realms, wantRealms, "unexpected number of realms")
 	is.Equal("TEST.GOKRB5", c.Realms[0].Realm, "[realm] realm name not as expectd")
 	is.Equal([]string{"10.80.88.88:749"}, c.Realms[0].AdminServer, "[realm] Admin_server not as expectd")
 	is.Equal([]string{"10.80.88.88:464"}, c.Realms[0].KPasswdServer, "[realm] Kpasswd_server not as expectd")

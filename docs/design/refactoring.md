@@ -2,7 +2,7 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-130 done. The latest measured
+(floor raised to 86.0%), and Phase 5 slices 1-131 done. The latest measured
 v8 inventories (Slice 129) contain 518 canonical and 3,392 supplemental
 findings. Most remaining canonical findings are from `revive`, complexity and
 nesting checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
@@ -819,6 +819,17 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 131 (2026-11-20, v8 config loader test precondition; Q-10):
+Require the exact realm count before indexing the realm slice in the shared
+loader assertion helper. A count regression now reports the mismatch instead
+of risking an index panic. The five callers retain their fixture inputs and
+expected counts. No production changes.
+
+All five loader tests passed 100 shuffled runs with the race detector. A
+temporary test overlay confirmed a one-realm result fails with the count
+diagnostic and no panic. Changed-line lint passed for both modules against
+`c15ba58` and `origin/main`.
 
 Slice 130 (2026-11-20, v8 config JSON test assertions; Q-10):
 Use Testify's structural JSON comparison for the existing config fixture.
