@@ -57,7 +57,8 @@ func TestAttachPACCredentialsPreservesDecodeErrors(t *testing.T) {
 
 func testSID(parts ...uint32) mstypes.RPCSID {
 	return mstypes.RPCSID{
-		Revision: 1, SubAuthorityCount: uint8(len(parts)), // #nosec G115 -- RPC SID subauthority fixtures contain at most three entries.
+		Revision:            1,
+		SubAuthorityCount:   uint8(len(parts)), // #nosec G115 -- RPC SID subauthority fixtures contain at most three entries.
 		IdentifierAuthority: [6]byte{0, 0, 0, 0, 0, 5}, SubAuthority: parts,
 	}
 }
@@ -66,37 +67,60 @@ func TestADCredentialsFromPAC(t *testing.T) {
 	domainSID := testSID(21, 1, 2)
 	extraSID := testSID(32, 544)
 	resourceSID := testSID(21, 9, 8)
-	validation := &pac.KerbValidationInfo{
-		LogOnTime: mstypes.GetFileTime(time.Unix(10, 0)), LogOffTime: mstypes.GetFileTime(time.Unix(20, 0)),
-		PasswordLastSet: mstypes.GetFileTime(time.Unix(30, 0)), UserID: 500, PrimaryGroupID: 513,
-		GroupIDs:               []mstypes.GroupMembership{{RelativeID: 512, Attributes: 7}},
-		ExtraSIDs:              []mstypes.KerbSidAndAttributes{{SID: extraSID, Attributes: 8}},
-		ResourceGroupDomainSID: resourceSID,
-		ResourceGroupIDs:       []mstypes.GroupMembership{{RelativeID: 1001, Attributes: 9}},
-		LogonDomainID:          domainSID, UserAccountControl: 0x200,
-	}
-	validation.EffectiveName.Value = "alice"
+	var validation pac.KerbValidationInfo
+	validation.LogOnTime = mstypes.GetFileTime(time.Unix(10, 0))
+	validation.LogOffTime = mstypes.GetFileTime(time.Unix(20, 0))
+	validation.PasswordLastSet = mstypes.GetFileTime(time.Unix(30, 0))
+	validation.UserID = 500
+	validation.PrimaryGroupID = 513
+	validation.GroupIDs = []mstypes.GroupMembership{{RelativeID: 512, Attributes: 7}}
+	validation.ExtraSIDs = []mstypes.KerbSidAndAttributes{{SID: extraSID, Attributes: 8}}
+	validation.ResourceGroupDomainSID = resourceSID
+	validation.ResourceGroupIDs = []mstypes.GroupMembership{{RelativeID: 1001, Attributes: 9}}
+	validation.LogonDomainID = domainSID
+	validation.UserAccountControl = 0x200
+	validation.EffectiveName.Value = testUsername
 	validation.FullName.Value = "Alice Example"
 	validation.LogonServer.Value = "DC01"
-	validation.LogonDomainName.Value = "EXAMPLE"
+	validation.LogonDomainName.Value = testDomain
 	authTime := time.Unix(40, 0).UTC()
 	requestorSID := testSID(21, 1, 2, 500)
-	parsed := pac.PACType{
-		KerbValidationInfo: validation,
-		UPNDNSInfo:         &pac.UPNDNSInfo{UPN: "alice@example.org", DNSDomain: "example.org", SAMAccountName: "ALICE"},
-		AttributesInfo:     &pac.AttributesInfo{Flags: 3}, Requestor: &pac.Requestor{SID: requestorSID},
+	var upnInfo pac.UPNDNSInfo
+	upnInfo.UPN = "alice@example.org"
+	upnInfo.DNSDomain = "example.org"
+	upnInfo.SAMAccountName = "ALICE"
+	var parsed pac.PACType
+	parsed.KerbValidationInfo = &validation
+	parsed.UPNDNSInfo = &upnInfo
+	parsed.AttributesInfo = &pac.AttributesInfo{FlagsLength: 0, Flags: 3}
+	parsed.Requestor = &pac.Requestor{SID: requestorSID}
+
+	got := adCredentialsFromPAC(parsed, authTime)
+	checkPACIdentity(t, got)
+	checkPACMetadata(t, got, authTime)
+	if len(got.GroupMembershipSIDs) != 3 ||
+		len(got.ExtraSIDs) != 1 || got.ExtraSIDs[0].SID != "S-1-5-32-544" ||
+		len(got.ResourceGroupSIDs) != 1 || got.ResourceGroupSIDs[0].SID != "S-1-5-21-9-8-1001" {
+		t.Fatalf("mapped groups = %+v", got)
 	}
-	credentials := adCredentialsFromPAC(parsed, authTime)
-	if credentials.EffectiveName != "alice" || credentials.FullName != "Alice Example" || credentials.UserID != 500 ||
-		credentials.PrimaryGroupID != 513 || credentials.LogonServer != "DC01" || credentials.LogonDomainName != "EXAMPLE" ||
-		credentials.LogonDomainID != "S-1-5-21-1-2" || credentials.UserSID != "S-1-5-21-1-2-500" ||
-		credentials.UPN != "alice@example.org" || credentials.DNSDomain != "example.org" || credentials.SAMAccountName != "ALICE" ||
-		credentials.PACAttributes != 3 || credentials.PACRequestorSID != "S-1-5-21-1-2-500" || !credentials.TicketAuthTime.Equal(authTime) {
-		t.Fatalf("mapped credentials = %+v", credentials)
+}
+
+func checkPACIdentity(t *testing.T, got credentials.ADCredentials) {
+	t.Helper()
+	if got.EffectiveName != testUsername || got.FullName != "Alice Example" ||
+		got.UserID != 500 || got.PrimaryGroupID != 513 ||
+		got.LogonServer != "DC01" || got.LogonDomainName != testDomain ||
+		got.LogonDomainID != "S-1-5-21-1-2" || got.UserSID != "S-1-5-21-1-2-500" {
+		t.Fatalf("mapped credentials = %+v", got)
 	}
-	if len(credentials.GroupMembershipSIDs) != 3 || len(credentials.ExtraSIDs) != 1 || credentials.ExtraSIDs[0].SID != "S-1-5-32-544" ||
-		len(credentials.ResourceGroupSIDs) != 1 || credentials.ResourceGroupSIDs[0].SID != "S-1-5-21-9-8-1001" {
-		t.Fatalf("mapped groups = %+v", credentials)
+}
+
+func checkPACMetadata(t *testing.T, got credentials.ADCredentials, authTime time.Time) {
+	t.Helper()
+	if got.UPN != "alice@example.org" || got.DNSDomain != "example.org" || got.SAMAccountName != "ALICE" ||
+		got.PACAttributes != 3 || got.PACRequestorSID != "S-1-5-21-1-2-500" ||
+		!got.TicketAuthTime.Equal(authTime) {
+		t.Fatalf("mapped credentials = %+v", got)
 	}
 }
 
@@ -106,19 +130,35 @@ func TestDeviceCredentialsFromPAC(t *testing.T) {
 	foreignSID := testSID(21, 7, 8)
 	device := pac.DeviceInfo{
 		UserID: 100, PrimaryGroupID: 515, AccountDomainID: domainSID,
-		AccountGroupIDs: []mstypes.GroupMembership{{RelativeID: 516, Attributes: 1}},
-		ExtraSIDs:       []mstypes.KerbSidAndAttributes{{SID: extraSID, Attributes: 2}},
-		DomainGroup:     []mstypes.DomainGroupMembership{{DomainID: foreignSID, GroupIDs: []mstypes.GroupMembership{{RelativeID: 517, Attributes: 3}}}},
+		AccountGroupCount: 0,
+		AccountGroupIDs:   []mstypes.GroupMembership{{RelativeID: 516, Attributes: 1}},
+		SIDCount:          0,
+		ExtraSIDs:         []mstypes.KerbSidAndAttributes{{SID: extraSID, Attributes: 2}},
+		DomainGroupCount:  0,
+		DomainGroup: []mstypes.DomainGroupMembership{{
+			DomainID:   foreignSID,
+			GroupCount: 0,
+			GroupIDs:   []mstypes.GroupMembership{{RelativeID: 517, Attributes: 3}},
+		}},
 	}
-	credentials := deviceCredentialsFromPAC(device)
-	if credentials.UserSID != "S-1-5-21-1-2-100" || credentials.PrimaryGroupSID != "S-1-5-21-1-2-515" ||
-		len(credentials.GroupSIDs) != 1 || credentials.GroupSIDs[0].SID != "S-1-5-21-1-2-516" ||
-		len(credentials.ExtraSIDs) != 1 || credentials.ExtraSIDs[0].SID != "S-1-5-32-545" ||
-		len(credentials.DomainGroupSIDs) != 1 || credentials.DomainGroupSIDs[0].SID != "S-1-5-21-7-8-517" {
-		t.Fatalf("mapped device credentials = %+v", credentials)
-	}
-	parsed := pac.PACType{KerbValidationInfo: &pac.KerbValidationInfo{LogonDomainID: domainSID}, DeviceInfo: &device}
-	if got := adCredentialsFromPAC(parsed, time.Time{}).DeviceInfo; got == nil || got.UserSID != credentials.UserSID {
+	mapped := deviceCredentialsFromPAC(device)
+	checkPACDevice(t, mapped)
+	var validation pac.KerbValidationInfo
+	validation.LogonDomainID = domainSID
+	var parsed pac.PACType
+	parsed.KerbValidationInfo = &validation
+	parsed.DeviceInfo = &device
+	if got := adCredentialsFromPAC(parsed, time.Time{}).DeviceInfo; got == nil || got.UserSID != mapped.UserSID {
 		t.Fatalf("nested device credentials = %+v", got)
+	}
+}
+
+func checkPACDevice(t *testing.T, got *credentials.ADDeviceInfo) {
+	t.Helper()
+	if got.UserSID != "S-1-5-21-1-2-100" || got.PrimaryGroupSID != "S-1-5-21-1-2-515" ||
+		len(got.GroupSIDs) != 1 || got.GroupSIDs[0].SID != "S-1-5-21-1-2-516" ||
+		len(got.ExtraSIDs) != 1 || got.ExtraSIDs[0].SID != "S-1-5-32-545" ||
+		len(got.DomainGroupSIDs) != 1 || got.DomainGroupSIDs[0].SID != "S-1-5-21-7-8-517" {
+		t.Fatalf("mapped device credentials = %+v", got)
 	}
 }

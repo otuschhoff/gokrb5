@@ -38,15 +38,35 @@ func adCredentialsFromPAC(p pac.PACType, authTime time.Time) credentials.ADCrede
 		UserSID:             fmt.Sprintf("%s-%d", domainSID, validation.UserID),
 		UserAccountControl:  validation.UserAccountControl,
 		TicketAuthTime:      authTime,
+		UPN:                 "",
+		DNSDomain:           "",
+		SAMAccountName:      "",
+		ExtraSIDs:           nil,
+		ResourceGroupSIDs:   nil,
+		ClientClaims:        nil,
+		DeviceClaims:        nil,
+		DeviceInfo:          nil,
+		S4UDelegationInfo:   nil,
+		PACAttributes:       0,
+		PACRequestorSID:     "",
 	}
 	for _, sid := range validation.ExtraSIDs {
-		result.ExtraSIDs = append(result.ExtraSIDs, credentials.SIDAndAttributes{SID: sid.SID.String(), Attributes: sid.Attributes})
+		result.ExtraSIDs = append(result.ExtraSIDs, credentials.SIDAndAttributes{
+			SID:        sid.SID.String(),
+			Attributes: sid.Attributes,
+		})
 	}
 	for _, group := range validation.ResourceGroupIDs {
 		result.ResourceGroupSIDs = append(result.ResourceGroupSIDs, credentials.SIDAndAttributes{
-			SID: fmt.Sprintf("%s-%d", validation.ResourceGroupDomainSID.String(), group.RelativeID), Attributes: group.Attributes,
+			SID:        fmt.Sprintf("%s-%d", validation.ResourceGroupDomainSID.String(), group.RelativeID),
+			Attributes: group.Attributes,
 		})
 	}
+	attachAdditionalPACFields(&result, &p)
+	return result
+}
+
+func attachAdditionalPACFields(result *credentials.ADCredentials, p *pac.PACType) {
 	if p.UPNDNSInfo != nil {
 		result.UPN = p.UPNDNSInfo.UPN
 		result.DNSDomain = p.UPNDNSInfo.DNSDomain
@@ -74,7 +94,6 @@ func adCredentialsFromPAC(p pac.PACType, authTime time.Time) credentials.ADCrede
 	if p.Requestor != nil {
 		result.PACRequestorSID = p.Requestor.SID.String()
 	}
-	return result
 }
 
 func deviceCredentialsFromPAC(device pac.DeviceInfo) *credentials.ADDeviceInfo {
@@ -82,16 +101,28 @@ func deviceCredentialsFromPAC(device pac.DeviceInfo) *credentials.ADDeviceInfo {
 	result := &credentials.ADDeviceInfo{
 		UserSID:         fmt.Sprintf("%s-%d", domainSID, device.UserID),
 		PrimaryGroupSID: fmt.Sprintf("%s-%d", domainSID, device.PrimaryGroupID),
+		GroupSIDs:       nil,
+		ExtraSIDs:       nil,
+		DomainGroupSIDs: nil,
 	}
 	for _, group := range device.AccountGroupIDs {
-		result.GroupSIDs = append(result.GroupSIDs, credentials.SIDAndAttributes{SID: fmt.Sprintf("%s-%d", domainSID, group.RelativeID), Attributes: group.Attributes})
+		result.GroupSIDs = append(result.GroupSIDs, credentials.SIDAndAttributes{
+			SID:        fmt.Sprintf("%s-%d", domainSID, group.RelativeID),
+			Attributes: group.Attributes,
+		})
 	}
 	for _, sid := range device.ExtraSIDs {
-		result.ExtraSIDs = append(result.ExtraSIDs, credentials.SIDAndAttributes{SID: sid.SID.String(), Attributes: sid.Attributes})
+		result.ExtraSIDs = append(result.ExtraSIDs, credentials.SIDAndAttributes{
+			SID:        sid.SID.String(),
+			Attributes: sid.Attributes,
+		})
 	}
 	for _, domain := range device.DomainGroup {
 		for _, group := range domain.GroupIDs {
-			result.DomainGroupSIDs = append(result.DomainGroupSIDs, credentials.SIDAndAttributes{SID: fmt.Sprintf("%s-%d", domain.DomainID.String(), group.RelativeID), Attributes: group.Attributes})
+			result.DomainGroupSIDs = append(result.DomainGroupSIDs, credentials.SIDAndAttributes{
+				SID:        fmt.Sprintf("%s-%d", domain.DomainID.String(), group.RelativeID),
+				Attributes: group.Attributes,
+			})
 		}
 	}
 	return result

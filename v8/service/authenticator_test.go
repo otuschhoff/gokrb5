@@ -13,6 +13,11 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/config"
 )
 
+const (
+	testUsername = "alice"
+	testDomain   = "EXAMPLE"
+)
+
 func TestImplementsInterface(t *testing.T) {
 	t.Parallel()
 	// s := new(SPNEGOAuthenticator)
@@ -29,9 +34,15 @@ func TestParseBasicHeaderValue(t *testing.T) {
 		username string
 		password string
 	}{
-		{name: "bare username", value: "alice:secret", username: "alice", password: "secret"},
-		{name: "Windows domain", value: `EXAMPLE\alice:secret:with:colons`, domain: "EXAMPLE", username: "alice", password: "secret:with:colons"},
-		{name: "realm suffix", value: "alice@EXAMPLE.COM:secret", domain: "EXAMPLE.COM", username: "alice", password: "secret"},
+		{name: "bare username", value: "alice:secret", domain: "", username: testUsername, password: "secret"},
+		{
+			name: "Windows domain", value: `EXAMPLE\alice:secret:with:colons`,
+			domain: testDomain, username: testUsername, password: "secret:with:colons",
+		},
+		{
+			name: "realm suffix", value: "alice@EXAMPLE.COM:secret",
+			domain: "EXAMPLE.COM", username: testUsername, password: "secret",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -56,7 +67,7 @@ func TestParseBasicHeaderValueRejectsMalformedInput(t *testing.T) {
 	_, corrupt := errors.AsType[base64.CorruptInputError](err)
 	assert.True(t, corrupt, "expected the base64 error to remain discoverable")
 
-	withoutSeparator := base64.StdEncoding.EncodeToString([]byte("alice"))
+	withoutSeparator := base64.StdEncoding.EncodeToString([]byte(testUsername))
 	if _, _, _, err := parseBasicHeaderValue(withoutSeparator); err == nil || !strings.Contains(err.Error(), "separator") {
 		t.Fatalf("missing separator error = %v", err)
 	}
@@ -67,7 +78,9 @@ func TestKRB5BasicAuthenticatorMetadataAndParseFailure(t *testing.T) {
 	serviceSettings := NewSettings(nil)
 	clientSettings := new(client.Settings)
 	authenticator := NewKRB5BasicAuthenticator("!!!", cfg, serviceSettings, clientSettings)
-	if authenticator.clientConfig != cfg || authenticator.serviceSettings != serviceSettings || authenticator.clientSettings != clientSettings {
+	if authenticator.clientConfig != cfg ||
+		authenticator.serviceSettings != serviceSettings ||
+		authenticator.clientSettings != clientSettings {
 		t.Fatal("constructor did not retain settings")
 	}
 	if authenticator.Mechanism() != "Kerberos Basic" {

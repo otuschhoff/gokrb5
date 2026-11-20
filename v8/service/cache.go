@@ -49,7 +49,7 @@ func replayCacheKeys(sname types.PrincipalName, a types.Authenticator) (replayCa
 	return client, key
 }
 
-// Instance of the ServiceCache. This needs to be a singleton.
+//nolint:gochecknoglobals // GetReplayCache shares replay detection across all service settings in the process.
 var (
 	replayCache Cache
 	once        sync.Once
@@ -59,9 +59,7 @@ var (
 func GetReplayCache(d time.Duration) *Cache {
 	// Create a singleton of the ReplayCache and start a background thread to regularly clean out old entries
 	once.Do(func() {
-		replayCache = Cache{
-			entries: make(map[replayCacheClient]clientEntries),
-		}
+		replayCache.entries = make(map[replayCacheClient]clientEntries)
 		go func() {
 			for {
 				// TODO consider using a context here.
@@ -78,6 +76,36 @@ func (c *Cache) AddEntry(sname types.PrincipalName, a types.Authenticator) {
 	c.mux.Lock()
 	defer c.mux.Unlock()
 	c.addEntryLocked(sname, a)
+}
+
+// ClearOldEntries clears entries from the Cache that are older than the duration provided.
+func (c *Cache) ClearOldEntries(d time.Duration) {
+	c.mux.Lock()
+	defer c.mux.Unlock()
+	for ke, ce := range c.entries {
+		for k, e := range ce.replayMap {
+			if time.Now().UTC().Sub(e.presentedTime) > d {
+				delete(ce.replayMap, k)
+			}
+		}
+		if len(ce.replayMap) == 0 {
+			delete(c.entries, ke)
+		}
+	}
+}
+
+// IsReplay reports whether the authenticator is already tracked and records it if not.
+func (c *Cache) IsReplay(sname types.PrincipalName, a types.Authenticator) bool {
+	c.mux.Lock()
+	defer c.mux.Unlock()
+	client, key := replayCacheKeys(sname, a)
+	if ce, ok := c.entries[client]; ok {
+		if _, found := ce.replayMap[key]; found {
+			return true
+		}
+	}
+	c.addEntryLocked(sname, a)
+	return false
 }
 
 func (c *Cache) addEntryLocked(sname types.PrincipalName, a types.Authenticator) {
@@ -103,34 +131,4 @@ func (c *Cache) addEntryLocked(sname types.PrincipalName, a types.Authenticator)
 			subKey:    a.SubKey,
 		}
 	}
-}
-
-// ClearOldEntries clears entries from the Cache that are older than the duration provided.
-func (c *Cache) ClearOldEntries(d time.Duration) {
-	c.mux.Lock()
-	defer c.mux.Unlock()
-	for ke, ce := range c.entries {
-		for k, e := range ce.replayMap {
-			if time.Now().UTC().Sub(e.presentedTime) > d {
-				delete(ce.replayMap, k)
-			}
-		}
-		if len(ce.replayMap) == 0 {
-			delete(c.entries, ke)
-		}
-	}
-}
-
-// IsReplay tests if the Authenticator provided is a replay within the duration defined. If this is not a replay add the entry to the cache for tracking.
-func (c *Cache) IsReplay(sname types.PrincipalName, a types.Authenticator) bool {
-	c.mux.Lock()
-	defer c.mux.Unlock()
-	client, key := replayCacheKeys(sname, a)
-	if ce, ok := c.entries[client]; ok {
-		if _, found := ce.replayMap[key]; found {
-			return true
-		}
-	}
-	c.addEntryLocked(sname, a)
-	return false
 }

@@ -12,13 +12,14 @@ func TestReplayCacheUpdatesAuthenticatorMetadata(t *testing.T) {
 	var cache Cache
 	name := types.NewPrincipalName(1, "user")
 	service := types.NewPrincipalName(2, "HTTP/host")
-	authenticator := types.Authenticator{CName: name, CTime: time.Now().UTC(), SeqNumber: 1}
+	authenticator := replayTestAuthenticator(name, time.Now().UTC())
+	authenticator.SeqNumber = 1
 	cache.AddEntry(service, authenticator)
 	authenticator.SeqNumber = 2
 	authenticator.Cusec = 1
 	authenticator.SubKey = types.EncryptionKey{KeyType: 18, KeyValue: []byte("second key")}
 	cache.AddEntry(service, authenticator)
-	entry, ok := cache.entries[replayCacheClient{name: `["user"]`}]
+	entry, ok := cache.entries[replayCacheClient{name: `["user"]`, realm: ""}]
 	if !ok || entry.seqNumber != 2 || string(entry.subKey.KeyValue) != "second key" || len(entry.replayMap) != 2 {
 		t.Fatalf("updated cache entry = %+v, found %v", entry, ok)
 	}
@@ -26,11 +27,8 @@ func TestReplayCacheUpdatesAuthenticatorMetadata(t *testing.T) {
 
 func TestReplayCacheSeparatesServicesAndRealms(t *testing.T) {
 	var cache Cache
-	authenticator := types.Authenticator{
-		CName:  types.NewPrincipalName(1, "user"),
-		CRealm: "FIRST.EXAMPLE",
-		CTime:  time.Now().UTC(),
-	}
+	authenticator := replayTestAuthenticator(types.NewPrincipalName(1, "user"), time.Now().UTC())
+	authenticator.CRealm = "FIRST.EXAMPLE"
 	first := types.NewPrincipalName(2, "HTTP/first")
 	second := types.NewPrincipalName(2, "HTTP/second")
 	if cache.IsReplay(first, authenticator) || cache.IsReplay(second, authenticator) {
@@ -50,9 +48,9 @@ func TestReplayCacheSeparatesServicesAndRealms(t *testing.T) {
 
 func TestReplayCachePrincipalComponentsAndTimeIdentity(t *testing.T) {
 	var cache Cache
-	authenticator := types.Authenticator{CName: types.NewPrincipalName(1, "user"), CTime: time.Now().UTC()}
-	first := types.PrincipalName{NameString: []string{"HTTP", "a/b"}}
-	second := types.PrincipalName{NameString: []string{"HTTP/a", "b"}}
+	authenticator := replayTestAuthenticator(types.NewPrincipalName(1, "user"), time.Now().UTC())
+	first := types.PrincipalName{NameType: 0, NameString: []string{testHTTPService, "a/b"}}
+	second := types.PrincipalName{NameType: 0, NameString: []string{"HTTP/a", "b"}}
 	if cache.IsReplay(first, authenticator) || cache.IsReplay(second, authenticator) {
 		t.Fatal("distinct service name components were treated as replays")
 	}
@@ -60,11 +58,11 @@ func TestReplayCachePrincipalComponentsAndTimeIdentity(t *testing.T) {
 	if !cache.IsReplay(first, authenticator) || !cache.IsReplay(second, authenticator) {
 		t.Fatal("equivalent timestamp locations changed replay identity")
 	}
-	authenticator.CName = types.PrincipalName{NameString: []string{"a/b"}}
+	authenticator.CName = types.PrincipalName{NameType: 0, NameString: []string{"a/b"}}
 	if cache.IsReplay(first, authenticator) {
 		t.Fatal("a new client name was treated as a replay")
 	}
-	authenticator.CName = types.PrincipalName{NameString: []string{"a", "b"}}
+	authenticator.CName = types.PrincipalName{NameType: 0, NameString: []string{"a", "b"}}
 	if cache.IsReplay(first, authenticator) {
 		t.Fatal("distinct client name components were treated as replays")
 	}
@@ -79,12 +77,14 @@ func TestReplayCacheConcurrentDistinctUpdates(t *testing.T) {
 	var workersDone sync.WaitGroup
 	for index := range workers {
 		workersDone.Go(func() {
-			cache.AddEntry(service, types.Authenticator{CName: name, CTime: now, Cusec: index})
+			authenticator := replayTestAuthenticator(name, now)
+			authenticator.Cusec = index
+			cache.AddEntry(service, authenticator)
 			cache.ClearOldEntries(time.Hour)
 		})
 	}
 	workersDone.Wait()
-	entry := cache.entries[replayCacheClient{name: `["user"]`}]
+	entry := cache.entries[replayCacheClient{name: `["user"]`, realm: ""}]
 	if len(entry.replayMap) != workers {
 		t.Fatalf("retained %d replay records, want %d", len(entry.replayMap), workers)
 	}
@@ -95,7 +95,7 @@ func TestReplayCacheConcurrentCheckAndInsert(t *testing.T) {
 	var cache Cache
 	name := types.NewPrincipalName(1, "user")
 	service := types.NewPrincipalName(2, "HTTP/host")
-	authenticator := types.Authenticator{CName: name, CTime: time.Now().UTC()}
+	authenticator := replayTestAuthenticator(name, time.Now().UTC())
 	start := make(chan struct{})
 	results := make(chan bool, workers)
 	var workersDone sync.WaitGroup
@@ -105,6 +105,7 @@ func TestReplayCacheConcurrentCheckAndInsert(t *testing.T) {
 			results <- cache.IsReplay(service, authenticator)
 		})
 	}
+
 	close(start)
 	workersDone.Wait()
 	close(results)
@@ -117,4 +118,11 @@ func TestReplayCacheConcurrentCheckAndInsert(t *testing.T) {
 	if accepted != 1 {
 		t.Fatalf("accepted %d identical concurrent authenticators, want 1", accepted)
 	}
+}
+
+func replayTestAuthenticator(name types.PrincipalName, timestamp time.Time) types.Authenticator {
+	var authenticator types.Authenticator
+	authenticator.CName = name
+	authenticator.CTime = timestamp
+	return authenticator
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,16 +12,6 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/config"
 )
-
-// NewKRB5BasicAuthenticator creates a new NewKRB5BasicAuthenticator
-func NewKRB5BasicAuthenticator(headerVal string, krb5conf *config.Config, serviceSettings *Settings, clientSettings *client.Settings) KRB5BasicAuthenticator {
-	return KRB5BasicAuthenticator{
-		BasicHeaderValue: headerVal,
-		clientConfig:     krb5conf,
-		serviceSettings:  serviceSettings,
-		clientSettings:   clientSettings,
-	}
-}
 
 // KRB5BasicAuthenticator implements gokrb5.com/jcmturner/goidentity.Authenticator interface.
 // It takes username and password so can be used for basic authentication.
@@ -34,7 +25,24 @@ type KRB5BasicAuthenticator struct {
 	password         string
 }
 
+// NewKRB5BasicAuthenticator creates a Kerberos Basic authenticator.
+func NewKRB5BasicAuthenticator(
+	headerVal string,
+	krb5conf *config.Config,
+	serviceSettings *Settings,
+	clientSettings *client.Settings,
+) KRB5BasicAuthenticator {
+	var authenticator KRB5BasicAuthenticator
+	authenticator.BasicHeaderValue = headerVal
+	authenticator.clientConfig = krb5conf
+	authenticator.serviceSettings = serviceSettings
+	authenticator.clientSettings = clientSettings
+	return authenticator
+}
+
 // Authenticate and return the identity. The boolean indicates if the authentication was successful.
+//
+//nolint:ireturn // Implements the goidentity.Authenticator contract.
 func (a KRB5BasicAuthenticator) Authenticate() (goidentity.Identity, bool, error) {
 	var i goidentity.Identity
 	var ok bool
@@ -75,36 +83,19 @@ func (a KRB5BasicAuthenticator) Mechanism() string {
 }
 
 func parseBasicHeaderValue(s string) (string, string, string, error) {
-	var domain string
-	var username string
-	var password string
-	var err error
 	b, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
-		return domain, username, password, fmt.Errorf("decode basic authentication value: %w", err)
+		return "", "", "", fmt.Errorf("decode basic authentication value: %w", err)
 	}
-	v := string(b)
-	vc := strings.SplitN(v, ":", 2)
-	if len(vc) != 2 {
-		err = fmt.Errorf("basic authentication value does not contain a password separator")
-		return domain, username, password, err
+	user, password, found := strings.Cut(string(b), ":")
+	if !found {
+		return "", "", "", errors.New("basic authentication value does not contain a password separator")
 	}
-	password = vc[1]
-	// Domain and username can be specified in 2 formats:
-	// <Username> - no domain specified
-	// <Domain>\<Username>
-	// <Username>@<Domain>
-	switch {
-	case strings.Contains(vc[0], `\`):
-		u := strings.SplitN(vc[0], `\`, 2)
-		domain = u[0]
-		username = u[1]
-	case strings.Contains(vc[0], `@`):
-		u := strings.SplitN(vc[0], `@`, 2)
-		domain = u[1]
-		username = u[0]
-	default:
-		username = vc[0]
+	if domain, username, ok := strings.Cut(user, `\`); ok {
+		return domain, username, password, nil
 	}
-	return domain, username, password, err
+	if username, domain, ok := strings.Cut(user, "@"); ok {
+		return domain, username, password, nil
+	}
+	return "", user, password, nil
 }

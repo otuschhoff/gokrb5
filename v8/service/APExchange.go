@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/otuschhoff/gokrb5/v8/credentials"
@@ -24,7 +25,7 @@ type APREQResult struct {
 	HasChecksum bool
 }
 
-// VerifyAPREQ verifies an AP_REQ sent to the service. Returns a boolean for if the AP_REQ is valid and the client's principal name and realm.
+// VerifyAPREQ verifies a service AP_REQ and returns the authenticated client's credentials on success.
 func VerifyAPREQ(apReq *messages.APReq, s *Settings) (bool, *credentials.Credentials, error) {
 	result, err := VerifyAPREQWithResult(apReq, s)
 	if err != nil {
@@ -116,13 +117,13 @@ func servicePrincipalAllowed(sname types.PrincipalName, realm string, settings *
 		return false
 	}
 	keytabPrincipals := settings.Keytab.Principals()
+	inKeytab := func() bool {
+		return slices.ContainsFunc(keytabPrincipals, func(principal keytab.Principal) bool {
+			return principalMatchesTicket(principal, sname, realm)
+		})
+	}
 	if len(settings.servicePrincipals) == 0 {
-		for _, principal := range keytabPrincipals {
-			if principalMatchesTicket(principal, sname, realm) {
-				return true
-			}
-		}
-		return false
+		return inKeytab()
 	}
 	for _, configured := range settings.servicePrincipals {
 		principalName, configuredRealm := types.ParseSPNString(configured)
@@ -135,10 +136,8 @@ func servicePrincipalAllowed(sname types.PrincipalName, realm string, settings *
 			}
 			continue
 		}
-		for _, principal := range keytabPrincipals {
-			if principalMatchesTicket(principal, sname, realm) {
-				return true
-			}
+		if inKeytab() {
+			return true
 		}
 	}
 	return false
@@ -153,11 +152,13 @@ func verifyAuthenticatorChecksum(raw types.Checksum, settings *Settings) (gssapi
 	return verifyAuthenticatorChecksumWithCBT(raw, settings, false)
 }
 
-func verifyAuthenticatorChecksumWithCBT(raw types.Checksum, settings *Settings, cbtAdvertised bool) (gssapi.AuthenticatorChecksum, bool, error) {
+func verifyAuthenticatorChecksumWithCBT(
+	raw types.Checksum, settings *Settings, cbtAdvertised bool,
+) (gssapi.AuthenticatorChecksum, bool, error) {
 	var checksum gssapi.AuthenticatorChecksum
 	if raw.CksumType == 0 && len(raw.Checksum) == 0 {
 		if settings.ExtendedProtection() == ExtendedProtectionRequired {
-			return checksum, false, fmt.Errorf("extended protection requires a GSSAPI authenticator checksum")
+			return checksum, false, errors.New("extended protection requires a GSSAPI authenticator checksum")
 		}
 		return checksum, false, nil
 	}
@@ -168,23 +169,33 @@ func verifyAuthenticatorChecksumWithCBT(raw types.Checksum, settings *Settings, 
 		return checksum, false, fmt.Errorf("invalid GSSAPI authenticator checksum: %w", err)
 	}
 	if checksum.Flags&gssapi.ContextFlagDeleg != 0 && (checksum.DelegationOption != 1 || len(checksum.Deleg) == 0) {
-		return checksum, true, fmt.Errorf("GSSAPI delegation requires option 1 and a KRB_CRED")
+		return checksum, true, errors.New("GSSAPI delegation requires option 1 and a KRB_CRED")
 	}
-	if settings.ExtendedProtection() == ExtendedProtectionDisabled || settings.ChannelBindings() == nil {
-		if settings.ExtendedProtection() == ExtendedProtectionRequired && settings.ChannelBindings() == nil {
-			return checksum, true, fmt.Errorf("extended protection requires acceptor channel bindings")
+	return checksum, true, verifyChannelBindings(checksum, settings, cbtAdvertised)
+}
+
+func verifyChannelBindings(checksum gssapi.AuthenticatorChecksum, settings *Settings, cbtAdvertised bool) error {
+	policy := settings.ExtendedProtection()
+	if policy == ExtendedProtectionDisabled {
+		return nil
+	}
+	bindings := settings.ChannelBindings()
+	if bindings == nil {
+		if policy == ExtendedProtectionRequired {
+			return errors.New("extended protection requires acceptor channel bindings")
 		}
-		return checksum, true, nil
+		return nil
 	}
-	want := settings.ChannelBindings().MD5Hash()
+	want := bindings.MD5Hash()
 	var zero [16]byte
-	if settings.ExtendedProtection() == ExtendedProtectionAllowed && !cbtAdvertised && subtle.ConstantTimeCompare(checksum.Bnd[:], zero[:]) == 1 {
-		return checksum, true, nil
+	bindingOptional := policy == ExtendedProtectionAllowed && !cbtAdvertised
+	if bindingOptional && subtle.ConstantTimeCompare(checksum.Bnd[:], zero[:]) == 1 {
+		return nil
 	}
 	if subtle.ConstantTimeCompare(checksum.Bnd[:], want[:]) != 1 {
-		return checksum, true, fmt.Errorf("GSSAPI channel bindings do not match")
+		return errors.New("GSSAPI channel bindings do not match")
 	}
-	return checksum, true, nil
+	return nil
 }
 
 func authenticatorAdvertisesCBT(authorizationData types.AuthorizationData) (bool, error) {
@@ -204,7 +215,9 @@ func authenticatorAdvertisesCBT(authorizationData types.AuthorizationData) (bool
 	return false, nil
 }
 
-func extractDelegatedCredentials(checksum gssapi.AuthenticatorChecksum, key types.EncryptionKey) ([]*credentials.Credential, error) {
+func extractDelegatedCredentials(
+	checksum gssapi.AuthenticatorChecksum, key types.EncryptionKey,
+) ([]*credentials.Credential, error) {
 	var delegated messages.KRBCred
 	if err := delegated.Unmarshal(checksum.Deleg); err != nil {
 		return nil, fmt.Errorf("invalid delegated KRB_CRED: %w", err)
@@ -213,7 +226,7 @@ func extractDelegatedCredentials(checksum gssapi.AuthenticatorChecksum, key type
 		return nil, fmt.Errorf("could not decrypt delegated KRB_CRED: %w", err)
 	}
 	if len(delegated.Tickets) == 0 || len(delegated.Tickets) != len(delegated.DecryptedEncPart.TicketInfo) {
-		return nil, fmt.Errorf("delegated KRB_CRED ticket count does not match ticket-info count")
+		return nil, errors.New("delegated KRB_CRED ticket count does not match ticket-info count")
 	}
 	result := make([]*credentials.Credential, 0, len(delegated.Tickets))
 	for i, ticket := range delegated.Tickets {
@@ -226,11 +239,19 @@ func extractDelegatedCredentials(checksum gssapi.AuthenticatorChecksum, key type
 			return nil, fmt.Errorf("could not marshal delegated ticket %d: %w", i, err)
 		}
 		result = append(result, &credentials.Credential{
-			Client: credentials.Principal{Realm: info.PRealm, PrincipalName: info.PName},
-			Server: credentials.Principal{Realm: info.SRealm, PrincipalName: info.SName},
-			Key:    info.Key, AuthTime: info.AuthTime, StartTime: info.StartTime,
-			EndTime: info.EndTime, RenewTill: info.RenewTill, TicketFlags: info.Flags,
-			Addresses: append([]types.HostAddress(nil), info.CAddr...), Ticket: ticketBytes,
+			Client:       credentials.Principal{Realm: info.PRealm, PrincipalName: info.PName},
+			Server:       credentials.Principal{Realm: info.SRealm, PrincipalName: info.SName},
+			Key:          info.Key,
+			AuthTime:     info.AuthTime,
+			StartTime:    info.StartTime,
+			EndTime:      info.EndTime,
+			RenewTill:    info.RenewTill,
+			TicketFlags:  info.Flags,
+			Addresses:    append([]types.HostAddress(nil), info.CAddr...),
+			Ticket:       ticketBytes,
+			IsSKey:       false,
+			AuthData:     nil,
+			SecondTicket: nil,
 		})
 	}
 	return result, nil

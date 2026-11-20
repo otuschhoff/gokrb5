@@ -24,12 +24,17 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+const (
+	testHTTPService = "HTTP"
+	testServiceHost = "host.test.gokrb5"
+)
+
 func TestVerifyAPREQ(t *testing.T) {
 	t.Parallel()
 	creds := newAPTestCredentials(t)
 	sname := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
-		NameString: []string{"HTTP", "host.test.gokrb5"},
+		NameString: []string{testHTTPService, testServiceHost},
 	}
 	b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 	kt := keytab.New()
@@ -149,7 +154,7 @@ func TestVerifyAPREQIgnoresKerbLocalAndRestrictionEntry(t *testing.T) {
 	creds := newAPTestCredentials(t)
 	sname := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
-		NameString: []string{"HTTP", "host.test.gokrb5"},
+		NameString: []string{testHTTPService, testServiceHost},
 	}
 	b, err := hex.DecodeString(testdata.HTTP_KEYTAB)
 	if err != nil {
@@ -168,8 +173,10 @@ func TestVerifyAPREQIgnoresKerbLocalAndRestrictionEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	restriction, err := types.NewKerbADRestrictionEntryForToken(types.LSAPTokenInfoIntegrity{
-		Flags:   msflags.TokenInfoUACRestricted,
-		TokenIL: msflags.TokenILMedium,
+		Flags:              msflags.TokenInfoUACRestricted,
+		TokenIL:            msflags.TokenILMedium,
+		PerBootMachineID:   [32]byte{},
+		CrossBootMachineID: [32]byte{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -202,7 +209,7 @@ func TestVerifyAPREQWithPrincipalOverride(t *testing.T) {
 	creds := newAPTestCredentials(t)
 	sname := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
-		NameString: []string{"HTTP", "host.test.gokrb5"},
+		NameString: []string{testHTTPService, testServiceHost},
 	}
 	b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 	kt := keytab.New()
@@ -250,7 +257,7 @@ func TestVerifyAPREQ_KRB_AP_ERR_BADMATCH(t *testing.T) {
 	creds := newAPTestCredentials(t)
 	sname := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
-		NameString: []string{"HTTP", "host.test.gokrb5"},
+		NameString: []string{testHTTPService, testServiceHost},
 	}
 	b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 	kt := keytab.New()
@@ -292,8 +299,7 @@ func TestVerifyAPREQ_KRB_AP_ERR_BADMATCH(t *testing.T) {
 	if ok || err == nil {
 		t.Fatal("Validation of AP_REQ passed when it should not have")
 	}
-	var krbErr messages.KRBError
-	if errors.As(err, &krbErr) {
+	if krbErr, ok := errors.AsType[messages.KRBError](err); ok {
 		assert.Equal(t, errorcode.KRB_AP_ERR_BADMATCH, krbErr.ErrorCode, "Error code not as expected")
 	} else {
 		t.Fatalf("Error is not a KRBError: %v", err)
@@ -305,7 +311,7 @@ func TestVerifyAPREQ_LargeClockSkew(t *testing.T) {
 	creds := newAPTestCredentials(t)
 	sname := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
-		NameString: []string{"HTTP", "host.test.gokrb5"},
+		NameString: []string{testHTTPService, testServiceHost},
 	}
 	b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 	kt := keytab.New()
@@ -345,8 +351,7 @@ func TestVerifyAPREQ_LargeClockSkew(t *testing.T) {
 	if ok || err == nil {
 		t.Fatal("Validation of AP_REQ passed when it should not have")
 	}
-	var krbErr messages.KRBError
-	if errors.As(err, &krbErr) {
+	if krbErr, ok := errors.AsType[messages.KRBError](err); ok {
 		assert.Equal(t, errorcode.KRB_AP_ERR_SKEW, krbErr.ErrorCode, "Error code not as expected")
 	} else {
 		t.Fatalf("Error is not a KRBError: %v", err)
@@ -358,7 +363,7 @@ func TestVerifyAPREQ_Replay(t *testing.T) {
 	creds := newAPTestCredentials(t)
 	sname := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
-		NameString: []string{"HTTP", "host.test.gokrb5"},
+		NameString: []string{testHTTPService, testServiceHost},
 	}
 	b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 	kt := keytab.New()
@@ -419,7 +424,7 @@ func TestVerifyAPREQ_FutureTicket(t *testing.T) {
 	creds := newAPTestCredentials(t)
 	sname := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
-		NameString: []string{"HTTP", "host.test.gokrb5"},
+		NameString: []string{testHTTPService, testServiceHost},
 	}
 	b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 	kt := keytab.New()
@@ -458,8 +463,7 @@ func TestVerifyAPREQ_FutureTicket(t *testing.T) {
 	if ok || err == nil {
 		t.Fatal("Validation of AP_REQ passed when it should not have")
 	}
-	var krbErr messages.KRBError
-	if errors.As(err, &krbErr) {
+	if krbErr, ok := errors.AsType[messages.KRBError](err); ok {
 		assert.Equal(t, errorcode.KRB_AP_ERR_TKT_NYV, krbErr.ErrorCode, "Error code not as expected")
 	} else {
 		t.Fatalf("Error is not a KRBError: %v", err)
@@ -471,7 +475,7 @@ func TestVerifyAPREQ_InvalidTicket(t *testing.T) {
 	creds := newAPTestCredentials(t)
 	sname := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
-		NameString: []string{"HTTP", "host.test.gokrb5"},
+		NameString: []string{testHTTPService, testServiceHost},
 	}
 	b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 	kt := keytab.New()
@@ -511,8 +515,7 @@ func TestVerifyAPREQ_InvalidTicket(t *testing.T) {
 	if ok || err == nil {
 		t.Fatal("Validation of AP_REQ passed when it should not have")
 	}
-	var krbErr messages.KRBError
-	if errors.As(err, &krbErr) {
+	if krbErr, ok := errors.AsType[messages.KRBError](err); ok {
 		assert.Equal(t, errorcode.KRB_AP_ERR_TKT_NYV, krbErr.ErrorCode, "Error code not as expected")
 	} else {
 		t.Fatalf("Error is not a KRBError: %v", err)
@@ -524,7 +527,7 @@ func TestVerifyAPREQ_ExpiredTicket(t *testing.T) {
 	creds := newAPTestCredentials(t)
 	sname := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
-		NameString: []string{"HTTP", "host.test.gokrb5"},
+		NameString: []string{testHTTPService, testServiceHost},
 	}
 	b, _ := hex.DecodeString(testdata.HTTP_KEYTAB)
 	kt := keytab.New()
@@ -563,8 +566,7 @@ func TestVerifyAPREQ_ExpiredTicket(t *testing.T) {
 	if ok || err == nil {
 		t.Fatal("Validation of AP_REQ passed when it should not have")
 	}
-	var krbErr messages.KRBError
-	if errors.As(err, &krbErr) {
+	if krbErr, ok := errors.AsType[messages.KRBError](err); ok {
 		assert.Equal(t, errorcode.KRB_AP_ERR_TKT_EXPIRED, krbErr.ErrorCode, "Error code not as expected")
 	} else {
 		t.Fatalf("Error is not a KRBError: %v", err)
@@ -573,15 +575,15 @@ func TestVerifyAPREQ_ExpiredTicket(t *testing.T) {
 
 func TestExtendedProtectionPolicy(t *testing.T) {
 	t.Parallel()
-	bindings := &gssapi.ChannelBindings{ApplicationData: []byte("tls-server-end-point:test")}
+	bindings := testApplicationBindings("tls-server-end-point:test")
 	matching := gssapi.NewAuthenticatorChecksum(bindings, gssapi.ContextFlagInteg)
 	matchingBytes, err := matching.Marshal()
 	if err != nil {
 		t.Fatal(err)
 	}
-	missing := types.Checksum{}
+	var missing types.Checksum
 	present := types.Checksum{CksumType: chksumtype.GSSAPI, Checksum: matchingBytes}
-	mismatchChecksum := gssapi.NewAuthenticatorChecksum(&gssapi.ChannelBindings{ApplicationData: []byte("different")})
+	mismatchChecksum := gssapi.NewAuthenticatorChecksum(testApplicationBindings("different"))
 	mismatchBytes, err := mismatchChecksum.Marshal()
 	if err != nil {
 		t.Fatal(err)
@@ -595,27 +597,28 @@ func TestExtendedProtectionPolicy(t *testing.T) {
 		check   types.Checksum
 		wantErr bool
 	}{
-		{name: "disabled missing", policy: ExtendedProtectionDisabled, check: missing},
-		{name: "disabled mismatch", policy: ExtendedProtectionDisabled, binding: bindings, check: mismatch},
-		{name: "allowed missing", policy: ExtendedProtectionAllowed, binding: bindings, check: missing},
-		{name: "allowed matching", policy: ExtendedProtectionAllowed, binding: bindings, check: present},
+		{name: "disabled missing", policy: ExtendedProtectionDisabled, binding: nil, check: missing, wantErr: false},
+		{name: "disabled mismatch", policy: ExtendedProtectionDisabled, binding: bindings, check: mismatch, wantErr: false},
+		{name: "allowed missing", policy: ExtendedProtectionAllowed, binding: bindings, check: missing, wantErr: false},
+		{name: "allowed matching", policy: ExtendedProtectionAllowed, binding: bindings, check: present, wantErr: false},
 		{name: "allowed mismatch", policy: ExtendedProtectionAllowed, binding: bindings, check: mismatch, wantErr: true},
 		{name: "required missing", policy: ExtendedProtectionRequired, binding: bindings, check: missing, wantErr: true},
-		{name: "required matching", policy: ExtendedProtectionRequired, binding: bindings, check: present},
+		{name: "required matching", policy: ExtendedProtectionRequired, binding: bindings, check: present, wantErr: false},
 		{name: "required mismatch", policy: ExtendedProtectionRequired, binding: bindings, check: mismatch, wantErr: true},
-		{name: "required configuration", policy: ExtendedProtectionRequired, check: present, wantErr: true},
+		{name: "required configuration", policy: ExtendedProtectionRequired, binding: nil, check: present, wantErr: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			_, _, err := verifyAuthenticatorChecksum(test.check, NewSettings(nil, ExtendedProtection(test.policy), ChannelBindings(test.binding)))
+			settings := NewSettings(nil, ExtendedProtection(test.policy), ChannelBindings(test.binding))
+			_, _, err := verifyAuthenticatorChecksum(test.check, settings)
 			assert.Equal(t, test.wantErr, err != nil)
 		})
 	}
 }
 
 func TestExtendedProtectionAllowedEnforcesAdvertisedCBT(t *testing.T) {
-	bindings := &gssapi.ChannelBindings{ApplicationData: []byte("tls-server-end-point:expected")}
+	bindings := testApplicationBindings("tls-server-end-point:expected")
 	checksum := gssapi.NewAuthenticatorChecksum(nil)
 	checksumBytes, err := checksum.Marshal()
 	assert.NoError(t, err)
@@ -642,9 +645,11 @@ func TestServicePrincipalAllowed(t *testing.T) {
 	sname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "HTTP/host.test.gokrb5")
 
 	assert.True(t, servicePrincipalAllowed(sname, "test.gokrb5", NewSettings(kt)))
-	assert.True(t, servicePrincipalAllowed(sname, "TEST.GOKRB5", NewSettings(kt, ServicePrincipals("HTTP/host.test.gokrb5"))))
+	allowed := NewSettings(kt, ServicePrincipals("HTTP/host.test.gokrb5"))
+	assert.True(t, servicePrincipalAllowed(sname, "TEST.GOKRB5", allowed))
 	assert.False(t, servicePrincipalAllowed(sname, "OTHER.REALM", NewSettings(kt)))
-	assert.False(t, servicePrincipalAllowed(sname, "TEST.GOKRB5", NewSettings(kt, ServicePrincipals("HTTP/other.test.gokrb5@TEST.GOKRB5"))))
+	disallowed := NewSettings(kt, ServicePrincipals("HTTP/other.test.gokrb5@TEST.GOKRB5"))
+	assert.False(t, servicePrincipalAllowed(sname, "TEST.GOKRB5", disallowed))
 }
 
 func TestExtractDelegatedCredentials(t *testing.T) {
@@ -662,6 +667,7 @@ func TestExtractDelegatedCredentials(t *testing.T) {
 		Key: key, PRealm: testdata.TEST_REALM,
 		PName: types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "testuser"),
 		Flags: types.NewKrbFlags(), SRealm: ticket.Realm, SName: ticket.SName,
+		AuthTime: time.Time{}, StartTime: time.Time{}, EndTime: time.Time{}, RenewTill: time.Time{}, CAddr: nil,
 	}
 	delegated, err := messages.NewKRBCred([]messages.Ticket{ticket}, []messages.KrbCredInfo{info}, key)
 	if err != nil {
@@ -673,7 +679,7 @@ func TestExtractDelegatedCredentials(t *testing.T) {
 	}
 
 	got, err := extractDelegatedCredentials(gssapi.AuthenticatorChecksum{
-		Flags: gssapi.ContextFlagDeleg, DelegationOption: 1, Deleg: wire,
+		Bnd: [16]byte{}, Flags: gssapi.ContextFlagDeleg, DelegationOption: 1, Deleg: wire, Exts: nil,
 	}, key)
 	if err != nil {
 		t.Fatal(err)
@@ -682,6 +688,12 @@ func TestExtractDelegatedCredentials(t *testing.T) {
 		assert.Equal(t, info.SName, got[0].Server.PrincipalName)
 		assert.Equal(t, key, got[0].Key)
 	}
+}
+
+func testApplicationBindings(data string) *gssapi.ChannelBindings {
+	var bindings gssapi.ChannelBindings
+	bindings.ApplicationData = []byte(data)
+	return &bindings
 }
 
 func newTestAuthenticator(t *testing.T, creds *credentials.Credentials) types.Authenticator {

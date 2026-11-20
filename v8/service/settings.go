@@ -38,6 +38,18 @@ type Settings struct {
 	servicePrincipals  []string
 }
 
+const defaultMaxClockSkew = 5 * time.Minute
+
+// NewSettings creates a new service Settings.
+func NewSettings(kt *keytab.Keytab, settings ...func(*Settings)) *Settings {
+	s := new(Settings)
+	s.Keytab = kt
+	for _, set := range settings {
+		set(s)
+	}
+	return s
+}
+
 // ExtendedProtection configures channel-binding enforcement.
 func ExtendedProtection(policy ExtendedProtectionPolicy) func(*Settings) {
 	return func(s *Settings) {
@@ -64,6 +76,8 @@ func (s *Settings) ChannelBindings() *gssapi.ChannelBindings {
 
 // ServicePrincipals restricts tickets accepted by this service. By default,
 // all principals in the configured keytab are accepted.
+//
+//nolint:revive // Preserve the published settings option name.
 func ServicePrincipals(principals ...string) func(*Settings) {
 	return func(s *Settings) {
 		s.servicePrincipals = append([]string(nil), principals...)
@@ -73,16 +87,6 @@ func ServicePrincipals(principals ...string) func(*Settings) {
 // ServicePrincipals returns a copy of the configured principal allowlist.
 func (s *Settings) ServicePrincipals() []string {
 	return append([]string(nil), s.servicePrincipals...)
-}
-
-// NewSettings creates a new service Settings.
-func NewSettings(kt *keytab.Keytab, settings ...func(*Settings)) *Settings {
-	s := new(Settings)
-	s.Keytab = kt
-	for _, set := range settings {
-		set(s)
-	}
-	return s
 }
 
 // RequireHostAddr used to configure service side to required host addresses to be specified in Kerberos tickets.
@@ -171,7 +175,7 @@ func MaxClockSkew(d time.Duration) func(*Settings) {
 // If none is defined a duration of 5 minutes is returned.
 func (s *Settings) MaxClockSkew() time.Duration {
 	if s.maxClockSkew.Nanoseconds() == 0 {
-		return time.Duration(5) * time.Minute
+		return defaultMaxClockSkew
 	}
 	return s.maxClockSkew
 }
@@ -190,7 +194,7 @@ func (s *Settings) SName() string {
 	return s.sname
 }
 
-// SessionManager configures a session manager to establish sessions with clients to avoid excessive authentication challenges.
+// SessionManager configures client sessions to avoid repeated authentication challenges.
 //
 // s := NewSettings(kt, SessionManager(sm))
 func SessionManager(sm SessionMgr) func(*Settings) {
@@ -200,6 +204,8 @@ func SessionManager(sm SessionMgr) func(*Settings) {
 }
 
 // SessionManager returns any configured session manager.
+//
+//nolint:ireturn // Returns the caller-supplied implementation of SessionMgr.
 func (s *Settings) SessionManager() SessionMgr {
 	return s.sessionMgr
 }

@@ -820,6 +820,23 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 142 (2026-11-20, complete v8 service lint cleanup; Q-10):
+Separate channel-binding enforcement from authenticator checksum parsing,
+reuse keytab principal matching, and simplify Basic credential parsing
+and PAC field mapping. Preserve authentication order, error behavior,
+and public signatures. Narrow lint exceptions retain the published
+principal option, caller-supplied interface contracts, and the shared
+replay cache.
+
+Uncapped whole-v8 scans report zero service findings, down from 7 canonical
+and 108 supplemental. Diagnostics outside service are unchanged; whole-v8
+totals are 381 canonical and 1,683 supplemental. All 31 test entry points
+were retained; measured statement coverage is 84.8% (previously 85.2%).
+Service passes 100 shuffled race-enabled runs, and service and SPNEGO
+pass Linux/386 tests. The full v8 build, vet, and race suite pass, as does
+changed-line lint for both modules. Interop-tagged tests compile; live
+interoperability was not run.
+
 Slice 141 (2026-11-20, internal v8 NDR lint cleanup; Q-10):
 Separate common-header encoding checks from the remaining header reads,
 and simplify scalar and slice dispatch. Preserve wire layout, validation
