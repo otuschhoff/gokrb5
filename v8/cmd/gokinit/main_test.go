@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
@@ -27,6 +26,13 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 )
 
+const (
+	testKeytabName = "client.keytab"
+	testPrincipal  = "user@REALM"
+	exampleUser    = "user@EXAMPLE.ORG"
+	pinPrompt      = "PIN for PKINIT identity: "
+)
+
 func TestLoadPKINITIdentityDecodeErrors(t *testing.T) {
 	t.Parallel()
 
@@ -40,9 +46,18 @@ func TestLoadPKINITIdentityDecodeErrors(t *testing.T) {
 		input                        io.Reader
 		cause                        error
 	}{
-		{name: "PEM decode", source: "FILE:", prefix: "decode PKINIT PEM identity:", input: iotest.ErrReader(inputErr)},
-		{name: "PKCS12 PIN read", source: "PKCS12:", prefix: "read PKINIT identity PIN:", prompt: "PIN for PKINIT identity: ", input: iotest.ErrReader(inputErr), cause: inputErr},
-		{name: "PKCS12 retry decode", source: "PKCS12:", prefix: "decode PKINIT PKCS#12 identity:", prompt: "PIN for PKINIT identity: ", input: strings.NewReader("test-pin\n")},
+		{
+			name: "PEM decode", source: "FILE:", prefix: "decode PKINIT PEM identity:", prompt: "",
+			input: iotest.ErrReader(inputErr), cause: nil,
+		},
+		{
+			name: "PKCS12 PIN read", source: "PKCS12:", prefix: "read PKINIT identity PIN:", prompt: pinPrompt,
+			input: iotest.ErrReader(inputErr), cause: inputErr,
+		},
+		{
+			name: "PKCS12 retry decode", source: "PKCS12:", prefix: "decode PKINIT PKCS#12 identity:",
+			prompt: pinPrompt, input: strings.NewReader("test-pin\n"), cause: nil,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -59,11 +74,33 @@ func TestLoadPKINITIdentityDecodeErrors(t *testing.T) {
 	}
 }
 
+func TestLegacyPEMMarkerPromptsForPIN(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "marked.pem")
+	data := pem.EncodeToMemory(&pem.Block{
+		Type: "RSA PRIVATE KEY", Headers: map[string]string{"DEK-Info": "invalid marker"}, Bytes: []byte("not a key"),
+	})
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	inputErr := errors.New("injected PIN read failure")
+	identity, err := loadPKINITIdentity("FILE:"+path, iotest.ErrReader(inputErr), &stderr, true)
+	assert.Nil(t, identity)
+	assert.ErrorIs(t, err, inputErr)
+	assert.ErrorContains(t, err, "read PKINIT identity PIN:")
+	assert.Equal(t, pinPrompt, stderr.String())
+}
+
 func TestLoadExplicitKeytabError(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "missing.keytab")
-	_, err := loadKeytab(initOptions{keytabName: path}, config.New())
+	var opts initOptions
+	opts.keytabName = path
+	_, err := loadKeytab(opts, config.New())
 	if !errors.Is(err, fs.ErrNotExist) || !strings.HasPrefix(err.Error(), "load explicit keytab:") {
 		t.Fatalf("expected contextual missing-keytab error, got %v", err)
 	}
@@ -71,14 +108,18 @@ func TestLoadExplicitKeytabError(t *testing.T) {
 
 func TestParseArgsMapsMITFlags(t *testing.T) {
 	var stderr bytes.Buffer
-	opts, err := parseArgs([]string{"-V", "-l", "2h", "-r", "7d", "-F", "-p", "-A", "-C", "-E", "-k", "-t", "client.keytab", "-c", "FILE:cache", "-S", "HTTP/host", "user@REALM"}, &stderr)
+	args := []string{
+		"-V", "-l", "2h", "-r", "7d", "-F", "-p", "-A", "-C", "-E", "-k", "-t", testKeytabName,
+		"-c", "FILE:cache", "-S", "HTTP/host", testPrincipal,
+	}
+	opts, err := parseArgs(args, &stderr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assert.True(t, opts.verbose)
 	assert.True(t, opts.useKeytab)
-	assert.Equal(t, "client.keytab", opts.keytabName)
-	assert.Equal(t, "user@REALM", opts.principal)
+	assert.Equal(t, testKeytabName, opts.keytabName)
+	assert.Equal(t, testPrincipal, opts.principal)
 	assert.Equal(t, boolChoice{set: true, value: false}, opts.forwardable)
 	assert.Equal(t, boolChoice{set: true, value: true}, opts.proxiable)
 	assert.Equal(t, boolChoice{set: true, value: false}, opts.addresses)
@@ -86,16 +127,15 @@ func TestParseArgsMapsMITFlags(t *testing.T) {
 
 func TestASRequestOptions(t *testing.T) {
 	cfg := config.New()
-	opts := initOptions{
-		lifetime:      "2h",
-		renewLifetime: "7d",
-		forwardable:   boolChoice{set: true, value: false},
-		proxiable:     boolChoice{set: true, value: true},
-		addresses:     boolChoice{set: true, value: false},
-		canonicalize:  true,
-		enterprise:    true,
-		service:       "HTTP/host.example.org",
-	}
+	var opts initOptions
+	opts.lifetime = "2h"
+	opts.renewLifetime = "7d"
+	opts.forwardable = boolChoice{set: true, value: false}
+	opts.proxiable = boolChoice{set: true, value: true}
+	opts.addresses = boolChoice{set: true, value: false}
+	opts.canonicalize = true
+	opts.enterprise = true
+	opts.service = "HTTP/host.example.org"
 	request, err := asRequestOptions(opts, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -113,22 +153,22 @@ func TestASRequestOptions(t *testing.T) {
 
 func TestParseArgsRejectsConflicts(t *testing.T) {
 	var stderr bytes.Buffer
-	_, err := parseArgs([]string{"-i", "-t", "client.keytab"}, &stderr)
+	_, err := parseArgs([]string{"-i", "-t", testKeytabName}, &stderr)
 	assert.EqualError(t, err, "-i and -t are mutually exclusive")
-	_, err = parseArgs([]string{"-R", "user@REALM"}, &stderr)
+	_, err = parseArgs([]string{"-R", testPrincipal}, &stderr)
 	assert.EqualError(t, err, "-R cannot be combined with credential acquisition options")
 }
 
 func TestParseArgsAcceptsCombinedKeytabFlags(t *testing.T) {
 	var stderr bytes.Buffer
-	opts, err := parseArgs([]string{"-kt", "client.keytab", "user@REALM"}, &stderr)
+	opts, err := parseArgs([]string{"-kt", testKeytabName, testPrincipal}, &stderr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assert.True(t, opts.useKeytab)
-	assert.Equal(t, "client.keytab", opts.keytabName)
+	assert.Equal(t, testKeytabName, opts.keytabName)
 
-	opts, err = parseArgs([]string{"-ki", "user@REALM"}, &stderr)
+	opts, err = parseArgs([]string{"-ki", testPrincipal}, &stderr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +178,7 @@ func TestParseArgsAcceptsCombinedKeytabFlags(t *testing.T) {
 
 func TestParseArgsDisablesPAReqEncPARep(t *testing.T) {
 	var stderr bytes.Buffer
-	opts, err := parseArgs([]string{"--no-request-enc-pa-rep", "user@REALM"}, &stderr)
+	opts, err := parseArgs([]string{"--no-request-enc-pa-rep", testPrincipal}, &stderr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +187,8 @@ func TestParseArgsDisablesPAReqEncPARep(t *testing.T) {
 
 func TestParseArgsAcceptsPKINITOptions(t *testing.T) {
 	var stderr bytes.Buffer
-	opts, err := parseArgs([]string{"-X", "X509_user_identity=PKCS12:user.p12", "-X", "X509_anchors=FILE:ca.pem", "user@REALM"}, &stderr)
+	args := []string{"-X", "X509_user_identity=PKCS12:user.p12", "-X", "X509_anchors=FILE:ca.pem", testPrincipal}
+	opts, err := parseArgs(args, &stderr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,14 +229,16 @@ func TestRunCredentialAcquisitionFailures(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	cachePath := filepath.Join(directory, "ccache")
-	code := run([]string{"--password-stdin", "-c", "FILE:" + cachePath, "user@EXAMPLE.ORG"}, strings.NewReader("password\n"), &stdout, &stderr)
+	args := []string{"--password-stdin", "-c", "FILE:" + cachePath, exampleUser}
+	code := run(args, strings.NewReader("password\n"), &stdout, &stderr)
 	if code != 1 || !strings.Contains(stderr.String(), "while getting initial credentials") {
 		t.Fatalf("password acquisition = code %d, stderr %q", code, stderr.String())
 	}
 
 	stdout.Reset()
 	stderr.Reset()
-	code = run([]string{"-k", "-t", filepath.Join(directory, "missing.keytab"), "-c", "FILE:" + cachePath, "user@EXAMPLE.ORG"}, strings.NewReader(""), &stdout, &stderr)
+	args = []string{"-k", "-t", filepath.Join(directory, "missing.keytab"), "-c", "FILE:" + cachePath, exampleUser}
+	code = run(args, strings.NewReader(""), &stdout, &stderr)
 	if code != 1 || !strings.Contains(stderr.String(), "while resolving keytab") {
 		t.Fatalf("keytab acquisition = code %d, stderr %q", code, stderr.String())
 	}
@@ -239,7 +282,8 @@ func TestLoadPKINITSettings(t *testing.T) {
 	cfg.LibDefaults.PKINITAnchors = []string{"FILE:" + certificatePath}
 	cfg.LibDefaults.PKINITPool = []string{"FILE:" + certificatePath}
 
-	settings, usingPKINIT, err := loadPKINITSettings(initOptions{}, cfg, bytes.NewReader(nil), io.Discard)
+	var opts initOptions
+	settings, usingPKINIT, err := loadPKINITSettings(opts, cfg, bytes.NewReader(nil), io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,23 +291,26 @@ func TestLoadPKINITSettings(t *testing.T) {
 		t.Fatalf("using/settings = %v/%d", usingPKINIT, len(settings))
 	}
 
-	override := initOptions{pkinitOptions: stringList{
+	opts.pkinitOptions = stringList{
 		"X509_user_identity=FILE:" + certificatePath + "," + keyPath,
 		"X509_anchors=FILE:" + certificatePath,
-	}}
-	settings, usingPKINIT, err = loadPKINITSettings(override, config.New(), bytes.NewReader(nil), io.Discard)
+	}
+	overrideCfg := config.New()
+	overrideCfg.LibDefaults.PKINITIdentities = []string{"PKCS11:unused"}
+	overrideCfg.LibDefaults.PKINITAnchors = []string{"DIR:unused"}
+	settings, usingPKINIT, err = loadPKINITSettings(opts, overrideCfg, bytes.NewReader(nil), io.Discard)
 	if err != nil || !usingPKINIT || len(settings) != 3 {
 		t.Fatalf("override settings = %d, %v, %v", len(settings), usingPKINIT, err)
 	}
 }
 
 func TestInitConfigConsumersRejectNil(t *testing.T) {
-	if _, _, err := loadPKINITSettings(initOptions{}, nil, bytes.NewReader(nil), io.Discard); err == nil {
-		t.Fatal("loadPKINITSettings accepted nil configuration")
-	}
-	if _, err := asRequestOptions(initOptions{addresses: boolChoice{set: true, value: true}}, nil); err == nil {
-		t.Fatal("asRequestOptions accepted nil configuration")
-	}
+	var opts initOptions
+	_, _, err := loadPKINITSettings(opts, nil, bytes.NewReader(nil), io.Discard)
+	assert.EqualError(t, err, "Kerberos configuration is nil")
+	opts.addresses = boolChoice{set: true, value: true}
+	_, err = asRequestOptions(opts, nil)
+	assert.EqualError(t, err, "Kerberos configuration is nil")
 }
 
 func TestLoadPKINITSettingsRejectsInvalidConfiguration(t *testing.T) {
@@ -276,23 +323,23 @@ func TestLoadPKINITSettingsRejectsInvalidConfiguration(t *testing.T) {
 		setup   func(*config.Config)
 		wantErr string
 	}{
-		{name: "malformed option", options: stringList{"X509_user_identity"}, wantErr: "invalid -X option"},
-		{name: "empty option", options: stringList{"X509_user_identity="}, wantErr: "invalid -X option"},
-		{name: "unsupported option", options: stringList{"flag=value"}, wantErr: "unsupported -X option"},
-		{name: "multiple identities", setup: func(config *config.Config) {
+		{name: "malformed option", options: stringList{"X509_user_identity"}, setup: nil, wantErr: "invalid -X option"},
+		{name: "empty option", options: stringList{"X509_user_identity="}, setup: nil, wantErr: "invalid -X option"},
+		{name: "unsupported option", options: stringList{"flag=value"}, setup: nil, wantErr: "unsupported -X option"},
+		{name: "multiple identities", options: nil, setup: func(config *config.Config) {
 			config.LibDefaults.PKINITIdentities = []string{identity, identity}
 		}, wantErr: "exactly one"},
-		{name: "unsupported identity", setup: func(config *config.Config) {
+		{name: "unsupported identity", options: nil, setup: func(config *config.Config) {
 			config.LibDefaults.PKINITIdentities = []string{"PKCS11:token"}
 		}, wantErr: "unsupported PKINIT identity"},
-		{name: "missing anchors", setup: func(config *config.Config) {
+		{name: "missing anchors", options: nil, setup: func(config *config.Config) {
 			config.LibDefaults.PKINITIdentities = []string{identity}
 		}, wantErr: "trust anchors are required"},
-		{name: "unsupported anchor", setup: func(config *config.Config) {
+		{name: "unsupported anchor", options: nil, setup: func(config *config.Config) {
 			config.LibDefaults.PKINITIdentities = []string{identity}
 			config.LibDefaults.PKINITAnchors = []string{"DIR:" + directory}
 		}, wantErr: "unsupported PKINIT anchor"},
-		{name: "malformed anchor", setup: func(config *config.Config) {
+		{name: "malformed anchor", options: nil, setup: func(config *config.Config) {
 			path := filepath.Join(directory, "malformed.pem")
 			if err := os.WriteFile(path, []byte("not a certificate"), 0o600); err != nil {
 				t.Fatal(err)
@@ -300,7 +347,7 @@ func TestLoadPKINITSettingsRejectsInvalidConfiguration(t *testing.T) {
 			config.LibDefaults.PKINITIdentities = []string{identity}
 			config.LibDefaults.PKINITAnchors = []string{"FILE:" + path}
 		}, wantErr: "contains no certificates"},
-		{name: "missing pool", setup: func(config *config.Config) {
+		{name: "missing pool", options: nil, setup: func(config *config.Config) {
 			config.LibDefaults.PKINITIdentities = []string{identity}
 			config.LibDefaults.PKINITAnchors = []string{"FILE:" + certificatePath}
 			config.LibDefaults.PKINITPool = []string{"FILE:" + filepath.Join(directory, "missing.pem")}
@@ -312,7 +359,9 @@ func TestLoadPKINITSettingsRejectsInvalidConfiguration(t *testing.T) {
 			if test.setup != nil {
 				test.setup(config)
 			}
-			_, _, err := loadPKINITSettings(initOptions{pkinitOptions: test.options}, config, bytes.NewReader(nil), io.Discard)
+			var opts initOptions
+			opts.pkinitOptions = test.options
+			_, _, err := loadPKINITSettings(opts, config, bytes.NewReader(nil), io.Discard)
 			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
 				t.Fatalf("error = %v, want containing %q", err, test.wantErr)
 			}
@@ -325,43 +374,54 @@ func TestGokinitPureHelpers(t *testing.T) {
 		t.Fatal("displayCacheName returned an unexpected value")
 	}
 	var stderr bytes.Buffer
-	if code := fail(&stderr, errors.New("failure"), "testing"); code != 1 || !strings.Contains(stderr.String(), "failure testing") {
+	code := fail(&stderr, errors.New("failure"), "testing")
+	if code != 1 || !strings.Contains(stderr.String(), "failure testing") {
 		t.Fatalf("fail = %d, %q", code, stderr.String())
 	}
 	if isPasswordExpired(errors.New("ordinary error")) {
 		t.Fatal("ordinary error treated as an expired password")
 	}
-	if _, err := asRequestOptions(initOptions{lifetime: "invalid"}, config.New()); err == nil {
-		t.Fatal("invalid lifetime accepted")
-	}
-	if _, err := asRequestOptions(initOptions{renewLifetime: "invalid"}, config.New()); err == nil {
-		t.Fatal("invalid renewable lifetime accepted")
-	}
-	if _, err := asRequestOptions(initOptions{service: "/"}, config.New()); err == nil {
-		t.Fatal("invalid service principal accepted")
-	}
+	var opts initOptions
+	opts.lifetime = "invalid"
+	_, err := asRequestOptions(opts, config.New())
+	assert.EqualError(t, err, `invalid ticket lifetime "invalid"`)
+	opts.lifetime, opts.renewLifetime = "2h", "invalid"
+	request, err := asRequestOptions(opts, config.New())
+	assert.EqualError(t, err, `invalid renewable lifetime "invalid"`)
+	assert.Equal(t, new(2*time.Hour), request.Lifetime)
+	opts.renewLifetime, opts.service = "", "/"
+	_, err = asRequestOptions(opts, config.New())
+	assert.ErrorContains(t, err, "invalid service principal:")
 	if _, err := parseArgs([]string{"one", "two"}, io.Discard); err == nil {
 		t.Fatal("multiple principals accepted")
 	}
 }
 
-func TestLoadKeytabAndVerboseCacheOutput(t *testing.T) {
+func TestLoadKeytab(t *testing.T) {
 	data, err := hex.DecodeString(testdata.KEYTAB_TESTUSER1_TEST_GOKRB5)
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(t.TempDir(), "client.keytab")
+	path := filepath.Join(t.TempDir(), testKeytabName)
 	if ierr := os.WriteFile(path, data, 0o600); ierr != nil {
 		t.Fatal(ierr)
 	}
-	loaded, err := loadKeytab(initOptions{keytabName: path}, config.New())
-	if err != nil || len(loaded.Entries) == 0 {
+	var opts initOptions
+	opts.keytabName = path
+	loaded, err := loadKeytab(opts, config.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Entries) == 0 {
 		t.Fatalf("loaded keytab entries = %d, %v", len(loaded.Entries), err)
 	}
-	if _, ierr := loadKeytab(initOptions{keytabName: filepath.Join(t.TempDir(), "missing")}, config.New()); ierr == nil {
+	opts.keytabName = filepath.Join(t.TempDir(), "missing")
+	if _, ierr := loadKeytab(opts, config.New()); ierr == nil {
 		t.Fatal("missing keytab returned no error")
 	}
+}
 
+func TestVerboseCacheOutput(t *testing.T) {
 	cacheData, err := hex.DecodeString(testdata.CCACHE_TEST)
 	if err != nil {
 		t.Fatal(err)
@@ -376,9 +436,11 @@ func TestLoadKeytabAndVerboseCacheOutput(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	cachePath := filepath.Join(t.TempDir(), "ccache")
-	if code := writeCache(cl, cachePath, true, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "Authenticated to Kerberos v5") || !strings.Contains(stdout.String(), "Using default cache: "+displayCacheName(cachePath)) {
+	if code := writeCache(cl, cachePath, true, &stdout, &stderr); code != 0 {
 		t.Fatalf("write cache = %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
 	}
+	assert.Contains(t, stdout.String(), "Authenticated to Kerberos v5")
+	assert.Contains(t, stdout.String(), "Using default cache: "+displayCacheName(cachePath))
 	if code := writeCache(cl, t.TempDir(), false, io.Discard, &stderr); code != 1 {
 		t.Fatalf("directory cache write = %d", code)
 	}
@@ -393,7 +455,11 @@ func TestLoadPKINITIdentityIOFailures(t *testing.T) {
 		want   string
 	}{
 		{"missing certificate", "FILE:" + missing, "read PKINIT certificate"},
-		{"missing separate key", "FILE:" + filepath.Join(directory, "certificate") + "," + missing, "read PKINIT private key"},
+		{
+			"missing separate key",
+			"FILE:" + filepath.Join(directory, "certificate") + "," + missing,
+			"read PKINIT private key",
+		},
 		{"missing PKCS12", "PKCS12:" + missing, "read PKINIT PKCS#12 identity"},
 		{"unsupported", "PKCS11:token", "unsupported PKINIT identity"},
 	}
@@ -402,7 +468,8 @@ func TestLoadPKINITIdentityIOFailures(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := loadPKINITIdentity(test.source, bytes.NewReader(nil), io.Discard, true); err == nil || !strings.Contains(err.Error(), test.want) {
+			_, err := loadPKINITIdentity(test.source, bytes.NewReader(nil), io.Discard, true)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want containing %q", err, test.want)
 			}
 		})
@@ -416,7 +483,7 @@ func TestLoadDefaultKeytabVariants(t *testing.T) {
 	}
 	directory := t.TempDir()
 	acceptorPath := filepath.Join(directory, "acceptor.keytab")
-	clientPath := filepath.Join(directory, "client.keytab")
+	clientPath := filepath.Join(directory, testKeytabName)
 	if err := os.WriteFile(acceptorPath, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -425,17 +492,20 @@ func TestLoadDefaultKeytabVariants(t *testing.T) {
 	}
 	t.Setenv("KRB5_KTNAME", "FILE:"+acceptorPath)
 	t.Setenv("KRB5_CLIENT_KTNAME", "FILE:"+clientPath)
-	if loaded, err := loadKeytab(initOptions{}, config.New()); err != nil || len(loaded.Entries) == 0 {
+	var opts initOptions
+	if loaded, err := loadKeytab(opts, config.New()); err != nil || len(loaded.Entries) == 0 {
 		t.Fatalf("default keytab = %v, %v", loaded, err)
 	}
-	if loaded, err := loadKeytab(initOptions{clientKeytab: true}, config.New()); err != nil || len(loaded.Entries) == 0 {
+	opts.clientKeytab = true
+	if loaded, err := loadKeytab(opts, config.New()); err != nil || len(loaded.Entries) == 0 {
 		t.Fatalf("client keytab = %v, %v", loaded, err)
 	}
 }
 
 func TestRenewAndPasswordChangeFailures(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := renewCredentials(filepath.Join(t.TempDir(), "missing.ccache"), config.New(), false, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "while renewing credentials") {
+	code := renewCredentials(filepath.Join(t.TempDir(), "missing.ccache"), config.New(), false, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "while renewing credentials") {
 		t.Fatalf("missing renewal cache = %d, %q", code, stderr.String())
 	}
 
@@ -444,29 +514,31 @@ func TestRenewAndPasswordChangeFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	cachePath := filepath.Join(t.TempDir(), "ccache")
-	if err := os.WriteFile(cachePath, data, 0o600); err != nil {
-		t.Fatal(err)
+	if writeErr := os.WriteFile(cachePath, data, 0o600); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 	stderr.Reset()
-	if code := renewCredentials(cachePath, config.New(), false, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "while renewing credentials") {
+	code = renewCredentials(cachePath, config.New(), false, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "while renewing credentials") {
 		t.Fatalf("offline renewal = %d, %q", code, stderr.String())
 	}
 
 	cl := client.NewWithPassword("user", "EXAMPLE.ORG", "old", config.New())
 	stderr.Reset()
-	if err := changeExpiredPassword(cl, "user@EXAMPLE.ORG", strings.NewReader("first\nsecond\n"), &stderr, true); err == nil || err.Error() != "Password mismatch" {
-		t.Fatalf("password mismatch error = %v", err)
-	}
+	err = changeExpiredPassword(cl, exampleUser, strings.NewReader("first\nsecond\n"), &stderr, true)
+	assert.EqualError(t, err, "Password mismatch")
 }
 
 func TestRunRejectsInvalidArgumentsAndConfiguration(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"one", "two"}, strings.NewReader(""), &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "too many arguments") {
+	code := run([]string{"one", "two"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "too many arguments") {
 		t.Fatalf("invalid arguments = %d, %q", code, stderr.String())
 	}
 	stderr.Reset()
 	t.Setenv("KRB5_CONFIG", filepath.Join(t.TempDir(), "missing.conf"))
-	if code := run([]string{"user@EXAMPLE.ORG"}, strings.NewReader(""), &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "loading Kerberos configuration") {
+	code = run([]string{exampleUser}, strings.NewReader(""), &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "loading Kerberos configuration") {
 		t.Fatalf("missing configuration = %d, %q", code, stderr.String())
 	}
 }
@@ -478,15 +550,14 @@ func writePKINITIdentity(t *testing.T, directory string) (string, string) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	template := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "PKINIT Test"},
-		NotBefore:             now.Add(-time.Hour),
-		NotAfter:              now.Add(time.Hour),
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		IsCA:                  true,
-		BasicConstraintsValid: true,
-	}
+	template := new(x509.Certificate)
+	template.SerialNumber = big.NewInt(1)
+	template.Subject.CommonName = "PKINIT Test"
+	template.NotBefore = now.Add(-time.Hour)
+	template.NotAfter = now.Add(time.Hour)
+	template.KeyUsage = x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign
+	template.IsCA = true
+	template.BasicConstraintsValid = true
 	certificateDER, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
 	if err != nil {
 		t.Fatal(err)
@@ -497,10 +568,12 @@ func writePKINITIdentity(t *testing.T, directory string) (string, string) {
 	}
 	certificatePath := filepath.Join(directory, "identity.pem")
 	keyPath := filepath.Join(directory, "identity.key")
-	if err := os.WriteFile(certificatePath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificateDER}), 0o600); err != nil {
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Headers: nil, Bytes: certificateDER})
+	if err := os.WriteFile(certificatePath, certPEM, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Headers: nil, Bytes: keyDER})
+	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return certificatePath, keyPath

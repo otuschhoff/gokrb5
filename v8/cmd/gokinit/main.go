@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/otuschhoff/gokrb5/v8/client"
 	"github.com/otuschhoff/gokrb5/v8/cmd/internal/krbcli"
@@ -24,7 +25,9 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
-const usageLine = "usage: gokinit [-V] [-l lifetime] [-r renewable_life] [-f | -F] [-p | -P] [-a | -A] [-C] [-E] [-v] [-R] [-k [-i | -t keytab_file]] [-c cache_name] [-S service_name] [-X attribute=value] [--password-stdin] [--no-request-enc-pa-rep] [principal]"
+const usageLine = "usage: gokinit [-V] [-l lifetime] [-r renewable_life] [-f | -F] [-p | -P] [-a | -A] " +
+	"[-C] [-E] [-v] [-R] [-k [-i | -t keytab_file]] [-c cache_name] [-S service_name] " +
+	"[-X attribute=value] [--password-stdin] [--no-request-enc-pa-rep] [principal]"
 
 type stringList []string
 
@@ -105,6 +108,12 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if opts.renew {
 		return renewCredentials(cacheName, cfg, opts.verbose, stdout, stderr)
 	}
+	return acquireCredentials(opts, cfg, cacheName, stdin, stdout, stderr)
+}
+
+func acquireCredentials(
+	opts initOptions, cfg *config.Config, cacheName string, stdin io.Reader, stdout, stderr io.Writer,
+) int {
 	principal, err := krbcli.ResolvePrincipal(opts.principal, cacheName, opts.useKeytab, opts.enterprise, cfg)
 	if err != nil {
 		return fail(stderr, err, "resolving client principal")
@@ -128,7 +137,9 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 		cl.Credentials.WithKeytab(kt)
 	} else if !usingPKINIT {
-		password, readErr := krbcli.ReadPassword("Password for "+principal.String()+": ", passwordInput, stderr, opts.passwordStdin)
+		password, readErr := krbcli.ReadPassword(
+			"Password for "+principal.String()+": ", passwordInput, stderr, opts.passwordStdin,
+		)
 		if readErr != nil {
 			return fail(stderr, readErr, "while reading password")
 		}
@@ -138,19 +149,30 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err, "parsing options")
 	}
-	if err := cl.LoginWithOptions(requestOptions); err != nil {
-		if !opts.useKeytab && isPasswordExpired(err) {
-			if changeErr := changeExpiredPassword(cl, principal.String(), passwordInput, stderr, opts.passwordStdin); changeErr != nil {
-				return fail(stderr, changeErr, "while changing password")
-			}
-			if err = cl.LoginWithOptions(requestOptions); err == nil {
-				return writeCache(cl, cacheName, opts.verbose, stdout, stderr)
-			}
-		}
-		_, _ = fmt.Fprintf(stderr, "kinit: %s while getting initial credentials\n", krbcli.InitialCredentialErrorText(err, principal.String(), principal.Realm))
+	if !loginWithPasswordRetry(cl, requestOptions, opts, principal, passwordInput, stderr) {
 		return 1
 	}
 	return writeCache(cl, cacheName, opts.verbose, stdout, stderr)
+}
+
+func loginWithPasswordRetry(
+	cl *client.Client, request messages.ASReqOptions, opts initOptions,
+	principal keytab.Principal, stdin io.Reader, stderr io.Writer,
+) bool {
+	err := cl.LoginWithOptions(request)
+	if err != nil && !opts.useKeytab && isPasswordExpired(err) {
+		if changeErr := changeExpiredPassword(cl, principal.String(), stdin, stderr, opts.passwordStdin); changeErr != nil {
+			fail(stderr, changeErr, "while changing password")
+			return false
+		}
+		err = cl.LoginWithOptions(request)
+	}
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "kinit: %s while getting initial credentials\n",
+			krbcli.InitialCredentialErrorText(err, principal.String(), principal.Realm))
+		return false
+	}
+	return true
 }
 
 func parseArgs(args []string, stderr io.Writer) (initOptions, error) {
@@ -189,6 +211,10 @@ func parseArgs(args []string, stderr io.Writer) (initOptions, error) {
 	if fs.NArg() == 1 {
 		opts.principal = fs.Arg(0)
 	}
+	return validateOptions(opts)
+}
+
+func validateOptions(opts initOptions) (initOptions, error) {
 	if opts.clientKeytab || opts.keytabName != "" {
 		opts.useKeytab = true
 	}
@@ -201,36 +227,17 @@ func parseArgs(args []string, stderr io.Writer) (initOptions, error) {
 	return opts, nil
 }
 
-func loadPKINITSettings(opts initOptions, cfg *config.Config, stdin io.Reader, stderr io.Writer) ([]func(*client.Settings), bool, error) {
+var errNilConfig = errors.New("Kerberos configuration is nil") //nolint:staticcheck // Preserve CLI error text.
+
+func loadPKINITSettings(
+	opts initOptions, cfg *config.Config, stdin io.Reader, stderr io.Writer,
+) ([]func(*client.Settings), bool, error) {
 	if cfg == nil {
-		return nil, false, errors.New("Kerberos configuration is nil")
+		return nil, false, errNilConfig
 	}
-	identities := append([]string(nil), cfg.LibDefaults.PKINITIdentities...)
-	anchors := append([]string(nil), cfg.LibDefaults.PKINITAnchors...)
-	if len(opts.pkinitOptions) != 0 {
-		identitySpecified, anchorsSpecified := false, false
-		for _, option := range opts.pkinitOptions {
-			name, value, found := strings.Cut(option, "=")
-			if !found || value == "" {
-				return nil, false, fmt.Errorf("invalid -X option %q", option)
-			}
-			switch name {
-			case "X509_user_identity":
-				if !identitySpecified {
-					identities = nil
-					identitySpecified = true
-				}
-				identities = append(identities, value)
-			case "X509_anchors":
-				if !anchorsSpecified {
-					anchors = nil
-					anchorsSpecified = true
-				}
-				anchors = append(anchors, value)
-			default:
-				return nil, false, fmt.Errorf("unsupported -X option %q", name)
-			}
-		}
+	identities, anchors, err := pkinitSources(opts.pkinitOptions, cfg)
+	if err != nil {
+		return nil, false, err
 	}
 	if len(identities) == 0 {
 		return nil, false, nil
@@ -245,63 +252,88 @@ func loadPKINITSettings(opts initOptions, cfg *config.Config, stdin io.Reader, s
 	if len(anchors) == 0 {
 		return nil, false, errors.New("PKINIT trust anchors are required")
 	}
-	roots := x509.NewCertPool()
-	for _, source := range anchors {
-		path, err := pkinitFilePath(source)
-		if err != nil {
-			return nil, false, err
-		}
-		data, err := os.ReadFile(path) // #nosec G304 -- FILE: and PKCS12: paths are explicit user configuration inputs.
-		if err != nil {
-			return nil, false, fmt.Errorf("read PKINIT anchor %q: %w", path, err)
-		}
-		if !roots.AppendCertsFromPEM(data) {
-			return nil, false, fmt.Errorf("PKINIT anchor %q contains no certificates", path)
-		}
+	roots, err := loadPKINITCertPool(anchors, "anchor")
+	if err != nil {
+		return nil, false, err
 	}
-	intermediates := x509.NewCertPool()
-	for _, source := range cfg.LibDefaults.PKINITPool {
-		path, err := pkinitFilePath(source)
-		if err != nil {
-			return nil, false, err
-		}
-		data, err := os.ReadFile(path) // #nosec G304 -- FILE: and PKCS12: paths are explicit user configuration inputs.
-		if err != nil {
-			return nil, false, fmt.Errorf("read PKINIT certificate pool %q: %w", path, err)
-		}
-		if !intermediates.AppendCertsFromPEM(data) {
-			return nil, false, fmt.Errorf("PKINIT certificate pool %q contains no certificates", path)
-		}
+	intermediates, err := loadPKINITCertPool(cfg.LibDefaults.PKINITPool, "certificate pool")
+	if err != nil {
+		return nil, false, err
 	}
-	settings := []func(*client.Settings){
+	var policy pkinit.KDCCertificatePolicy
+	policy.Roots = roots
+	policy.Intermediates = intermediates
+	policy.Hostname = cfg.LibDefaults.PKINITKDCHostname
+	policy.EKUChecking = pkinit.KDCEKUChecking(cfg.LibDefaults.PKINITEKUChecking)
+	policy.RequireRevocation = cfg.LibDefaults.PKINITRequireCRLCheck
+	return []func(*client.Settings){
 		client.PKINITIdentity(identity),
-		client.PKINITKDCCertificatePolicy(pkinit.KDCCertificatePolicy{
-			Roots: roots, Intermediates: intermediates, Hostname: cfg.LibDefaults.PKINITKDCHostname,
-			EKUChecking:       pkinit.KDCEKUChecking(cfg.LibDefaults.PKINITEKUChecking),
-			RequireRevocation: cfg.LibDefaults.PKINITRequireCRLCheck,
-		}),
+		client.PKINITKDCCertificatePolicy(policy),
 		client.PKINITMinimumDHBits(cfg.LibDefaults.PKINITDHMinBits),
+	}, true, nil
+}
+
+func pkinitSources(options stringList, cfg *config.Config) ([]string, []string, error) {
+	var identities, anchors []string
+	for _, option := range options {
+		name, value, found := strings.Cut(option, "=")
+		if !found || value == "" {
+			return nil, nil, fmt.Errorf("invalid -X option %q", option)
+		}
+		switch name {
+		case "X509_user_identity":
+			identities = append(identities, value)
+		case "X509_anchors":
+			anchors = append(anchors, value)
+		default:
+			return nil, nil, fmt.Errorf("unsupported -X option %q", name)
+		}
 	}
-	return settings, true, nil
+	if len(identities) == 0 {
+		identities = append(identities, cfg.LibDefaults.PKINITIdentities...)
+	}
+	if len(anchors) == 0 {
+		anchors = append(anchors, cfg.LibDefaults.PKINITAnchors...)
+	}
+	return identities, anchors, nil
+}
+
+func loadPKINITCertPool(sources []string, kind string) (*x509.CertPool, error) {
+	pool := x509.NewCertPool()
+	for _, source := range sources {
+		path, err := pkinitFilePath(source)
+		if err != nil {
+			return nil, err
+		}
+		data, err := os.ReadFile(path) // #nosec G304 -- FILE: paths are explicit user configuration inputs.
+		if err != nil {
+			return nil, fmt.Errorf("read PKINIT %s %q: %w", kind, path, err)
+		}
+		if !pool.AppendCertsFromPEM(data) {
+			return nil, fmt.Errorf("PKINIT %s %q contains no certificates", kind, path)
+		}
+	}
+	return pool, nil
 }
 
 func loadPKINITIdentity(source string, stdin io.Reader, stderr io.Writer, allowStdin bool) (*pkinit.Identity, error) {
 	switch {
 	case strings.HasPrefix(source, "FILE:"):
-		paths := strings.SplitN(strings.TrimPrefix(source, "FILE:"), ",", 2)
+		const maxIdentityPaths = 2
+		paths := strings.SplitN(strings.TrimPrefix(source, "FILE:"), ",", maxIdentityPaths)
 		certificate, err := os.ReadFile(paths[0])
 		if err != nil {
 			return nil, fmt.Errorf("read PKINIT certificate: %w", err)
 		}
 		key := certificate
-		if len(paths) == 2 {
+		if len(paths) == maxIdentityPaths {
 			key, err = os.ReadFile(paths[1])
 			if err != nil {
 				return nil, fmt.Errorf("read PKINIT private key: %w", err)
 			}
 		}
 		block, _ := pem.Decode(key)
-		if block == nil || !x509.IsEncryptedPEMBlock(block) {
+		if !hasLegacyPEMEncryption(block) {
 			return decodePKINITPEM(certificate, key, nil)
 		}
 		pin, readErr := readPKINITPIN(stdin, stderr, allowStdin)
@@ -314,6 +346,15 @@ func loadPKINITIdentity(source string, stdin io.Reader, stderr io.Writer, allowS
 	default:
 		return nil, fmt.Errorf("unsupported PKINIT identity source %q", source)
 	}
+}
+
+func hasLegacyPEMEncryption(block *pem.Block) bool {
+	if block == nil {
+		return false
+	}
+	// Match the legacy RFC 1423 marker only to decide whether to prompt for a PIN.
+	_, encrypted := block.Headers["DEK-Info"]
+	return encrypted
 }
 
 func loadPKINITPKCS12(path string, stdin io.Reader, stderr io.Writer, allowStdin bool) (*pkinit.Identity, error) {
@@ -377,21 +418,10 @@ func expandKeytabArgs(args []string) []string {
 func asRequestOptions(opts initOptions, cfg *config.Config) (messages.ASReqOptions, error) {
 	var result messages.ASReqOptions
 	if cfg == nil {
-		return result, errors.New("Kerberos configuration is nil")
+		return result, errNilConfig
 	}
-	if opts.lifetime != "" {
-		value, err := krbcli.ParseDuration(opts.lifetime)
-		if err != nil {
-			return result, fmt.Errorf("invalid ticket lifetime %q", opts.lifetime)
-		}
-		result.Lifetime = &value
-	}
-	if opts.renewLifetime != "" {
-		value, err := krbcli.ParseDuration(opts.renewLifetime)
-		if err != nil {
-			return result, fmt.Errorf("invalid renewable lifetime %q", opts.renewLifetime)
-		}
-		result.RenewLifetime = &value
+	if err := setRequestLifetimes(&result, opts); err != nil {
+		return result, err
 	}
 	if opts.forwardable.set {
 		result.Forwardable = &opts.forwardable.value
@@ -399,18 +429,11 @@ func asRequestOptions(opts initOptions, cfg *config.Config) (messages.ASReqOptio
 	if opts.proxiable.set {
 		result.Proxiable = &opts.proxiable.value
 	}
-	if opts.addresses.set {
-		if opts.addresses.value {
-			addresses, err := types.LocalHostAddresses()
-			if err != nil {
-				return result, fmt.Errorf("collect local ticket addresses: %w", err)
-			}
-			addresses = append(addresses, types.HostAddressesFromNetIPs(cfg.LibDefaults.ExtraAddresses)...)
-			result.Addresses = addresses
-		} else {
-			result.Addresses = []types.HostAddress{}
-		}
+	addresses, err := requestAddresses(opts.addresses, cfg)
+	if err != nil {
+		return result, err
 	}
+	result.Addresses = addresses
 	if opts.canonicalize {
 		result.Canonicalize = &opts.canonicalize
 	}
@@ -418,14 +441,64 @@ func asRequestOptions(opts initOptions, cfg *config.Config) (messages.ASReqOptio
 		result.Enterprise = &opts.enterprise
 	}
 	if opts.service != "" {
-		service, err := keytab.ParsePrincipal(opts.service)
+		name, err := requestServicePrincipal(opts.service)
 		if err != nil {
-			return result, fmt.Errorf("invalid service principal: %w", err)
+			return result, err
 		}
-		name := types.PrincipalName{NameType: service.NameType, NameString: append([]string(nil), service.Components...)}
 		result.ServicePrincipal = &name
 	}
 	return result, nil
+}
+
+func setRequestLifetimes(request *messages.ASReqOptions, opts initOptions) error {
+	if opts.lifetime != "" {
+		value, err := parseLifetime(opts.lifetime, "ticket")
+		if err != nil {
+			return err
+		}
+		request.Lifetime = &value
+	}
+	if opts.renewLifetime != "" {
+		value, err := parseLifetime(opts.renewLifetime, "renewable")
+		if err != nil {
+			return err
+		}
+		request.RenewLifetime = &value
+	}
+	return nil
+}
+
+func parseLifetime(value, kind string) (time.Duration, error) {
+	lifetime, err := krbcli.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s lifetime %q", kind, value)
+	}
+	return lifetime, nil
+}
+
+func requestAddresses(choice boolChoice, cfg *config.Config) ([]types.HostAddress, error) {
+	if !choice.set {
+		return nil, nil
+	}
+	if !choice.value {
+		return []types.HostAddress{}, nil
+	}
+	addresses, err := types.LocalHostAddresses()
+	if err != nil {
+		return nil, fmt.Errorf("collect local ticket addresses: %w", err)
+	}
+	return append(addresses, types.HostAddressesFromNetIPs(cfg.LibDefaults.ExtraAddresses)...), nil
+}
+
+func requestServicePrincipal(value string) (types.PrincipalName, error) {
+	service, err := keytab.ParsePrincipal(value)
+	if err != nil {
+		return types.PrincipalName{}, fmt.Errorf("invalid service principal: %w", err)
+	}
+	return types.PrincipalName{
+		NameType:   service.NameType,
+		NameString: append([]string(nil), service.Components...),
+	}, nil
 }
 
 func loadKeytab(opts initOptions, cfg *config.Config) (*keytab.Keytab, error) {
@@ -455,7 +528,9 @@ func isPasswordExpired(err error) bool {
 	return ok && kdcErr.ErrorCode == errorcode.KDC_ERR_KEY_EXPIRED
 }
 
-func changeExpiredPassword(cl *client.Client, principal string, stdin io.Reader, stderr io.Writer, passwordStdin bool) error {
+func changeExpiredPassword(
+	cl *client.Client, principal string, stdin io.Reader, stderr io.Writer, passwordStdin bool,
+) error {
 	if _, err := fmt.Fprintln(stderr, "Password expired.  You must change it now."); err != nil {
 		return fmt.Errorf("write password expiration notice: %w", err)
 	}
@@ -468,7 +543,7 @@ func changeExpiredPassword(cl *client.Client, principal string, stdin io.Reader,
 		return fmt.Errorf("read password confirmation: %w", err)
 	}
 	if first != second {
-		return errors.New("Password mismatch")
+		return errors.New("Password mismatch") //nolint:staticcheck // Preserve CLI error text.
 	}
 	ok, err := cl.ChangePasswd(first)
 	if err != nil {
@@ -492,7 +567,8 @@ func writeCache(cl *client.Client, cacheName string, verbose bool, stdout, stder
 		if _, err := fmt.Fprintf(stdout, "Using default cache: %s\n", displayCacheName(cacheName)); err != nil {
 			return fail(stderr, err, "while reporting cached credentials")
 		}
-		if _, err := fmt.Fprintf(stdout, "Using principal: %s@%s\n", cl.Credentials.CName().PrincipalNameString(), cl.Credentials.Domain()); err != nil {
+		if _, err := fmt.Fprintf(stdout, "Using principal: %s@%s\n",
+			cl.Credentials.CName().PrincipalNameString(), cl.Credentials.Domain()); err != nil {
 			return fail(stderr, err, "while reporting cached credentials")
 		}
 		if _, err := fmt.Fprintln(stdout, "Authenticated to Kerberos v5"); err != nil {
@@ -518,7 +594,8 @@ func renewCredentials(cacheName string, cfg *config.Config, verbose bool, stdout
 }
 
 func displayCacheName(name string) string {
-	if strings.Contains(strings.SplitN(name, "/", 2)[0], ":") {
+	prefix, _, _ := strings.Cut(name, "/")
+	if strings.Contains(prefix, ":") {
 		return name
 	}
 	return "FILE:" + name

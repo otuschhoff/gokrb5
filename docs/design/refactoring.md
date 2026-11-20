@@ -820,6 +820,25 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 147 (2026-11-20, complete v8 `gokinit` lint cleanup; Q-10):
+Separate option validation, credential acquisition and password retry,
+PKINIT source and certificate-pool loading, and AS request construction.
+Preserve option precedence, validation order, and CLI output. Check the
+legacy PEM header only to decide whether to prompt for a PIN. Two narrow
+Staticcheck exceptions resolve three capitalization findings while
+preserving the exact error text.
+
+Uncapped whole-v8 scans report zero `gokinit` findings, down from 9
+canonical and 68 supplemental. All out-of-scope diagnostics are unchanged;
+whole-v8 totals are 354 canonical and 598 supplemental. The updated tests
+measure 87.0% statement coverage on both the original and updated command,
+up from 84.1% with the original tests. Seven CLI cases match the baseline
+byte-for-byte on stdout and stderr and return the same exit status. The
+full v8 build, vet, and race suite pass, as do 25 shuffled race-enabled
+command runs, Linux/386 command tests, and canonical changed-line lint
+against both baselines. Windows/amd64 and interop-tagged tests compile;
+native Windows and live interoperability were not run.
+
 Slice 146 (2026-11-20, complete top-level v8 crypto lint cleanup; Q-10):
 Separate KDC password-hint decoding, enctype selection, and key
 derivation. Preserve hint precedence, omitted versus explicit salts,
