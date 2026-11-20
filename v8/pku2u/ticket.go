@@ -109,23 +109,15 @@ func validateInitiatorIdentity(identity *pkinit.Identity, principal types.Princi
 
 func finishASExchange(state *initiatorASState, encoded []byte, settings settings) (*asResult, error) {
 	if state == nil || state.exchange == nil {
-		return nil, fmt.Errorf("PKU2U AS exchange state is missing")
+		return nil, errors.New("PKU2U AS exchange state is missing")
 	}
 	var reply messages.ASRep
 	if err := reply.Unmarshal(encoded); err != nil {
 		return nil, fmt.Errorf("decode PKU2U AS reply: %w", err)
 	}
-	var paValue []byte
-	for _, pa := range reply.PAData {
-		if pa.PADataType == patype.PA_PK_AS_REP {
-			if paValue != nil {
-				return nil, fmt.Errorf("PKU2U AS reply contains duplicate PA-PK-AS-REP values")
-			}
-			paValue = pa.PADataValue
-		}
-	}
-	if paValue == nil {
-		return nil, fmt.Errorf("PKU2U AS reply is missing PA-PK-AS-REP")
+	paValue, err := pkinitASReply(reply.PAData)
+	if err != nil {
+		return nil, err
 	}
 	pkResult, err := state.exchange.ProcessReply(paValue, reply.EncPart.EType)
 	if err != nil {
@@ -141,7 +133,27 @@ func finishASExchange(state *initiatorASState, encoded []byte, settings settings
 	if !verified {
 		return nil, errors.New("PKU2U AS reply did not verify")
 	}
-	return &asResult{ticket: reply.Ticket, sessionKey: reply.DecryptedEncPart.Key, peer: state.peer, peerChain: state.peerChain}, nil
+	result := new(asResult)
+	result.ticket, result.sessionKey = reply.Ticket, reply.DecryptedEncPart.Key
+	result.peer, result.peerChain = state.peer, state.peerChain
+	return result, nil
+}
+
+func pkinitASReply(paData []types.PAData) ([]byte, error) {
+	var paValue []byte
+	for _, pa := range paData {
+		if pa.PADataType != patype.PA_PK_AS_REP {
+			continue
+		}
+		if paValue != nil {
+			return nil, errors.New("PKU2U AS reply contains duplicate PA-PK-AS-REP values")
+		}
+		paValue = pa.PADataValue
+	}
+	if paValue == nil {
+		return nil, errors.New("PKU2U AS reply is missing PA-PK-AS-REP")
+	}
+	return paValue, nil
 }
 
 func acceptASExchange(encoded []byte, settings settings) ([]byte, *asResult, error) {
@@ -152,69 +164,102 @@ func acceptASExchange(encoded []byte, settings settings) ([]byte, *asResult, err
 	if err := validateASRequest(&request, settings.identity); err != nil {
 		return nil, nil, err
 	}
-	var peer *pkinit.VerifiedSignedData
-	var peerChain []*x509.Certificate
-	pkResult, err := pkinit.AcceptExchange(&request, pkinit.AcceptorOptions{
-		Identity: settings.identity, MinimumDHBits: settings.minimumDHBits,
-		CurrentTime: settings.currentTime(), ClockSkew: settings.clockSkew,
-		ValidateSigner: func(signed *pkinit.VerifiedSignedData) error {
-			chain, err := settings.validatePeer(signed, request.ReqBody.CName)
-			if err != nil {
-				return err
-			}
-			peer, peerChain = signed, chain
-			return nil
-		},
-	})
+	result := new(asResult)
+	var options pkinit.AcceptorOptions
+	options.Identity = settings.identity
+	options.MinimumDHBits = settings.minimumDHBits
+	options.CurrentTime = settings.currentTime()
+	options.ClockSkew = settings.clockSkew
+	options.ValidateSigner = func(signed *pkinit.VerifiedSignedData) error {
+		chain, err := settings.validatePeer(signed, request.ReqBody.CName)
+		if err != nil {
+			return err
+		}
+		result.peer, result.peerChain = signed, chain
+		return nil
+	}
+	pkResult, err := pkinit.AcceptExchange(&request, options)
 	if err != nil {
 		return nil, nil, fmt.Errorf("accept PKU2U PKINIT exchange: %w", err)
 	}
+	reply, err := buildASReply(&request.ReqBody, pkResult, settings, result)
+	if err != nil {
+		return nil, nil, err
+	}
+	replyDER, err := marshalASMessage("reply", reply.Marshal)
+	return replyDER, result, err
+}
+
+func buildASReply(
+	body *messages.KDCReqBody,
+	pkResult *pkinit.AcceptorResult,
+	settings settings,
+	result *asResult,
+) (*messages.ASRep, error) {
 	et, err := crypto.GetEtype(pkResult.ReplyKey.KeyType)
 	if err != nil {
-		return nil, nil, fmt.Errorf("select PKU2U ticket key enctype: %w", err)
+		return nil, fmt.Errorf("select PKU2U ticket key enctype: %w", err)
 	}
 	ticketKey, err := types.GenerateEncryptionKey(et)
 	if err != nil {
-		return nil, nil, fmt.Errorf("generate PKU2U ticket key: %w", err)
+		return nil, fmt.Errorf("generate PKU2U ticket key: %w", err)
 	}
 	now := settings.currentTime().UTC()
 	end := now.Add(settings.ticketLifetime)
-	if request.ReqBody.Till.Before(end) {
-		end = request.ReqBody.Till
+	if body.Till.Before(end) {
+		end = body.Till
 	}
 	if !end.After(now) {
-		return nil, nil, fmt.Errorf("PKU2U AS request ticket lifetime has expired")
+		return nil, errors.New("PKU2U AS request ticket lifetime has expired")
 	}
 	ticketFlags := types.NewKrbFlags()
 	types.SetFlag(&ticketFlags, flags.Initial)
 	types.SetFlag(&ticketFlags, flags.PreAuthent)
 	ticket, sessionKey, err := messages.NewTicketWithKey(
-		request.ReqBody.CName, Realm, request.ReqBody.SName, Realm, ticketFlags,
-		ticketKey, 0, now, now, end, time.Time{},
+		body.CName,
+		Realm,
+		body.SName,
+		Realm,
+		ticketFlags,
+		ticketKey,
+		0,
+		now,
+		now,
+		end,
+		time.Time{},
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("issue PKU2U self-ticket: %w", err)
+		return nil, fmt.Errorf("issue PKU2U self-ticket: %w", err)
 	}
-	part := messages.EncKDCRepPart{
-		Key: sessionKey, Nonce: request.ReqBody.Nonce, Flags: ticketFlags,
-		AuthTime: now, StartTime: now, EndTime: end,
-		SRealm: Realm, SName: request.ReqBody.SName,
+	var part messages.EncKDCRepPart
+	part.Key, part.Nonce, part.Flags = sessionKey, body.Nonce, ticketFlags
+	part.AuthTime, part.StartTime, part.EndTime = now, now, end
+	part.SRealm, part.SName = Realm, body.SName
+	encryptedPart, err := encryptASReplyPart(&part, pkResult.ReplyKey)
+	if err != nil {
+		return nil, err
 	}
+
+	var reply messages.ASRep
+	reply.PVNO, reply.MsgType = iana.PVNO, msgtype.KRB_AS_REP
+	reply.PAData = []types.PAData{{PADataType: patype.PA_PK_AS_REP, PADataValue: pkResult.ReplyPAData}}
+	reply.CRealm, reply.CName = Realm, body.CName
+	reply.Ticket, reply.EncPart = ticket, encryptedPart
+	result.ticket, result.sessionKey, result.ticketKey = ticket, sessionKey, ticketKey
+	return &reply, nil
+}
+
+func encryptASReplyPart(part *messages.EncKDCRepPart, replyKey types.EncryptionKey) (types.EncryptedData, error) {
+	var encrypted types.EncryptedData
 	partDER, err := part.Marshal()
 	if err != nil {
-		return nil, nil, fmt.Errorf("marshal PKU2U AS reply plaintext: %w", err)
+		return encrypted, fmt.Errorf("marshal PKU2U AS reply plaintext: %w", err)
 	}
-	encryptedPart, err := crypto.GetEncryptedData(partDER, pkResult.ReplyKey, keyusage.AS_REP_ENCPART, 0)
+	encrypted, err = crypto.GetEncryptedData(partDER, replyKey, keyusage.AS_REP_ENCPART, 0)
 	if err != nil {
-		return nil, nil, fmt.Errorf("encrypt PKU2U AS reply: %w", err)
+		return encrypted, fmt.Errorf("encrypt PKU2U AS reply: %w", err)
 	}
-	reply := messages.ASRep{KDCRepFields: messages.KDCRepFields{
-		PVNO: iana.PVNO, MsgType: msgtype.KRB_AS_REP,
-		PAData: types.PADataSequence{{PADataType: patype.PA_PK_AS_REP, PADataValue: pkResult.ReplyPAData}},
-		CRealm: Realm, CName: request.ReqBody.CName, Ticket: ticket, EncPart: encryptedPart,
-	}}
-	replyDER, err := marshalASMessage("reply", reply.Marshal)
-	return replyDER, &asResult{ticket: ticket, sessionKey: sessionKey, ticketKey: ticketKey, peer: peer, peerChain: peerChain}, err
+	return encrypted, nil
 }
 
 func marshalASMessage(kind string, marshal func() ([]byte, error)) ([]byte, error) {
