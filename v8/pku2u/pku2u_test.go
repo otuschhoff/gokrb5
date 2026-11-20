@@ -522,7 +522,10 @@ func TestEndToEndOverNegoEx(t *testing.T) {
 	serverIdentity, _ := pkinit.NewIdentity(serverCertificate, []*x509.Certificate{root}, serverKey, false)
 	anchors := x509.NewCertPool()
 	anchors.AddCert(root)
-	initiator, err := negoex.NewInitiator("host/server.example.com", negoex.NewPKU2UScheme(NewInitiator(clientIdentity, anchors)))
+	initiator, err := negoex.NewInitiator(
+		"host/server.example.com",
+		negoex.NewPKU2UScheme(NewInitiator(clientIdentity, anchors)),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -531,29 +534,28 @@ func TestEndToEndOverNegoEx(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	initiatorToken, done, err := initiator.Step(nil)
-	if err != nil || done {
-		t.Fatalf("initiator AS: done=%t err=%v", done, err)
+	var token []byte
+	for _, step := range [...]struct {
+		stage        string
+		conversation *negoex.Conversation
+		wantDone     bool
+	}{
+		{stage: "initiator AS", conversation: initiator, wantDone: false},
+		{stage: "acceptor AS", conversation: acceptor, wantDone: false},
+		{stage: "initiator AP", conversation: initiator, wantDone: false},
+		{stage: "acceptor AP", conversation: acceptor, wantDone: false},
+		{stage: "initiator verify", conversation: initiator, wantDone: true},
+	} {
+		output, done, stepErr := step.conversation.Step(token)
+		if stepErr != nil || done != step.wantDone {
+			t.Fatalf("%s: done=%t err=%v", step.stage, done, stepErr)
+		}
+		token = output
 	}
-	acceptorToken, done, err := acceptor.Step(initiatorToken)
-	if err != nil || done {
-		t.Fatalf("acceptor AS: done=%t err=%v", done, err)
-	}
-	initiatorToken, done, err = initiator.Step(acceptorToken)
-	if err != nil || done {
-		t.Fatalf("initiator AP: done=%t err=%v", done, err)
-	}
-	acceptorToken, done, err = acceptor.Step(initiatorToken)
-	if err != nil || done {
-		t.Fatalf("acceptor AP: done=%t err=%v", done, err)
-	}
-	initiatorToken, done, err = initiator.Step(acceptorToken)
-	if err != nil || !done {
-		t.Fatalf("initiator verify: done=%t err=%v", done, err)
-	}
-	acceptorToken, done, err = acceptor.Step(initiatorToken)
-	if err != nil || !done || len(acceptorToken) != 0 {
-		t.Fatalf("acceptor verify: output=%x done=%t err=%v", acceptorToken, done, err)
+
+	output, done, err := acceptor.Step(token)
+	if err != nil || !done || len(output) != 0 {
+		t.Fatalf("acceptor verify: output=%x done=%t err=%v", output, done, err)
 	}
 	assertProtectedMessage(t, initiator.Context(), acceptor.Context(), []byte("negoex secret"), true)
 }
