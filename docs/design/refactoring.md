@@ -2,8 +2,8 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-100 done. The latest v8
-inventories contain 519 canonical and 3,472 supplemental findings. Most
+(floor raised to 86.0%), and Phase 5 slices 1-101 done. The latest v8
+inventories contain 519 canonical and 3,470 supplemental findings. Most
 remaining canonical findings are from `revive`, complexity and nesting
 checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
 Phase 3/4 interoperability and Windows exit evidence remains an external CI
@@ -30,7 +30,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.3% cross-package statement coverage; 519 canonical lint findings after Slice 100 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.3% cross-package statement coverage; 519 canonical lint findings after Slice 101 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -819,6 +819,24 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 101 (2026-11-20, v8 libdefaults coverage assertions; Q-10):
+Replace the compound check in `TestLibDefaultsAllSupportedDirectives`
+with directive-specific assertions that report each mismatch. Keep the
+fixture byte-for-byte unchanged and retain all 19 field expectations.
+Production code and neighboring tests are unchanged; PKU2U cleanup
+remains deferred.
+
+Both module suites, v8 build and vet, 100 shuffled race-enabled config
+suite runs, Linux/386 config tests, and Windows/amd64 config test
+cross-compilation passed. Native Windows and live interoperability were
+not tested.
+
+Changed-line lint passed against `dcf4e69` and `origin/main` for both
+modules. V8 cross-package statement coverage remained at 88.3%.
+Supplemental v8 findings fell from 3,472 to 3,470 (`cyclop`, `lll`).
+The v8 canonical and both v7 inventories were unchanged, with no new
+findings or suppressions.
 
 Slice 100 (2026-11-20, v8 libdefaults collection directives; Q-10):
 Separate enctype-list replacement from PKINIT list accumulation, while

@@ -4,10 +4,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestLibDefaultsAllSupportedDirectives(t *testing.T) {
-	configuration, err := NewFromString(`[libdefaults]
+const allSupportedLibDefaults = `[libdefaults]
 allow_weak_crypto = yes
 ad_site = Site-A
 canonicalize = y
@@ -48,19 +50,34 @@ safe_checksum_type = 12
 ticket_lifetime = 10h
 udp_preference_limit = 1200
 verify_ap_req_nofail = yes
-`)
-	if err != nil {
-		t.Fatal(err)
-	}
+`
+
+func TestLibDefaultsAllSupportedDirectives(t *testing.T) {
+	configuration, err := NewFromString(allSupportedLibDefaults)
+	require.NoError(t, err)
+	require.NotNil(t, configuration)
+
 	defaults := configuration.LibDefaults
-	if !defaults.AllowWeakCrypto || defaults.ADSite != "Site-A" || !defaults.Canonicalize || defaults.RequestPAC ||
-		len(defaults.PKINITAnchors) != 1 || len(defaults.PKINITIdentities) != 1 || defaults.PKINITKDCHostname != "kdc.example.org" ||
-		defaults.PKINITEKUChecking != "none" || !defaults.PKINITRequireCRLCheck || defaults.PKINITDHMinBits != 3072 ||
-		defaults.CCacheType != 3 || defaults.Clockskew != 6*time.Minute || len(defaults.ExtraAddresses) != 2 ||
-		defaults.KDCTimeSync != 2 || defaults.RealmTryDomains != -1 || defaults.RenewLifetime != 26*time.Hour ||
-		defaults.TicketLifetime != 10*time.Hour || defaults.UDPPreferenceLimit != 1200 || !defaults.VerifyAPReqNofail {
-		t.Fatalf("parsed libdefaults = %+v", defaults)
-	}
+	is := assert.New(t)
+	is.True(defaults.AllowWeakCrypto, "allow_weak_crypto")
+	is.Equal("Site-A", defaults.ADSite, "ad_site")
+	is.True(defaults.Canonicalize, "canonicalize")
+	is.False(defaults.RequestPAC, "request_pac")
+	is.Len(defaults.PKINITAnchors, 1, "pkinit_anchors")
+	is.Len(defaults.PKINITIdentities, 1, "pkinit_identities")
+	is.Equal("kdc.example.org", defaults.PKINITKDCHostname, "pkinit_kdc_hostname")
+	is.Equal("none", defaults.PKINITEKUChecking, "pkinit_eku_checking")
+	is.True(defaults.PKINITRequireCRLCheck, "pkinit_require_crl_checking")
+	is.Equal(3072, defaults.PKINITDHMinBits, "pkinit_dh_min_bits")
+	is.Equal(3, defaults.CCacheType, "ccache_type")
+	is.Equal(6*time.Minute, defaults.Clockskew, "clockskew")
+	is.Len(defaults.ExtraAddresses, 2, "extra_addresses")
+	is.Equal(2, defaults.KDCTimeSync, "kdc_timesync")
+	is.Equal(-1, defaults.RealmTryDomains, "realm_try_domains")
+	is.Equal(26*time.Hour, defaults.RenewLifetime, "renew_lifetime")
+	is.Equal(10*time.Hour, defaults.TicketLifetime, "ticket_lifetime")
+	is.Equal(1200, defaults.UDPPreferenceLimit, "udp_preference_limit")
+	is.True(defaults.VerifyAPReqNofail, "verify_ap_req_nofail")
 }
 
 func TestLibDefaultsRejectInvalidValues(t *testing.T) {
