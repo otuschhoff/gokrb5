@@ -35,10 +35,8 @@ func run(args []string, stderr io.Writer) int {
 		}
 		return 1
 	}
-	if opts.all {
-		return destroyAllFileCaches(stderr, opts.quiet)
-	}
 	name := opts.cacheName
+	// -A also resolves the default FILE cache; parseArgs rejects -A with -c.
 	if name == "" {
 		cfg, lerr := krbcli.LoadConfig()
 		if lerr != nil {
@@ -55,25 +53,6 @@ func run(args []string, stderr io.Writer) int {
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fail(stderr, err, opts.quiet)
-	}
-	return 0
-}
-
-func destroyAllFileCaches(stderr io.Writer, quiet bool) int {
-	cfg, err := krbcli.LoadConfig()
-	if err != nil {
-		return fail(stderr, err, quiet)
-	}
-	name, err := credentials.DefaultCCacheName(cfg)
-	if err != nil {
-		return fail(stderr, err, quiet)
-	}
-	path, err := credentials.ResolveCCacheName(name)
-	if err != nil {
-		return fail(stderr, err, quiet)
-	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fail(stderr, err, quiet)
 	}
 	return 0
 }

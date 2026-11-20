@@ -820,6 +820,24 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 148 (2026-11-20, complete v8 command-tree lint cleanup; Q-10):
+Separate cache rendering from loading in `goklist`, share the default
+FILE-cache removal path in `gokdestroy`, and separate duration parsing
+and KDC error formatting in `krbcli`. Preserve option precedence,
+output, and exit status. One approved Staticcheck exception preserves
+the exact configuration error text.
+
+Uncapped whole-v8 scans report zero findings under `v8/cmd`, down from
+5 canonical and 51 supplemental. Diagnostics outside that subtree
+are unchanged; whole-v8 totals are 349 canonical and 547 supplemental.
+The updated tests pass on the baseline and final code. Final statement
+coverage is 95.0% for `gokdestroy`, 87.0% for `gokinit`, 90.3% for
+`goklist`, and 72.1% for `krbcli`. Eleven CLI comparisons match stdout,
+stderr, and exit status. The full v8 build, vet, and race suite pass,
+along with 25 shuffled race-enabled command runs, Linux/386 command
+tests, and canonical changed-line lint from both baselines.
+Windows/amd64 and interop-tagged tests compile but were not run.
+
 Slice 147 (2026-11-20, complete v8 `gokinit` lint cleanup; Q-10):
 Separate option validation, credential acquisition and password retry,
 PKINIT source and certificate-pool loading, and AS request construction.

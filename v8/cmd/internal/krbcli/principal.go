@@ -14,7 +14,9 @@ import (
 )
 
 // ResolvePrincipal applies kinit's explicit, cache, keytab, and local-user defaults.
-func ResolvePrincipal(value, cacheName string, keytabLogin, enterprise bool, cfg *config.Config) (keytab.Principal, error) {
+func ResolvePrincipal(
+	value, cacheName string, keytabLogin, enterprise bool, cfg *config.Config,
+) (keytab.Principal, error) {
 	if value != "" {
 		return parsePrincipalWithDefaultRealm(value, enterprise, cfg)
 	}

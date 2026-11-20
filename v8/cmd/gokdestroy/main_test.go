@@ -51,7 +51,8 @@ func TestDestroyAllRemovesDefaultFileCache(t *testing.T) {
 	if err := os.WriteFile(cachePath, []byte("cache"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(configPath, []byte("[libdefaults]\n default_ccache_name = FILE:"+cachePath+"\n"), 0o600); err != nil {
+	configText := "[libdefaults]\n default_ccache_name = FILE:" + cachePath + "\n"
+	if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("KRB5_CONFIG", configPath)
@@ -82,17 +83,20 @@ func TestDestroyReportsRemovalAndConfigurationErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stderr bytes.Buffer
-	if code := run([]string{"-c", directory}, &stderr); code != 1 || !strings.Contains(stderr.String(), "while destroying cache") {
+	code := run([]string{"-c", directory}, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "while destroying cache") {
 		t.Fatalf("directory removal = %d, %q", code, stderr.String())
 	}
 
 	stderr.Reset()
 	t.Setenv("KRB5_CONFIG", filepath.Join(t.TempDir(), "missing.conf"))
-	if code := run([]string{"-A"}, &stderr); code != 1 || !strings.Contains(stderr.String(), "while destroying cache") {
+	code = run([]string{"-A"}, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "while destroying cache") {
 		t.Fatalf("missing config = %d, %q", code, stderr.String())
 	}
 	stderr.Reset()
-	if code := run([]string{"unexpected"}, &stderr); code != 1 || !strings.Contains(stderr.String(), "unexpected argument") {
+	code = run([]string{"unexpected"}, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "unexpected argument") {
 		t.Fatalf("unexpected argument = %d, %q", code, stderr.String())
 	}
 }
@@ -104,7 +108,8 @@ func TestDestroyDefaultCacheAndUnsupportedDefault(t *testing.T) {
 	if err := os.WriteFile(cachePath, []byte("cache"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(configPath, []byte("[libdefaults]\n default_ccache_name = FILE:"+cachePath+"\n"), 0o600); err != nil {
+	configText := "[libdefaults]\n default_ccache_name = FILE:" + cachePath + "\n"
+	if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("KRB5_CONFIG", configPath)

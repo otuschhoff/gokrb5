@@ -2,6 +2,7 @@
 package main
 
 import (
+	"cmp"
 	"errors"
 	"flag"
 	"fmt"
@@ -65,16 +66,16 @@ func parseArgs(args []string, stderr io.Writer) (listOptions, error) {
 		return opts, fmt.Errorf("parse options: %w", err)
 	}
 	if fs.NArg() > 1 {
-		return opts, fmt.Errorf("too many arguments")
+		return opts, errors.New("too many arguments")
 	}
 	if fs.NArg() == 1 {
 		opts.name = fs.Arg(0)
 	}
 	if opts.keytab && opts.cacheName != "" {
-		return opts, fmt.Errorf("-k and -c are mutually exclusive")
+		return opts, errors.New("-k and -c are mutually exclusive")
 	}
 	if !opts.keytab && (opts.showTimestamp || opts.showKeys) {
-		return opts, fmt.Errorf("-t and -K require -k")
+		return opts, errors.New("-t and -K require -k")
 	}
 	return opts, nil
 }
@@ -101,19 +102,17 @@ func listKeytab(opts listOptions, stdout, stderr io.Writer) int {
 }
 
 func listCache(opts listOptions, stdout, stderr io.Writer) int {
-	name := opts.cacheName
-	if name == "" {
-		name = opts.name
-	}
+	name := cmp.Or(opts.cacheName, opts.name)
 	if name == "" {
 		cfg, err := krbcli.LoadConfig()
 		if err != nil {
 			return fail(stderr, err, opts.silent)
 		}
-		name, err = credentials.DefaultCCacheName(cfg)
+		defaultName, err := credentials.DefaultCCacheName(cfg)
 		if err != nil {
 			return fail(stderr, err, opts.silent)
 		}
+		name = defaultName
 	}
 	cache, err := credentials.LoadCCache(name)
 	if err != nil {
@@ -121,45 +120,64 @@ func listCache(opts listOptions, stdout, stderr io.Writer) int {
 	}
 	entries := cache.GetEntries()
 	if opts.silent {
-		now := time.Now().UTC()
-		for _, entry := range entries {
-			if now.Before(entry.EndTime) {
-				return 0
-			}
-		}
-		return 1
+		return cacheStatus(entries, time.Now().UTC())
 	}
-	if _, err := fmt.Fprintf(stdout, "Ticket cache: %s\n", displayCacheName(name)); err != nil {
-		return fail(stderr, err, opts.silent)
-	}
-	if _, err := fmt.Fprintf(stdout, "Default principal: %s\n\n", principalString(cache.DefaultPrincipal)); err != nil {
-		return fail(stderr, err, opts.silent)
-	}
-	if _, err := fmt.Fprintln(stdout, "Valid starting     Expires            Service principal"); err != nil {
-		return fail(stderr, err, opts.silent)
+	if code := writeCacheHeader(stdout, stderr, name, cache.DefaultPrincipal); code != 0 {
+		return code
 	}
 	for _, entry := range entries {
-		start := entry.StartTime
-		if start.IsZero() {
-			start = entry.AuthTime
+		if code := writeCacheEntry(stdout, stderr, entry, opts.showEtypes); code != 0 {
+			return code
 		}
-		if _, err := fmt.Fprintf(stdout, "%s  %s  %s\n", formatTime(start), formatTime(entry.EndTime), principalString(entry.Server)); err != nil {
-			return fail(stderr, err, opts.silent)
+	}
+	return 0
+}
+
+func cacheStatus(entries []*credentials.Credential, now time.Time) int {
+	for _, entry := range entries {
+		if now.Before(entry.EndTime) {
+			return 0
 		}
-		if !entry.RenewTill.IsZero() && entry.RenewTill.Unix() > 0 {
-			if _, err := fmt.Fprintf(stdout, "\trenew until %s\n", formatTime(entry.RenewTill)); err != nil {
-				return fail(stderr, err, opts.silent)
-			}
+	}
+	return 1
+}
+
+func writeCacheHeader(stdout, stderr io.Writer, name string, principal credentials.Principal) int {
+	if _, err := fmt.Fprintf(stdout, "Ticket cache: %s\n", displayCacheName(name)); err != nil {
+		return fail(stderr, err, false)
+	}
+	if _, err := fmt.Fprintf(stdout, "Default principal: %s\n\n", principalString(principal)); err != nil {
+		return fail(stderr, err, false)
+	}
+	if _, err := fmt.Fprintln(stdout, "Valid starting     Expires            Service principal"); err != nil {
+		return fail(stderr, err, false)
+	}
+	return 0
+}
+
+func writeCacheEntry(stdout, stderr io.Writer, entry *credentials.Credential, showEtypes bool) int {
+	start := entry.StartTime
+	if start.IsZero() {
+		start = entry.AuthTime
+	}
+	if _, err := fmt.Fprintf(stdout, "%s  %s  %s\n",
+		formatTime(start), formatTime(entry.EndTime), principalString(entry.Server)); err != nil {
+		return fail(stderr, err, false)
+	}
+	if !entry.RenewTill.IsZero() && entry.RenewTill.Unix() > 0 {
+		if _, err := fmt.Fprintf(stdout, "\trenew until %s\n", formatTime(entry.RenewTill)); err != nil {
+			return fail(stderr, err, false)
 		}
-		if opts.showEtypes {
-			ticketEType := int32(0)
-			var ticket messages.Ticket
-			if err := ticket.Unmarshal(entry.Ticket); err == nil {
-				ticketEType = ticket.EncPart.EType
-			}
-			if _, err := fmt.Fprintf(stdout, "\tEtype (skey, tkt): %s, %s\n", etypeID.ETypeToString(entry.Key.KeyType), etypeID.ETypeToString(ticketEType)); err != nil {
-				return fail(stderr, err, opts.silent)
-			}
+	}
+	if showEtypes {
+		var ticketEType int32
+		var ticket messages.Ticket
+		if err := ticket.Unmarshal(entry.Ticket); err == nil {
+			ticketEType = ticket.EncPart.EType
+		}
+		if _, err := fmt.Fprintf(stdout, "\tEtype (skey, tkt): %s, %s\n",
+			etypeID.ETypeToString(entry.Key.KeyType), etypeID.ETypeToString(ticketEType)); err != nil {
+			return fail(stderr, err, false)
 		}
 	}
 	return 0
@@ -178,7 +196,8 @@ func formatTime(value time.Time) string {
 }
 
 func displayCacheName(name string) string {
-	if strings.Contains(strings.SplitN(name, "/", 2)[0], ":") {
+	prefix, _, _ := strings.Cut(name, "/")
+	if strings.Contains(prefix, ":") {
 		return name
 	}
 	return "FILE:" + name

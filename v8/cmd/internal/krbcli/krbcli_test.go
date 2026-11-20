@@ -83,9 +83,41 @@ func TestParseDuration(t *testing.T) {
 			assert.Equal(t, expected, actual, input)
 		}
 	}
-	for _, value := range []string{"tomorrow", "1x:30", "1:2x", "1h2d", "d", "1:60", "1:02:60", "1000000000d", "999999999999:00", "99999999999999999999"} {
+	invalid := []string{
+		"tomorrow", "1x:30", "1:2x", "1h2d", "d", "1:60", "1:02:60",
+		"1000000000d", "999999999999:00", "99999999999999999999",
+	}
+	for _, value := range invalid {
 		_, err := ParseDuration(value)
 		assert.Error(t, err, value)
+	}
+}
+
+func TestParseDurationBoundaries(t *testing.T) {
+	tests := []struct {
+		input string
+		want  time.Duration
+		err   string
+	}{
+		{input: "", want: 0, err: "empty duration"},
+		{input: "1d-1h", want: 23 * time.Hour, err: ""},
+		{input: "1:02", want: time.Hour + 2*time.Minute, err: ""},
+		{input: "1:02:03:04", want: 0, err: "invalid duration"},
+		{input: "1d2x", want: 0, err: "invalid duration"},
+		{input: "106751d23h47m16.854775807s", want: time.Duration(1<<63 - 1), err: ""},
+		{input: "106751d23h47m16.854775808s", want: 0, err: "duration out of range"},
+		{input: "9223372037", want: 0, err: "duration out of range"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, err := ParseDuration(tt.input)
+			if tt.err != "" {
+				assert.EqualError(t, err, tt.err)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tt.want, got)
+		})
 	}
 }
 
@@ -102,7 +134,8 @@ func TestReadPasswordFromTTYWithoutEcho(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PTY test is Unix-specific")
 	}
-	command := exec.Command(os.Args[0], "-test.run=TestReadPasswordFromTTYWithoutEcho") // #nosec G204,G702 -- executes the current test binary with a fixed argument.
+	// #nosec G204,G702 -- executes the current test binary with a fixed argument.
+	command := exec.Command(os.Args[0], "-test.run=TestReadPasswordFromTTYWithoutEcho")
 	command.Env = append(os.Environ(), "GOKRB5_PASSWORD_HELPER=1")
 	tty, err := pty.Start(command)
 	if err != nil {
@@ -163,15 +196,21 @@ func TestReadPasswordReusesBufferedStdin(t *testing.T) {
 }
 
 func TestErrorTextUsesWrappedKDCCode(t *testing.T) {
-	wrapped := krberror.Errorf(messages.KRBError{ErrorCode: errorcode.KDC_ERR_KEY_EXPIRED}, krberror.KDCError, "login failed")
+	var kdcErr messages.KRBError
+	kdcErr.ErrorCode = errorcode.KDC_ERR_KEY_EXPIRED
+	wrapped := krberror.Errorf(kdcErr, krberror.KDCError, "login failed")
 	assert.Equal(t, "Password has expired", ErrorText(wrapped))
 	assert.Equal(t, "plain failure", ErrorText(errors.New("plain failure")))
 }
 
 func TestInitialCredentialErrorTextAddsMITContext(t *testing.T) {
-	unknown := krberror.Errorf(messages.KRBError{ErrorCode: errorcode.KDC_ERR_C_PRINCIPAL_UNKNOWN}, krberror.KDCError, "login failed")
-	assert.Equal(t, "Client 'does-not-exist@TEST.GOKRB5' not found in Kerberos database", InitialCredentialErrorText(unknown, "does-not-exist@TEST.GOKRB5", "TEST.GOKRB5"))
-	assert.Equal(t, "Cannot contact any KDC for realm 'TEST.GOKRB5'", InitialCredentialErrorText(errors.New("failed sending request"), "testuser1@TEST.GOKRB5", "TEST.GOKRB5"))
+	var kdcErr messages.KRBError
+	kdcErr.ErrorCode = errorcode.KDC_ERR_C_PRINCIPAL_UNKNOWN
+	unknown := krberror.Errorf(kdcErr, krberror.KDCError, "login failed")
+	text := InitialCredentialErrorText(unknown, "does-not-exist@TEST.GOKRB5", "TEST.GOKRB5")
+	assert.Equal(t, "Client 'does-not-exist@TEST.GOKRB5' not found in Kerberos database", text)
+	text = InitialCredentialErrorText(errors.New("failed sending request"), "testuser1@TEST.GOKRB5", "TEST.GOKRB5")
+	assert.Equal(t, "Cannot contact any KDC for realm 'TEST.GOKRB5'", text)
 }
 
 func TestErrorTextIncludesWrappedNTStatus(t *testing.T) {
@@ -179,7 +218,9 @@ func TestErrorTextIncludesWrappedNTStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kdcErr := messages.KRBError{ErrorCode: errorcode.KDC_ERR_CLIENT_REVOKED, EData: eData}
+	var kdcErr messages.KRBError
+	kdcErr.ErrorCode = errorcode.KDC_ERR_CLIENT_REVOKED
+	kdcErr.EData = eData
 	wrapped := krberror.Errorf(kdcErr, krberror.KDCError, "login failed")
 	assert.Equal(t, "Clients credentials have been revoked: STATUS_ACCOUNT_DISABLED (0xC0000072)", ErrorText(wrapped))
 }

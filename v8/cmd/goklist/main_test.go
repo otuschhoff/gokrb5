@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -18,6 +19,22 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+const testRealm = "EXAMPLE.ORG"
+
+func testCacheEntry(endTime time.Time) *credentials.Credential {
+	entry := new(credentials.Credential)
+	entry.Client = credentials.Principal{
+		Realm:         testRealm,
+		PrincipalName: types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user"),
+	}
+	entry.Server = credentials.Principal{
+		Realm:         testRealm,
+		PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/"+testRealm),
+	}
+	entry.EndTime = endTime
+	return entry
+}
+
 func TestListCacheAndSilentStatus(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "krb5.conf")
@@ -27,16 +44,13 @@ func TestListCacheAndSilentStatus(t *testing.T) {
 	}
 	t.Setenv("KRB5_CONFIG", configPath)
 	clientName := types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: []string{"user"}}
-	cache := credentials.NewCCache(clientName, "EXAMPLE.ORG")
+	cache := credentials.NewCCache(clientName, testRealm)
 	now := time.Now().UTC()
-	cache.AddCredential(&credentials.Credential{
-		Client:    credentials.Principal{Realm: "EXAMPLE.ORG", PrincipalName: clientName},
-		Server:    credentials.Principal{Realm: "EXAMPLE.ORG", PrincipalName: types.PrincipalName{NameType: nametype.KRB_NT_SRV_INST, NameString: []string{"krbtgt", "EXAMPLE.ORG"}}},
-		AuthTime:  now.Add(-time.Minute),
-		StartTime: now.Add(-time.Minute),
-		EndTime:   now.Add(time.Hour),
-		RenewTill: now.Add(time.Hour),
-	})
+	entry := testCacheEntry(now.Add(time.Hour))
+	entry.AuthTime = now.Add(-time.Minute)
+	entry.StartTime = entry.AuthTime
+	entry.RenewTill = entry.EndTime
+	cache.AddCredential(entry)
 	if err := cache.WriteFile(cachePath); err != nil {
 		t.Fatal(err)
 	}
@@ -78,32 +92,31 @@ func TestListKeytabModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"-k", "-t", "-K", "-e", path}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "testuser1@TEST.GOKRB5") {
+	code := run([]string{"-k", "-t", "-K", "-e", path}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "testuser1@TEST.GOKRB5") {
 		t.Fatalf("keytab listing = %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
 	}
 	stdout.Reset()
-	if code := listKeytab(listOptions{keytab: true, silent: true, name: path}, &stdout, &stderr); code != 0 || stdout.Len() != 0 {
+	code = run([]string{"-k", "-s", path}, &stdout, &stderr)
+	if code != 0 || stdout.Len() != 0 {
 		t.Fatalf("silent keytab listing = %d, %q", code, stdout.String())
 	}
 	stderr.Reset()
-	if code := run([]string{"-k", filepath.Join(t.TempDir(), "missing")}, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "goklist:") {
+	code = run([]string{"-k", filepath.Join(t.TempDir(), "missing")}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "goklist:") {
 		t.Fatalf("missing keytab = %d, %q", code, stderr.String())
 	}
 }
 
 func TestListCacheExpiredAndArgumentErrors(t *testing.T) {
 	clientName := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user")
-	cache := credentials.NewCCache(clientName, "EXAMPLE.ORG")
-	cache.AddCredential(&credentials.Credential{
-		Client:  credentials.Principal{Realm: "EXAMPLE.ORG", PrincipalName: clientName},
-		Server:  credentials.Principal{Realm: "EXAMPLE.ORG", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/EXAMPLE.ORG")},
-		EndTime: time.Now().UTC().Add(-time.Hour),
-	})
+	cache := credentials.NewCCache(clientName, testRealm)
+	cache.AddCredential(testCacheEntry(time.Now().UTC().Add(-time.Hour)))
 	path := filepath.Join(t.TempDir(), "expired.ccache")
 	if err := cache.WriteFile(path); err != nil {
 		t.Fatal(err)
 	}
-	if code := listCache(listOptions{cacheName: path, silent: true}, io.Discard, io.Discard); code != 1 {
+	if code := run([]string{"-s", "-c", path}, io.Discard, io.Discard); code != 1 {
 		t.Fatalf("expired cache status = %d", code)
 	}
 	for _, args := range [][]string{{"-t"}, {"-K"}, {"one", "two"}} {
@@ -126,9 +139,32 @@ func TestListCacheFixtureWithEtypesAndPositionalName(t *testing.T) {
 	if code := run([]string{"-e", path}, &stdout, &stderr); code != 0 {
 		t.Fatalf("fixture listing = %d, %q", code, stderr.String())
 	}
-	if output := stdout.String(); !strings.Contains(output, "Etype (skey, tkt):") || !strings.Contains(output, "Ticket cache: "+displayCacheName(path)) {
-		t.Fatalf("fixture output = %q", output)
+	assert.Contains(t, stdout.String(), "Etype (skey, tkt):")
+	assert.Contains(t, stdout.String(), "Ticket cache: "+displayCacheName(path))
+}
+
+func TestListCacheReportsOutputFailure(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "empty.ccache")
+	name := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user")
+	if err := credentials.NewCCache(name, testRealm).WriteFile(path); err != nil {
+		t.Fatal(err)
 	}
+
+	var stderr bytes.Buffer
+	writer := failingWriter{err: errors.New("stdout failed")}
+	code := run([]string{"-c", path, "ignored.ccache"}, writer, &stderr)
+	assert.Equal(t, 1, code)
+	assert.Equal(t, "goklist: stdout failed\n", stderr.String())
+}
+
+type failingWriter struct {
+	err error
+}
+
+func (w failingWriter) Write([]byte) (int, error) {
+	return 0, w.err
 }
 
 func TestListDefaultAndParseFailures(t *testing.T) {
@@ -138,12 +174,13 @@ func TestListDefaultAndParseFailures(t *testing.T) {
 		t.Fatalf("missing config = %d, %q", code, stderr.String())
 	}
 	stderr.Reset()
-	if code := run([]string{"-unknown"}, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "flag provided") {
+	code := run([]string{"-unknown"}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "flag provided") {
 		t.Fatalf("invalid flag = %d, %q", code, stderr.String())
 	}
 }
 
-func TestListDefaultKeytabAndCache(t *testing.T) {
+func TestListDefaultKeytab(t *testing.T) {
 	directory := t.TempDir()
 	keytabData, err := hex.DecodeString(testdata.KEYTAB_TESTUSER1_TEST_GOKRB5)
 	if err != nil {
@@ -155,10 +192,14 @@ func TestListDefaultKeytabAndCache(t *testing.T) {
 	}
 	t.Setenv("KRB5_KTNAME", "FILE:"+keytabPath)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"-k"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "testuser1@TEST.GOKRB5") {
+	code := run([]string{"-k"}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "testuser1@TEST.GOKRB5") {
 		t.Fatalf("default keytab = %d, %q, %q", code, stdout.String(), stderr.String())
 	}
+}
 
+func TestListDefaultCache(t *testing.T) {
+	directory := t.TempDir()
 	cacheData, err := hex.DecodeString(testdata.CCACHE_TEST)
 	if err != nil {
 		t.Fatal(err)
@@ -168,14 +209,15 @@ func TestListDefaultKeytabAndCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(directory, "krb5.conf")
-	if err := os.WriteFile(configPath, []byte("[libdefaults]\n default_ccache_name = FILE:"+cachePath+"\n"), 0o600); err != nil {
+	configText := "[libdefaults]\n default_ccache_name = FILE:" + cachePath + "\n"
+	if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("KRB5_CONFIG", configPath)
 	t.Setenv("KRB5CCNAME", "")
-	stdout.Reset()
-	stderr.Reset()
-	if code := run(nil, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "Ticket cache: "+displayCacheName(cachePath)) {
+	var stdout, stderr bytes.Buffer
+	code := run(nil, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "Ticket cache: "+displayCacheName(cachePath)) {
 		t.Fatalf("default cache = %d, %q, %q", code, stdout.String(), stderr.String())
 	}
 	if displayCacheName("MEMORY:cache") != "MEMORY:cache" {

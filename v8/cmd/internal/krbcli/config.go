@@ -19,14 +19,16 @@ func LoadConfig() (*config.Config, error) {
 	var lastErr error
 	for _, path := range paths {
 		cfg, err := config.Load(path)
-		if err == nil {
-			if cfg == nil {
-				lastErr = errors.New("Kerberos configuration loader returned nil configuration")
-				continue
-			}
-			return cfg, nil
+		if err != nil {
+			lastErr = err
+			continue
 		}
-		lastErr = err
+		if cfg == nil {
+			//nolint:staticcheck // Preserve the existing CLI error text.
+			lastErr = errors.New("Kerberos configuration loader returned nil configuration")
+			continue
+		}
+		return cfg, nil
 	}
 	if lastErr == nil {
 		lastErr = errors.New("no Kerberos configuration path configured")
@@ -57,65 +59,88 @@ func nonEmptyStrings(values []string) []string {
 	return result
 }
 
+const maxDuration = time.Duration(1<<63 - 1)
+
+var (
+	errInvalidDuration = errors.New("invalid duration")
+	errDurationRange   = errors.New("duration out of range")
+)
+
 // ParseDuration parses MIT duration forms used by kinit flags.
 func ParseDuration(value string) (time.Duration, error) {
-	const maxDuration = time.Duration(1<<63 - 1)
 	if value == "" {
 		return 0, errors.New("empty duration")
 	}
-	if daysAt := strings.IndexByte(value, 'd'); daysAt >= 0 {
-		days, err := strconv.ParseUint(value[:daysAt], 10, 31)
-		if err != nil {
-			return 0, errors.New("invalid duration")
-		}
-		if days > uint64(maxDuration/(24*time.Hour)) {
-			return 0, errors.New("duration out of range")
-		}
-		duration := time.Duration(days) * 24 * time.Hour
-		rest := time.Duration(0)
-		if daysAt+1 < len(value) {
-			rest, err = time.ParseDuration(value[daysAt+1:])
-			if err != nil {
-				return 0, errors.New("invalid duration")
-			}
-		}
-		if rest > maxDuration-duration {
-			return 0, errors.New("duration out of range")
-		}
-		return duration + rest, nil
+	if days, suffix, found := strings.Cut(value, "d"); found {
+		return parseDayDuration(days, suffix)
 	}
 	if duration, err := time.ParseDuration(value); err == nil {
 		return duration, nil
 	}
-	if strings.Contains(value, ":") {
-		var hours, minutes, seconds int64
-		var err error
-		parts := strings.Split(value, ":")
-		if len(parts) < 2 || len(parts) > 3 {
-			return 0, errors.New("invalid duration")
-		}
-		if hours, err = strconv.ParseInt(parts[0], 10, 64); err != nil || hours < 0 {
-			return 0, errors.New("invalid duration")
-		}
-		if minutes, err = strconv.ParseInt(parts[1], 10, 64); err != nil || minutes < 0 || minutes > 59 {
-			return 0, errors.New("invalid duration")
-		}
-		if len(parts) == 3 {
-			if seconds, err = strconv.ParseInt(parts[2], 10, 64); err != nil || seconds < 0 || seconds > 59 {
-				return 0, errors.New("invalid duration")
-			}
-		}
-		if hours > int64(maxDuration/time.Hour) {
-			return 0, errors.New("duration out of range")
-		}
-		return time.Duration(hours)*time.Hour + time.Duration(minutes)*time.Minute + time.Duration(seconds)*time.Second, nil
+	if hours, remainder, found := strings.Cut(value, ":"); found {
+		return parseClockDuration(hours, remainder)
 	}
 	seconds, err := strconv.ParseUint(value, 10, 64)
 	if err != nil {
-		return 0, errors.New("invalid duration")
+		return 0, errInvalidDuration
 	}
 	if seconds > uint64(maxDuration/time.Second) {
-		return 0, errors.New("duration out of range")
+		return 0, errDurationRange
 	}
 	return time.Duration(seconds) * time.Second, nil
+}
+
+func parseDayDuration(value, suffix string) (time.Duration, error) {
+	const day = 24 * time.Hour
+	days, err := strconv.ParseUint(value, 10, 31)
+	if err != nil {
+		return 0, errInvalidDuration
+	}
+	if days > uint64(maxDuration/day) {
+		return 0, errDurationRange
+	}
+	duration := time.Duration(days) * day
+	if suffix == "" {
+		return duration, nil
+	}
+	rest, err := time.ParseDuration(suffix)
+	if err != nil {
+		return 0, errInvalidDuration
+	}
+	if rest > maxDuration-duration {
+		return 0, errDurationRange
+	}
+	return duration + rest, nil
+}
+
+func parseClockDuration(hourText, remainder string) (time.Duration, error) {
+	minuteText, secondText, hasSeconds := strings.Cut(remainder, ":")
+	hours, err := strconv.ParseInt(hourText, 10, 64)
+	if err != nil || hours < 0 {
+		return 0, errInvalidDuration
+	}
+	minutes, err := parseClockField(minuteText)
+	if err != nil {
+		return 0, err
+	}
+	var seconds int64
+	if hasSeconds {
+		seconds, err = parseClockField(secondText)
+		if err != nil {
+			return 0, err
+		}
+	}
+	if hours > int64(maxDuration/time.Hour) {
+		return 0, errDurationRange
+	}
+	return time.Duration(hours)*time.Hour + time.Duration(minutes)*time.Minute + time.Duration(seconds)*time.Second, nil
+}
+
+func parseClockField(value string) (int64, error) {
+	const maxClockField = 59
+	field, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || field < 0 || field > maxClockField {
+		return 0, errInvalidDuration
+	}
+	return field, nil
 }
