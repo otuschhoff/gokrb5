@@ -102,21 +102,18 @@ func (l *LibDefaults) stringOption(key string) *string {
 }
 
 func (l *LibDefaults) parseCollectionOption(key, value, line string) error {
+	if target := l.enctypeListOption(key); target != nil {
+		*target = strings.Fields(value)
+		return nil
+	}
+	if target := l.pkinitListOption(key); target != nil {
+		*target = append(*target, strings.TrimSpace(value))
+		return nil
+	}
 	switch key {
-	case "default_tgs_enctypes":
-		l.DefaultTGSEnctypes = strings.Fields(value)
-	case "default_tkt_enctypes":
-		l.DefaultTktEnctypes = strings.Fields(value)
-	case "permitted_enctypes":
-		l.PermittedEnctypes = strings.Fields(value)
-	case "pkinit_anchors":
-		l.PKINITAnchors = append(l.PKINITAnchors, strings.TrimSpace(value))
-	case "pkinit_identities":
-		l.PKINITIdentities = append(l.PKINITIdentities, strings.TrimSpace(value))
-	case "pkinit_pool":
-		l.PKINITPool = append(l.PKINITPool, strings.TrimSpace(value))
 	case "extra_addresses":
 		l.appendExtraAddresses(value)
+		return nil
 	case "preferred_preauth_types":
 		return l.parsePreferredPreauthTypes(value, line)
 	case "kdc_default_options":
@@ -124,7 +121,32 @@ func (l *LibDefaults) parseCollectionOption(key, value, line string) error {
 	default:
 		return l.parseConstrainedOption(key, value, line)
 	}
-	return nil
+}
+
+func (l *LibDefaults) enctypeListOption(key string) *[]string {
+	switch key {
+	case "default_tgs_enctypes":
+		return &l.DefaultTGSEnctypes
+	case "default_tkt_enctypes":
+		return &l.DefaultTktEnctypes
+	case "permitted_enctypes":
+		return &l.PermittedEnctypes
+	default:
+		return nil
+	}
+}
+
+func (l *LibDefaults) pkinitListOption(key string) *[]string {
+	switch key {
+	case "pkinit_anchors":
+		return &l.PKINITAnchors
+	case "pkinit_identities":
+		return &l.PKINITIdentities
+	case "pkinit_pool":
+		return &l.PKINITPool
+	default:
+		return nil
+	}
 }
 
 func (l *LibDefaults) appendExtraAddresses(value string) {

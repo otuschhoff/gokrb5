@@ -59,12 +59,21 @@ func TestLibDefaultsLegacyEnctypePolicy(t *testing.T) {
 }
 
 func TestLibDefaultsLineAndCollectionSemantics(t *testing.T) {
+	const (
+		aes128 = "aes128-cts-hmac-sha256-128"
+		aes256 = "aes256-cts-hmac-sha384-192"
+	)
 	l := newLibDefaults()
 	l.ExtraAddresses = []net.IP{net.ParseIP("192.0.2.9")}
 	err := l.parseLines([]string{
 		" # ignored", " ; ignored", " \t ", "UnKnOwN = ignored",
 		" DEFAULT_REALM = first=discarded ; trailing",
 		"default_realm = second#discarded",
+		"default_tgs_enctypes = " + aes128,
+		"default_tgs_enctypes = " + aes256 + " \t " + aes128,
+		"default_tkt_enctypes = " + aes256,
+		"default_tkt_enctypes = " + aes128,
+		"permitted_enctypes = " + aes256, "permitted_enctypes = ",
 		"pkinit_anchors = FILE:first", "pkinit_anchors = FILE:second=discarded",
 		"pkinit_identities = first", "pkinit_identities = second",
 		"pkinit_pool = first", "pkinit_pool = second", "pkinit_pool = ",
@@ -78,6 +87,12 @@ func TestLibDefaultsLineAndCollectionSemantics(t *testing.T) {
 	}
 	want := newLibDefaults()
 	want.DefaultRealm = "second"
+	want.DefaultTGSEnctypes = []string{aes256, aes128}
+	want.DefaultTGSEnctypeIDs = []int32{etypeID.AES256_CTS_HMAC_SHA384_192, etypeID.AES128_CTS_HMAC_SHA256_128}
+	want.DefaultTktEnctypes = []string{aes128}
+	want.DefaultTktEnctypeIDs = []int32{etypeID.AES128_CTS_HMAC_SHA256_128}
+	want.PermittedEnctypes = []string{}
+	want.PermittedEnctypeIDs = nil
 	want.PKINITAnchors = []string{"FILE:first", "FILE:second"}
 	want.PKINITIdentities = []string{"first", "second"}
 	want.PKINITPool = []string{"first", "second", ""}
