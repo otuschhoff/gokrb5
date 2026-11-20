@@ -17,6 +17,13 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+const (
+	fixtureRealm   = "AD.EXAMPLE.COM"
+	fixtureHost    = "ws01.ad.example.com"
+	fixtureMachine = "WS01$"
+	hostService    = "host"
+)
+
 func time0() time.Time { return time.Unix(1700000000, 0) }
 
 func TestDomainOf(t *testing.T) {
@@ -30,12 +37,18 @@ func TestEnvironmentKind(t *testing.T) {
 		want                       Kind
 		wantError                  bool
 	}{
-		{name: "explicit Samba", value: " SAMBA ", want: KindSamba},
-		{name: "explicit Windows", value: "windows", realm: "SAMBA.EXAMPLE", want: KindWindows},
-		{name: "Samba realm", realm: "SAMBA.GOKRB5", want: KindSamba},
-		{name: "Samba domain", realm: "EXAMPLE.COM", domain: "samba.example.com", want: KindSamba},
-		{name: "default Windows", realm: "AD.EXAMPLE.COM", want: KindWindows},
-		{name: "invalid", value: "mit", wantError: true},
+		{name: "explicit Samba", value: " SAMBA ", realm: "", domain: "", want: KindSamba, wantError: false},
+		{
+			name: "explicit Windows", value: "windows", realm: "SAMBA.EXAMPLE",
+			domain: "", want: KindWindows, wantError: false,
+		},
+		{name: "Samba realm", value: "", realm: "SAMBA.GOKRB5", domain: "", want: KindSamba, wantError: false},
+		{
+			name: "Samba domain", value: "", realm: "EXAMPLE.COM", domain: "samba.example.com",
+			want: KindSamba, wantError: false,
+		},
+		{name: "default Windows", value: "", realm: fixtureRealm, domain: "", want: KindWindows, wantError: false},
+		{name: "invalid", value: "mit", realm: "", domain: "", want: "", wantError: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -50,33 +63,33 @@ func TestEnvironmentKind(t *testing.T) {
 	}
 }
 
+func fixtureKeytab(t *testing.T, kvno uint32, principals []keytab.Principal) *keytab.Keytab {
+	t.Helper()
+	kt := keytab.New()
+	key := types.EncryptionKey{KeyType: etypeID.AES256_CTS_HMAC_SHA1_96, KeyValue: make([]byte, 32)}
+	for _, p := range principals {
+		require.NoError(t, kt.AddKey(p, kvno, key, time0()))
+	}
+	return kt
+}
+
 func TestDiscoverADEnvironmentFromFiles(t *testing.T) {
 	dir := t.TempDir()
-	kt := keytab.New()
-	realm := "AD.EXAMPLE.COM"
-	key := types.EncryptionKey{KeyType: etypeID.AES256_CTS_HMAC_SHA1_96, KeyValue: make([]byte, 32)}
-	for _, p := range []keytab.Principal{
-		{Realm: realm, Components: []string{"HOST", "WS01"}},
-		{Realm: realm, Components: []string{"host", "ws01.ad.example.com"}},
-		{Realm: realm, Components: []string{"WS01$"}},
-		{Realm: realm, Components: []string{"frontendsvc"}},
-		{Realm: "OTHER.EXAMPLE", Components: []string{"host", "ws01.other.example"}},
-	} {
-		if err := kt.AddKey(p, 3, key, time0()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := kt.WriteFile(filepath.Join(dir, KeytabFile)); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, UserFile), []byte("alice@AD.EXAMPLE.COM\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, PasswordFile), []byte("secret\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	kt := fixtureKeytab(t, 3, []keytab.Principal{
+		{Realm: fixtureRealm, Components: []string{"HOST", "WS01"}, NameType: 0},
+		{Realm: fixtureRealm, Components: []string{hostService, fixtureHost}, NameType: 0},
+		{Realm: fixtureRealm, Components: []string{fixtureMachine}, NameType: 0},
+		{Realm: fixtureRealm, Components: []string{"frontendsvc"}, NameType: 0},
+		{Realm: "OTHER.EXAMPLE", Components: []string{hostService, "ws01.other.example"}, NameType: 0},
+	})
+	require.NoError(t, kt.WriteFile(filepath.Join(dir, KeytabFile)))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, UserFile), []byte("alice@"+fixtureRealm+"\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, PasswordFile), []byte("secret\n"), 0o600))
 	t.Setenv(DirEnvVar, dir)
-	t.Setenv(RealmEnvVar, realm)
+	t.Setenv(KeytabEnvVar, "")
+	t.Setenv(UserFileEnvVar, "")
+	t.Setenv(PasswordFileEnvVar, "")
+	t.Setenv(RealmEnvVar, fixtureRealm)
 	t.Setenv(KindEnvVar, string(KindWindows))
 	t.Setenv(KDCEnvVar, " 127.0.0.1:88, 127.0.0.2:88 ")
 	t.Setenv(ServiceSPNEnvVar, "HTTP/service.ad.example.com")
@@ -87,24 +100,32 @@ func TestDiscoverADEnvironmentFromFiles(t *testing.T) {
 	t.Setenv(DisabledPassEnvVar, "DisabledPassw0rd!")
 
 	env, err := Discover()
-	if err != nil {
-		t.Fatal(err)
-	}
-	assert.Equal(t, realm, env.Realm)
+	require.NoError(t, err)
+	assert.Equal(t, fixtureRealm, env.Realm)
 	assert.Equal(t, "alice", env.User)
-	assert.Equal(t, realm, env.UserRealm)
+	assert.Equal(t, fixtureRealm, env.UserRealm)
 	assert.Equal(t, "secret", env.Password)
-	assert.Equal(t, realm, env.Config.LibDefaults.DefaultRealm)
+	assert.Equal(t, fixtureRealm, env.Config.LibDefaults.DefaultRealm)
 	assert.False(t, env.Config.LibDefaults.DNSLookupKDC)
 	if assert.Len(t, env.Config.Realms, 1) {
 		assert.Equal(t, []string{"127.0.0.1:88", "127.0.0.2:88"}, env.Config.Realms[0].KDC)
 	}
 	assert.Equal(t, KindWindows, env.Kind())
+	assertConfiguredPrincipals(t, env)
 
+	t.Run("blank KDC override keeps DNS discovery", func(t *testing.T) {
+		t.Setenv(KDCEnvVar, " , ")
+		env, err := Discover()
+		require.NoError(t, err)
+		assert.True(t, env.Config.LibDefaults.DNSLookupKDC)
+		assert.Empty(t, env.Config.Realms)
+	})
+}
+
+func assertConfiguredPrincipals(t *testing.T, env *Env) {
+	t.Helper()
 	spn, err := env.ServiceSPN()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	assert.Equal(t, "HTTP/service.ad.example.com", spn)
 	target, ok := env.DelegationTargetSPN()
 	assert.True(t, ok)
@@ -117,60 +138,59 @@ func TestDiscoverADEnvironmentFromFiles(t *testing.T) {
 	assert.Equal(t, "disabled", disabledUser)
 	assert.Equal(t, "DisabledPassw0rd!", disabledPassword)
 	machine, ok := env.MachineAccountPrincipal()
-	assert.True(t, ok)
-	assert.Equal(t, "WS01$", machine.Components[0])
+	require.True(t, ok)
+	assert.Equal(t, []string{fixtureMachine}, machine.Components)
 	delegator, ok := env.DelegationPrincipal()
-	assert.True(t, ok)
-	assert.Equal(t, "frontendsvc", delegator.Components[0])
+	require.True(t, ok)
+	assert.Equal(t, []string{"frontendsvc"}, delegator.Components)
 }
 
 func TestDiscoverADEnvironmentMissingFiles(t *testing.T) {
 	t.Setenv(DirEnvVar, t.TempDir())
-	t.Setenv(RealmEnvVar, "AD.EXAMPLE.COM")
+	t.Setenv(KeytabEnvVar, "")
+	t.Setenv(UserFileEnvVar, "")
+	t.Setenv(PasswordFileEnvVar, "")
+	t.Setenv(KindEnvVar, "")
+	t.Setenv(RealmEnvVar, fixtureRealm)
 	_, err := Discover()
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, fs.ErrNotExist)
 }
 
 func TestServicePrincipalSelectionAndFallbacks(t *testing.T) {
-	realm := "AD.EXAMPLE.COM"
-	kt := keytab.New()
-	key := types.EncryptionKey{KeyType: etypeID.AES256_CTS_HMAC_SHA1_96, KeyValue: make([]byte, 32)}
-	principals := []keytab.Principal{
-		{Realm: "OTHER.EXAMPLE", Components: []string{"host", "other.example"}},
-		{Realm: realm, Components: []string{"HTTP", "service.ad.example.com"}},
-		{Realm: realm, Components: []string{"host", "ws01.ad.example.com"}},
-		{Realm: realm, Components: []string{"WS01$"}},
-	}
-	for _, principal := range principals {
-		if err := kt.AddKey(principal, 1, key, time0()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	env := &Env{Realm: realm, HostFQDN: "ws01.ad.example.com", Keytab: kt}
+	kt := fixtureKeytab(t, 1, []keytab.Principal{
+		{Realm: "OTHER.EXAMPLE", Components: []string{hostService, "other.example"}, NameType: 0},
+		{Realm: fixtureRealm, Components: []string{"HTTP", "service.ad.example.com"}, NameType: 0},
+		{Realm: fixtureRealm, Components: []string{hostService, fixtureHost}, NameType: 0},
+		{Realm: fixtureRealm, Components: []string{fixtureMachine}, NameType: 0},
+	})
+	var env Env
+	env.Realm = fixtureRealm
+	env.HostFQDN = fixtureHost
+	env.Keytab = kt
 	principal, err := env.ServicePrincipal()
-	if err != nil || len(principal.Components) != 2 || principal.Components[1] != env.HostFQDN {
-		t.Fatalf("service principal = %+v, %v", principal, err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, []string{hostService, fixtureHost}, principal.Components)
 	spn, err := env.ServiceSPN()
-	if err != nil || spn != "host/ws01.ad.example.com" {
-		t.Fatalf("service SPN = %q, %v", spn, err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, hostService+"/"+fixtureHost, spn)
 	machine, ok := env.DelegationPrincipal()
-	if !ok || machine.Components[0] != "WS01$" {
-		t.Fatalf("delegation fallback = %+v, %v", machine, ok)
-	}
+	require.True(t, ok)
+	assert.Equal(t, []string{fixtureMachine}, machine.Components)
 	env.delegator = "missing"
-	if _, ok := env.DelegationPrincipal(); ok {
-		t.Fatal("missing configured delegator was found")
-	}
+	_, ok = env.DelegationPrincipal()
+	assert.False(t, ok)
+}
 
-	empty := &Env{Keytab: keytab.New()}
-	if _, err := empty.ServicePrincipal(); err == nil {
-		t.Fatal("empty keytab returned a service principal")
-	}
-	if _, err := empty.ServiceSPN(); err == nil {
-		t.Fatal("empty keytab returned a service SPN")
-	}
+func TestServicePrincipalWithEmptyKeytab(t *testing.T) {
+	var env Env
+	env.Keytab = keytab.New()
+	_, err := env.ServicePrincipal()
+	assert.Error(t, err)
+	_, err = env.ServiceSPN()
+	assert.Error(t, err)
+	principal, ok := env.MachineAccountPrincipal()
+	assert.False(t, ok)
+	assert.Zero(t, principal)
 }
 
 func TestADLocalDiscoveryHelpers(t *testing.T) {

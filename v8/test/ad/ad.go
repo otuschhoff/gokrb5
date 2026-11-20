@@ -99,16 +99,9 @@ func Discover() (*Env, error) {
 	if err != nil {
 		return nil, err
 	}
-	domain := strings.ToLower(domainOf(fqdn))
-	realm := os.Getenv(RealmEnvVar)
-	if realm == "" {
-		if domain == "" {
-			return nil, fmt.Errorf("cannot derive AD domain from host name %q; set %s", fqdn, RealmEnvVar)
-		}
-		realm = strings.ToUpper(domain)
-	}
-	if domain == "" {
-		domain = strings.ToLower(realm)
+	realm, domain, err := realmAndDomain(fqdn, os.Getenv(RealmEnvVar))
+	if err != nil {
+		return nil, err
 	}
 	kind, err := environmentKind(os.Getenv(KindEnvVar), realm, domain)
 	if err != nil {
@@ -139,17 +132,6 @@ func Discover() (*Env, error) {
 		return nil, err
 	}
 
-	cfg := config.New()
-	cfg.LibDefaults.DefaultRealm = realm
-	cfg.LibDefaults.DNSLookupKDC = true
-	cfg.LibDefaults.UDPPreferenceLimit = 1
-	cfg.DomainRealm[domain] = realm
-	cfg.DomainRealm["."+domain] = realm
-	if kdcs := splitCommaList(os.Getenv(KDCEnvVar)); len(kdcs) > 0 {
-		cfg.LibDefaults.DNSLookupKDC = false
-		cfg.Realms = []config.Realm{{Realm: realm, KDC: kdcs}}
-	}
-
 	return &Env{
 		Realm:            realm,
 		Domain:           domain,
@@ -159,7 +141,7 @@ func Discover() (*Env, error) {
 		Password:         password,
 		Keytab:           kt,
 		KeytabPath:       keytabPath,
-		Config:           cfg,
+		Config:           kerberosConfig(realm, domain, splitCommaList(os.Getenv(KDCEnvVar))),
 		kind:             kind,
 		serviceSPN:       strings.TrimSpace(os.Getenv(ServiceSPNEnvVar)),
 		delegator:        strings.TrimSpace(os.Getenv(DelegatorEnvVar)),
@@ -170,9 +152,44 @@ func Discover() (*Env, error) {
 	}, nil
 }
 
+func realmAndDomain(fqdn, realm string) (string, string, error) {
+	domain := strings.ToLower(domainOf(fqdn))
+	if realm == "" {
+		if domain == "" {
+			return "", "", fmt.Errorf("cannot derive AD domain from host name %q; set %s", fqdn, RealmEnvVar)
+		}
+		realm = strings.ToUpper(domain)
+	}
+	if domain == "" {
+		domain = strings.ToLower(realm)
+	}
+	return realm, domain, nil
+}
+
+func kerberosConfig(realm, domain string, kdcs []string) *config.Config {
+	cfg := config.New()
+	cfg.LibDefaults.DefaultRealm = realm
+	cfg.LibDefaults.DNSLookupKDC = true
+	cfg.LibDefaults.UDPPreferenceLimit = 1
+	cfg.DomainRealm[domain] = realm
+	cfg.DomainRealm["."+domain] = realm
+	if len(kdcs) > 0 {
+		cfg.LibDefaults.DNSLookupKDC = false
+		cfg.Realms = []config.Realm{{
+			Realm:         realm,
+			AdminServer:   nil,
+			DefaultDomain: "",
+			KDC:           kdcs,
+			KPasswdServer: nil,
+			MasterKDC:     nil,
+		}}
+	}
+	return cfg
+}
+
 func splitCommaList(value string) []string {
 	var values []string
-	for _, item := range strings.Split(value, ",") {
+	for item := range strings.SplitSeq(value, ",") {
 		if item = strings.TrimSpace(item); item != "" {
 			values = append(values, item)
 		}
@@ -184,8 +201,11 @@ func environmentKind(value, realm, domain string) (Kind, error) {
 	switch normalized := strings.ToLower(strings.TrimSpace(value)); normalized {
 	case string(KindSamba):
 		return KindSamba, nil
-	case "", string(KindWindows):
-		if normalized == "" && (strings.Contains(strings.ToLower(realm), "samba") || strings.Contains(strings.ToLower(domain), "samba")) {
+	case string(KindWindows):
+		return KindWindows, nil
+	case "":
+		if strings.Contains(strings.ToLower(realm), "samba") ||
+			strings.Contains(strings.ToLower(domain), "samba") {
 			return KindSamba, nil
 		}
 		return KindWindows, nil
@@ -254,11 +274,14 @@ func (e *Env) DeniedTargetSPN() (string, bool) {
 func (e *Env) DelegationPrincipal() (keytab.Principal, bool) {
 	if e.delegator != "" {
 		for _, principal := range e.Keytab.Principals() {
-			if len(principal.Components) == 1 && strings.EqualFold(principal.Components[0], e.delegator) && strings.EqualFold(principal.Realm, e.Realm) {
+			if len(principal.Components) == 1 &&
+				strings.EqualFold(principal.Components[0], e.delegator) &&
+				strings.EqualFold(principal.Realm, e.Realm) {
 				return principal, true
 			}
 		}
-		return keytab.Principal{}, false
+		var absent keytab.Principal
+		return absent, false
 	}
 	return e.MachineAccountPrincipal()
 }
@@ -277,7 +300,8 @@ func (e *Env) MachineAccountPrincipal() (keytab.Principal, bool) {
 			return p, true
 		}
 	}
-	return keytab.Principal{}, false
+	var absent keytab.Principal
+	return absent, false
 }
 
 func hostFQDN() (string, error) {
@@ -298,10 +322,8 @@ func hostFQDN() (string, error) {
 }
 
 func domainOf(fqdn string) string {
-	if i := strings.Index(fqdn, "."); i >= 0 {
-		return fqdn[i+1:]
-	}
-	return ""
+	_, domain, _ := strings.Cut(fqdn, ".")
+	return domain
 }
 
 func resolvConfDomain() string {
@@ -314,7 +336,8 @@ func resolvConfDomain() string {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
-		if len(fields) < 2 {
+		const directiveAndValue = 2
+		if len(fields) < directiveAndValue {
 			continue
 		}
 		switch fields[0] {
@@ -362,10 +385,12 @@ func credentialPaths() (string, string, string, error) {
 // directory is a nested package directory or a container temp directory.
 func findRepoRoot() (string, error) {
 	if workspace := os.Getenv("GITHUB_WORKSPACE"); workspace != "" {
-		if _, err := os.Stat(filepath.Join(workspace, ".git")); err == nil { // #nosec G703 -- GITHUB_WORKSPACE is an explicit CI root.
+		// #nosec G703 -- GITHUB_WORKSPACE is an explicit CI root.
+		if _, err := os.Stat(filepath.Join(workspace, ".git")); err == nil {
 			return workspace, nil
 		}
-		if _, err := os.Stat(filepath.Join(workspace, KeytabFile)); err == nil { // #nosec G703 -- GITHUB_WORKSPACE is an explicit CI root.
+		// #nosec G703 -- GITHUB_WORKSPACE is an explicit CI root.
+		if _, err := os.Stat(filepath.Join(workspace, KeytabFile)); err == nil {
 			return workspace, nil
 		}
 	}
@@ -375,10 +400,12 @@ func findRepoRoot() (string, error) {
 		return "", fmt.Errorf("get working directory: %w", err)
 	}
 	for {
-		if _, err := os.Stat(filepath.Join(dir, KeytabFile)); err == nil { // #nosec G703 -- path search is confined to working-directory ancestors.
+		// #nosec G703 -- path search is confined to working-directory ancestors.
+		if _, err := os.Stat(filepath.Join(dir, KeytabFile)); err == nil {
 			return dir, nil
 		}
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil { // #nosec G703 -- path search is confined to working-directory ancestors.
+		// #nosec G703 -- path search is confined to working-directory ancestors.
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 			return dir, nil
 		}
 		parent := filepath.Dir(dir)

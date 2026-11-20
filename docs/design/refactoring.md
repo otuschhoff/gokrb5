@@ -820,6 +820,23 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 151 (2026-11-21, complete v8 AD test-helper lint cleanup; Q-10):
+Separate realm and domain resolution and Kerberos configuration from AD
+test environment discovery. Preserve credential lookup order, error
+behavior, KDC override precedence, and principal selection. Simplify
+local fixtures and verify that a blank KDC override keeps DNS discovery.
+No new lint exceptions or dependency changes.
+
+Both pinned profiles report zero findings in `v8/test/ad`, down from
+37 supplemental and zero canonical. Diagnostics outside the package
+are unchanged; whole-v8 totals are 340 canonical and 418 supplemental.
+Revised tests pass against baseline and final code; statement coverage
+rose from 81.4% to 82.2%. The full v8 build, vet, and race suite pass,
+along with 25 shuffled race-enabled package runs, Linux/386 tests,
+and both canonical changed-line gates. Windows/amd64 helper tests and
+interop-tagged v8 tests compile; native Windows and live AD
+interoperability were not run.
+
 Slice 150 (2026-11-20, complete v8 crypto-tree lint cleanup; Q-10):
 Clear the remaining findings in `common`, `etype`, `rfc3962`, `rfc4757`,
 and `rfc8009`. Name protocol sizes and key-usage values, preallocate
