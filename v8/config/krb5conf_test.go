@@ -497,6 +497,69 @@ func TestLoad(t *testing.T) {
 	assert.Equal(t, "TEST.GOKRB5", c.DomainRealm["test.gokrb5"], "Domain to realm mapping not as expected")
 }
 
+func TestConfigRealmDirectiveFinalValues(t *testing.T) {
+	t.Parallel()
+
+	const input = `[realms]
+FIRST.EXAMPLE = {
+	ADMIN_SERVER = admin.example:749*
+	admin_server = ignored.example
+	kdc = first.example
+	kdc = final.example *
+	kdc = ignored.example
+	master_kdc = master.example:88*
+	master_kdc = ignored.example
+	default_domain = first.example
+	default_domain = final.example=discarded
+}
+SECOND.EXAMPLE = {
+	admin_server = admin2.example
+	kdc = kdc2.example:1234
+	kpasswd_server = passwd.example:777*
+	kpasswd_server = ignored.example
+}
+`
+	cfg, err := NewFromString(input)
+	require.NoError(t, err)
+	require.Len(t, cfg.Realms, 2)
+
+	first, second := cfg.Realms[0], cfg.Realms[1]
+	assert.Equal(t, []string{"admin.example:749"}, first.AdminServer)
+	assert.Equal(t, []string{"first.example:88", "final.example:88"}, first.KDC)
+	assert.Equal(t, []string{"master.example:88"}, first.MasterKDC)
+	assert.Equal(t, "final.example", first.DefaultDomain)
+	assert.Equal(t, []string{"admin.example:464"}, first.KPasswdServer)
+	assert.Equal(t, []string{"admin2.example"}, second.AdminServer)
+	assert.Equal(t, []string{"kdc2.example:1234"}, second.KDC)
+	assert.Equal(t, []string{"passwd.example:777"}, second.KPasswdServer)
+}
+
+func TestConfigRealmDirectiveLegacyBlock(t *testing.T) {
+	t.Parallel()
+
+	const input = `[realms]
+EXAMPLE.COM = {
+	admin_server = admin.example
+	v4_instance_convert = {
+		kdc = ignored.example
+		nested = {
+			ignored text without an assignment
+		}
+		admin_server = ignored.example
+	}
+	kdc = final.example:1234*
+	kdc = ignored.example
+}
+`
+	cfg, err := NewFromString(input)
+	assert.Equal(t, UnsupportedDirective{text: "v4 configurations are not supported"}, err)
+	require.NotNil(t, cfg)
+	require.Len(t, cfg.Realms, 1)
+	assert.Equal(t, []string{"admin.example"}, cfg.Realms[0].AdminServer)
+	assert.Equal(t, []string{"admin.example:464"}, cfg.Realms[0].KPasswdServer)
+	assert.Equal(t, []string{"final.example:1234"}, cfg.Realms[0].KDC)
+}
+
 func TestConfigRealmBlockBoundaries(t *testing.T) {
 	t.Parallel()
 

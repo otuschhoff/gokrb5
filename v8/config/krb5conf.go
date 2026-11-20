@@ -176,87 +176,127 @@ type Realm struct {
 	MasterKDC     []string
 }
 
-// Parse the lines of a [realms] entry into the Realm struct.
+type realmLineState struct {
+	depth     int
+	isIgnored bool
+	hasV4     bool
+}
+
+type realmFinalValues struct {
+	adminServer   bool
+	kdc           bool
+	kpasswdServer bool
+	masterKDC     bool
+}
+
+// parseLines applies directives in order and returns a warning for legacy v4 settings.
 func (r *Realm) parseLines(name string, lines []string) error {
-	var err error
 	r.Realm = name
-	var adminServerFinal bool
-	var KDCFinal bool
-	var kpasswdServerFinal bool
-	var masterKDCFinal bool
-	var ignore bool
-	var c int // counts the depth of blocks within brackets { }
+	var state realmLineState
+	var final realmFinalValues
 	for _, line := range lines {
-		if ignore && c > 0 && !strings.Contains(line, "{") && !strings.Contains(line, "}") {
-			continue
-		}
-		// Remove comments after the values
-		if idx := strings.IndexAny(line, "#;"); idx != -1 {
-			line = line[:idx]
-		}
-		line = strings.TrimSpace(line)
+		line = state.directiveLine(line)
 		if line == "" {
 			continue
 		}
-		if !strings.Contains(line, "=") && !strings.Contains(line, "}") {
-			return InvalidErrorf("realms section line (%s)", line)
+		skip, err := state.skipDirective(line)
+		if err != nil {
+			return err
 		}
-		if strings.Contains(line, "v4_") {
-			ignore = true
-			err = UnsupportedDirective{"v4 configurations are not supported"}
+		if !skip {
+			applyRealmDirective(r, line, &final)
 		}
-		if strings.Contains(line, "{") {
-			c++
-			if ignore {
-				continue
-			}
-		}
-		if strings.Contains(line, "}") {
-			c--
-			if c < 0 {
-				return InvalidErrorf("unpaired curly brackets")
-			}
-			if ignore {
-				if c < 1 {
-					c = 0
-					ignore = false
-				}
-				continue
-			}
-		}
+	}
+	defaultRealmKPasswdServers(r)
+	if state.hasV4 {
+		return UnsupportedDirective{text: "v4 configurations are not supported"}
+	}
+	return nil
+}
 
-		p := strings.Split(line, "=")
-		key := strings.TrimSpace(strings.ToLower(p[0]))
-		v := strings.TrimSpace(p[1])
-		switch key {
-		case "admin_server":
-			appendUntilFinal(&r.AdminServer, v, &adminServerFinal)
-		case "default_domain":
-			r.DefaultDomain = v
-		case "kdc":
-			if !strings.Contains(v, ":") {
-				// No port number specified default to 88
-				if strings.HasSuffix(v, `*`) {
-					v = strings.TrimSpace(strings.TrimSuffix(v, `*`)) + ":88*"
-				} else {
-					v = strings.TrimSpace(v) + ":88"
-				}
-			}
-			appendUntilFinal(&r.KDC, v, &KDCFinal)
-		case "kpasswd_server":
-			appendUntilFinal(&r.KPasswdServer, v, &kpasswdServerFinal)
-		case "master_kdc":
-			appendUntilFinal(&r.MasterKDC, v, &masterKDCFinal)
+func (s *realmLineState) directiveLine(line string) string {
+	// Legacy blocks check the raw line for braces before stripping comments.
+	inIgnoredBlock := s.isIgnored && s.depth > 0
+	if inIgnoredBlock && !strings.ContainsAny(line, "{}") {
+		return ""
+	}
+	if idx := strings.IndexAny(line, "#;"); idx != -1 {
+		line = line[:idx]
+	}
+	return strings.TrimSpace(line)
+}
+
+func (s *realmLineState) skipDirective(line string) (bool, error) {
+	closesBlock := strings.Contains(line, "}")
+	if !closesBlock && !strings.Contains(line, "=") {
+		return false, InvalidErrorf("realms section line (%s)", line)
+	}
+	if strings.Contains(line, "v4_") {
+		s.isIgnored = true
+		s.hasV4 = true
+	}
+	if strings.Contains(line, "{") {
+		s.depth++
+		if s.isIgnored {
+			return true, nil
 		}
 	}
-	// default for Kpasswd_server = admin_server:464
-	if len(r.KPasswdServer) < 1 {
-		for _, a := range r.AdminServer {
-			s := strings.Split(a, ":")
-			r.KPasswdServer = append(r.KPasswdServer, s[0]+":464")
-		}
+	if !closesBlock {
+		return false, nil
 	}
-	return err
+	return s.closeBlock()
+}
+
+func (s *realmLineState) closeBlock() (bool, error) {
+	s.depth--
+	if s.depth < 0 {
+		return false, InvalidErrorf("unpaired curly brackets")
+	}
+	if !s.isIgnored {
+		return false, nil
+	}
+	if s.depth == 0 {
+		s.isIgnored = false
+	}
+	return true, nil
+}
+
+func applyRealmDirective(r *Realm, line string, final *realmFinalValues) {
+	parts := strings.Split(line, "=")
+	key := strings.TrimSpace(strings.ToLower(parts[0]))
+	value := strings.TrimSpace(parts[1])
+	switch key {
+	case "admin_server":
+		appendUntilFinal(&r.AdminServer, value, &final.adminServer)
+	case "default_domain":
+		r.DefaultDomain = value
+	case "kdc":
+		appendUntilFinal(&r.KDC, realmKDCWithDefaultPort(value), &final.kdc)
+	case "kpasswd_server":
+		appendUntilFinal(&r.KPasswdServer, value, &final.kpasswdServer)
+	case "master_kdc":
+		appendUntilFinal(&r.MasterKDC, value, &final.masterKDC)
+	}
+}
+
+func realmKDCWithDefaultPort(value string) string {
+	if strings.Contains(value, ":") {
+		return value
+	}
+	if host, isFinal := strings.CutSuffix(value, "*"); isFinal {
+		return strings.TrimSpace(host) + ":88*"
+	}
+	return strings.TrimSpace(value) + ":88"
+}
+
+func defaultRealmKPasswdServers(r *Realm) {
+	if len(r.KPasswdServer) != 0 {
+		return
+	}
+	for _, server := range r.AdminServer {
+		host, _, _ := strings.Cut(server, ":")
+		r.KPasswdServer = append(r.KPasswdServer, host+":464")
+	}
 }
 
 type realmBlock struct {
