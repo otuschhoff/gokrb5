@@ -497,6 +497,81 @@ func TestLoad(t *testing.T) {
 	assert.Equal(t, "TEST.GOKRB5", c.DomainRealm["test.gokrb5"], "Domain to realm mapping not as expected")
 }
 
+func TestConfigRealmBlockBoundaries(t *testing.T) {
+	t.Parallel()
+
+	const input = `[realms]
+FIRST.EXAMPLE = { # }
+	; }
+	v4_instance_convert = {
+		legacy = ignored
+	}
+	kdc = first.example ; }
+}
+SECOND.EXAMPLE = {
+	kdc = second.example # {
+}
+UNFINISHED.EXAMPLE = {
+	kdc = unfinished.example
+`
+	cfg, err := NewFromString(input)
+	assert.Equal(t, UnsupportedDirective{text: "v4 configurations are not supported"}, err)
+	require.NotNil(t, cfg)
+	require.Len(t, cfg.Realms, 2)
+	assert.Equal(t, "FIRST.EXAMPLE", cfg.Realms[0].Realm)
+	assert.Equal(t, []string{"first.example:88"}, cfg.Realms[0].KDC)
+	assert.Equal(t, "SECOND.EXAMPLE", cfg.Realms[1].Realm)
+	assert.Equal(t, []string{"second.example:88"}, cfg.Realms[1].KDC)
+}
+
+func TestConfigRealmBlockErrorPrecedence(t *testing.T) {
+	t.Parallel()
+
+	const prefix = `[realms]
+FIRST.EXAMPLE = {
+	v4_instance_convert = {
+		legacy = ignored
+	}
+}
+`
+	tests := []struct {
+		name        string
+		input       string
+		expected    string
+		wantInvalid bool
+	}{
+		{
+			name:        "unmatched closing brace",
+			input:       " } # comment\n",
+			expected:    "invalid Realms section in configuration",
+			wantInvalid: false,
+		},
+		{
+			name:        "opening brace without assignment",
+			input:       " BROKEN { ; comment\n",
+			expected:    "realm configuration line invalid: BROKEN {",
+			wantInvalid: false,
+		},
+		{
+			name:        "directive error before later boundary error",
+			input:       "SECOND.EXAMPLE = {\nmissing assignment\n}\n}\n",
+			expected:    "invalid krb5 config realms section line (missing assignment)",
+			wantInvalid: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg, err := NewFromString(prefix + tt.input)
+			require.EqualError(t, err, "error processing realms section: "+tt.expected)
+			assert.Nil(t, cfg)
+			_, ok := errors.AsType[Invalid](err)
+			assert.Equal(t, tt.wantInvalid, ok)
+		})
+	}
+}
+
 func TestConfigAdjacentSectionHeaders(t *testing.T) {
 	t.Parallel()
 

@@ -259,58 +259,63 @@ func (r *Realm) parseLines(name string, lines []string) error {
 	return err
 }
 
-// Parse the lines of the [realms] section of the configuration into an slice of Realm structs.
-func parseRealms(lines []string) ([]Realm, error) {
-	var realms []Realm
-	var err error
-	var name string
-	var start int
-	var c int
-	for i, l := range lines {
-		// Remove comments after the values
-		if idx := strings.IndexAny(l, "#;"); idx != -1 {
-			l = l[:idx]
+type realmBlock struct {
+	name  string
+	start int
+	depth int
+}
+
+// advance reports whether the line closes the outer block. Each line contributes
+// at most one opening and one closing brace, in that order.
+func (b *realmBlock) advance(i int, line string) (bool, error) {
+	if idx := strings.IndexAny(line, "#;"); idx != -1 {
+		line = line[:idx]
+	}
+	line = strings.TrimSpace(line)
+	if strings.Contains(line, "{") {
+		b.depth++
+		name, _, ok := strings.Cut(line, "=")
+		if !ok {
+			return false, fmt.Errorf("realm configuration line invalid: %s", line)
 		}
-		l = strings.TrimSpace(l)
-		if l == "" {
-			continue
-		}
-		// if strings.Contains(l, "v4_") {
-		//	return nil, errors.New("v4 configurations are not supported in Realms section")
-		//}
-		if strings.Contains(l, "{") {
-			c++
-			if !strings.Contains(l, "=") {
-				return nil, fmt.Errorf("realm configuration line invalid: %s", l)
-			}
-			if c == 1 {
-				start = i
-				p := strings.Split(l, "=")
-				name = strings.TrimSpace(p[0])
-			}
-		}
-		if strings.Contains(l, "}") {
-			if c < 1 {
-				// but not started a block!!!
-				return nil, errors.New("invalid Realms section in configuration")
-			}
-			c--
-			if c == 0 {
-				var r Realm
-				e := r.parseLines(name, lines[start+1:i])
-				if e != nil {
-					var ud UnsupportedDirective
-					if !errors.As(e, &ud) {
-						err = e
-						return realms, err
-					}
-					err = e
-				}
-				realms = append(realms, r)
-			}
+		if b.depth == 1 {
+			b.start = i
+			b.name = strings.TrimSpace(name)
 		}
 	}
-	return realms, err
+	if !strings.Contains(line, "}") {
+		return false, nil
+	}
+	if b.depth == 0 {
+		return false, errors.New("invalid Realms section in configuration")
+	}
+	b.depth--
+	return b.depth == 0, nil
+}
+
+// parseRealms parses completed realm blocks in order and retains the last warning.
+func parseRealms(lines []string) ([]Realm, error) {
+	var realms []Realm
+	var warning error
+	var block realmBlock
+	for i, line := range lines {
+		closed, err := block.advance(i, line)
+		if err != nil {
+			return nil, err
+		}
+		if !closed {
+			continue
+		}
+		var r Realm
+		if err := r.parseLines(block.name, lines[block.start+1:i]); err != nil {
+			if _, ok := errors.AsType[UnsupportedDirective](err); !ok {
+				return realms, err
+			}
+			warning = err
+		}
+		realms = append(realms, r)
+	}
+	return realms, warning
 }
 
 // DomainRealm maps the domains to realms representing the [domain_realm] section of the configuration.
