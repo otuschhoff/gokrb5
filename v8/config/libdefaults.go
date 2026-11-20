@@ -150,7 +150,7 @@ func (l *LibDefaults) pkinitListOption(key string) *[]string {
 }
 
 func (l *LibDefaults) appendExtraAddresses(value string) {
-	for _, ip := range strings.Split(strings.TrimSpace(value), ",") {
+	for ip := range strings.SplitSeq(strings.TrimSpace(value), ",") {
 		if eip := net.ParseIP(ip); eip != nil {
 			l.ExtraAddresses = append(l.ExtraAddresses, eip)
 		}
@@ -159,7 +159,7 @@ func (l *LibDefaults) appendExtraAddresses(value string) {
 
 func (l *LibDefaults) parsePreferredPreauthTypes(value, line string) error {
 	var types []int
-	for _, s := range strings.Split(strings.TrimSpace(value), ",") {
+	for s := range strings.SplitSeq(strings.TrimSpace(value), ",") {
 		i, err := strconv.ParseInt(s, 10, 32)
 		if err != nil {
 			return InvalidErrorf("libdefaults section line (%s): %v", line, err)
