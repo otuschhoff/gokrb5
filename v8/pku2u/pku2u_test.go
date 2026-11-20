@@ -63,19 +63,8 @@ func TestASExchangeIssuesSelfTicket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pacRequests := 0
-	for _, pa := range clientState.request.PAData {
-		if pa.PADataType == patype.PA_PAC_REQUEST {
-			pacRequests++
-			request, rerr := pa.GetKerbPAPACRequest()
-			if rerr != nil || request.IncludePAC {
-				t.Fatalf("PKU2U PAC request = %#v, %v", request, rerr)
-			}
-		}
-	}
-	if pacRequests != 1 {
-		t.Fatalf("PAC request count = %d, want 1", pacRequests)
-	}
+	requirePACOptOut(t, clientState.request.PAData)
+
 	replyDER, serverState, err := acceptASExchange(requestDER, serverSettings)
 	if err != nil {
 		t.Fatal(err)
@@ -92,9 +81,34 @@ func TestASExchangeIssuesSelfTicket(t *testing.T) {
 	if err := ticket.Decrypt(serverState.ticketKey); err != nil {
 		t.Fatal(err)
 	}
-	if ticket.Realm != Realm || !ticket.SName.Equal(clientState.request.ReqBody.SName) ||
-		!ticket.DecryptedEncPart.CName.Equal(clientState.request.ReqBody.CName) {
-		t.Fatalf("issued ticket does not bind requested PKU2U names: %#v", ticket)
+	requireTicketNames(t, &ticket, &clientState.request.ReqBody)
+}
+
+func requirePACOptOut(t *testing.T, paData types.PADataSequence) {
+	t.Helper()
+
+	pacRequests := 0
+	for _, pa := range paData {
+		if pa.PADataType != patype.PA_PAC_REQUEST {
+			continue
+		}
+		pacRequests++
+		request, err := pa.GetKerbPAPACRequest()
+		if err != nil || request.IncludePAC {
+			t.Fatalf("PKU2U PAC request = %#v, %v", request, err)
+		}
+	}
+	if pacRequests != 1 {
+		t.Fatalf("PAC request count = %d, want 1", pacRequests)
+	}
+}
+
+func requireTicketNames(t *testing.T, ticket *messages.Ticket, requested *messages.KDCReqBody) {
+	t.Helper()
+
+	if ticket.Realm != Realm || !ticket.SName.Equal(requested.SName) ||
+		!ticket.DecryptedEncPart.CName.Equal(requested.CName) {
+		t.Fatalf("issued ticket does not bind requested PKU2U names: %#v", *ticket)
 	}
 }
 
