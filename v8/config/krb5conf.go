@@ -1,4 +1,5 @@
-// Package config implements KRB5 client and service configuration as described at https://web.mit.edu/kerberos/krb5-latest/doc/admin/conf_files/krb5_conf.html
+// Package config implements KRB5 client and service configuration as described at
+// https://web.mit.edu/kerberos/krb5-latest/doc/admin/conf_files/krb5_conf.html.
 package config
 
 import (
@@ -115,7 +116,9 @@ type LibDefaults struct {
 	PermittedEnctypes   []string // default AES256 then AES128 (RFC 3962)
 	PermittedEnctypeIDs []int32
 	// plugin_base_dir string //not supporting plugins
-	PreferredPreauthTypes []int         // default “17, 16, 15, 14”, which forces libkrb5 to attempt to use PKINIT if it is supported
+	// PreferredPreauthTypes defaults to 17, 16, 15, 14, which forces libkrb5
+	// to attempt PKINIT if it is supported.
+	PreferredPreauthTypes []int
 	PKINITAnchors         []string      `json:"-"`
 	PKINITIdentities      []string      `json:"-"`
 	PKINITKDCHostname     string        `json:"-"`
@@ -130,8 +133,10 @@ type LibDefaults struct {
 	RenewLifetime         time.Duration // default 0
 	SafeChecksumType      int           // default 8
 	TicketLifetime        time.Duration // default 1 day
-	UDPPreferenceLimit    int           // 1 means to always use tcp. MIT krb5 has a default value of 1465, and it prevents user setting more than 32700.
-	VerifyAPReqNofail     bool          // default false
+	// UDPPreferenceLimit of 1 means to always use TCP. MIT krb5 defaults to
+	// 1465 and does not allow values above 32700.
+	UDPPreferenceLimit int
+	VerifyAPReqNofail  bool // default false
 }
 
 // Create a new LibDefaults struct.
