@@ -108,7 +108,7 @@ const (
    krb4_convert = false
  }
 `
-	krb5ConfJson = `{
+	krb5ConfJSON = `{
   "LibDefaults": {
 	"ADSite": "",
     "AllowWeakCrypto": false,
@@ -922,7 +922,7 @@ func TestJSON(t *testing.T) {
 		t.Errorf("error marshaling krb config to JSON: %v", err)
 	}
 	var expected, actual interface{}
-	if err := json.Unmarshal([]byte(krb5ConfJson), &expected); err != nil {
+	if err := json.Unmarshal([]byte(krb5ConfJSON), &expected); err != nil {
 		t.Fatal(err)
 	}
 	if err := json.Unmarshal([]byte(j), &actual); err != nil {
