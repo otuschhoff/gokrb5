@@ -656,13 +656,12 @@ func TestConcurrentHTTPExchanges(t *testing.T) {
 	client := spnego.NewNegotiatingClient(server.Client(), "host/server.example.com", func() gssapi.ContextMechanism {
 		return negoex.New(negoex.NewPKU2UScheme(NewInitiator(clientIdentity, anchors)))
 	})
+	const workerCount = 2
 	start := make(chan struct{})
-	errors := make(chan error, 2)
-	var wait sync.WaitGroup
-	for index := 0; index < 2; index++ {
-		wait.Add(1)
-		go func() {
-			defer wait.Done()
+	errors := make(chan error, workerCount)
+	var workers sync.WaitGroup
+	for range workerCount {
+		workers.Go(func() {
 			<-start
 			request, err := http.NewRequest(http.MethodGet, server.URL, nil)
 			if err != nil {
@@ -677,10 +676,10 @@ func TestConcurrentHTTPExchanges(t *testing.T) {
 				}
 			}
 			errors <- err
-		}()
+		})
 	}
 	close(start)
-	wait.Wait()
+	workers.Wait()
 	close(errors)
 	for err := range errors {
 		if err != nil {
