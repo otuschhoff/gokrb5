@@ -651,6 +651,33 @@ EXAMPLE.COM = {
 	assert.Equal(t, "EXAMPLE.COM", cfg.DomainRealm[".example.com"])
 }
 
+func TestConfigDomainRealmAssignments(t *testing.T) {
+	t.Parallel()
+
+	const input = `[domain_realm]
+  .EXAMPLE.COM  =  Original.Realm
+  host.example.com = Host.Realm # inline comment
+  semicolon.example.com = Semicolon.Realm ; inline comment
+  extra.example.com = Extra.Realm = ignored
+  empty.example.com =
+  = EmptyKey.Realm
+
+[domain_realm]
+  .Example.Com = Replacement.Realm
+`
+	cfg, err := NewFromString(input)
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	assert.Equal(t, DomainRealm{
+		".example.com":          "Replacement.Realm",
+		"host.example.com":      "Host.Realm",
+		"semicolon.example.com": "Semicolon.Realm",
+		"extra.example.com":     "Extra.Realm",
+		"empty.example.com":     "",
+		"":                      "EmptyKey.Realm",
+	}, cfg.DomainRealm)
+}
+
 func TestConfigFatalSectionErrorAfterWarning(t *testing.T) {
 	t.Parallel()
 
