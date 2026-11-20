@@ -9,6 +9,8 @@ import (
 )
 
 // Kpasswd server response codes.
+//
+//nolint:revive // Preserve the published Kpasswd constant names.
 const (
 	KRB5_KPASSWD_SUCCESS             = 0
 	KRB5_KPASSWD_MALFORMED           = 1

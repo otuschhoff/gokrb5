@@ -29,7 +29,11 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 )
 
-const testHTTPServiceSPN = "HTTP/host.test.gokrb5"
+const (
+	testHTTPServiceSPN = "HTTP/host.test.gokrb5"
+	testAES128SHA1     = "aes128-cts-hmac-sha1-96"
+	testAES256SHA1     = "aes256-cts-hmac-sha1-96"
+)
 
 func mustIntegrationConfig(t testing.TB, content string) *config.Config {
 	t.Helper()
@@ -99,7 +103,7 @@ func TestClient_Login_Keytab_KDCPrefersEtypeNotInKeytab(t *testing.T) {
 	if addr == "" {
 		addr = testdata.KDC_IP_TEST_GOKRB5
 	}
-	cfg.LibDefaults.DefaultTktEnctypes = []string{"aes256-cts-hmac-sha1-96", "aes128-cts-hmac-sha1-96"}
+	cfg.LibDefaults.DefaultTktEnctypes = []string{testAES256SHA1, testAES128SHA1}
 	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES256_CTS_HMAC_SHA1_96, etypeID.AES128_CTS_HMAC_SHA1_96}
 
 	for name, port := range map[string]string{
@@ -207,8 +211,8 @@ func TestClient_ASExchange_TGSExchange_EncTypes_Keytab(t *testing.T) {
 	c.Realms[0].KDC = []string{addr + ":" + testdata.KDC_PORT_TEST_GOKRB5_LASTEST}
 	tests := []string{
 		"des3-cbc-sha1-kd",
-		"aes128-cts-hmac-sha1-96",
-		"aes256-cts-hmac-sha1-96",
+		testAES128SHA1,
+		testAES256SHA1,
 		"aes128-cts-hmac-sha256-128",
 		"aes256-cts-hmac-sha384-192",
 		"rc4-hmac",
@@ -244,8 +248,8 @@ func TestClient_ASExchange_TGSExchange_EncTypes_Password(t *testing.T) {
 	c.Realms[0].KDC = []string{addr + ":" + testdata.KDC_PORT_TEST_GOKRB5_LASTEST}
 	tests := []string{
 		"des3-cbc-sha1-kd",
-		"aes128-cts-hmac-sha1-96",
-		"aes256-cts-hmac-sha1-96",
+		testAES128SHA1,
+		testAES256SHA1,
 		"aes128-cts-hmac-sha256-128",
 		"aes256-cts-hmac-sha384-192",
 		"rc4-hmac",
@@ -542,7 +546,7 @@ func TestMultiThreadedClientUse(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(5)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		go func() {
 			defer wg.Done()
 			err := cl.Login()
@@ -555,7 +559,7 @@ func TestMultiThreadedClientUse(t *testing.T) {
 
 	var wg2 sync.WaitGroup
 	wg2.Add(5)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		go func() {
 			defer wg2.Done()
 			err := spnegoGet(cl)
@@ -579,13 +583,16 @@ func spnegoGet(cl *client.Client) error {
 	if url == "" {
 		url = testdata.TEST_HTTP_URL
 	}
-	r, _ := http.NewRequest("GET", url+"/modgssapi/index.html", nil) // #nosec G704 -- integration-test URL is explicitly configured by the environment. // #nosec G704 -- integration-test URL is explicitly configured by the environment.
-	httpResp, err := http.DefaultClient.Do(r)                        // #nosec G704 -- integration-test URL is explicitly configured by the test environment.
+	r, err := http.NewRequest(http.MethodGet, url+"/modgssapi/index.html", nil) // #nosec G704 -- test operator sets URL.
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	httpResp, err := http.DefaultClient.Do(r) // #nosec G704 -- integration test uses a configured URL.
 	if httpResp != nil {
 		defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
 	}
 	if err != nil {
-		return fmt.Errorf("request error: %w\n", err)
+		return fmt.Errorf("request error: %w", err)
 	}
 	if httpResp.StatusCode != http.StatusUnauthorized {
 		return errors.New("did not get unauthorized code when no SPNEGO header set")
@@ -594,12 +601,12 @@ func spnegoGet(cl *client.Client) error {
 	if err != nil {
 		return fmt.Errorf("error setting client SPNEGO header: %w", err)
 	}
-	httpResp, err = http.DefaultClient.Do(r) // #nosec G704 -- integration-test URL is explicitly configured by the test environment.
+	httpResp, err = http.DefaultClient.Do(r) // #nosec G704 -- integration test uses a configured URL.
 	if httpResp != nil {
 		defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
 	}
 	if err != nil {
-		return fmt.Errorf("request error: %w\n", err)
+		return fmt.Errorf("request error: %w", err)
 	}
 	if httpResp.StatusCode != http.StatusOK {
 		return errors.New("did not get OK code when SPNEGO header set")
@@ -662,10 +669,10 @@ func TestClient_GetServiceTicket_Trusted_Resource_Domain(t *testing.T) {
 
 	c.LibDefaults.DefaultRealm = "TEST.GOKRB5"
 	cl := client.NewWithKeytab("testuser1", "TEST.GOKRB5", kt, c)
-	c.LibDefaults.DefaultTktEnctypes = []string{"aes256-cts-hmac-sha1-96"}
-	c.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.ETypesByName["aes256-cts-hmac-sha1-96"]}
-	c.LibDefaults.DefaultTGSEnctypes = []string{"aes256-cts-hmac-sha1-96"}
-	c.LibDefaults.DefaultTGSEnctypeIDs = []int32{etypeID.ETypesByName["aes256-cts-hmac-sha1-96"]}
+	c.LibDefaults.DefaultTktEnctypes = []string{testAES256SHA1}
+	c.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES256_CTS_HMAC_SHA1_96}
+	c.LibDefaults.DefaultTGSEnctypes = []string{testAES256SHA1}
+	c.LibDefaults.DefaultTGSEnctypeIDs = []int32{etypeID.AES256_CTS_HMAC_SHA1_96}
 
 	if err := cl.Login(); err != nil {
 		t.Fatalf("error on login: %v\n", err)
@@ -676,7 +683,7 @@ func TestClient_GetServiceTicket_Trusted_Resource_Domain(t *testing.T) {
 		t.Fatalf("error getting service ticket: %v\n", err)
 	}
 	assert.Equal(t, spn, tkt.SName.PrincipalNameString())
-	assert.Equal(t, etypeID.ETypesByName["aes256-cts-hmac-sha1-96"], key.KeyType)
+	assert.Equal(t, etypeID.AES256_CTS_HMAC_SHA1_96, key.KeyType)
 
 	b, _ = hex.DecodeString(testdata.KEYTAB_SYSHTTP_RESDOM_GOKRB5)
 	skt := keytab.New()
@@ -814,12 +821,13 @@ func TestGetServiceTicketFromCCacheTGT(t *testing.T) {
 	if url == "" {
 		url = testdata.TEST_HTTP_URL
 	}
-	r, _ := http.NewRequest("GET", url+"/modgssapi/index.html", nil) // #nosec G704 -- integration-test URL is explicitly configured by the environment.
+	r, err := http.NewRequest(http.MethodGet, url+"/modgssapi/index.html", nil) // #nosec G704 -- test operator sets URL.
+	require.NoError(t, err)
 	err = spnego.SetSPNEGOHeader(cl, r, testHTTPServiceSPN)
 	if err != nil {
 		t.Fatalf("error setting client SPNEGO header: %v", err)
 	}
-	httpResp, err := http.DefaultClient.Do(r) // #nosec G704 -- integration-test URL is explicitly configured by the test environment.
+	httpResp, err := http.DefaultClient.Do(r) // #nosec G704 -- integration test uses a configured URL.
 	if httpResp != nil {
 		defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
 	}
@@ -842,12 +850,13 @@ func TestGetServiceTicketFromCCacheWithoutKDC(t *testing.T) {
 	if url == "" {
 		url = testdata.TEST_HTTP_URL
 	}
-	r, _ := http.NewRequest("GET", url+"/modgssapi/index.html", nil) // #nosec G704 -- integration-test URL is explicitly configured by the environment.
+	r, err := http.NewRequest(http.MethodGet, url+"/modgssapi/index.html", nil) // #nosec G704 -- test operator sets URL.
+	require.NoError(t, err)
 	err = spnego.SetSPNEGOHeader(cl, r, testHTTPServiceSPN)
 	if err != nil {
 		t.Fatalf("error setting client SPNEGO header: %v", err)
 	}
-	httpResp, err := http.DefaultClient.Do(r) // #nosec G704 -- integration-test URL is explicitly configured by the test environment.
+	httpResp, err := http.DefaultClient.Do(r) // #nosec G704 -- integration test uses a configured URL.
 	if httpResp != nil {
 		defer func(resp *http.Response) { _ = resp.Body.Close() }(httpResp)
 	}

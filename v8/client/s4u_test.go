@@ -26,6 +26,8 @@ import (
 )
 
 func TestS4U2SelfFallbackAndReferralPreservePAForUser(t *testing.T) {
+	var defaultOptions s4uOptions
+
 	cfg := s4uClientTestConfig()
 	cl := NewWithPassword("HTTP/service.example.com", "SERVICE.EXAMPLE", "unused", cfg)
 	service := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "HTTP/service.example.com")
@@ -36,27 +38,25 @@ func TestS4U2SelfFallbackAndReferralPreservePAForUser(t *testing.T) {
 	cl.sendToKDCFunc = func(requestBytes []byte, realm string) ([]byte, error) {
 		calls++
 		var request messages.TGSReq
-		if err := request.Unmarshal(requestBytes); err != nil {
-			t.Fatal(err)
-		}
-		if !request.PAData.Contains(patype.PA_FOR_USER) {
-			t.Fatal("S4U request omitted PA-FOR-USER")
-		}
+		require.NoError(t, request.Unmarshal(requestBytes))
+		require.True(t, request.PAData.Contains(patype.PA_FOR_USER), "S4U request omitted PA-FOR-USER")
 		switch calls {
 		case 1:
-			if !request.PAData.Contains(patype.PA_S4U_X509_USER) {
-				t.Fatal("first S4U request omitted PA-S4U-X509-USER")
-			}
-			return nil, messages.NewKRBError(types.PrincipalName{}, realm, errorcode.KDC_ERR_PADATA_TYPE_NOSUPP, "unsupported")
+			require.True(t, request.PAData.Contains(patype.PA_S4U_X509_USER), "first request omitted PA-S4U-X509-USER")
+			return nil, s4uUnsupportedPAError(realm)
 		case 2:
-			if request.PAData.Contains(patype.PA_S4U_X509_USER) {
-				t.Fatal("fallback request retained PA-S4U-X509-USER")
-			}
-			return marshalS4UTGSReply(t, request, initialKey, referralKey, cl.Credentials.CName(), cl.Credentials.Realm(), types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/SERVICE.EXAMPLE")), nil
+			require.False(t, request.PAData.Contains(patype.PA_S4U_X509_USER), "fallback retained PA-S4U-X509-USER")
+			return marshalS4UTGSReply(
+				t,
+				request,
+				initialKey,
+				referralKey,
+				cl.Credentials.CName(),
+				cl.Credentials.Realm(),
+				types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/SERVICE.EXAMPLE"),
+			), nil
 		case 3:
-			if realm != "SERVICE.EXAMPLE" {
-				t.Fatalf("referral request realm = %q, want SERVICE.EXAMPLE", realm)
-			}
+			require.Equal(t, "SERVICE.EXAMPLE", realm, "referral request realm")
 			if request.PAData.Contains(patype.PA_S4U_X509_USER) || !request.PAData.Contains(patype.PA_FOR_USER) {
 				t.Fatal("referral request did not preserve PA-FOR-USER-only fallback")
 			}
@@ -67,7 +67,15 @@ func TestS4U2SelfFallbackAndReferralPreservePAForUser(t *testing.T) {
 		}
 	}
 
-	reply, err := cl.s4u2SelfExchange(service, user, "USER.EXAMPLE", "USER.EXAMPLE", s4uTestTicket("USER.EXAMPLE", "krbtgt/USER.EXAMPLE"), initialKey, s4uOptions{})
+	reply, err := cl.s4u2SelfExchange(
+		service,
+		user,
+		"USER.EXAMPLE",
+		"USER.EXAMPLE",
+		s4uTestTicket("USER.EXAMPLE", "krbtgt/USER.EXAMPLE"),
+		initialKey,
+		defaultOptions,
+	)
 	if err != nil {
 		t.Fatalf("s4u2SelfExchange() error = %v", err)
 	}
@@ -77,6 +85,8 @@ func TestS4U2SelfFallbackAndReferralPreservePAForUser(t *testing.T) {
 }
 
 func TestS4U2SelfDoesNotSilentlyDowngrade(t *testing.T) {
+	var defaultOptions s4uOptions
+
 	cfg := s4uClientTestConfig()
 	cl := NewWithPassword("HTTP/service.example.com", "EXAMPLE.COM", "unused", cfg)
 	service := cl.Credentials.CName()
@@ -89,7 +99,15 @@ func TestS4U2SelfDoesNotSilentlyDowngrade(t *testing.T) {
 		}
 		return marshalS4UTGSReply(t, request, key, s4uTestKey(2), user, "EXAMPLE.COM", service), nil
 	}
-	_, err := cl.s4u2SelfExchange(service, user, "EXAMPLE.COM", "EXAMPLE.COM", s4uTestTicket("EXAMPLE.COM", "krbtgt/EXAMPLE.COM"), key, s4uOptions{})
+	_, err := cl.s4u2SelfExchange(
+		service,
+		user,
+		"EXAMPLE.COM",
+		"EXAMPLE.COM",
+		s4uTestTicket("EXAMPLE.COM", "krbtgt/EXAMPLE.COM"),
+		key,
+		defaultOptions,
+	)
 	if err == nil {
 		t.Fatal("s4u2SelfExchange() accepted a reply that silently omitted PA-S4U-X509-USER")
 	}
@@ -121,12 +139,24 @@ func TestS4U2SelfRetriesPAForUserForForwardableEvidence(t *testing.T) {
 	}
 
 	forwardable := true
-	reply, err := cl.s4u2SelfExchange(service, user, "EXAMPLE.COM", "EXAMPLE.COM", s4uTestTicket("EXAMPLE.COM", "krbtgt/EXAMPLE.COM"), key, s4uOptions{forwardable: &forwardable})
+	reply, err := cl.s4u2SelfExchange(
+		service,
+		user,
+		"EXAMPLE.COM",
+		"EXAMPLE.COM",
+		s4uTestTicket("EXAMPLE.COM", "krbtgt/EXAMPLE.COM"),
+		key,
+		s4uOptions{resourceBased: false, subjectCertificate: nil, forwardable: &forwardable},
+	)
 	if err != nil {
 		t.Fatalf("s4u2SelfExchange() error = %v", err)
 	}
 	if calls != 2 || !types.IsFlagSet(&reply.DecryptedEncPart.Flags, flags.Forwardable) {
-		t.Fatalf("exchange calls = %d, forwardable = %t; want 2 and true", calls, types.IsFlagSet(&reply.DecryptedEncPart.Flags, flags.Forwardable))
+		t.Fatalf(
+			"exchange calls = %d, forwardable = %t; want 2 and true",
+			calls,
+			types.IsFlagSet(&reply.DecryptedEncPart.Flags, flags.Forwardable),
+		)
 	}
 }
 
@@ -143,23 +173,23 @@ func TestS4U2ProxyReferralPreservesOptionsAndUsesReferralEvidence(t *testing.T) 
 	cl.sendToKDCFunc = func(requestBytes []byte, realm string) ([]byte, error) {
 		calls++
 		var request messages.TGSReq
-		if err := request.Unmarshal(requestBytes); err != nil {
-			t.Fatal(err)
-		}
-		if !types.IsFlagSet(&request.ReqBody.KDCOptions, flags.CNameInAddlTkt) || len(request.ReqBody.AdditionalTickets) != 1 {
-			t.Fatal("S4U2proxy request omitted cname-in-addl-tkt or evidence")
-		}
-		pacOptions, err := findClientPAData(request.PAData, patype.PA_PAC_OPTIONS).GetPAPACOptions()
-		if err != nil || !types.IsFlagSet(&pacOptions.Options, flags.PACOptionResourceBasedConstrainedDelegation) {
-			t.Fatal("S4U2proxy request omitted RBCD PAC option")
-		}
+		require.NoError(t, request.Unmarshal(requestBytes))
+		checkS4UProxyRequestOptions(t, &request)
 		switch calls {
 		case 1:
 			if !ticketsEqual(request.ReqBody.AdditionalTickets[0], evidence) {
 				t.Fatal("first S4U2proxy request did not use original evidence")
 			}
 			referralTicket = s4uTestTicket(realm, "krbtgt/TARGET.EXAMPLE")
-			return marshalS4UTGSReply(t, request, initialKey, referralKey, cl.Credentials.CName(), cl.Credentials.Realm(), referralTicket.SName), nil
+			return marshalS4UTGSReply(
+				t,
+				request,
+				initialKey,
+				referralKey,
+				cl.Credentials.CName(),
+				cl.Credentials.Realm(),
+				referralTicket.SName,
+			), nil
 		case 2:
 			if realm != "TARGET.EXAMPLE" || !ticketsEqual(request.ReqBody.AdditionalTickets[0], referralTicket) {
 				t.Fatal("referral S4U2proxy request did not use the user referral ticket")
@@ -171,7 +201,14 @@ func TestS4U2ProxyReferralPreservesOptionsAndUsesReferralEvidence(t *testing.T) 
 		}
 	}
 
-	reply, err := cl.s4u2ProxyExchange(target, "SERVICE.EXAMPLE", s4uTestTicket("SERVICE.EXAMPLE", "krbtgt/SERVICE.EXAMPLE"), initialKey, evidence, s4uOptions{resourceBased: true})
+	reply, err := cl.s4u2ProxyExchange(
+		target,
+		"SERVICE.EXAMPLE",
+		s4uTestTicket("SERVICE.EXAMPLE", "krbtgt/SERVICE.EXAMPLE"),
+		initialKey,
+		evidence,
+		s4uOptions{forwardable: nil, subjectCertificate: nil, resourceBased: true},
+	)
 	if err != nil {
 		t.Fatalf("s4u2ProxyExchange() error = %v", err)
 	}
@@ -180,12 +217,39 @@ func TestS4U2ProxyReferralPreservesOptionsAndUsesReferralEvidence(t *testing.T) 
 	}
 }
 
-func TestPublicS4UServiceTicketRoundTripsAndCaches(t *testing.T) {
-	client, _, tgt, tgtKey := newCoverageTGSRequest(t)
+func checkS4UProxyRequestOptions(t *testing.T, request *messages.TGSReq) {
+	t.Helper()
+	require.True(t, types.IsFlagSet(&request.ReqBody.KDCOptions, flags.CNameInAddlTkt), "missing cname-in-addl-tkt")
+	require.Len(t, request.ReqBody.AdditionalTickets, 1, "missing or extra evidence tickets")
+	pacOptions, err := findClientPAData(request.PAData, patype.PA_PAC_OPTIONS).GetPAPACOptions()
+	require.NoError(t, err, "decode S4U2proxy PAC options")
+	require.True(t, types.IsFlagSet(&pacOptions.Options, flags.PACOptionResourceBasedConstrainedDelegation),
+		"S4U2proxy request omitted RBCD PAC option")
+}
+
+func installS4UTestSession(client *Client, tgt messages.Ticket, tgtKey types.EncryptionKey) {
+	var (
+		emptyFlags     asn1.BitString
+		emptyPrincipal types.PrincipalName
+	)
+
 	now := time.Now().UTC()
 	client.addSession(tgt, messages.EncKDCRepPart{
-		Key: tgtKey, AuthTime: now, StartTime: now, EndTime: now.Add(time.Hour), RenewTill: now.Add(2 * time.Hour),
+		LastReqs:      nil,
+		Nonce:         0,
+		KeyExpiration: time.Time{},
+		Flags:         emptyFlags,
+		SRealm:        "",
+		SName:         emptyPrincipal,
+		CAddr:         nil,
+		EncPAData:     nil,
+		Key:           tgtKey, AuthTime: now, StartTime: now, EndTime: now.Add(time.Hour), RenewTill: now.Add(2 * time.Hour),
 	})
+}
+
+func TestPublicS4UServiceTicketRoundTripsAndCaches(t *testing.T) {
+	client, _, tgt, tgtKey := newCoverageTGSRequest(t)
+	installS4UTestSession(client, tgt, tgtKey)
 	user := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "bob")
 	selfSPN := "HTTP/self.example.org"
 	targetSPN := "HTTP/target.example.org"
@@ -195,33 +259,44 @@ func TestPublicS4UServiceTicketRoundTripsAndCaches(t *testing.T) {
 	client.sendToKDCFunc = func(requestBytes []byte, _ string) ([]byte, error) {
 		calls++
 		var request messages.TGSReq
-		if err := request.Unmarshal(requestBytes); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, request.Unmarshal(requestBytes))
 		if len(request.ReqBody.AdditionalTickets) == 0 {
 			if request.PAData.Contains(patype.PA_S4U_X509_USER) {
-				return nil, messages.NewKRBError(types.PrincipalName{}, request.ReqBody.Realm, errorcode.KDC_ERR_PADATA_TYPE_NOSUPP, "unsupported")
+				return nil, s4uUnsupportedPAError(request.ReqBody.Realm)
 			}
-			return marshalS4UTGSReply(t, request, tgtKey, selfKey, user, "EXAMPLE.ORG", types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, selfSPN), flags.Forwardable), nil
+			return marshalS4UTGSReply(
+				t,
+				request,
+				tgtKey,
+				selfKey,
+				user,
+				exchangeFixtureRealm,
+				types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, selfSPN),
+				flags.Forwardable,
+			), nil
 		}
-		return marshalS4UTGSReply(t, request, tgtKey, proxyKey, user, "EXAMPLE.ORG", types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, targetSPN)), nil
+		return marshalS4UTGSReply(
+			t,
+			request,
+			tgtKey,
+			proxyKey,
+			user,
+			exchangeFixtureRealm,
+			types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, targetSPN),
+		), nil
 	}
 
 	evidence, gotSelfKey, err := client.GetServiceTicketForUser(user, "", selfSPN, S4UWithForwardable(true))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	if string(gotSelfKey.KeyValue) != string(selfKey.KeyValue) {
 		t.Fatalf("S4U2self key = %x", gotSelfKey.KeyValue)
 	}
-	if _, _, ierr := client.GetServiceTicketForUser(user, "EXAMPLE.ORG", selfSPN); ierr != nil || calls != 2 {
+	if _, _, ierr := client.GetServiceTicketForUser(user, exchangeFixtureRealm, selfSPN); ierr != nil || calls != 2 {
 		t.Fatalf("cached S4U2self = calls %d, error %v", calls, ierr)
 	}
 
 	ticket, gotProxyKey, err := client.GetServiceTicketOnBehalfOf(evidence, targetSPN, S4UWithResourceBasedDelegation())
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	if ticket.SName.PrincipalNameString() != targetSPN || string(gotProxyKey.KeyValue) != string(proxyKey.KeyValue) {
 		t.Fatalf("S4U2proxy ticket/key = %s/%x", ticket.SName.PrincipalNameString(), gotProxyKey.KeyValue)
 	}
@@ -230,13 +305,25 @@ func TestPublicS4UServiceTicketRoundTripsAndCaches(t *testing.T) {
 	}
 }
 
+func s4uUnsupportedPAError(realm string) messages.KRBError {
+	var emptyPrincipal types.PrincipalName
+	return messages.NewKRBError(emptyPrincipal, realm, errorcode.KDC_ERR_PADATA_TYPE_NOSUPP, "unsupported")
+}
+
 func TestS4UCacheIsSeparateByUserAndSPN(t *testing.T) {
 	cl := NewWithPassword("service", "EXAMPLE.COM", "unused", config.New())
 	now := time.Now().UTC()
 	spn := "HTTP/target.example.com"
 	normalTicket := s4uTestTicket("EXAMPLE.COM", spn)
 	normalKey := s4uTestKey(1)
-	cl.cache.addEntry(normalTicket, now.Add(-time.Minute), now.Add(-time.Minute), now.Add(time.Hour), time.Time{}, normalKey)
+	cl.cache.addEntry(
+		normalTicket,
+		now.Add(-time.Minute),
+		now.Add(-time.Minute),
+		now.Add(time.Hour),
+		time.Time{},
+		normalKey,
+	)
 
 	alice := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
 	s4uTicket := s4uTestTicket("EXAMPLE.COM", spn)
@@ -244,13 +331,18 @@ func TestS4UCacheIsSeparateByUserAndSPN(t *testing.T) {
 	s4uKey := s4uTestKey(2)
 	ticketFlags := types.NewKrbFlags()
 	types.SetFlag(&ticketFlags, flags.Forwardable)
-	cl.addS4UCacheEntry(alice, "EXAMPLE.COM", spn, messages.TGSRep{KDCRepFields: messages.KDCRepFields{
-		Ticket:           s4uTicket,
-		DecryptedEncPart: messages.EncKDCRepPart{StartTime: now.Add(-time.Minute), EndTime: now.Add(time.Hour), Key: s4uKey, Flags: ticketFlags},
-	}})
+	var reply messages.TGSRep
+	reply.Ticket = s4uTicket
+	reply.DecryptedEncPart.StartTime = now.Add(-time.Minute)
+	reply.DecryptedEncPart.EndTime = now.Add(time.Hour)
+	reply.DecryptedEncPart.Key = s4uKey
+	reply.DecryptedEncPart.Flags = ticketFlags
+	cl.addS4UCacheEntry(alice, "EXAMPLE.COM", spn, reply)
 
 	gotNormal, gotNormalKey, ok := cl.GetCachedTicket(spn)
-	if !ok || string(gotNormal.EncPart.Cipher) == string(s4uTicket.EncPart.Cipher) || string(gotNormalKey.KeyValue) != string(normalKey.KeyValue) {
+	if !ok || string(gotNormal.EncPart.Cipher) == string(
+		s4uTicket.EncPart.Cipher,
+	) || string(gotNormalKey.KeyValue) != string(normalKey.KeyValue) {
 		t.Fatal("normal cache entry was replaced by S4U entry")
 	}
 	gotS4U, gotS4UKey, ok := cl.GetCachedServiceTicketForUser(alice, "example.com", spn)
@@ -267,7 +359,9 @@ func TestS4UCacheIsSeparateByUserAndSPN(t *testing.T) {
 }
 
 func TestClassifyS4UErrorPreservesNTStatus(t *testing.T) {
-	extended, err := types.NewKerbExtErrorData(types.KerbExtError{Status: ntstatus.STATUS_NO_MATCH})
+	var emptyPrincipal types.PrincipalName
+
+	extended, err := types.NewKerbExtErrorData(types.KerbExtError{Reserved: 0, Flags: 0, Status: ntstatus.STATUS_NO_MATCH})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +369,7 @@ func TestClassifyS4UErrorPreservesNTStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kdcError := messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.COM", errorcode.KDC_ERR_BADOPTION, "denied")
+	kdcError := messages.NewKRBError(emptyPrincipal, "EXAMPLE.COM", errorcode.KDC_ERR_BADOPTION, "denied")
 	kdcError.EData = eData
 	cause := fmt.Errorf("kdc reply: %w", kdcError)
 	for _, tt := range []struct {
@@ -298,7 +392,7 @@ func TestClassifyS4UErrorPreservesNTStatus(t *testing.T) {
 			require.Equal(t, ntstatus.STATUS_NO_MATCH, status)
 		})
 	}
-	policyError := messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.COM", errorcode.KDC_ERR_POLICY, "denied")
+	policyError := messages.NewKRBError(emptyPrincipal, "EXAMPLE.COM", errorcode.KDC_ERR_POLICY, "denied")
 	if got := classifyS4UError(policyError, true); !errors.Is(got, krberror.ErrDelegationNotPermitted) {
 		t.Fatalf("KDC_ERR_POLICY classification = %v, want ErrDelegationNotPermitted", got)
 	}
@@ -341,37 +435,59 @@ func s4uClientTestConfig() *config.Config {
 }
 
 func s4uTestKey(seed byte) types.EncryptionKey {
-	return types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte{seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed}}
+	return types.EncryptionKey{
+		KeyType:  etypeID.AES128_CTS_HMAC_SHA1_96,
+		KeyValue: []byte{seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed},
+	}
 }
 
 func s4uTestTicket(realm, spn string) messages.Ticket {
+	var emptyTicketPart messages.EncTicketPart
+
 	return messages.Ticket{
-		TktVNO: iana.PVNO,
-		Realm:  realm,
-		SName:  types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, spn),
+		DecryptedEncPart: emptyTicketPart,
+		TktVNO:           iana.PVNO,
+		Realm:            realm,
+		SName:            types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, spn),
 		EncPart: types.EncryptedData{
+			KVNO:   0,
 			EType:  etypeID.AES128_CTS_HMAC_SHA1_96,
 			Cipher: []byte("ticket:" + realm + ":" + spn),
 		},
 	}
 }
 
-func marshalS4UTGSReply(t *testing.T, request messages.TGSReq, encryptionKey, replyKey types.EncryptionKey, cname types.PrincipalName, crealm string, ticketSName types.PrincipalName, replyFlags ...int) []byte {
+func marshalS4UTGSReply(
+	t *testing.T,
+	request messages.TGSReq,
+	encryptionKey, replyKey types.EncryptionKey,
+	cname types.PrincipalName,
+	crealm string,
+	ticketSName types.PrincipalName,
+	replyFlags ...int,
+) []byte {
 	t.Helper()
+	var emptyReplyPart messages.EncKDCRepPart
+
 	now := time.Now().UTC()
 	flagsValue := types.NewKrbFlags()
 	for _, flag := range replyFlags {
 		types.SetFlag(&flagsValue, flag)
 	}
 	part := messages.EncKDCRepPart{
-		Key:       replyKey,
-		Nonce:     request.ReqBody.Nonce,
-		Flags:     flagsValue,
-		AuthTime:  now,
-		StartTime: now,
-		EndTime:   now.Add(time.Hour),
-		SRealm:    request.ReqBody.Realm,
-		SName:     request.ReqBody.SName,
+		LastReqs:      nil,
+		KeyExpiration: time.Time{},
+		RenewTill:     time.Time{},
+		CAddr:         nil,
+		EncPAData:     nil,
+		Key:           replyKey,
+		Nonce:         request.ReqBody.Nonce,
+		Flags:         flagsValue,
+		AuthTime:      now,
+		StartTime:     now,
+		EndTime:       now.Add(time.Hour),
+		SRealm:        request.ReqBody.Realm,
+		SName:         request.ReqBody.SName,
 	}
 	plain, err := part.Marshal()
 	if err != nil {
@@ -382,12 +498,14 @@ func marshalS4UTGSReply(t *testing.T, request messages.TGSReq, encryptionKey, re
 		t.Fatal(err)
 	}
 	reply := messages.TGSRep{KDCRepFields: messages.KDCRepFields{
-		PVNO:    iana.PVNO,
-		MsgType: msgtype.KRB_TGS_REP,
-		CRealm:  crealm,
-		CName:   cname,
-		Ticket:  s4uTestTicket(request.ReqBody.Realm, ticketSName.PrincipalNameString()),
-		EncPart: encrypted,
+		PAData:           nil,
+		DecryptedEncPart: emptyReplyPart,
+		PVNO:             iana.PVNO,
+		MsgType:          msgtype.KRB_TGS_REP,
+		CRealm:           crealm,
+		CName:            cname,
+		Ticket:           s4uTestTicket(request.ReqBody.Realm, ticketSName.PrincipalNameString()),
+		EncPart:          encrypted,
 	}}
 	b, err := reply.Marshal()
 	if err != nil {
@@ -402,5 +520,5 @@ func findClientPAData(paData types.PADataSequence, paType int32) *types.PAData {
 			return &paData[i]
 		}
 	}
-	return &types.PAData{}
+	return new(types.PAData)
 }

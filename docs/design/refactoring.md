@@ -820,6 +820,24 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 138 (2026-11-20, complete v8 client lint cleanup; Q-10):
+Separate request preparation, transport fallback, reply verification, and
+referral handling in the AS, TGS, FAST, and S4U exchanges. Simplify login,
+session renewal, credential-cache import/export, and diagnostics without
+changing the public API or the wire protocol. Retain the published Kpasswd
+constants and document the narrow exceptions for intentional contracts,
+including algorithm-dependent interface returns and disabled optional FAST.
+Clean up test fixtures while retaining all 177 top-level test entry points.
+
+Uncapped whole-v8 scans report zero client findings, down from 38
+canonical and 582 supplemental. Diagnostics outside client and lint
+policy are unchanged; whole-v8 totals are 427 canonical and 2,203
+supplemental. Client passes 100 shuffled race-enabled runs, and its
+default-tag statement coverage is 83.6%. The full v8 build, vet, and
+race-enabled default test suite pass, as does changed-line lint for both
+modules. The client tests compile with the `interop` tag; live
+interoperability was not run.
+
 Slice 137 (2026-11-20, complete v8 config lint cleanup; Q-10):
 Separate hostname, address, and DNS boolean directives from the other
 boolean options without changing their field mappings or error handling.

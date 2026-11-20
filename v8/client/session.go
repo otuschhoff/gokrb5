@@ -18,10 +18,48 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+const (
+	tgtServiceName      = "krbtgt"
+	renewalWindowParts  = 6
+	renewalElapsedParts = renewalWindowParts - 1
+)
+
 // sessions hold TGTs and are keyed on the realm name
 type sessions struct {
 	Entries map[string]*session
 	mux     sync.RWMutex
+}
+
+// JSON return information about the held sessions in a JSON format.
+func (s *sessions) JSON() (string, error) {
+	s.mux.RLock()
+	defer s.mux.RUnlock()
+	var js []jsonSession
+	keys := make([]string, 0, len(s.Entries))
+	for k := range s.Entries {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		session := s.Entries[k]
+		if session == nil {
+			continue
+		}
+		r, at, et, rt, kt := session.timeDetails()
+		j := jsonSession{
+			Realm:                r,
+			AuthTime:             at,
+			EndTime:              et,
+			RenewTill:            rt,
+			SessionKeyExpiration: kt,
+		}
+		js = append(js, j)
+	}
+	b, err := json.MarshalIndent(js, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("encode TGT sessions as JSON: %w", err)
+	}
+	return string(b), nil
 }
 
 // destroy erases all sessions
@@ -48,24 +86,13 @@ func (s *sessions) update(sess *session) {
 	defer s.mux.Unlock()
 	realmKey := strings.ToUpper(sess.realm)
 	// if a session already exists for this, cancel its auto renew.
-	if i, ok := s.Entries[realmKey]; ok {
-		if i == nil {
-			s.Entries[realmKey] = sess
-			return
-		}
-		if i != sess {
-			// Session in the sessions cache is not the same as one provided.
-			// Cancel the one in the cache and add this one.
-			i.mux.Lock()
-			defer i.mux.Unlock()
-			if i.cancel != nil {
-				i.cancel <- true
-			}
-			s.Entries[realmKey] = sess
-			return
+	if previous := s.Entries[realmKey]; previous != nil && previous != sess {
+		previous.mux.Lock()
+		defer previous.mux.Unlock()
+		if previous.cancel != nil {
+			previous.cancel <- true
 		}
 	}
-	// No session for this realm was found so just add it
 	s.Entries[realmKey] = sess
 }
 
@@ -112,7 +139,7 @@ type jsonSession struct {
 // AddSession adds a session for a realm with a TGT to the client's session cache.
 // A goroutine is started to automatically renew the TGT before expiry.
 func (cl *Client) addSession(tgt messages.Ticket, dep messages.EncKDCRepPart) {
-	if strings.ToLower(tgt.SName.NameString[0]) != "krbtgt" {
+	if strings.ToLower(tgt.SName.NameString[0]) != tgtServiceName {
 		// Not a TGT
 		return
 	}
@@ -131,8 +158,13 @@ func (cl *Client) addSession(tgt messages.Ticket, dep messages.EncKDCRepPart) {
 		sessionKey:           dep.Key,
 		ticketFlags:          dep.Flags,
 		addresses:            append([]types.HostAddress(nil), dep.CAddr...),
+		authData:             nil,
+		isSKey:               false,
+		secondTicket:         nil,
 		sessionKeyExpiration: dep.KeyExpiration,
 		supportedEncTypes:    supportedEncTypes,
+		cancel:               nil,
+		mux:                  sync.RWMutex{},
 	}
 	cl.sessions.update(s)
 	cl.enableAutoSessionRenewal(s)
@@ -210,7 +242,9 @@ func (s *session) valid() bool {
 // tgtDetails is a thread safe way to get the session's realm, TGT and session key values
 func (s *session) tgtDetails() (string, messages.Ticket, types.EncryptionKey) {
 	if s == nil {
-		return "", messages.Ticket{}, types.EncryptionKey{}
+		var ticket messages.Ticket
+		var key types.EncryptionKey
+		return "", ticket, key
 	}
 	s.mux.RLock()
 	defer s.mux.RUnlock()
@@ -227,70 +261,39 @@ func (s *session) timeDetails() (string, time.Time, time.Time, time.Time, time.T
 	return s.realm, s.authTime, s.endTime, s.renewTill, s.sessionKeyExpiration
 }
 
-// JSON return information about the held sessions in a JSON format.
-func (s *sessions) JSON() (string, error) {
-	s.mux.RLock()
-	defer s.mux.RUnlock()
-	var js []jsonSession
-	keys := make([]string, 0, len(s.Entries))
-	for k := range s.Entries {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		session := s.Entries[k]
-		if session == nil {
-			continue
-		}
-		r, at, et, rt, kt := session.timeDetails()
-		j := jsonSession{
-			Realm:                r,
-			AuthTime:             at,
-			EndTime:              et,
-			RenewTill:            rt,
-			SessionKeyExpiration: kt,
-		}
-		js = append(js, j)
-	}
-	b, err := json.MarshalIndent(js, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("encode TGT sessions as JSON: %w", err)
-	}
-	return string(b), nil
-}
-
 // enableAutoSessionRenewal turns on the automatic renewal for the client's TGT session.
 func (cl *Client) enableAutoSessionRenewal(s *session) {
-	var timer *time.Timer
 	s.mux.Lock()
 	s.cancel = make(chan bool, 1)
 	s.mux.Unlock()
-	go func(s *session) {
-		for {
-			s.mux.RLock()
-			w := (s.endTime.Sub(time.Now().UTC()) * 5) / 6
-			s.mux.RUnlock()
-			if w < 0 {
-				return
-			}
-			timer = time.NewTimer(w)
-			select {
-			case <-timer.C:
-				renewal, err := cl.refreshSession(s)
-				if err != nil {
-					cl.Log("error refreshing session: %v", err)
-				}
-				if !renewal && err == nil {
-					// end this goroutine as there will have been a new login and new auto renewal goroutine created.
-					return
-				}
-			case <-s.cancel:
-				// cancel has been called. Stop the timer and exit.
-				timer.Stop()
-				return
-			}
+	go cl.autoRenewSession(s)
+}
+
+func (cl *Client) autoRenewSession(s *session) {
+	for {
+		s.mux.RLock()
+		w := (s.endTime.Sub(time.Now().UTC()) * renewalElapsedParts) / renewalWindowParts
+		s.mux.RUnlock()
+		if w < 0 {
+			return
 		}
-	}(s)
+		timer := time.NewTimer(w)
+		select {
+		case <-timer.C:
+			renewal, err := cl.refreshSession(s)
+			if err != nil {
+				cl.Log("error refreshing session: %v", err)
+				continue
+			}
+			if !renewal {
+				// The new login started a replacement renewal goroutine.
+				return
+			}
+		case <-s.cancel:
+			timer.Stop()
+			return
+		}
+	}
 }
 
 // renewTGT renews the client's TGT session.
@@ -298,7 +301,7 @@ func (cl *Client) renewTGT(s *session) error {
 	realm, tgt, skey := s.tgtDetails()
 	spn := types.PrincipalName{
 		NameType:   nametype.KRB_NT_SRV_INST,
-		NameString: []string{"krbtgt", realm},
+		NameString: []string{tgtServiceName, realm},
 	}
 	_, tgsRep, err := cl.TGSREQGenerateAndExchange(spn, cl.Credentials.Domain(), tgt, skey, true)
 	if err != nil {
@@ -340,7 +343,7 @@ func (cl *Client) ensureValidSession(realm string) error {
 	s, ok := cl.sessions.get(realm)
 	if ok && s != nil {
 		s.mux.RLock()
-		d := s.endTime.Sub(s.authTime) / 6
+		d := s.endTime.Sub(s.authTime) / renewalWindowParts
 		if s.endTime.Sub(time.Now().UTC()) > d {
 			s.mux.RUnlock()
 			return nil

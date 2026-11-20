@@ -12,21 +12,35 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/keytab"
-	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/pac"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
+
+const (
+	clientTestOrgRealm    = "EXAMPLE.ORG"
+	clientTestComRealm    = "EXAMPLE.COM"
+	clientTestKDCAddress  = "127.0.0.1:88"
+	diagnosticCredentials = "Credentials:"
+)
+
+func kdcTestRealmConfig(realm string, kdcs []string) config.Realm {
+	var entry config.Realm
+	entry.Realm = realm
+	entry.KDC = kdcs
+	return entry
+}
 
 func TestSessionStoreHandlesNilEntries(t *testing.T) {
 	var nilStore *sessions
 	nilStore.destroy()
 	nilStore.update(nil)
-	if session, ok := nilStore.get("EXAMPLE.ORG"); ok || session != nil {
+	if session, ok := nilStore.get(clientTestOrgRealm); ok || session != nil {
 		t.Fatalf("nil store get = %v, %v", session, ok)
 	}
 
-	store := &sessions{Entries: map[string]*session{"EXAMPLE.ORG": nil}}
-	if session, ok := store.get("EXAMPLE.ORG"); ok || session != nil {
+	var store sessions
+	store.Entries = map[string]*session{clientTestOrgRealm: nil}
+	if session, ok := store.get(clientTestOrgRealm); ok || session != nil {
 		t.Fatalf("nil entry get = %v, %v", session, ok)
 	}
 	store.destroy()
@@ -41,30 +55,30 @@ func TestSessionStoreHandlesNilEntries(t *testing.T) {
 func TestSessionLifecycleHelpers(t *testing.T) {
 	now := time.Now().UTC()
 	oldCancel := make(chan bool, 1)
-	old := &session{realm: "Example.Org", authTime: now.Add(-time.Hour), endTime: now.Add(time.Hour), cancel: oldCancel}
-	store := &sessions{Entries: map[string]*session{"EXAMPLE.ORG": old}}
-	replacement := &session{
-		realm: "example.org", authTime: now.Add(-time.Minute), startTime: now.Add(-time.Minute),
-		endTime: now.Add(2 * time.Hour), renewTill: now.Add(3 * time.Hour),
-		sessionKey: types.EncryptionKey{KeyType: 17, KeyValue: []byte("0123456789abcdef")},
-	}
-	store.update(replacement)
+	var old, replacement session
+	old.realm, old.authTime, old.endTime, old.cancel = "Example.Org", now.Add(-time.Hour), now.Add(time.Hour), oldCancel
+	var store sessions
+	store.Entries = map[string]*session{clientTestOrgRealm: &old}
+	replacement.realm = "example.org"
+	replacement.authTime = now.Add(-time.Minute)
+	replacement.startTime = now.Add(-time.Minute)
+	replacement.endTime = now.Add(2 * time.Hour)
+	replacement.renewTill = now.Add(3 * time.Hour)
+	replacement.sessionKey = types.EncryptionKey{KeyType: 17, KeyValue: []byte("0123456789abcdef")}
+	store.update(&replacement)
 	select {
 	case <-oldCancel:
 	default:
 		t.Fatal("replaced session was not cancelled")
 	}
-	got, ok := store.get("EXAMPLE.ORG")
-	if !ok || got != replacement {
+	got, ok := store.get(clientTestOrgRealm)
+	if !ok || got != &replacement {
 		t.Fatalf("replacement session = %p, %v", got, ok)
 	}
 	if !replacement.valid() {
 		t.Fatal("current session reported invalid")
 	}
-	realm, _, key := replacement.tgtDetails()
-	if realm != "example.org" || !bytes.Equal(key.KeyValue, replacement.sessionKey.KeyValue) {
-		t.Fatalf("session details = %q/%x", realm, key.KeyValue)
-	}
+	assertReplacementSessionDetails(t, &replacement)
 	replacement.destroy()
 	if replacement.valid() || replacement.endTime.After(time.Now().UTC()) {
 		t.Fatal("destroyed session remained valid")
@@ -75,18 +89,29 @@ func TestSessionLifecycleHelpers(t *testing.T) {
 	}
 }
 
+func assertReplacementSessionDetails(t *testing.T, replacement *session) {
+	t.Helper()
+	realm, _, key := replacement.tgtDetails()
+	if realm != "example.org" || !bytes.Equal(key.KeyValue, replacement.sessionKey.KeyValue) {
+		t.Fatalf("session details = %q/%x", realm, key.KeyValue)
+	}
+}
+
 func TestClientSessionAccessAndSessionOnlyLogin(t *testing.T) {
 	cfg := config.New()
 	cfg.LibDefaults.DNSLookupKDC = true
 	principal := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
-	client := NewFromPrincipalName(principal, "EXAMPLE.ORG", cfg)
+	client := NewFromPrincipalName(principal, clientTestOrgRealm, cfg)
 	now := time.Now().UTC()
-	current := &session{
-		realm: "EXAMPLE.ORG", authTime: now.Add(-time.Hour), endTime: now.Add(time.Hour),
-		renewTill: now.Add(2 * time.Hour), sessionKeyExpiration: now.Add(30 * time.Minute),
-		tgt: messages.Ticket{Realm: "EXAMPLE.ORG"}, sessionKey: types.EncryptionKey{KeyType: 17, KeyValue: []byte("key")},
-	}
-	client.sessions.update(current)
+	var current session
+	current.realm = clientTestOrgRealm
+	current.authTime = now.Add(-time.Hour)
+	current.endTime = now.Add(time.Hour)
+	current.renewTill = now.Add(2 * time.Hour)
+	current.sessionKeyExpiration = now.Add(30 * time.Minute)
+	current.tgt.Realm = clientTestOrgRealm
+	current.sessionKey = types.EncryptionKey{KeyType: 17, KeyValue: []byte("key")}
+	client.sessions.update(&current)
 
 	if ok, err := client.IsConfigured(); !ok || err != nil {
 		t.Fatalf("session-only client configuration = %v, %v", ok, err)
@@ -100,8 +125,17 @@ func TestClientSessionAccessAndSessionOnlyLogin(t *testing.T) {
 	if err := client.ensureValidSession("example.org"); err != nil {
 		t.Fatal(err)
 	}
-	ticket, key, err := client.sessionTGT("EXAMPLE.ORG")
-	if err != nil || ticket.Realm != "EXAMPLE.ORG" || string(key.KeyValue) != "key" {
+	assertClientSessionDetails(t, client, &current)
+	current.endTime = now.Add(-time.Minute)
+	if err := client.Login(); err == nil || !strings.Contains(err.Error(), "no valid existing session") {
+		t.Fatalf("expired session login error = %v", err)
+	}
+}
+
+func assertClientSessionDetails(t *testing.T, client *Client, current *session) {
+	t.Helper()
+	ticket, key, err := client.sessionTGT(clientTestOrgRealm)
+	if err != nil || ticket.Realm != clientTestOrgRealm || string(key.KeyValue) != "key" {
 		t.Fatalf("session TGT = %+v, %x, %v", ticket, key.KeyValue, err)
 	}
 	authTime, endTime, renewTill, keyExpiry, err := client.sessionTimes("example.org")
@@ -112,62 +146,76 @@ func TestClientSessionAccessAndSessionOnlyLogin(t *testing.T) {
 	if _, _, _, _, err := client.sessionTimes("missing"); err == nil {
 		t.Fatal("missing session times returned no error")
 	}
-
-	current.endTime = now.Add(-time.Minute)
-	if err := client.Login(); err == nil || !strings.Contains(err.Error(), "no valid existing session") {
-		t.Fatalf("expired session login error = %v", err)
-	}
 }
 
 func TestClientConfigurationFailures(t *testing.T) {
-	if ok, err := (&Client{}).IsConfigured(); ok || err == nil || !strings.Contains(err.Error(), "configuration") {
-		t.Fatalf("nil configuration = %v, %v", ok, err)
-	}
+	var zeroClient Client
+	assertConfigurationFailure(t, &zeroClient, "nil configuration", "configuration")
 	cfg := config.New()
-	cfg.LibDefaults.DefaultRealm = "EXAMPLE.ORG"
-	if ok, err := NewWithPassword("", "EXAMPLE.ORG", "password", cfg).IsConfigured(); ok || err == nil || !strings.Contains(err.Error(), "username") {
-		t.Fatalf("empty username = %v, %v", ok, err)
-	}
+	cfg.LibDefaults.DefaultRealm = clientTestOrgRealm
+	assertConfigurationFailure(t, NewWithPassword("", clientTestOrgRealm, "password", cfg), "empty username", "username")
 	cfg.LibDefaults.DefaultRealm = ""
-	if ok, err := NewWithPassword("alice", "", "password", cfg).IsConfigured(); ok || err == nil || !strings.Contains(err.Error(), "defined realm") {
-		t.Fatalf("empty realm = %v, %v", ok, err)
-	}
-	cfg.LibDefaults.DefaultRealm = "EXAMPLE.ORG"
-	cfg.Realms = []config.Realm{{Realm: "EXAMPLE.ORG"}}
-	if ok, err := NewWithPassword("alice", "EXAMPLE.ORG", "password", cfg).IsConfigured(); ok || err == nil || !strings.Contains(err.Error(), "defined KDCs") {
-		t.Fatalf("realm without KDC = %v, %v", ok, err)
-	}
+	assertConfigurationFailure(t, NewWithPassword("alice", "", "password", cfg), "empty realm", "defined realm")
+	cfg.LibDefaults.DefaultRealm = clientTestOrgRealm
+	cfg.Realms = []config.Realm{kdcTestRealmConfig(clientTestOrgRealm, nil)}
+	noKDC := NewWithPassword("alice", clientTestOrgRealm, "password", cfg)
+	assertConfigurationFailure(t, noKDC, "realm without KDC", "defined KDCs")
 
 	cfg.LibDefaults.DNSLookupKDC = true
-	withoutCredentials := NewFromPrincipalName(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice"), "EXAMPLE.ORG", cfg)
-	if ok, err := withoutCredentials.IsConfigured(); ok || err == nil || !strings.Contains(err.Error(), "neither a keytab nor a password") {
-		t.Fatalf("missing credentials = %v, %v", ok, err)
-	}
+	principal := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
+	withoutCredentials := NewFromPrincipalName(principal, clientTestOrgRealm, cfg)
+	assertConfigurationFailure(t, withoutCredentials, "missing credentials", "neither a keytab nor a password")
 	if err := withoutCredentials.AffirmLogin(); err == nil || !strings.Contains(err.Error(), "could not get valid TGT") {
 		t.Fatalf("AffirmLogin error = %v", err)
 	}
 }
 
+func assertConfigurationFailure(t *testing.T, client *Client, name, want string) {
+	t.Helper()
+	if ok, err := client.IsConfigured(); ok || err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("%s = %v, %v", name, ok, err)
+	}
+}
+
 func TestClientDiagnosticsPrintAndDestroy(t *testing.T) {
 	cfg := config.New()
-	client := NewWithPassword("alice", "EXAMPLE.ORG", "password", cfg)
+	client := NewWithPassword("alice", clientTestOrgRealm, "password", cfg)
 	var output bytes.Buffer
 	if err := client.Diagnostics(&output); err == nil || !strings.Contains(err.Error(), "no KDCs") {
 		t.Fatalf("Diagnostics error = %v", err)
 	}
-	if !strings.Contains(output.String(), "Credentials:") || !strings.Contains(output.String(), "TGT Sessions:") || !strings.Contains(output.String(), "Settings:") {
-		t.Fatalf("diagnostic output = %q", output.String())
+	for _, section := range []string{diagnosticCredentials, "TGT Sessions:", "Settings:"} {
+		if !strings.Contains(output.String(), section) {
+			t.Fatalf("diagnostic output = %q", output.String())
+		}
 	}
 
+	assertClientDestroyClearsState(t, client, cfg)
+}
+
+func assertClientDestroyClearsState(t *testing.T, client *Client, cfg *config.Config) {
+	t.Helper()
 	now := time.Now().UTC()
-	client.sessions.Entries["EXAMPLE.ORG"] = &session{realm: "EXAMPLE.ORG", authTime: now.Add(-time.Hour), endTime: now.Add(time.Hour)}
-	client.setPKINITReplyKey("EXAMPLE.ORG", types.EncryptionKey{KeyType: 17, KeyValue: []byte{1, 2, 3}})
-	storedKey := client.pkinitKeys["EXAMPLE.ORG"].KeyValue
+	var current session
+	current.realm = clientTestOrgRealm
+	current.authTime = now.Add(-time.Hour)
+	current.endTime = now.Add(time.Hour)
+	client.sessions.Entries[clientTestOrgRealm] = &current
+	client.setPKINITReplyKey(clientTestOrgRealm, types.EncryptionKey{KeyType: 17, KeyValue: []byte{1, 2, 3}})
+	storedKey := client.pkinitKeys[clientTestOrgRealm].KeyValue
 	credentialBytes := []byte{4, 5, 6}
-	client.pkinitCreds = &pac.CredentialData{CredentialCount: 1, Credentials: []pac.SECPKGSupplementalCred{{CredentialSize: 3, Credentials: credentialBytes}}}
-	client.fastArmorCl = NewWithPassword("armor", "EXAMPLE.ORG", "password", cfg)
+	var supplemental pac.SECPKGSupplementalCred
+	supplemental.CredentialSize = 3
+	supplemental.Credentials = credentialBytes
+	client.pkinitCreds = &pac.CredentialData{
+		CredentialCount: 1,
+		Credentials:     []pac.SECPKGSupplementalCred{supplemental},
+	}
+	client.fastArmorCl = NewWithPassword("armor", clientTestOrgRealm, "password", cfg)
 	client.Destroy()
-	if client.Credentials.UserName() != "" || len(client.sessions.Entries) != 0 || client.fastArmorCl != nil || client.pkinitCreds != nil {
+	hasLoginState := client.Credentials.UserName() != "" || len(client.sessions.Entries) != 0
+	hasArmorOrCredentials := client.fastArmorCl != nil || client.pkinitCreds != nil
+	if hasLoginState || hasArmorOrCredentials {
 		t.Fatal("Destroy did not clear client state")
 	}
 	if !bytes.Equal(storedKey, []byte{0, 0, 0}) || !bytes.Equal(credentialBytes, []byte{0, 0, 0}) {
@@ -176,10 +224,15 @@ func TestClientDiagnosticsPrintAndDestroy(t *testing.T) {
 }
 
 func TestClientPrintWithEmptyState(t *testing.T) {
-	client := &Client{
-		Credentials: credentials.New("alice", "EXAMPLE.ORG"), Config: config.New(), settings: NewSettings(),
-		sessions: &sessions{Entries: make(map[string]*session)}, cache: NewCache(), s4uCache: NewCache(),
-	}
+	var client Client
+	var store sessions
+	store.Entries = make(map[string]*session)
+	client.Credentials = credentials.New("alice", clientTestOrgRealm)
+	client.Config = config.New()
+	client.settings = NewSettings()
+	client.sessions = &store
+	client.cache = NewCache()
+	client.s4uCache = NewCache()
 	var output bytes.Buffer
 	client.Print(&output)
 	if !strings.Contains(output.String(), "Service ticket cache:") {
@@ -192,14 +245,18 @@ func TestClientDiagnosticsConfiguredKeytab(t *testing.T) {
 	cfg.LibDefaults.DNSLookupKDC = false
 	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES128_CTS_HMAC_SHA1_96}
 	cfg.LibDefaults.PreferredPreauthTypes = []int{int(etypeID.AES128_CTS_HMAC_SHA1_96)}
-	cfg.Realms = []config.Realm{{Realm: "EXAMPLE.ORG", KDC: []string{"127.0.0.1:88"}}}
+	cfg.Realms = []config.Realm{kdcTestRealmConfig(clientTestOrgRealm, []string{clientTestKDCAddress})}
 	kt := keytab.New()
-	principal := keytab.Principal{Realm: "EXAMPLE.ORG", Components: []string{"alice"}, NameType: nametype.KRB_NT_PRINCIPAL}
+	principal := keytab.Principal{
+		Realm:      clientTestOrgRealm,
+		Components: []string{"alice"},
+		NameType:   nametype.KRB_NT_PRINCIPAL,
+	}
 	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
 	if err := kt.AddKey(principal, 1, key, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	client := NewWithKeytab("alice", "EXAMPLE.ORG", kt, cfg)
+	client := NewWithKeytab("alice", clientTestOrgRealm, kt, cfg)
 	var output bytes.Buffer
 	if err := client.Diagnostics(&output); err != nil {
 		t.Fatalf("configured diagnostics: %v", err)
@@ -210,7 +267,9 @@ func TestClientDiagnosticsConfiguredKeytab(t *testing.T) {
 
 	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES256_CTS_HMAC_SHA1_96}
 	cfg.LibDefaults.PreferredPreauthTypes = []int{int(etypeID.AES256_CTS_HMAC_SHA1_96)}
-	if err := client.Diagnostics(io.Discard); err == nil || !strings.Contains(err.Error(), "default_tkt_enctypes") || !strings.Contains(err.Error(), "preferred_preauth_types") {
+	if err := client.Diagnostics(io.Discard); err == nil ||
+		!strings.Contains(err.Error(), "default_tkt_enctypes") ||
+		!strings.Contains(err.Error(), "preferred_preauth_types") {
 		t.Fatalf("mismatched diagnostics = %v", err)
 	}
 }

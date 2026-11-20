@@ -35,8 +35,17 @@ func TestClientS4U2SelfAD(t *testing.T) {
 	if err := ticket.DecryptEncPart(env.Keytab, nil); err != nil {
 		t.Fatalf("decrypt S4U2self ticket: %v", err)
 	}
-	if !strings.EqualFold(ticket.DecryptedEncPart.CName.PrincipalNameString(), env.User) || !types.RealmEqual(ticket.DecryptedEncPart.CRealm, env.UserRealm) {
-		t.Fatalf("S4U2self ticket identity = %s@%s, want %s@%s", ticket.DecryptedEncPart.CName.PrincipalNameString(), ticket.DecryptedEncPart.CRealm, env.User, env.UserRealm)
+	if !strings.EqualFold(
+		ticket.DecryptedEncPart.CName.PrincipalNameString(),
+		env.User,
+	) || !types.RealmEqual(ticket.DecryptedEncPart.CRealm, env.UserRealm) {
+		t.Fatalf(
+			"S4U2self ticket identity = %s@%s, want %s@%s",
+			ticket.DecryptedEncPart.CName.PrincipalNameString(),
+			ticket.DecryptedEncPart.CRealm,
+			env.User,
+			env.UserRealm,
+		)
 	}
 	if _, ok := cl.GetCachedServiceTicketForUserInfo(user, env.UserRealm, spn); !ok {
 		t.Fatal("S4U2self ticket was not added to the user-specific cache")

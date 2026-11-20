@@ -34,12 +34,12 @@ func newFASTTestState(t *testing.T) (*Client, *fastState, messages.ASReq) {
 	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES128_CTS_HMAC_SHA1_96}
 	cname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user")
 	armorKey := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
-	armorTicket := s4uTestTicket("EXAMPLE.ORG", "krbtgt/EXAMPLE.ORG")
-	cl := NewWithKeytab("user", "EXAMPLE.ORG", phase5Keytab(t, etypeID.AES128_CTS_HMAC_SHA1_96), cfg,
-		FASTArmorWithIdentity(armorTicket, armorKey, cname, "EXAMPLE.ORG"),
+	armorTicket := s4uTestTicket(exchangeFixtureRealm, "krbtgt/EXAMPLE.ORG")
+	cl := NewWithKeytab("user", exchangeFixtureRealm, phase5Keytab(t, etypeID.AES128_CTS_HMAC_SHA1_96), cfg,
+		FASTArmorWithIdentity(armorTicket, armorKey, cname, exchangeFixtureRealm),
 		DisablePAReqEncPARep(true),
 	)
-	state, err := cl.newFASTState("EXAMPLE.ORG", true)
+	state, err := cl.newFASTState(exchangeFixtureRealm, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,20 +77,14 @@ func TestClientWireConversionBounds(t *testing.T) {
 func TestFASTASRequestEncryptsInnerRequest(t *testing.T) {
 	cl, state, request := newFASTTestState(t)
 	request.PAData = types.PADataSequence{{PADataType: patype.PA_ENC_TIMESTAMP, PADataValue: []byte("outside-fast")}}
-	if err := state.setASPreAuth(cl, nil, &request); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, state.setASPreAuth(cl, nil, &request))
 	wrapped, err := state.wrapASRequest(request)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	if len(wrapped.PAData) != 1 || wrapped.PAData[0].PADataType != patype.PA_FX_FAST {
 		t.Fatalf("outer padata = %#v, want only PA-FX-FAST", wrapped.PAData)
 	}
 	fastPA, err := wrapped.PAData[0].GetPAFXFastRequest()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	if fastPA.ArmoredData.Armor.ArmorType != fxFastArmorAPRequest {
 		t.Fatalf("armor type = %d, want %d", fastPA.ArmoredData.Armor.ArmorType, fxFastArmorAPRequest)
 	}
@@ -101,39 +95,39 @@ func TestFASTASRequestEncryptsInnerRequest(t *testing.T) {
 	if ierr := armorAPReq.DecryptAuthenticatorWithKeyUsage(state.armor.key, keyusage.AP_REQ_AUTHENTICATOR); ierr != nil {
 		t.Fatal(ierr)
 	}
-	if ierr := armorAPReq.DecryptAuthenticatorWithKeyUsage(state.armor.key, keyusage.TGS_REQ_PA_TGS_REQ_AP_REQ_AUTHENTICATOR); ierr == nil {
+	if ierr := armorAPReq.DecryptAuthenticatorWithKeyUsage(
+		state.armor.key,
+		keyusage.TGS_REQ_PA_TGS_REQ_AP_REQ_AUTHENTICATOR,
+	); ierr == nil {
 		t.Fatal("FAST armor authenticator accepted TGS-REQ key usage")
 	}
-	if len(armorAPReq.Authenticator.SubKey.KeyValue) == 0 {
-		t.Fatal("FAST armor authenticator omitted its subkey")
-	}
+	require.NotEmpty(t, armorAPReq.Authenticator.SubKey.KeyValue, "FAST armor authenticator omitted its subkey")
 	body, err := request.ReqBody.Marshal()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	et, err := crypto.GetEtype(state.armorKey.KeyType)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !et.VerifyChecksum(state.armorKey.KeyValue, body, fastPA.ArmoredData.ReqChecksum.Checksum, keyusage.FAST_REQ_CHKSUM) {
+	require.NoError(t, err)
+	if !et.VerifyChecksum(
+		state.armorKey.KeyValue,
+		body,
+		fastPA.ArmoredData.ReqChecksum.Checksum,
+		keyusage.FAST_REQ_CHKSUM,
+	) {
 		t.Fatal("FAST outer request-body checksum did not verify")
 	}
 	plain, err := crypto.DecryptEncPart(fastPA.ArmoredData.EncFastReq, state.armorKey, keyusage.FAST_ENC)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	var inner types.KrbFastReq
-	if err := inner.Unmarshal(plain); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, inner.Unmarshal(plain))
 	if !inner.PAData.Contains(patype.PA_ENCRYPTED_CHALLENGE) || inner.PAData.Contains(patype.PA_ENC_TIMESTAMP) {
 		t.Fatalf("inner padata types = %#v, want encrypted challenge without encrypted timestamp", inner.PAData)
 	}
 }
 
 func TestFASTASPreAuthEchoesCookie(t *testing.T) {
+	var emptyPrincipal types.PrincipalName
+
 	cl, state, request := newFASTTestState(t)
-	info, err := asn1.Marshal(types.ETypeInfo2{{EType: etypeID.AES128_CTS_HMAC_SHA1_96}})
+	info, err := asn1.Marshal(types.ETypeInfo2{{Salt: "", S2KParams: nil, EType: etypeID.AES128_CTS_HMAC_SHA1_96}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,18 +139,25 @@ func TestFASTASPreAuthEchoesCookie(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hint := messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KDC_ERR_PREAUTH_REQUIRED, "")
+	hint := messages.NewKRBError(emptyPrincipal, exchangeFixtureRealm, errorcode.KDC_ERR_PREAUTH_REQUIRED, "")
 	hint.CName = cl.Credentials.CName()
 	hint.CRealm = cl.Credentials.Realm()
 	hint.EData = encoded
 	if ierr := state.setASPreAuth(cl, &hint, &request); ierr != nil {
 		t.Fatal(ierr)
 	}
-	secondMethodData, err := asn1.Marshal(types.PADataSequence{{PADataType: patype.PA_FX_COOKIE, PADataValue: []byte("replacement-cookie")}})
+	secondMethodData, err := asn1.Marshal(
+		types.PADataSequence{{PADataType: patype.PA_FX_COOKIE, PADataValue: []byte("replacement-cookie")}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondHint := messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED, "")
+	secondHint := messages.NewKRBError(
+		emptyPrincipal,
+		exchangeFixtureRealm,
+		errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED,
+		"",
+	)
 	secondHint.EData = secondMethodData
 	if err := state.setASPreAuth(cl, &secondHint, &request); err != nil {
 		t.Fatalf("second FAST round without ETYPE-INFO failed: %v", err)
@@ -170,11 +171,18 @@ func TestFASTASPreAuthEchoesCookie(t *testing.T) {
 }
 
 func TestFASTASPreAuthRejectsMalformedMethodData(t *testing.T) {
+	var emptyPrincipal types.PrincipalName
+
 	cl, state, request := newFASTTestState(t)
 	if err := state.setASPreAuth(cl, nil, &request); err != nil {
 		t.Fatal(err)
 	}
-	hint := messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED, "")
+	hint := messages.NewKRBError(
+		emptyPrincipal,
+		exchangeFixtureRealm,
+		errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED,
+		"",
+	)
 	hint.EData = []byte{0x30, 0x01, 0xff}
 
 	err := state.setASPreAuth(cl, &hint, &request)
@@ -184,8 +192,10 @@ func TestFASTASPreAuthRejectsMalformedMethodData(t *testing.T) {
 }
 
 func TestFASTUnwrapAuthenticatedError(t *testing.T) {
+	var emptyPrincipal types.PrincipalName
+
 	_, state, request := newFASTTestState(t)
-	inner := messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KDC_ERR_PREAUTH_FAILED, "inner")
+	inner := messages.NewKRBError(emptyPrincipal, exchangeFixtureRealm, errorcode.KDC_ERR_PREAUTH_FAILED, "inner")
 	innerBytes, err := inner.Marshal()
 	if err != nil {
 		t.Fatal(err)
@@ -226,13 +236,18 @@ func TestFASTUnwrapResponseRetainsDecodeCause(t *testing.T) {
 }
 
 func TestFASTASExchangeRejectsUnarmoredReplyAfterActivation(t *testing.T) {
+	var (
+		emptyPrincipal types.PrincipalName
+		emptyReplyPart messages.EncKDCRepPart
+	)
+
 	cl, _, request := newFASTTestState(t)
-	info, err := asn1.Marshal(types.ETypeInfo2{{EType: etypeID.AES128_CTS_HMAC_SHA1_96}})
+	info, err := asn1.Marshal(types.ETypeInfo2{{Salt: "", S2KParams: nil, EType: etypeID.AES128_CTS_HMAC_SHA1_96}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	methodData, err := asn1.Marshal(types.PADataSequence{
-		{PADataType: patype.PA_FX_FAST},
+		{PADataValue: nil, PADataType: patype.PA_FX_FAST},
 		{PADataType: patype.PA_ETYPE_INFO2, PADataValue: info},
 	})
 	if err != nil {
@@ -242,7 +257,7 @@ func TestFASTASExchangeRejectsUnarmoredReplyAfterActivation(t *testing.T) {
 	cl.sendToKDCFunc = func(requestBytes []byte, _ string) ([]byte, error) {
 		calls++
 		if calls == 1 {
-			kdcErr := messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KDC_ERR_PREAUTH_REQUIRED, "")
+			kdcErr := messages.NewKRBError(emptyPrincipal, exchangeFixtureRealm, errorcode.KDC_ERR_PREAUTH_REQUIRED, "")
 			kdcErr.EData = methodData
 			return nil, kdcErr
 		}
@@ -254,14 +269,16 @@ func TestFASTASExchangeRejectsUnarmoredReplyAfterActivation(t *testing.T) {
 			t.Fatalf("retry padata = %#v, want only PA-FX-FAST", wrapped.PAData)
 		}
 		reply := messages.ASRep{KDCRepFields: messages.KDCRepFields{
-			PVNO: iana.PVNO, MsgType: msgtype.KRB_AS_REP,
+			PAData:           nil,
+			DecryptedEncPart: emptyReplyPart,
+			PVNO:             iana.PVNO, MsgType: msgtype.KRB_AS_REP,
 			CRealm: request.ReqBody.Realm, CName: request.ReqBody.CName,
 			Ticket:  s4uTestTicket(request.ReqBody.Realm, request.ReqBody.SName.PrincipalNameString()),
-			EncPart: types.EncryptedData{EType: etypeID.AES128_CTS_HMAC_SHA1_96, Cipher: []byte("unarmored")},
+			EncPart: types.EncryptedData{KVNO: 0, EType: etypeID.AES128_CTS_HMAC_SHA1_96, Cipher: []byte("unarmored")},
 		}}
 		return reply.Marshal()
 	}
-	if _, err := cl.ASExchange("EXAMPLE.ORG", request, 0); err == nil {
+	if _, err := cl.ASExchange(exchangeFixtureRealm, request, 0); err == nil {
 		t.Fatal("unarmored AS-REP was accepted after FAST activation")
 	}
 	if calls != 2 {
@@ -271,8 +288,11 @@ func TestFASTASExchangeRejectsUnarmoredReplyAfterActivation(t *testing.T) {
 
 func TestFASTStateActivatesFromRealmMetadata(t *testing.T) {
 	cl, _, _ := newFASTTestState(t)
-	cl.sessions.update(&session{realm: "EXAMPLE.ORG", supportedEncTypes: msflags.SupportedEncTypeFAST})
-	state, err := cl.newFASTState("EXAMPLE.ORG", false)
+	entry := new(session)
+	entry.realm = exchangeFixtureRealm
+	entry.supportedEncTypes = msflags.SupportedEncTypeFAST
+	cl.sessions.update(entry)
+	state, err := cl.newFASTState(exchangeFixtureRealm, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,14 +306,22 @@ func TestFASTArmorKeytabAcquisitionFailures(t *testing.T) {
 	cfg.LibDefaults.DNSLookupKDC = true
 	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES128_CTS_HMAC_SHA1_96}
 
-	empty := NewWithPassword("user", "EXAMPLE.ORG", "password", cfg, FASTArmorFromKeytab(keytab.New()))
-	if _, err := empty.newFASTState("EXAMPLE.ORG", true); err == nil || !strings.Contains(err.Error(), "no principals") {
-		t.Fatalf("empty armor keytab error = %v", err)
-	}
+	empty := NewWithPassword("user", exchangeFixtureRealm, "password", cfg, FASTArmorFromKeytab(keytab.New()))
+	_, err := empty.newFASTState(exchangeFixtureRealm, true)
+	require.ErrorContains(t, err, "no principals")
 
-	client := NewWithPassword("user", "EXAMPLE.ORG", "password", cfg, FASTArmorFromKeytab(phase5Keytab(t, etypeID.AES128_CTS_HMAC_SHA1_96)))
+	client := NewWithPassword(
+		"user",
+		exchangeFixtureRealm,
+		"password",
+		cfg,
+		FASTArmorFromKeytab(phase5Keytab(t, etypeID.AES128_CTS_HMAC_SHA1_96)),
+	)
 	client.sendToKDCFunc = func([]byte, string) ([]byte, error) { return nil, errors.New("offline") }
-	if _, err := client.newFASTState("EXAMPLE.ORG", true); err == nil || !strings.Contains(err.Error(), "acquire FAST armor TGT") {
+	if _, err := client.newFASTState(exchangeFixtureRealm, true); err == nil || !strings.Contains(
+		err.Error(),
+		"acquire FAST armor TGT",
+	) {
 		t.Fatalf("armor login error = %v", err)
 	}
 	if client.fastArmorCl != nil {
@@ -302,29 +330,44 @@ func TestFASTArmorKeytabAcquisitionFailures(t *testing.T) {
 }
 
 func TestFASTExplicitArmorValidation(t *testing.T) {
+	var emptyPrincipal types.PrincipalName
+
 	cfg := config.New()
-	client := NewWithPassword("user", "EXAMPLE.ORG", "password", cfg)
+	client := NewWithPassword("user", exchangeFixtureRealm, "password", cfg)
 	state := new(fastState)
 	client.settings.fastArmor = &fastArmorCredentials{
-		ticket: s4uTestTicket("EXAMPLE.ORG", "HTTP/not-a-tgt"),
+		cname:  emptyPrincipal,
+		realm:  "",
+		ticket: s4uTestTicket(exchangeFixtureRealm, "HTTP/not-a-tgt"),
 		key:    types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")},
 	}
-	if err := state.activate(client, "EXAMPLE.ORG"); err == nil || !strings.Contains(err.Error(), "not a TGT") {
+	if err := state.activate(client, exchangeFixtureRealm); err == nil || !strings.Contains(err.Error(), "not a TGT") {
 		t.Fatalf("invalid armor ticket error = %v", err)
 	}
-	client.settings.fastArmor.ticket = s4uTestTicket("EXAMPLE.ORG", "krbtgt/EXAMPLE.ORG")
-	client.settings.fastArmor.key = types.EncryptionKey{KeyType: -1}
-	if err := state.activate(client, "EXAMPLE.ORG"); err == nil || !strings.Contains(err.Error(), "session key") {
+	client.settings.fastArmor.ticket = s4uTestTicket(exchangeFixtureRealm, "krbtgt/EXAMPLE.ORG")
+	client.settings.fastArmor.key = types.EncryptionKey{KeyValue: nil, KeyType: -1}
+	if err := state.activate(client, exchangeFixtureRealm); err == nil || !strings.Contains(err.Error(), "session key") {
 		t.Fatalf("invalid armor key error = %v", err)
 	}
 }
 
 func fastTestError(t *testing.T, state *fastState, nonce int, paData types.PADataSequence) messages.KRBError {
 	t.Helper()
-	response := types.KrbFastResponse{PAData: paData, Nonce: mustClientUint32(t, "FAST nonce", nonce)}
+	var (
+		emptyKey       types.EncryptionKey
+		emptyFinished  types.KrbFastFinished
+		emptyPrincipal types.PrincipalName
+	)
+
+	response := types.KrbFastResponse{
+		StrengthenKey: emptyKey,
+		Finished:      emptyFinished,
+		PAData:        paData,
+		Nonce:         mustClientUint32(t, "FAST nonce", nonce),
+	}
 	methodData, err := asn1.Marshal(fastTestReplyPAData(t, state, response))
 	require.NoError(t, err)
-	outer := messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KDC_ERR_PREAUTH_FAILED, "outer")
+	outer := messages.NewKRBError(emptyPrincipal, exchangeFixtureRealm, errorcode.KDC_ERR_PREAUTH_FAILED, "outer")
 	outer.EData = methodData
 	return outer
 }
@@ -342,50 +385,76 @@ func fastTestReplyPAData(t *testing.T, state *fastState, response types.KrbFastR
 	return types.PADataSequence{pa}
 }
 
-func TestFASTVerifyASReplyStrengthensKey(t *testing.T) {
-	cl, state, request := newFASTTestState(t)
-	if err := state.setASPreAuth(cl, nil, &request); err != nil {
-		t.Fatal(err)
+func fastTestFinishedChecksum(t *testing.T, armorKey types.EncryptionKey, ticket *messages.Ticket) []byte {
+	t.Helper()
+	ticketBytes, err := ticket.Marshal()
+	require.NoError(t, err)
+	et, err := crypto.GetEtype(armorKey.KeyType)
+	require.NoError(t, err)
+	checksum, err := et.GetChecksumHash(armorKey.KeyValue, ticketBytes, keyusage.FAST_FINISHED)
+	require.NoError(t, err)
+	return checksum
+}
+
+func testKDCReplyFields(body *messages.KDCReqBody, messageType int) messages.KDCRepFields {
+	var (
+		emptyEncryptedData types.EncryptedData
+		emptyReplyPart     messages.EncKDCRepPart
+	)
+
+	return messages.KDCRepFields{
+		PVNO:             iana.PVNO,
+		MsgType:          messageType,
+		PAData:           nil,
+		CRealm:           body.Realm,
+		CName:            body.CName,
+		Ticket:           s4uTestTicket(body.Realm, body.SName.PrincipalNameString()),
+		EncPart:          emptyEncryptedData,
+		DecryptedEncPart: emptyReplyPart,
 	}
-	strengthen := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("strengthen-key!!")}
-	strengthened, err := crypto.KRBFXCF2(strengthen, state.replyKey, []byte("strengthenkey"), []byte("replykey"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now().UTC()
-	reply := messages.ASRep{KDCRepFields: messages.KDCRepFields{
-		PVNO: iana.PVNO, MsgType: msgtype.KRB_AS_REP,
-		CRealm: request.ReqBody.Realm, CName: request.ReqBody.CName,
-		Ticket: s4uTestTicket(request.ReqBody.Realm, request.ReqBody.SName.PrincipalNameString()),
-	}}
+}
+
+func marshalFASTTestReplyPart(t *testing.T, body *messages.KDCReqBody, keyValue string, now time.Time) []byte {
+	t.Helper()
 	part := messages.EncKDCRepPart{
-		Key:   types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("session-key-1234")},
-		Nonce: request.ReqBody.Nonce, Flags: types.NewKrbFlags(), AuthTime: now, StartTime: now,
-		EndTime: now.Add(time.Hour), SRealm: request.ReqBody.Realm, SName: request.ReqBody.SName,
+		Key:           types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte(keyValue)},
+		LastReqs:      nil,
+		Nonce:         body.Nonce,
+		KeyExpiration: time.Time{},
+		Flags:         types.NewKrbFlags(),
+		AuthTime:      now,
+		StartTime:     now,
+		EndTime:       now.Add(time.Hour),
+		RenewTill:     time.Time{},
+		SRealm:        body.Realm,
+		SName:         body.SName,
+		CAddr:         nil,
+		EncPAData:     nil,
 	}
 	partBytes, err := part.Marshal()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	return partBytes
+}
+
+func TestFASTVerifyASReplyStrengthensKey(t *testing.T) {
+	cl, state, request := newFASTTestState(t)
+	require.NoError(t, state.setASPreAuth(cl, nil, &request))
+	strengthen := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("strengthen-key!!")}
+	strengthened, err := crypto.KRBFXCF2(strengthen, state.replyKey, []byte("strengthenkey"), []byte("replykey"))
+	require.NoError(t, err)
+	now := time.Now().UTC()
+	reply := messages.ASRep{KDCRepFields: testKDCReplyFields(&request.ReqBody, msgtype.KRB_AS_REP)}
+	partBytes := marshalFASTTestReplyPart(t, &request.ReqBody, "session-key-1234", now)
 	reply.EncPart, err = crypto.GetEncryptedData(partBytes, strengthened, keyusage.AS_REP_ENCPART, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	challengePA := fastTestKDCChallenge(t, state, now)
-	ticketBytes, err := reply.Ticket.Marshal()
-	if err != nil {
-		t.Fatal(err)
-	}
-	et, err := crypto.GetEtype(state.armorKey.KeyType)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ticketChecksum, err := et.GetChecksumHash(state.armorKey.KeyValue, ticketBytes, keyusage.FAST_FINISHED)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ticketChecksum := fastTestFinishedChecksum(t, state.armorKey, &reply.Ticket)
 	response := types.KrbFastResponse{
-		PAData: challengePASequence(challengePA), StrengthenKey: strengthen, Nonce: mustClientUint32(t, "FAST request nonce", request.ReqBody.Nonce),
+		PAData: challengePASequence(challengePA), StrengthenKey: strengthen, Nonce: mustClientUint32(
+			t,
+			"FAST request nonce",
+			request.ReqBody.Nonce,
+		),
 		Finished: types.KrbFastFinished{
 			Timestamp: now, Usec: now.Nanosecond() / int(time.Microsecond), CRealm: reply.CRealm, CName: reply.CName,
 			TicketChecksum: types.Checksum{CksumType: chksumtype.HMAC_SHA1_96_AES128, Checksum: ticketChecksum},
@@ -393,9 +462,7 @@ func TestFASTVerifyASReplyStrengthensKey(t *testing.T) {
 	}
 	fastPA := fastTestReplyPAData(t, state, response)
 	reply.PAData = fastPA
-	if err := state.verifyASReply(cl, &reply, request, nil); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, state.verifyASReply(cl, &reply, request, nil))
 	if reply.DecryptedEncPart.Nonce != request.ReqBody.Nonce {
 		t.Fatal("FAST-strengthened AS-REP was not decrypted")
 	}
@@ -423,99 +490,85 @@ func TestFASTVerifyASReplyStrengthensKey(t *testing.T) {
 }
 
 func TestFASTTGSRequestUsesImplicitArmor(t *testing.T) {
+	var (
+		emptyArmor fastArmorCredentials
+		emptyKey   types.EncryptionKey
+	)
+
 	cl, _, _ := newFASTTestState(t)
-	tgt := s4uTestTicket("EXAMPLE.ORG", "krbtgt/EXAMPLE.ORG")
+	tgt := s4uTestTicket(exchangeFixtureRealm, "krbtgt/EXAMPLE.ORG")
 	sessionKey := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("tgt-session-key!")}
-	request, err := messages.NewTGSReq(cl.Credentials.CName(), "EXAMPLE.ORG", cl.Config, tgt, sessionKey,
+	request, err := messages.NewTGSReq(cl.Credentials.CName(), exchangeFixtureRealm, cl.Config, tgt, sessionKey,
 		types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "HTTP/service.example.org"), false)
-	if err != nil {
-		t.Fatal(err)
+	require.NoError(t, err)
+	state := &fastState{
+		armor:         emptyArmor,
+		armorValue:    nil,
+		armorKey:      emptyKey,
+		replyKey:      emptyKey,
+		sentChallenge: false,
+		active:        true,
 	}
-	state := &fastState{active: true}
 	wrapped, err := state.wrapTGSRequest(request, tgt, sessionKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(wrapped.PAData) != 2 || wrapped.PAData[0].PADataType != patype.PA_TGS_REQ || wrapped.PAData[1].PADataType != patype.PA_FX_FAST {
+	require.NoError(t, err)
+	if len(
+		wrapped.PAData,
+	) != 2 || wrapped.PAData[0].PADataType != patype.PA_TGS_REQ || wrapped.PAData[1].PADataType != patype.PA_FX_FAST {
 		t.Fatalf("outer TGS padata types = %#v, want PA-TGS-REQ and PA-FX-FAST", wrapped.PAData)
 	}
 	fastPA, err := wrapped.PAData[1].GetPAFXFastRequest()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	if fastPA.ArmoredData.Armor.ArmorType != 0 || len(fastPA.ArmoredData.Armor.ArmorValue) != 0 {
 		t.Fatal("implicit TGS armor unexpectedly included an explicit armor value")
 	}
 	et, err := crypto.GetEtype(state.armorKey.KeyType)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !et.VerifyChecksum(state.armorKey.KeyValue, wrapped.PAData[0].PADataValue, fastPA.ArmoredData.ReqChecksum.Checksum, keyusage.FAST_REQ_CHKSUM) {
+	require.NoError(t, err)
+	if !et.VerifyChecksum(
+		state.armorKey.KeyValue,
+		wrapped.PAData[0].PADataValue,
+		fastPA.ArmoredData.ReqChecksum.Checksum,
+		keyusage.FAST_REQ_CHKSUM,
+	) {
 		t.Fatal("FAST PA-TGS-REQ checksum did not verify")
 	}
 	plain, err := crypto.DecryptEncPart(fastPA.ArmoredData.EncFastReq, state.armorKey, keyusage.FAST_ENC)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	var inner types.KrbFastReq
-	if err := inner.Unmarshal(plain); err != nil {
-		t.Fatal(err)
-	}
-	if inner.PAData.Contains(patype.PA_TGS_REQ) || !inner.PAData.Contains(patype.PA_PAC_REQUEST) || !inner.PAData.Contains(patype.PA_PAC_OPTIONS) {
+	require.NoError(t, inner.Unmarshal(plain))
+	if inner.PAData.Contains(patype.PA_TGS_REQ) || !inner.PAData.Contains(patype.PA_PAC_REQUEST) || !inner.PAData.Contains(
+		patype.PA_PAC_OPTIONS,
+	) {
 		t.Fatalf("inner TGS padata types = %#v", inner.PAData)
 	}
 }
 
 func TestFASTVerifyTGSReplyUsesStrengthenedSubkey(t *testing.T) {
 	cl, _, _ := newFASTTestState(t)
-	tgt := s4uTestTicket("EXAMPLE.ORG", "krbtgt/EXAMPLE.ORG")
+	tgt := s4uTestTicket(exchangeFixtureRealm, "krbtgt/EXAMPLE.ORG")
 	sessionKey := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("tgt-session-key!")}
-	request, err := messages.NewTGSReq(cl.Credentials.CName(), "EXAMPLE.ORG", cl.Config, tgt, sessionKey,
+	request, err := messages.NewTGSReq(cl.Credentials.CName(), exchangeFixtureRealm, cl.Config, tgt, sessionKey,
 		types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "HTTP/service.example.org"), false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	state := &fastState{active: true}
+	require.NoError(t, err)
+	state := new(fastState)
+	state.active = true
 	if _, ierr := state.wrapTGSRequest(request, tgt, sessionKey); ierr != nil {
 		t.Fatal(ierr)
 	}
 	strengthen := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("strengthen-key!!")}
 	replyKey, err := crypto.KRBFXCF2(strengthen, state.replyKey, []byte("strengthenkey"), []byte("replykey"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	now := time.Now().UTC()
-	reply := messages.TGSRep{KDCRepFields: messages.KDCRepFields{
-		PVNO: iana.PVNO, MsgType: msgtype.KRB_TGS_REP, CRealm: request.ReqBody.Realm, CName: request.ReqBody.CName,
-		Ticket: s4uTestTicket(request.ReqBody.Realm, request.ReqBody.SName.PrincipalNameString()),
-	}}
-	part := messages.EncKDCRepPart{
-		Key:   types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("service-key-123")},
-		Nonce: request.ReqBody.Nonce, Flags: types.NewKrbFlags(), AuthTime: now, StartTime: now,
-		EndTime: now.Add(time.Hour), SRealm: request.ReqBody.Realm, SName: request.ReqBody.SName,
-	}
-	partBytes, err := part.Marshal()
-	if err != nil {
-		t.Fatal(err)
-	}
+	reply := messages.TGSRep{KDCRepFields: testKDCReplyFields(&request.ReqBody, msgtype.KRB_TGS_REP)}
+	partBytes := marshalFASTTestReplyPart(t, &request.ReqBody, "service-key-123", now)
 	reply.EncPart, err = crypto.GetEncryptedData(partBytes, replyKey, keyusage.TGS_REP_ENCPART_AUTHENTICATOR_SUB_KEY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ticketBytes, err := reply.Ticket.Marshal()
-	if err != nil {
-		t.Fatal(err)
-	}
-	et, err := crypto.GetEtype(state.armorKey.KeyType)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checksum, err := et.GetChecksumHash(state.armorKey.KeyValue, ticketBytes, keyusage.FAST_FINISHED)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	checksum := fastTestFinishedChecksum(t, state.armorKey, &reply.Ticket)
 	response := types.KrbFastResponse{
-		PAData: types.PADataSequence{}, StrengthenKey: strengthen, Nonce: mustClientUint32(t, "FAST request nonce", request.ReqBody.Nonce),
+		PAData: types.PADataSequence{}, StrengthenKey: strengthen, Nonce: mustClientUint32(
+			t,
+			"FAST request nonce",
+			request.ReqBody.Nonce,
+		),
 		Finished: types.KrbFastFinished{
 			Timestamp: now, Usec: now.Nanosecond() / int(time.Microsecond), CRealm: reply.CRealm, CName: reply.CName,
 			TicketChecksum: types.Checksum{CksumType: chksumtype.HMAC_SHA1_96_AES128, Checksum: checksum},
@@ -523,9 +576,7 @@ func TestFASTVerifyTGSReplyUsesStrengthenedSubkey(t *testing.T) {
 	}
 	fastPA := fastTestReplyPAData(t, state, response)
 	reply.PAData = fastPA
-	if err := state.verifyTGSReply(cl, &reply, request); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, state.verifyTGSReply(cl, &reply, request))
 	if reply.DecryptedEncPart.Nonce != request.ReqBody.Nonce {
 		t.Fatal("FAST-strengthened TGS-REP was not decrypted")
 	}
@@ -543,21 +594,35 @@ func TestFASTVerifyTGSReplyUsesStrengthenedSubkey(t *testing.T) {
 	require.ErrorContains(t, verifyErr, "CName in response does not match")
 	require.Equal(t, offset, cl.KDCTimeOffset())
 
-	response.StrengthenKey = types.EncryptionKey{}
+	checkFASTTGSReplyRejections(t, cl, state, &reply, request, response)
+}
+
+func checkFASTTGSReplyRejections(
+	t *testing.T,
+	cl *Client,
+	state *fastState,
+	reply *messages.TGSRep,
+	request messages.TGSReq,
+	response types.KrbFastResponse,
+) {
+	t.Helper()
+	var emptyKey types.EncryptionKey
+	strengthen := response.StrengthenKey
+	response.StrengthenKey = emptyKey
 	reply.PAData = fastTestReplyPAData(t, state, response)
-	if err := state.verifyTGSReply(cl, &reply, request); err == nil {
+	if err := state.verifyTGSReply(cl, reply, request); err == nil {
 		t.Fatal("FAST TGS-REP without strengthen-key was accepted")
 	}
 	response.StrengthenKey = strengthen
 	response.Nonce++
 	reply.PAData = fastTestReplyPAData(t, state, response)
-	if err := state.verifyTGSReply(cl, &reply, request); err == nil {
+	if err := state.verifyTGSReply(cl, reply, request); err == nil {
 		t.Fatal("FAST TGS-REP with mismatched nonce was accepted")
 	}
 	response.Nonce = mustClientUint32(t, "FAST request nonce", request.ReqBody.Nonce)
 	response.Finished.CName = types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "other-user")
 	reply.PAData = fastTestReplyPAData(t, state, response)
-	if err := state.verifyTGSReply(cl, &reply, request); err == nil {
+	if err := state.verifyTGSReply(cl, reply, request); err == nil {
 		t.Fatal("FAST TGS-REP with mismatched finished identity was accepted")
 	}
 }
@@ -567,11 +632,13 @@ func TestCheckFASTReplyVerificationRejectsWithoutCause(t *testing.T) {
 }
 
 func TestFASTTGSExchangeRejectsUnarmoredReply(t *testing.T) {
+	var emptyReplyPart messages.EncKDCRepPart
+
 	cl, _, _ := newFASTTestState(t)
 	cl.settings.requireFAST = true
-	tgt := s4uTestTicket("EXAMPLE.ORG", "krbtgt/EXAMPLE.ORG")
+	tgt := s4uTestTicket(exchangeFixtureRealm, "krbtgt/EXAMPLE.ORG")
 	sessionKey := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("tgt-session-key!")}
-	request, err := messages.NewTGSReq(cl.Credentials.CName(), "EXAMPLE.ORG", cl.Config, tgt, sessionKey,
+	request, err := messages.NewTGSReq(cl.Credentials.CName(), exchangeFixtureRealm, cl.Config, tgt, sessionKey,
 		types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "HTTP/service.example.org"), false)
 	if err != nil {
 		t.Fatal(err)
@@ -585,14 +652,16 @@ func TestFASTTGSExchangeRejectsUnarmoredReply(t *testing.T) {
 			t.Fatalf("TGS request padata = %#v, want PA-TGS-REQ and PA-FX-FAST", wrapped.PAData)
 		}
 		reply := messages.TGSRep{KDCRepFields: messages.KDCRepFields{
-			PVNO: iana.PVNO, MsgType: msgtype.KRB_TGS_REP,
+			PAData:           nil,
+			DecryptedEncPart: emptyReplyPart,
+			PVNO:             iana.PVNO, MsgType: msgtype.KRB_TGS_REP,
 			CRealm: request.ReqBody.Realm, CName: request.ReqBody.CName,
 			Ticket:  s4uTestTicket(request.ReqBody.Realm, request.ReqBody.SName.PrincipalNameString()),
-			EncPart: types.EncryptedData{EType: etypeID.AES128_CTS_HMAC_SHA1_96, Cipher: []byte("unarmored")},
+			EncPart: types.EncryptedData{KVNO: 0, EType: etypeID.AES128_CTS_HMAC_SHA1_96, Cipher: []byte("unarmored")},
 		}}
 		return reply.Marshal()
 	}
-	if _, _, err := cl.TGSExchange(request, "EXAMPLE.ORG", tgt, sessionKey, 0); err == nil {
+	if _, _, err := cl.TGSExchange(request, exchangeFixtureRealm, tgt, sessionKey, 0); err == nil {
 		t.Fatal("unarmored TGS-REP was accepted while FAST was required")
 	}
 }
@@ -620,11 +689,23 @@ func fastTestKDCChallenge(t *testing.T, state *fastState, now time.Time) types.P
 }
 
 func TestNilFASTStateRejectsOperations(t *testing.T) {
+	var (
+		emptyASRequest  messages.ASReq
+		emptyTGSRequest messages.TGSReq
+		emptyTicket     messages.Ticket
+		emptyKey        types.EncryptionKey
+		emptyKRBError   messages.KRBError
+	)
+
 	var state *fastState
-	if _, err := state.wrapASRequest(messages.ASReq{}); err == nil {
+	if _, err := state.wrapASRequest(emptyASRequest); err == nil {
 		t.Fatal("nil FAST state accepted AS request")
 	}
-	if _, err := state.wrapTGSRequest(messages.TGSReq{}, messages.Ticket{}, types.EncryptionKey{}); err == nil {
+	if _, err := state.wrapTGSRequest(
+		emptyTGSRequest,
+		emptyTicket,
+		emptyKey,
+	); err == nil {
 		t.Fatal("nil FAST state accepted TGS request")
 	}
 	if err := state.setASPreAuth(nil, nil, nil); err == nil {
@@ -633,13 +714,13 @@ func TestNilFASTStateRejectsOperations(t *testing.T) {
 	if _, err := state.unwrapResponse(nil, 0); err == nil {
 		t.Fatal("nil FAST state decoded a response")
 	}
-	if _, err := state.unwrapError(messages.KRBError{}, 0); err == nil {
+	if _, err := state.unwrapError(emptyKRBError, 0); err == nil {
 		t.Fatal("nil FAST state decoded an error")
 	}
-	if _, err := state.verifyASReplyWithKey(nil, nil, messages.ASReq{}, nil, nil); err == nil {
+	if _, err := state.verifyASReplyWithKey(nil, nil, emptyASRequest, nil, nil); err == nil {
 		t.Fatal("nil FAST state verified an AS reply")
 	}
-	if err := state.verifyTGSReply(nil, nil, messages.TGSReq{}); err == nil {
+	if err := state.verifyTGSReply(nil, nil, emptyTGSRequest); err == nil {
 		t.Fatal("nil FAST state verified a TGS reply")
 	}
 }

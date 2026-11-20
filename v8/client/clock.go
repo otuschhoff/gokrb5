@@ -1,5 +1,4 @@
 //go:build !interop
-// +build !interop
 
 package client
 

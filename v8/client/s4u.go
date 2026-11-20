@@ -42,7 +42,11 @@ func S4UWithCertificate(certificate []byte) S4UOption {
 }
 
 // GetServiceTicketForUser obtains an S4U2self ticket for user to spn.
-func (cl *Client) GetServiceTicketForUser(user types.PrincipalName, userRealm, spn string, optionFns ...S4UOption) (messages.Ticket, types.EncryptionKey, error) {
+func (cl *Client) GetServiceTicketForUser(
+	user types.PrincipalName,
+	userRealm, spn string,
+	optionFns ...S4UOption,
+) (messages.Ticket, types.EncryptionKey, error) {
 	if userRealm == "" {
 		userRealm = cl.Credentials.Realm()
 	}
@@ -53,7 +57,9 @@ func (cl *Client) GetServiceTicketForUser(user types.PrincipalName, userRealm, s
 	service := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, spn)
 	tgt, tgtKey, err := cl.s4uRealmTGT(userRealm)
 	if err != nil {
-		return messages.Ticket{}, types.EncryptionKey{}, fmt.Errorf("obtain TGT for S4U2self user realm %s: %w", userRealm, err)
+		return messages.Ticket{}, types.EncryptionKey{}, fmt.Errorf(
+			"obtain TGT for S4U2self user realm %s: %w", userRealm, err,
+		)
 	}
 	reply, err := cl.s4u2SelfExchange(service, user, userRealm, userRealm, tgt, tgtKey, options)
 	if err != nil {
@@ -64,7 +70,11 @@ func (cl *Client) GetServiceTicketForUser(user types.PrincipalName, userRealm, s
 }
 
 // GetServiceTicketOnBehalfOf obtains an S4U2proxy ticket using evidence.
-func (cl *Client) GetServiceTicketOnBehalfOf(evidence messages.Ticket, spn string, optionFns ...S4UOption) (messages.Ticket, types.EncryptionKey, error) {
+func (cl *Client) GetServiceTicketOnBehalfOf(
+	evidence messages.Ticket,
+	spn string,
+	optionFns ...S4UOption,
+) (messages.Ticket, types.EncryptionKey, error) {
 	options := applyS4UOptions(optionFns)
 	user, userRealm, identityKnown := cl.s4uIdentityForTicket(evidence)
 	if identityKnown {
@@ -79,14 +89,19 @@ func (cl *Client) GetServiceTicketOnBehalfOf(evidence messages.Ticket, spn strin
 	}
 	tgt, tgtKey, err := cl.s4uProxyTGT(targetRealm)
 	if err != nil {
-		return messages.Ticket{}, types.EncryptionKey{}, fmt.Errorf("obtain TGT for S4U2proxy target realm %s: %w", targetRealm, err)
+		return messages.Ticket{}, types.EncryptionKey{}, fmt.Errorf(
+			"obtain TGT for S4U2proxy target realm %s: %w", targetRealm, err,
+		)
 	}
 	reply, err := cl.s4u2ProxyExchange(target, targetRealm, tgt, tgtKey, evidence, options)
 	if err != nil {
 		return messages.Ticket{}, types.EncryptionKey{}, err
 	}
 	if identityKnown && (!reply.CName.Equal(user) || !types.RealmEqual(reply.CRealm, userRealm)) {
-		return messages.Ticket{}, types.EncryptionKey{}, fmt.Errorf("S4U2proxy reply identity %s@%s does not match evidence user %s@%s", reply.CName.PrincipalNameString(), reply.CRealm, user.PrincipalNameString(), userRealm)
+		return messages.Ticket{}, types.EncryptionKey{}, fmt.Errorf(
+			"S4U2proxy reply identity %s@%s does not match evidence user %s@%s",
+			reply.CName.PrincipalNameString(), reply.CRealm, user.PrincipalNameString(), userRealm,
+		)
 	}
 	if !identityKnown {
 		user, userRealm = reply.CName, reply.CRealm
@@ -114,7 +129,7 @@ func (cl *Client) s4uRealmTGT(realm string) (messages.Ticket, types.EncryptionKe
 	if types.RealmEqual(homeRealm, realm) {
 		return homeTGT, homeKey, nil
 	}
-	tgs := types.PrincipalName{NameType: nametype.KRB_NT_SRV_INST, NameString: []string{"krbtgt", realm}}
+	tgs := types.PrincipalName{NameType: nametype.KRB_NT_SRV_INST, NameString: []string{tgtServiceName, realm}}
 	_, reply, err := cl.TGSREQGenerateAndExchange(tgs, homeRealm, homeTGT, homeKey, false)
 	if err != nil {
 		return messages.Ticket{}, types.EncryptionKey{}, err
@@ -126,66 +141,135 @@ func (cl *Client) s4uProxyTGT(targetRealm string) (messages.Ticket, types.Encryp
 	return cl.s4uRealmTGT(targetRealm)
 }
 
-func (cl *Client) s4u2SelfExchange(service, user types.PrincipalName, userRealm, kdcRealm string, tgt messages.Ticket, sessionKey types.EncryptionKey, options s4uOptions) (messages.TGSRep, error) {
+func (cl *Client) s4u2SelfExchange(
+	service, user types.PrincipalName,
+	userRealm, kdcRealm string,
+	tgt messages.Ticket,
+	sessionKey types.EncryptionKey,
+	options s4uOptions,
+) (messages.TGSRep, error) {
 	paForUserOnly := false
 	subjectCertificate := append([]byte(nil), options.subjectCertificate...)
 	for referral := 0; referral <= maxS4UReferrals; referral++ {
+		var tgsOptions messages.TGSReqOptions
+		tgsOptions.Forwardable = options.forwardable
 		requestOptions := messages.S4U2SelfReqOptions{
-			TGSReqOptions:      messages.TGSReqOptions{Forwardable: options.forwardable},
+			TGSReqOptions:      tgsOptions,
 			SubjectCertificate: subjectCertificate,
 			PAForUserOnly:      paForUserOnly,
 		}
-		request, err := messages.NewS4U2SelfTGSReq(cl.Credentials.CName(), kdcRealm, cl.Config, tgt, sessionKey, service, user, userRealm, requestOptions)
+		request, err := messages.NewS4U2SelfTGSReq(
+			cl.Credentials.CName(), kdcRealm, cl.Config, tgt, sessionKey, service, user, userRealm, requestOptions,
+		)
 		if err != nil {
 			return messages.TGSRep{}, fmt.Errorf("build S4U2self request: %w", err)
 		}
-		reply, err := cl.exchangeS4URequest(request, kdcRealm, sessionKey)
+		reply, retry, err := cl.exchangeS4USelfRequest(
+			request, kdcRealm, sessionKey, paForUserOnly, options.forwardable,
+		)
 		if err != nil {
-			if !paForUserOnly && request.PAData.Contains(patype.PA_S4U_X509_USER) && isKDCError(err, errorcode.KDC_ERR_PADATA_TYPE_NOSUPP) {
-				paForUserOnly = true
-				continue
-			}
-			return messages.TGSRep{}, classifyS4UError(err, false)
+			return messages.TGSRep{}, err
 		}
-		replyPAData := types.PADataSequence(reply.PAData)
-		if !isReferralReply(reply, request) && !paForUserOnly && request.PAData.Contains(patype.PA_S4U_X509_USER) &&
-			options.forwardable != nil && *options.forwardable && !types.IsFlagSet(&reply.DecryptedEncPart.Flags, flags.Forwardable) {
+		if retry {
 			paForUserOnly = true
 			continue
 		}
-		if request.PAData.Contains(patype.PA_S4U_X509_USER) && replyPAData.Contains(patype.PA_S4U_X509_USER) {
-			normalized, verr := reply.VerifyS4UX509UserReply(request, sessionKey)
-			if verr != nil {
-				return messages.TGSRep{}, fmt.Errorf("verify PA-S4U-X509-USER reply: %w", verr)
-			}
-			user, userRealm = normalized.CName, normalized.CRealm
-			subjectCertificate = nil
-		} else if request.PAData.Contains(patype.PA_S4U_X509_USER) {
-			return messages.TGSRep{}, fmt.Errorf("S4U2self reply omitted PA-S4U-X509-USER")
+		if normalizeErr := normalizeS4UUser(
+			reply, request, sessionKey, &user, &userRealm, &subjectCertificate,
+		); normalizeErr != nil {
+			return messages.TGSRep{}, normalizeErr
 		}
 		if !isReferralReply(reply, request) {
-			if !reply.CName.Equal(user) || !types.RealmEqual(reply.CRealm, userRealm) {
-				return messages.TGSRep{}, fmt.Errorf("S4U2self reply identity %s@%s does not match requested user %s@%s", reply.CName.PrincipalNameString(), reply.CRealm, user.PrincipalNameString(), userRealm)
-			}
-			return reply, nil
+			return validateS4USelfReply(reply, user, userRealm)
 		}
-		kdcRealm, err = referralRealm(reply.DecryptedEncPart.EncPAData, reply.Ticket.SName.NameString[len(reply.Ticket.SName.NameString)-1])
+		kdcRealm, err = s4uReferralRealm(reply)
 		if err != nil {
 			return messages.TGSRep{}, fmt.Errorf("decode S4U2self referral realm: %w", err)
 		}
 		tgt, sessionKey = reply.Ticket, reply.DecryptedEncPart.Key
 	}
-	return messages.TGSRep{}, fmt.Errorf("S4U2self maximum number of referrals exceeded")
+	return messages.TGSRep{}, errors.New("S4U2self maximum number of referrals exceeded")
 }
 
-func (cl *Client) s4u2ProxyExchange(target types.PrincipalName, kdcRealm string, tgt messages.Ticket, sessionKey types.EncryptionKey, evidence messages.Ticket, options s4uOptions) (messages.TGSRep, error) {
+// exchangeS4USelfRequest reports whether to retry with PA-FOR-USER only.
+func (cl *Client) exchangeS4USelfRequest(
+	request messages.TGSReq,
+	realm string,
+	sessionKey types.EncryptionKey,
+	paForUserOnly bool,
+	forwardable *bool,
+) (messages.TGSRep, bool, error) {
+	reply, err := cl.exchangeS4URequest(request, realm, sessionKey)
+	canFallback := !paForUserOnly && request.PAData.Contains(patype.PA_S4U_X509_USER)
+	if err != nil {
+		if canFallback && isKDCError(err, errorcode.KDC_ERR_PADATA_TYPE_NOSUPP) {
+			return reply, true, nil
+		}
+		return reply, false, classifyS4UError(err, false)
+	}
+	retry := canFallback && !isReferralReply(reply, request) && missingS4UForwardable(reply, forwardable)
+	return reply, retry, nil
+}
+
+func missingS4UForwardable(reply messages.TGSRep, forwardable *bool) bool {
+	return forwardable != nil && *forwardable && !types.IsFlagSet(&reply.DecryptedEncPart.Flags, flags.Forwardable)
+}
+
+func normalizeS4UUser(
+	reply messages.TGSRep,
+	request messages.TGSReq,
+	sessionKey types.EncryptionKey,
+	user *types.PrincipalName,
+	realm *string,
+	certificate *[]byte,
+) error {
+	if !request.PAData.Contains(patype.PA_S4U_X509_USER) {
+		return nil
+	}
+	replyPAData := types.PADataSequence(reply.PAData)
+	if !replyPAData.Contains(patype.PA_S4U_X509_USER) {
+		return errors.New("S4U2self reply omitted PA-S4U-X509-USER")
+	}
+	normalized, err := reply.VerifyS4UX509UserReply(request, sessionKey)
+	if err != nil {
+		return fmt.Errorf("verify PA-S4U-X509-USER reply: %w", err)
+	}
+	*user, *realm, *certificate = normalized.CName, normalized.CRealm, nil
+	return nil
+}
+
+func validateS4USelfReply(reply messages.TGSRep, user types.PrincipalName, userRealm string) (messages.TGSRep, error) {
+	if !reply.CName.Equal(user) || !types.RealmEqual(reply.CRealm, userRealm) {
+		return messages.TGSRep{}, fmt.Errorf(
+			"S4U2self reply identity %s@%s does not match requested user %s@%s",
+			reply.CName.PrincipalNameString(), reply.CRealm, user.PrincipalNameString(), userRealm,
+		)
+	}
+	return reply, nil
+}
+
+func s4uReferralRealm(reply messages.TGSRep) (string, error) {
+	components := reply.Ticket.SName.NameString
+	return referralRealm(reply.DecryptedEncPart.EncPAData, components[len(components)-1])
+}
+
+func (cl *Client) s4u2ProxyExchange(
+	target types.PrincipalName,
+	kdcRealm string,
+	tgt messages.Ticket,
+	sessionKey types.EncryptionKey,
+	evidence messages.Ticket,
+	options s4uOptions,
+) (messages.TGSRep, error) {
 	for referral := 0; referral <= maxS4UReferrals; referral++ {
 		requestOptions := cl.tgsReqOptions(kdcRealm)
 		requestOptions.Forwardable = options.forwardable
 		if options.resourceBased {
 			requestOptions.PACOptions = append(requestOptions.PACOptions, flags.PACOptionResourceBasedConstrainedDelegation)
 		}
-		request, err := messages.NewS4U2ProxyTGSReq(cl.Credentials.CName(), kdcRealm, cl.Config, tgt, sessionKey, target, evidence, requestOptions)
+		request, err := messages.NewS4U2ProxyTGSReq(
+			cl.Credentials.CName(), kdcRealm, cl.Config, tgt, sessionKey, target, evidence, requestOptions,
+		)
 		if err != nil {
 			return messages.TGSRep{}, fmt.Errorf("build S4U2proxy request: %w", err)
 		}
@@ -196,16 +280,20 @@ func (cl *Client) s4u2ProxyExchange(target types.PrincipalName, kdcRealm string,
 		if !isReferralReply(reply, request) {
 			return reply, nil
 		}
-		kdcRealm, err = referralRealm(reply.DecryptedEncPart.EncPAData, reply.Ticket.SName.NameString[len(reply.Ticket.SName.NameString)-1])
+		kdcRealm, err = s4uReferralRealm(reply)
 		if err != nil {
 			return messages.TGSRep{}, fmt.Errorf("decode S4U2proxy referral realm: %w", err)
 		}
 		tgt, sessionKey, evidence = reply.Ticket, reply.DecryptedEncPart.Key, reply.Ticket
 	}
-	return messages.TGSRep{}, fmt.Errorf("S4U2proxy maximum number of referrals exceeded")
+	return messages.TGSRep{}, errors.New("S4U2proxy maximum number of referrals exceeded")
 }
 
-func (cl *Client) exchangeS4URequest(request messages.TGSReq, realm string, sessionKey types.EncryptionKey) (messages.TGSRep, error) {
+func (cl *Client) exchangeS4URequest(
+	request messages.TGSReq,
+	realm string,
+	sessionKey types.EncryptionKey,
+) (messages.TGSRep, error) {
 	requestBytes, err := request.Marshal()
 	if err != nil {
 		return messages.TGSRep{}, krberror.Errorf(err, krberror.EncodingError, "marshal S4U TGS-REQ")
@@ -232,7 +320,8 @@ func (cl *Client) exchangeS4URequest(request messages.TGSReq, realm string, sess
 }
 
 func isReferralReply(reply messages.TGSRep, request messages.TGSReq) bool {
-	return len(reply.Ticket.SName.NameString) > 1 && reply.Ticket.SName.NameString[0] == "krbtgt" && !reply.Ticket.SName.Equal(request.ReqBody.SName)
+	server := reply.Ticket.SName
+	return len(server.NameString) > 1 && server.NameString[0] == tgtServiceName && !server.Equal(request.ReqBody.SName)
 }
 
 func isKDCError(err error, code int32) bool {

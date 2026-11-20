@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,38 +47,6 @@ type Client struct {
 	sendToKDCFunc func([]byte, string) ([]byte, error)
 }
 
-func (cl *Client) setPKINITReplyKey(realm string, key types.EncryptionKey) {
-	cl.pkinitMux.Lock()
-	defer cl.pkinitMux.Unlock()
-	if cl.pkinitKeys == nil {
-		cl.pkinitKeys = make(map[string]types.EncryptionKey)
-	}
-	key.KeyValue = append([]byte(nil), key.KeyValue...)
-	cl.pkinitKeys[strings.ToUpper(realm)] = key
-}
-
-func (cl *Client) takePKINITReplyKey(realm string) (types.EncryptionKey, bool) {
-	cl.pkinitMux.Lock()
-	defer cl.pkinitMux.Unlock()
-	key, ok := cl.pkinitKeys[strings.ToUpper(realm)]
-	delete(cl.pkinitKeys, strings.ToUpper(realm))
-	return key, ok
-}
-
-// PKINITCredentials returns credentials recovered from PAC_CREDENTIAL_INFO
-// after certificate authentication. The returned value is a defensive copy.
-func (cl *Client) PKINITCredentials() (pac.CredentialData, error) {
-	cl.pkinitMux.Lock()
-	defer cl.pkinitMux.Unlock()
-	if cl.pkinitCreds == nil {
-		if cl.pkinitCredErr != nil {
-			return pac.CredentialData{}, cl.pkinitCredErr
-		}
-		return pac.CredentialData{}, errors.New("PKINIT PAC credentials are not available")
-	}
-	return clonePKINITCredentialData(*cl.pkinitCreds), nil
-}
-
 func clonePKINITCredentialData(data pac.CredentialData) pac.CredentialData {
 	copyData := data
 	copyData.Credentials = append([]pac.SECPKGSupplementalCred(nil), data.Credentials...)
@@ -95,37 +64,19 @@ func NewWithPassword(username, realm, password string, krb5conf *config.Config, 
 	}
 	creds := credentials.New(username, realm)
 	clientSettings := NewSettings(settings...)
-	return &Client{
-		Credentials: creds.WithPassword(password),
-		Config:      krb5conf,
-		settings:    clientSettings,
-		sessions: &sessions{
-			Entries: make(map[string]*session),
-		},
-		cache:         NewCache(),
-		s4uCache:      NewCache(),
-		kdcTimeOffset: clientSettings.kdcTimeOffset,
-	}
+	return newClient(creds.WithPassword(password), krb5conf, clientSettings)
 }
 
 // NewWithKeytab creates a new client from a keytab credential.
-func NewWithKeytab(username, realm string, kt *keytab.Keytab, krb5conf *config.Config, settings ...func(*Settings)) *Client {
+func NewWithKeytab(
+	username, realm string, kt *keytab.Keytab, krb5conf *config.Config, settings ...func(*Settings),
+) *Client {
 	if realm == "" && krb5conf != nil {
 		realm = krb5conf.LibDefaults.DefaultRealm
 	}
 	creds := credentials.New(username, realm)
 	clientSettings := NewSettings(settings...)
-	return &Client{
-		Credentials: creds.WithKeytab(kt),
-		Config:      krb5conf,
-		settings:    clientSettings,
-		sessions: &sessions{
-			Entries: make(map[string]*session),
-		},
-		cache:         NewCache(),
-		s4uCache:      NewCache(),
-		kdcTimeOffset: clientSettings.kdcTimeOffset,
-	}
+	return newClient(creds.WithKeytab(kt), krb5conf, clientSettings)
 }
 
 // NewFromPrincipalString creates a client from an MIT-style principal string.
@@ -148,128 +99,72 @@ func NewFromPrincipalString(princ string, krb5conf *config.Config, settings ...f
 }
 
 // NewFromPrincipalName creates a client from a typed principal name and realm.
-func NewFromPrincipalName(princ types.PrincipalName, realm string, krb5conf *config.Config, settings ...func(*Settings)) *Client {
+func NewFromPrincipalName(
+	princ types.PrincipalName, realm string, krb5conf *config.Config, settings ...func(*Settings),
+) *Client {
 	if realm == "" && krb5conf != nil {
 		realm = krb5conf.LibDefaults.DefaultRealm
 	}
 	creds := credentials.NewFromPrincipalName(princ, realm)
-	clientSettings := NewSettings(settings...)
-	return &Client{
-		Credentials:   creds,
-		Config:        krb5conf,
-		settings:      clientSettings,
-		sessions:      &sessions{Entries: make(map[string]*session)},
-		cache:         NewCache(),
-		s4uCache:      NewCache(),
-		kdcTimeOffset: clientSettings.kdcTimeOffset,
-	}
+	return newClient(creds, krb5conf, NewSettings(settings...))
 }
 
 // NewFromCCache create a client from a populated client cache.
 //
-// WARNING: A client created from CCache does not automatically renew TGTs and a failure will occur after the TGT expires.
+// WARNING: A client created from CCache does not automatically renew TGTs.
+// Authentication will fail after the TGT expires.
 func NewFromCCache(c *credentials.CCache, krb5conf *config.Config, settings ...func(*Settings)) (*Client, error) {
 	if c == nil {
 		return nil, errors.New("credential cache is nil")
 	}
 	clientSettings := NewSettings(settings...)
-	cl := &Client{
-		Credentials: c.GetClientCredentials(),
-		Config:      krb5conf,
-		settings:    clientSettings,
-		sessions: &sessions{
-			Entries: make(map[string]*session),
-		},
+	cl := newClient(c.GetClientCredentials(), krb5conf, clientSettings)
+	return cl, cl.importCCache(c)
+}
+
+// PKINITCredentials returns credentials recovered from PAC_CREDENTIAL_INFO
+// after certificate authentication. The returned value is a defensive copy.
+func (cl *Client) PKINITCredentials() (pac.CredentialData, error) {
+	cl.pkinitMux.Lock()
+	defer cl.pkinitMux.Unlock()
+	if cl.pkinitCreds == nil {
+		if cl.pkinitCredErr != nil {
+			return pac.CredentialData{}, cl.pkinitCredErr
+		}
+		return pac.CredentialData{}, errors.New("PKINIT PAC credentials are not available")
+	}
+	return clonePKINITCredentialData(*cl.pkinitCreds), nil
+}
+
+func newClient(creds *credentials.Credentials, krb5conf *config.Config, settings *Settings) *Client {
+	return &Client{
+		Credentials:   creds,
+		Config:        krb5conf,
+		settings:      settings,
+		sessions:      &sessions{Entries: make(map[string]*session), mux: sync.RWMutex{}},
 		cache:         NewCache(),
 		s4uCache:      NewCache(),
-		kdcTimeOffset: clientSettings.kdcTimeOffset,
+		loginMux:      sync.Mutex{},
+		kdcTimeOffset: settings.kdcTimeOffset,
+		kdcTimeMux:    sync.RWMutex{},
+		fastArmorMux:  sync.Mutex{},
+		fastArmorCl:   nil,
+		pkinitMux:     sync.Mutex{},
+		pkinitKeys:    nil,
+		pkinitCreds:   nil,
+		pkinitCredErr: nil,
+		sendToKDCFunc: nil,
 	}
-	spn := types.PrincipalName{
-		NameType:   nametype.KRB_NT_SRV_INST,
-		NameString: []string{"krbtgt", c.DefaultPrincipal.Realm},
-	}
-	entries := c.GetEntries()
-	if len(entries) == 0 {
-		return cl, errors.New("credential cache contains no credentials")
-	}
-	tgtCredential, ok := c.GetEntry(spn)
-	if !ok {
-		// Realm casing in the ccache's default principal can differ from the
-		// realm the KDC embedded in the TGT's service name (e.g. a custom
-		// identity entered with different casing, or a cross-realm referral).
-		// Fall back to a realm-insensitive match so a valid cached TGT is not
-		// missed, which would otherwise leave no session registered and cause
-		// a later Renew() to fail with "TGT session not found".
-		tgtCredential, ok = findTGTCredentialFold(entries, c.DefaultPrincipal.Realm)
-	}
-	configCredential := entries[0]
-	if ok {
-		var tgt messages.Ticket
-		if err := tgt.Unmarshal(tgtCredential.Ticket); err != nil {
-			return cl, fmt.Errorf("TGT bytes in cache are not valid: %w", err)
-		}
-		realm := c.DefaultPrincipal.Realm
-		if len(tgtCredential.Server.PrincipalName.NameString) == 2 {
-			realm = tgtCredential.Server.PrincipalName.NameString[1]
-		}
-		cl.sessions.Entries[strings.ToUpper(realm)] = &session{
-			realm:        realm,
-			authTime:     tgtCredential.AuthTime,
-			startTime:    tgtCredential.StartTime,
-			endTime:      tgtCredential.EndTime,
-			renewTill:    tgtCredential.RenewTill,
-			tgt:          tgt,
-			sessionKey:   tgtCredential.Key,
-			ticketFlags:  tgtCredential.TicketFlags,
-			addresses:    append([]types.HostAddress(nil), tgtCredential.Addresses...),
-			authData:     append([]types.AuthorizationDataEntry(nil), tgtCredential.AuthData...),
-			isSKey:       tgtCredential.IsSKey,
-			secondTicket: append([]byte(nil), tgtCredential.SecondTicket...),
-		}
-		configCredential = tgtCredential
-	}
-	if offset, ok := c.KDCTimeOffset(); ok {
-		cl.setKDCTimeOffset(offset)
-	}
-	configPrincipal := configCredential.Server.PrincipalName.PrincipalNameString() + "@" + configCredential.Server.Realm
-	if value, ok := c.GetConfig("pa_type", configPrincipal); ok {
-		paType, err := strconv.ParseInt(value, 10, 32)
-		if err != nil {
-			return cl, fmt.Errorf("invalid pa_type credential cache config value %q: %w", value, err)
-		}
-		cl.settings.preAuthType = int32(paType)
-	}
-	for _, cred := range entries {
-		if cred == tgtCredential {
-			continue
-		}
-		var tkt messages.Ticket
-		if err := tkt.Unmarshal(cred.Ticket); err != nil {
-			return cl, fmt.Errorf("cache entry ticket bytes are not valid: %w", err)
-		}
-		cl.cache.addEntryWithDetails(
-			tkt,
-			cred.AuthTime,
-			cred.StartTime,
-			cred.EndTime,
-			cred.RenewTill,
-			cred.Key,
-			cred.TicketFlags,
-			cred.Addresses,
-			cred.AuthData,
-			cred.IsSKey,
-			cred.SecondTicket,
-		)
-	}
-	return cl, nil
 }
+
+const tgtPrincipalComponents = 2
 
 // findTGTCredentialFold finds the krbtgt credential for realm, comparing the
 // realm case-insensitively rather than requiring an exact string match.
 func findTGTCredentialFold(entries []*credentials.Credential, realm string) (*credentials.Credential, bool) {
 	for _, cred := range entries {
 		name := cred.Server.PrincipalName.NameString
-		if len(name) == 2 && name[0] == "krbtgt" && types.RealmEqual(name[1], realm) {
+		if len(name) == tgtPrincipalComponents && name[0] == tgtServiceName && types.RealmEqual(name[1], realm) {
 			return cred, true
 		}
 	}
@@ -286,27 +181,12 @@ func (cl *Client) KDCTimeOffset() time.Duration {
 	return cl.kdcTimeOffset
 }
 
-func (cl *Client) setKDCTimeOffset(offset time.Duration) {
-	if cl == nil {
-		return
-	}
-	cl.kdcTimeMux.Lock()
-	cl.kdcTimeOffset = offset
-	cl.kdcTimeMux.Unlock()
-}
-
-func (cl *Client) sendKDCRequest(request []byte, realm string) ([]byte, error) {
-	if cl.sendToKDCFunc != nil {
-		return cl.sendToKDCFunc(request, realm)
-	}
-	return cl.sendToKDC(request, realm)
-}
-
-// Key returns the client's encryption key for the specified encryption type and its kvno (kvno of zero will find latest).
-// The key can be retrieved either from the keytab or generated from the client's password.
+// Key returns the client's encryption key for the specified encryption type and kvno.
+// A kvno of zero selects the latest key.
+// The key comes from the keytab or is generated from the client's password.
 // If the client has both a keytab and a password defined the keytab is favoured as the source for the key
-// A KRBError can be passed in the event the KDC returns one of type KDC_ERR_PREAUTH_REQUIRED and is required to derive
-// the key for pre-authentication from the client's password. If a KRBError is not available, pass nil to this argument.
+// If the KDC returns KDC_ERR_PREAUTH_REQUIRED, pass it to derive the pre-authentication
+// key from the client's password. Otherwise, pass nil.
 func (cl *Client) Key(etype etype.EType, kvno int, krberr *messages.KRBError) (types.EncryptionKey, int, error) {
 	if cl.Credentials.HasKeytab() && etype != nil {
 		key, keyVersion, err := cl.Credentials.Keytab().GetEncryptionKey(
@@ -356,28 +236,19 @@ func (cl *Client) IsConfigured() (bool, error) {
 		cl.Credentials.SetDomain(cl.Config.LibDefaults.DefaultRealm)
 	}
 	// Client needs to have either a password, keytab or a session already (later when loading from CCache)
-	if !cl.Credentials.HasPassword() && !cl.Credentials.HasKeytab() && (cl.settings.pkinitOptions == nil || cl.settings.pkinitOptions.Identity == nil) {
+	if !cl.hasLoginCredentials() {
 		authTime, _, _, _, err := cl.sessionTimes(cl.Credentials.Domain())
 		if err != nil || authTime.IsZero() {
 			return false, errors.New("client has neither a keytab nor a password set and no session")
 		}
 	}
-	if !cl.Config.LibDefaults.DNSLookupKDC {
-		for _, r := range cl.Config.Realms {
-			if types.RealmEqual(r.Realm, cl.Credentials.Domain()) {
-				if len(r.KDC) > 0 {
-					return true, nil
-				}
-				return false, errors.New("client krb5 config does not have any defined KDCs for the default realm")
-			}
-		}
-	}
-	return true, nil
+	return cl.checkKDCConfiguration()
 }
 
 // Login the client with the KDC via an AS exchange.
 func (cl *Client) Login() error {
-	return cl.LoginWithOptions(messages.ASReqOptions{})
+	var options messages.ASReqOptions
+	return cl.LoginWithOptions(options)
 }
 
 // LoginWithOptions logs the client in with per-request AS options.
@@ -388,18 +259,8 @@ func (cl *Client) LoginWithOptions(options messages.ASReqOptions) error {
 	if ok, err := cl.IsConfigured(); !ok {
 		return err
 	}
-	pkinitConfigured := cl.settings.pkinitOptions != nil && cl.settings.pkinitOptions.Identity != nil
-	if !cl.Credentials.HasPassword() && !cl.Credentials.HasKeytab() && !pkinitConfigured {
-		_, endTime, _, _, err := cl.sessionTimes(cl.Credentials.Domain())
-		if err != nil {
-			return krberror.Errorf(err, krberror.KRBMsgError, "no user credentials available and error getting any existing session")
-		}
-		if time.Now().UTC().After(endTime) {
-			//nolint:wrapcheck // This is a new classified error; there is no underlying error to wrap.
-			return krberror.New(krberror.KRBMsgError, "cannot login, no user credentials available and no valid existing session")
-		}
-		// no credentials but there is a session with tgt already
-		return nil
+	if !cl.hasLoginCredentials() {
+		return cl.loginFromExistingSession()
 	}
 	ASReq, err := cl.newASReqWithOptions(options)
 	if err != nil {
@@ -409,107 +270,16 @@ func (cl *Client) LoginWithOptions(options messages.ASReqOptions) error {
 	if err != nil {
 		return err
 	}
-	if len(ASRep.Ticket.SName.NameString) > 0 && strings.EqualFold(ASRep.Ticket.SName.NameString[0], "krbtgt") {
-		cl.addSession(ASRep.Ticket, ASRep.DecryptedEncPart)
-		if replyKey, ok := cl.takePKINITReplyKey(cl.Credentials.Domain()); ok {
-			cl.pkinitMux.Lock()
-			cl.pkinitCreds = nil
-			cl.pkinitCredErr = nil
-			cl.pkinitMux.Unlock()
-			if err := cl.retrievePKINITCredentials(ASRep.Ticket, ASRep.DecryptedEncPart, replyKey); err != nil {
-				cl.pkinitMux.Lock()
-				cl.pkinitCredErr = err
-				cl.pkinitMux.Unlock()
-				cl.Log("could not retrieve PKINIT PAC credentials: %v", err)
-			}
-		}
-	} else {
-		cl.cache.addEntryWithDetails(
-			ASRep.Ticket,
-			ASRep.DecryptedEncPart.AuthTime,
-			ASRep.DecryptedEncPart.StartTime,
-			ASRep.DecryptedEncPart.EndTime,
-			ASRep.DecryptedEncPart.RenewTill,
-			ASRep.DecryptedEncPart.Key,
-			ASRep.DecryptedEncPart.Flags,
-			ASRep.DecryptedEncPart.CAddr,
-			nil,
-			false,
-			nil,
-		)
+	if name := ASRep.Ticket.SName.NameString; len(name) > 0 && strings.EqualFold(name[0], tgtServiceName) {
+		cl.addLoginSession(ASRep.Ticket, ASRep.DecryptedEncPart)
+		return nil
 	}
+	part := ASRep.DecryptedEncPart
+	cl.cache.addEntryWithDetails(
+		ASRep.Ticket, part.AuthTime, part.StartTime, part.EndTime, part.RenewTill,
+		part.Key, part.Flags, part.CAddr, nil, false, nil,
+	)
 	return nil
-}
-
-func (cl *Client) retrievePKINITCredentials(tgt messages.Ticket, reply messages.EncKDCRepPart, replyKey types.EncryptionKey) error {
-	request, err := messages.NewUser2UserTGSReq(cl.Credentials.CName(), cl.Credentials.Domain(), cl.Config, tgt, reply.Key, cl.Credentials.CName(), false, tgt)
-	if err != nil {
-		return fmt.Errorf("build PKINIT credential U2U request: %w", err)
-	}
-	_, response, err := cl.TGSExchange(request, cl.Credentials.Domain(), tgt, reply.Key, 0)
-	if err != nil {
-		return fmt.Errorf("request PKINIT credential U2U ticket: %w", err)
-	}
-	if ierr := response.Ticket.Decrypt(reply.Key); ierr != nil {
-		return fmt.Errorf("decrypt PKINIT credential U2U ticket: %w", ierr)
-	}
-	entries, err := response.Ticket.DecryptedEncPart.AuthorizationData.EntriesOfType(adtype.ADWin2KPAC)
-	if err != nil {
-		return fmt.Errorf("find PKINIT credential PAC: %w", err)
-	}
-	if len(entries) != 1 {
-		return fmt.Errorf("PKINIT credential U2U ticket contains %d PAC values", len(entries))
-	}
-	var parsed pac.PACType
-	if err := parsed.Unmarshal(entries[0].ADData); err != nil {
-		return fmt.Errorf("decode PKINIT credential PAC: %w", err)
-	}
-	logger := cl.settings.Logger()
-	if logger == nil {
-		logger = log.New(io.Discard, "", 0)
-	}
-	if err := parsed.ProcessPACInfoBuffersWithCredentialKey(reply.Key, replyKey, logger); err != nil {
-		return fmt.Errorf("process PKINIT credential PAC: %w", err)
-	}
-	if err := parsed.Verify(reply.Key, pac.VerifyOptions{
-		ExpectedClientName: cl.Credentials.CName().PrincipalNameString(),
-		ExpectedAuthTime:   &response.Ticket.DecryptedEncPart.AuthTime,
-	}); err != nil {
-		return fmt.Errorf("verify PKINIT credential PAC: %w", err)
-	}
-	if parsed.CredentialsInfo == nil {
-		return errors.New("PKINIT credential PAC omitted PAC_CREDENTIAL_INFO")
-	}
-	credentials := clonePKINITCredentialData(parsed.CredentialsInfo.PACCredentialData)
-	cl.pkinitMux.Lock()
-	cl.pkinitCreds = &credentials
-	cl.pkinitCredErr = nil
-	cl.pkinitMux.Unlock()
-	return nil
-}
-
-func (cl *Client) newASReq() (messages.ASReq, error) {
-	return cl.newASReqWithOptions(messages.ASReqOptions{})
-}
-
-func (cl *Client) newASReqWithOptions(options messages.ASReqOptions) (messages.ASReq, error) {
-	req, err := messages.NewASReqForTGTWithOptions(cl.Credentials.Domain(), cl.Config, cl.Credentials.CName(), options)
-	if err != nil {
-		return req, fmt.Errorf("build initial AS request: %w", err)
-	}
-	if !cl.Credentials.HasKeytab() {
-		return req, nil
-	}
-	available := cl.Credentials.Keytab().ETypesForPrincipal(keytab.Principal{
-		Realm:      cl.Credentials.Domain(),
-		Components: cl.Credentials.CName().NameString,
-		NameType:   cl.Credentials.CName().NameType,
-	})
-	req.ReqBody.EType = intersectETypes(cl.Config.LibDefaults.DefaultTktEnctypeIDs, available)
-	if len(req.ReqBody.EType) == 0 {
-		return req, errors.New("no supported encryption types (config file error?)")
-	}
-	return req, nil
 }
 
 func intersectETypes(preferred, available []int32) []int32 {
@@ -534,36 +304,6 @@ func (cl *Client) AffirmLogin() error {
 			return fmt.Errorf("could not get valid TGT for client's realm: %w", lerr)
 		}
 	}
-	return nil
-}
-
-// realmLogin obtains or renews a TGT and establishes a session for the realm specified.
-func (cl *Client) realmLogin(realm string) error {
-	if types.RealmEqual(realm, cl.Credentials.Domain()) {
-		return cl.Login()
-	}
-	_, endTime, _, _, err := cl.sessionTimes(cl.Credentials.Domain())
-	if err != nil || time.Now().UTC().After(endTime) {
-		if lerr := cl.Login(); lerr != nil {
-			return fmt.Errorf("could not get valid TGT for client's realm: %w", lerr)
-		}
-	}
-	tgt, skey, err := cl.sessionTGT(cl.Credentials.Domain())
-	if err != nil {
-		return err
-	}
-
-	spn := types.PrincipalName{
-		NameType:   nametype.KRB_NT_SRV_INST,
-		NameString: []string{"krbtgt", realm},
-	}
-
-	_, tgsRep, err := cl.TGSREQGenerateAndExchange(spn, cl.Credentials.Domain(), tgt, skey, false)
-	if err != nil {
-		return err
-	}
-	cl.addSession(tgsRep.Ticket, tgsRep.DecryptedEncPart)
-
 	return nil
 }
 
@@ -607,62 +347,15 @@ func (cl *Client) Diagnostics(w io.Writer) error {
 	}
 	var errs []error
 	if cl.Credentials.HasKeytab() {
-		var loginRealmEncTypes []int32
-		for _, e := range cl.Credentials.Keytab().Entries {
-			if types.RealmEqual(e.Principal.Realm, cl.Credentials.Realm()) {
-				loginRealmEncTypes = append(loginRealmEncTypes, e.Key.KeyType)
-			}
-		}
-		for _, et := range cl.Config.LibDefaults.DefaultTktEnctypeIDs {
-			var etInKt bool
-			for _, val := range loginRealmEncTypes {
-				if val == et {
-					etInKt = true
-					break
-				}
-			}
-			if !etInKt {
-				errs = append(errs, fmt.Errorf("default_tkt_enctypes specifies %d but this enctype is not available in the client's keytab", et))
-			}
-		}
-		for _, et := range cl.Config.LibDefaults.PreferredPreauthTypes {
-			var etInKt bool
-			for _, val := range loginRealmEncTypes {
-				if int(val) == et {
-					etInKt = true
-					break
-				}
-			}
-			if !etInKt {
-				errs = append(errs, fmt.Errorf("preferred_preauth_types specifies %d but this enctype is not available in the client's keytab", et))
-			}
+		errs = cl.keytabDiagnosticErrors()
+	}
+	for _, transport := range []string{"UDP", "TCP"} {
+		var writeErr error
+		errs, writeErr = cl.writeKDCDiagnostics(w, transport, errs)
+		if writeErr != nil {
+			return errors.Join(append(errs, writeErr)...)
 		}
 	}
-	udpCnt, udpKDC, err := cl.Config.GetKDCs(cl.Credentials.Realm(), false)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("error when resolving KDCs for UDP communication: %w", err))
-	}
-	if udpCnt < 1 {
-		errs = append(errs, errors.New("no KDCs resolved for communication via UDP"))
-	} else {
-		b, _ := json.MarshalIndent(&udpKDC, "", "  ")
-		if writeErr := writeDiagnosticText(w, fmt.Sprintf("UDP KDCs: %s\n", string(b))); writeErr != nil {
-			return errors.Join(append(errs, fmt.Errorf("write UDP KDC diagnostics: %w", writeErr))...)
-		}
-	}
-	tcpCnt, tcpKDC, err := cl.Config.GetKDCs(cl.Credentials.Realm(), false)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("error when resolving KDCs for TCP communication: %w", err))
-	}
-	if tcpCnt < 1 {
-		errs = append(errs, errors.New("no KDCs resolved for communication via TCP"))
-	} else {
-		b, _ := json.MarshalIndent(&tcpKDC, "", "  ")
-		if writeErr := writeDiagnosticText(w, fmt.Sprintf("TCP KDCs: %s\n", string(b))); writeErr != nil {
-			return errors.Join(append(errs, fmt.Errorf("write TCP KDC diagnostics: %w", writeErr))...)
-		}
-	}
-
 	return errors.Join(errs...)
 }
 
@@ -683,6 +376,344 @@ func (cl *Client) Print(w io.Writer) {
 	if err := cl.print(w); err != nil {
 		cl.Log("could not print client details: %v", err)
 	}
+}
+
+func (cl *Client) importCCache(c *credentials.CCache) error {
+	spn := types.PrincipalName{
+		NameType:   nametype.KRB_NT_SRV_INST,
+		NameString: []string{tgtServiceName, c.DefaultPrincipal.Realm},
+	}
+	entries := c.GetEntries()
+	if len(entries) == 0 {
+		return errors.New("credential cache contains no credentials")
+	}
+	tgtCredential, ok := c.GetEntry(spn)
+	if !ok {
+		// Realm casing in the ccache's default principal can differ from the
+		// realm the KDC embedded in the TGT's service name (e.g. a custom
+		// identity entered with different casing, or a cross-realm referral).
+		// Fall back to a realm-insensitive match so a valid cached TGT is not
+		// missed, which would otherwise leave no session registered and cause
+		// a later Renew() to fail with "TGT session not found".
+		tgtCredential, ok = findTGTCredentialFold(entries, c.DefaultPrincipal.Realm)
+	}
+	configCredential := entries[0]
+	if ok {
+		if err := cl.importCCacheTGT(tgtCredential, c.DefaultPrincipal.Realm); err != nil {
+			return err
+		}
+		configCredential = tgtCredential
+	}
+	if offset, ok := c.KDCTimeOffset(); ok {
+		cl.setKDCTimeOffset(offset)
+	}
+	configPrincipal := configCredential.Server.PrincipalName.PrincipalNameString() + "@" + configCredential.Server.Realm
+	if value, ok := c.GetConfig("pa_type", configPrincipal); ok {
+		paType, err := strconv.ParseInt(value, 10, 32)
+		if err != nil {
+			return fmt.Errorf("invalid pa_type credential cache config value %q: %w", value, err)
+		}
+		cl.settings.preAuthType = int32(paType)
+	}
+	return cl.importCCacheServiceTickets(entries, tgtCredential)
+}
+
+func (cl *Client) importCCacheTGT(cred *credentials.Credential, realm string) error {
+	var tgt messages.Ticket
+	if err := tgt.Unmarshal(cred.Ticket); err != nil {
+		return fmt.Errorf("TGT bytes in cache are not valid: %w", err)
+	}
+	if name := cred.Server.PrincipalName.NameString; len(name) == tgtPrincipalComponents {
+		realm = name[1]
+	}
+	cl.sessions.Entries[strings.ToUpper(realm)] = &session{
+		realm:                realm,
+		authTime:             cred.AuthTime,
+		startTime:            cred.StartTime,
+		endTime:              cred.EndTime,
+		renewTill:            cred.RenewTill,
+		tgt:                  tgt,
+		sessionKey:           cred.Key,
+		ticketFlags:          cred.TicketFlags,
+		addresses:            append([]types.HostAddress(nil), cred.Addresses...),
+		authData:             append([]types.AuthorizationDataEntry(nil), cred.AuthData...),
+		isSKey:               cred.IsSKey,
+		secondTicket:         append([]byte(nil), cred.SecondTicket...),
+		sessionKeyExpiration: time.Time{},
+		supportedEncTypes:    0,
+		cancel:               nil,
+		mux:                  sync.RWMutex{},
+	}
+	return nil
+}
+
+func (cl *Client) importCCacheServiceTickets(
+	entries []*credentials.Credential, tgtCredential *credentials.Credential,
+) error {
+	for _, cred := range entries {
+		if cred == tgtCredential {
+			continue
+		}
+		var tkt messages.Ticket
+		if err := tkt.Unmarshal(cred.Ticket); err != nil {
+			return fmt.Errorf("cache entry ticket bytes are not valid: %w", err)
+		}
+		cl.cache.addEntryWithDetails(
+			tkt,
+			cred.AuthTime,
+			cred.StartTime,
+			cred.EndTime,
+			cred.RenewTill,
+			cred.Key,
+			cred.TicketFlags,
+			cred.Addresses,
+			cred.AuthData,
+			cred.IsSKey,
+			cred.SecondTicket,
+		)
+	}
+	return nil
+}
+
+func (cl *Client) retrievePKINITCredentials(
+	tgt messages.Ticket, reply messages.EncKDCRepPart, replyKey types.EncryptionKey,
+) error {
+	request, err := messages.NewUser2UserTGSReq(
+		cl.Credentials.CName(), cl.Credentials.Domain(), cl.Config, tgt, reply.Key, cl.Credentials.CName(), false, tgt,
+	)
+	if err != nil {
+		return fmt.Errorf("build PKINIT credential U2U request: %w", err)
+	}
+	_, response, err := cl.TGSExchange(request, cl.Credentials.Domain(), tgt, reply.Key, 0)
+	if err != nil {
+		return fmt.Errorf("request PKINIT credential U2U ticket: %w", err)
+	}
+	if ierr := response.Ticket.Decrypt(reply.Key); ierr != nil {
+		return fmt.Errorf("decrypt PKINIT credential U2U ticket: %w", ierr)
+	}
+	return cl.processPKINITCredentials(response.Ticket.DecryptedEncPart, reply.Key, replyKey)
+}
+
+func (cl *Client) processPKINITCredentials(part messages.EncTicketPart, key, replyKey types.EncryptionKey) error {
+	entries, err := part.AuthorizationData.EntriesOfType(adtype.ADWin2KPAC)
+	if err != nil {
+		return fmt.Errorf("find PKINIT credential PAC: %w", err)
+	}
+	if len(entries) != 1 {
+		return fmt.Errorf("PKINIT credential U2U ticket contains %d PAC values", len(entries))
+	}
+	var parsed pac.PACType
+	if err := parsed.Unmarshal(entries[0].ADData); err != nil {
+		return fmt.Errorf("decode PKINIT credential PAC: %w", err)
+	}
+	logger := cl.settings.Logger()
+	if logger == nil {
+		logger = log.New(io.Discard, "", 0)
+	}
+	if err := parsed.ProcessPACInfoBuffersWithCredentialKey(key, replyKey, logger); err != nil {
+		return fmt.Errorf("process PKINIT credential PAC: %w", err)
+	}
+	var options pac.VerifyOptions
+	options.ExpectedClientName = cl.Credentials.CName().PrincipalNameString()
+	options.ExpectedAuthTime = &part.AuthTime
+	if err := parsed.Verify(key, options); err != nil {
+		return fmt.Errorf("verify PKINIT credential PAC: %w", err)
+	}
+	if parsed.CredentialsInfo == nil {
+		return errors.New("PKINIT credential PAC omitted PAC_CREDENTIAL_INFO")
+	}
+	credentials := clonePKINITCredentialData(parsed.CredentialsInfo.PACCredentialData)
+	cl.pkinitMux.Lock()
+	cl.pkinitCreds = &credentials
+	cl.pkinitCredErr = nil
+	cl.pkinitMux.Unlock()
+	return nil
+}
+
+func (cl *Client) newASReq() (messages.ASReq, error) {
+	var options messages.ASReqOptions
+	return cl.newASReqWithOptions(options)
+}
+
+func (cl *Client) newASReqWithOptions(options messages.ASReqOptions) (messages.ASReq, error) {
+	req, err := messages.NewASReqForTGTWithOptions(cl.Credentials.Domain(), cl.Config, cl.Credentials.CName(), options)
+	if err != nil {
+		return req, fmt.Errorf("build initial AS request: %w", err)
+	}
+	if !cl.Credentials.HasKeytab() {
+		return req, nil
+	}
+	available := cl.Credentials.Keytab().ETypesForPrincipal(keytab.Principal{
+		Realm:      cl.Credentials.Domain(),
+		Components: cl.Credentials.CName().NameString,
+		NameType:   cl.Credentials.CName().NameType,
+	})
+	req.ReqBody.EType = intersectETypes(cl.Config.LibDefaults.DefaultTktEnctypeIDs, available)
+	if len(req.ReqBody.EType) == 0 {
+		return req, errors.New("no supported encryption types (config file error?)")
+	}
+	return req, nil
+}
+
+// realmLogin obtains or renews a TGT and establishes a session for the realm specified.
+func (cl *Client) realmLogin(realm string) error {
+	if types.RealmEqual(realm, cl.Credentials.Domain()) {
+		return cl.Login()
+	}
+	_, endTime, _, _, err := cl.sessionTimes(cl.Credentials.Domain())
+	if err != nil || time.Now().UTC().After(endTime) {
+		if lerr := cl.Login(); lerr != nil {
+			return fmt.Errorf("could not get valid TGT for client's realm: %w", lerr)
+		}
+	}
+	tgt, skey, err := cl.sessionTGT(cl.Credentials.Domain())
+	if err != nil {
+		return err
+	}
+
+	spn := types.PrincipalName{
+		NameType:   nametype.KRB_NT_SRV_INST,
+		NameString: []string{tgtServiceName, realm},
+	}
+
+	_, tgsRep, err := cl.TGSREQGenerateAndExchange(spn, cl.Credentials.Domain(), tgt, skey, false)
+	if err != nil {
+		return err
+	}
+	cl.addSession(tgsRep.Ticket, tgsRep.DecryptedEncPart)
+
+	return nil
+}
+
+func (cl *Client) setKDCTimeOffset(offset time.Duration) {
+	if cl == nil {
+		return
+	}
+	cl.kdcTimeMux.Lock()
+	cl.kdcTimeOffset = offset
+	cl.kdcTimeMux.Unlock()
+}
+
+func (cl *Client) sendKDCRequest(request []byte, realm string) ([]byte, error) {
+	if cl.sendToKDCFunc != nil {
+		return cl.sendToKDCFunc(request, realm)
+	}
+	return cl.sendToKDC(request, realm)
+}
+
+func (cl *Client) hasLoginCredentials() bool {
+	if cl.Credentials.HasPassword() || cl.Credentials.HasKeytab() {
+		return true
+	}
+	return cl.settings.pkinitOptions != nil && cl.settings.pkinitOptions.Identity != nil
+}
+
+func (cl *Client) checkKDCConfiguration() (bool, error) {
+	if cl.Config.LibDefaults.DNSLookupKDC {
+		return true, nil
+	}
+	for _, realm := range cl.Config.Realms {
+		if !types.RealmEqual(realm.Realm, cl.Credentials.Domain()) {
+			continue
+		}
+		if len(realm.KDC) == 0 {
+			return false, errors.New("client krb5 config does not have any defined KDCs for the default realm")
+		}
+		return true, nil
+	}
+	return true, nil
+}
+
+func (cl *Client) loginFromExistingSession() error {
+	_, endTime, _, _, err := cl.sessionTimes(cl.Credentials.Domain())
+	if err != nil {
+		return krberror.Errorf(err, krberror.KRBMsgError,
+			"no user credentials available and error getting any existing session")
+	}
+	if time.Now().UTC().After(endTime) {
+		//nolint:wrapcheck // This is a new classified error; there is no underlying error to wrap.
+		return krberror.New(krberror.KRBMsgError,
+			"cannot login, no user credentials available and no valid existing session")
+	}
+	return nil
+}
+
+func (cl *Client) addLoginSession(ticket messages.Ticket, part messages.EncKDCRepPart) {
+	cl.addSession(ticket, part)
+	replyKey, ok := cl.takePKINITReplyKey(cl.Credentials.Domain())
+	if !ok {
+		return
+	}
+	cl.pkinitMux.Lock()
+	cl.pkinitCreds = nil
+	cl.pkinitCredErr = nil
+	cl.pkinitMux.Unlock()
+	if err := cl.retrievePKINITCredentials(ticket, part, replyKey); err != nil {
+		cl.pkinitMux.Lock()
+		cl.pkinitCredErr = err
+		cl.pkinitMux.Unlock()
+		cl.Log("could not retrieve PKINIT PAC credentials: %v", err)
+	}
+}
+
+func (cl *Client) keytabDiagnosticErrors() []error {
+	var errs []error
+	var loginRealmEncTypes []int32
+	for _, e := range cl.Credentials.Keytab().Entries {
+		if types.RealmEqual(e.Principal.Realm, cl.Credentials.Realm()) {
+			loginRealmEncTypes = append(loginRealmEncTypes, e.Key.KeyType)
+		}
+	}
+	for _, et := range cl.Config.LibDefaults.DefaultTktEnctypeIDs {
+		if !slices.Contains(loginRealmEncTypes, et) {
+			errs = append(errs, fmt.Errorf(
+				"default_tkt_enctypes specifies %d but this enctype is not available in the client's keytab", et))
+		}
+	}
+	for _, et := range cl.Config.LibDefaults.PreferredPreauthTypes {
+		if !slices.ContainsFunc(loginRealmEncTypes, func(val int32) bool { return int(val) == et }) {
+			errs = append(errs, fmt.Errorf(
+				"preferred_preauth_types specifies %d but this enctype is not available in the client's keytab", et))
+		}
+	}
+	return errs
+}
+
+func (cl *Client) writeKDCDiagnostics(w io.Writer, transport string, errs []error) ([]error, error) {
+	// Preserve the diagnostic's existing lookup mode for both report sections.
+	count, kdcs, err := cl.Config.GetKDCs(cl.Credentials.Realm(), false)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("error when resolving KDCs for %s communication: %w", transport, err))
+	}
+	if count < 1 {
+		return append(errs, fmt.Errorf("no KDCs resolved for communication via %s", transport)), nil
+	}
+	b, err := json.MarshalIndent(&kdcs, "", "  ")
+	if err != nil {
+		return errs, fmt.Errorf("encode %s KDC diagnostics: %w", transport, err)
+	}
+	if err := writeDiagnosticText(w, fmt.Sprintf("%s KDCs: %s\n", transport, b)); err != nil {
+		return errs, fmt.Errorf("write %s KDC diagnostics: %w", transport, err)
+	}
+	return errs, nil
+}
+
+func (cl *Client) setPKINITReplyKey(realm string, key types.EncryptionKey) {
+	cl.pkinitMux.Lock()
+	defer cl.pkinitMux.Unlock()
+	if cl.pkinitKeys == nil {
+		cl.pkinitKeys = make(map[string]types.EncryptionKey)
+	}
+	key.KeyValue = append([]byte(nil), key.KeyValue...)
+	cl.pkinitKeys[strings.ToUpper(realm)] = key
+}
+
+func (cl *Client) takePKINITReplyKey(realm string) (types.EncryptionKey, bool) {
+	cl.pkinitMux.Lock()
+	defer cl.pkinitMux.Unlock()
+	key, ok := cl.pkinitKeys[strings.ToUpper(realm)]
+	delete(cl.pkinitKeys, strings.ToUpper(realm))
+	return key, ok
 }
 
 func (cl *Client) print(w io.Writer) error {

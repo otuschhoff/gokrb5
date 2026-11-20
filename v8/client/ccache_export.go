@@ -14,14 +14,39 @@ import (
 
 // CCache exports the client's current TGT sessions and cached service tickets.
 func (cl *Client) CCache() (*credentials.CCache, error) {
-	if cl == nil || cl.Credentials == nil || cl.sessions == nil || cl.cache == nil || cl.settings == nil {
+	if !cl.canExportCCache() {
 		return nil, errors.New("client is not initialized for credential cache export")
 	}
 	cache := credentials.NewCCache(cl.Credentials.CName(), cl.Credentials.Domain())
 	cache.SetKDCTimeOffset(cl.KDCTimeOffset())
 
-	sessionRealms := make([]string, 0)
+	if err := cl.exportSessionCredentials(cache); err != nil {
+		return nil, err
+	}
+	if err := cl.exportServiceCredentials(cache); err != nil {
+		return nil, err
+	}
+	entries := cache.GetEntries()
+	if len(entries) == 0 {
+		return nil, errors.New("client has no credentials to export")
+	}
+	if cl.settings.preAuthType != 0 {
+		principal := entries[0].Server.PrincipalName.PrincipalNameString() + "@" + entries[0].Server.Realm
+		if err := cache.SetConfig("pa_type", principal, strconv.FormatInt(int64(cl.settings.preAuthType), 10)); err != nil {
+			return nil, fmt.Errorf("store credential cache preauthentication type: %w", err)
+		}
+	}
+	return cache, nil
+}
+
+func (cl *Client) canExportCCache() bool {
+	return cl != nil && cl.Credentials != nil && cl.sessions != nil && cl.cache != nil && cl.settings != nil
+}
+
+func (cl *Client) exportSessionCredentials(cache *credentials.CCache) error {
 	cl.sessions.mux.RLock()
+	defer cl.sessions.mux.RUnlock()
+	sessionRealms := make([]string, 0, len(cl.sessions.Entries))
 	for realm := range cl.sessions.Entries {
 		sessionRealms = append(sessionRealms, realm)
 	}
@@ -29,21 +54,23 @@ func (cl *Client) CCache() (*credentials.CCache, error) {
 	for _, realm := range sessionRealms {
 		session := cl.sessions.Entries[realm]
 		if session == nil {
-			cl.sessions.mux.RUnlock()
-			return nil, fmt.Errorf("client session for realm %s is nil", realm)
+			return fmt.Errorf("client session for realm %s is nil", realm)
 		}
 		session.mux.RLock()
 		credential, err := sessionCredential(cl, session)
 		session.mux.RUnlock()
 		if err != nil {
-			cl.sessions.mux.RUnlock()
-			return nil, err
+			return err
 		}
 		cache.AddCredential(credential)
 	}
-	cl.sessions.mux.RUnlock()
-	serviceNames := make([]string, 0)
+	return nil
+}
+
+func (cl *Client) exportServiceCredentials(cache *credentials.CCache) error {
 	cl.cache.mux.RLock()
+	defer cl.cache.mux.RUnlock()
+	serviceNames := make([]string, 0, len(cl.cache.Entries))
 	for name := range cl.cache.Entries {
 		serviceNames = append(serviceNames, name)
 	}
@@ -52,24 +79,11 @@ func (cl *Client) CCache() (*credentials.CCache, error) {
 		entry := cl.cache.Entries[name]
 		credential, err := cacheEntryCredential(cl, entry)
 		if err != nil {
-			cl.cache.mux.RUnlock()
-			return nil, err
+			return err
 		}
 		cache.AddCredential(credential)
 	}
-	cl.cache.mux.RUnlock()
-	entries := cache.GetEntries()
-	if len(entries) == 0 {
-		return nil, errors.New("client has no credentials to export")
-	}
-
-	if cl.settings.preAuthType != 0 {
-		principal := entries[0].Server.PrincipalName.PrincipalNameString() + "@" + entries[0].Server.Realm
-		if err := cache.SetConfig("pa_type", principal, strconv.FormatInt(int64(cl.settings.preAuthType), 10)); err != nil {
-			return nil, fmt.Errorf("store credential cache preauthentication type: %w", err)
-		}
-	}
-	return cache, nil
+	return nil
 }
 
 func sessionCredential(cl *Client, session *session) (*credentials.Credential, error) {

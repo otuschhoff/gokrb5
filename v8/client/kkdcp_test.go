@@ -29,7 +29,26 @@ func (errorResponseBody) Close() error                  { return nil }
 func TestKKDCPTransport(t *testing.T) {
 	request := []byte{0x6a, 0x03, 0x02, 0x01, 0x05}
 	reply := []byte{0x6b, 0x03, 0x02, 0x01, 0x05}
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(kkdcpTestHandler(t, request, reply))
+	defer server.Close()
+
+	cfg := config.New()
+	cfg.LibDefaults.DNSLookupKDC = false
+	cfg.LibDefaults.UDPPreferenceLimit = 1
+	cfg.Realms = []config.Realm{kdcTestRealmConfig(clientTestOrgRealm, []string{server.URL})}
+	cl := NewWithPassword("user", clientTestOrgRealm, "password", cfg, KKDCPClient(server.Client()))
+	got, err := cl.sendToKDC(request, clientTestOrgRealm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(reply) {
+		t.Fatalf("reply = %x, want %x", got, reply)
+	}
+}
+
+func kkdcpTestHandler(t *testing.T, request, reply []byte) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("method = %s, want POST", r.Method)
 		}
@@ -54,7 +73,7 @@ func TestKKDCPTransport(t *testing.T) {
 			http.Error(w, "unwrap request", http.StatusBadRequest)
 			return
 		}
-		if string(message) != string(request) || proxyRequest.TargetDomain != "EXAMPLE.ORG" {
+		if string(message) != string(request) || proxyRequest.TargetDomain != clientTestOrgRealm {
 			t.Errorf("proxy request = %x for %q", message, proxyRequest.TargetDomain)
 		}
 		proxyReply, err := types.NewKDCProxyMessage(reply, "", 0)
@@ -71,25 +90,12 @@ func TestKKDCPTransport(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", kkdcpContentType)
 		_, _ = w.Write(encoded)
-	}))
-	defer server.Close()
-
-	cfg := config.New()
-	cfg.LibDefaults.DNSLookupKDC = false
-	cfg.LibDefaults.UDPPreferenceLimit = 1
-	cfg.Realms = []config.Realm{{Realm: "EXAMPLE.ORG", KDC: []string{server.URL}}}
-	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", cfg, KKDCPClient(server.Client()))
-	got, err := cl.sendToKDC(request, "EXAMPLE.ORG")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != string(reply) {
-		t.Fatalf("reply = %x, want %x", got, reply)
 	}
 }
 
 func TestKKDCPRejectsInvalidResponses(t *testing.T) {
-	invalidFrame := types.KDCProxyMessage{KerbMessage: []byte{0, 0, 0, 2, 1}}
+	var invalidFrame types.KDCProxyMessage
+	invalidFrame.KerbMessage = []byte{0, 0, 0, 2, 1}
 	invalidFrameBytes, err := invalidFrame.Marshal()
 	if err != nil {
 		t.Fatal(err)
@@ -100,8 +106,8 @@ func TestKKDCPRejectsInvalidResponses(t *testing.T) {
 		contentType string
 		body        []byte
 	}{
-		{name: "HTTP status", status: http.StatusForbidden, contentType: kkdcpContentType},
-		{name: "content type", status: http.StatusOK, contentType: "text/plain"},
+		{name: "HTTP status", status: http.StatusForbidden, contentType: kkdcpContentType, body: nil},
+		{name: "content type", status: http.StatusOK, contentType: "text/plain", body: nil},
 		{name: "ASN.1", status: http.StatusOK, contentType: kkdcpContentType, body: []byte("invalid")},
 		{name: "message length", status: http.StatusOK, contentType: kkdcpContentType, body: invalidFrameBytes},
 	}
@@ -114,8 +120,8 @@ func TestKKDCPRejectsInvalidResponses(t *testing.T) {
 			}))
 			defer server.Close()
 			cfg := config.New()
-			cl := NewWithPassword("user", "EXAMPLE.ORG", "password", cfg, KKDCPClient(server.Client()))
-			if _, err := cl.sendKKDCP(server.URL, "EXAMPLE.ORG", []byte("request")); err == nil {
+			cl := NewWithPassword("user", clientTestOrgRealm, "password", cfg, KKDCPClient(server.Client()))
+			if _, err := cl.sendKKDCP(server.URL, clientTestOrgRealm, []byte("request")); err == nil {
 				t.Fatal("invalid KKDCP response was accepted")
 			}
 		})
@@ -124,16 +130,17 @@ func TestKKDCPRejectsInvalidResponses(t *testing.T) {
 
 func TestKKDCPReportsErrorResponseReadFailure(t *testing.T) {
 	readErr := errors.New("response read failed")
-	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusBadGateway,
-			Status:     "502 Bad Gateway",
-			Body:       errorResponseBody{err: readErr},
-			Header:     make(http.Header),
-		}, nil
-	})}
-	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", config.New(), KKDCPClient(httpClient))
-	_, err := cl.sendKKDCP("https://proxy.example.org/KdcProxy", "EXAMPLE.ORG", []byte("request"))
+	var httpClient http.Client
+	httpClient.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		var response http.Response
+		response.StatusCode = http.StatusBadGateway
+		response.Status = "502 Bad Gateway"
+		response.Body = errorResponseBody{err: readErr}
+		response.Header = make(http.Header)
+		return &response, nil
+	})
+	cl := NewWithPassword("user", clientTestOrgRealm, "password", config.New(), KKDCPClient(&httpClient))
+	_, err := cl.sendKKDCP("https://proxy.example.org/KdcProxy", clientTestOrgRealm, []byte("request"))
 	if !errors.Is(err, readErr) {
 		t.Fatalf("error %v does not wrap response read failure", err)
 	}
@@ -146,11 +153,11 @@ func TestKKDCPDoesNotFollowRedirects(t *testing.T) {
 	}))
 	defer destination.Close()
 	proxy := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Redirect(w, &http.Request{}, destination.URL, http.StatusTemporaryRedirect)
+		http.Redirect(w, new(http.Request), destination.URL, http.StatusTemporaryRedirect)
 	}))
 	defer proxy.Close()
-	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", config.New(), KKDCPClient(proxy.Client()))
-	if _, err := cl.sendKKDCP(proxy.URL, "EXAMPLE.ORG", []byte("request")); err == nil {
+	cl := NewWithPassword("user", clientTestOrgRealm, "password", config.New(), KKDCPClient(proxy.Client()))
+	if _, err := cl.sendKKDCP(proxy.URL, clientTestOrgRealm, []byte("request")); err == nil {
 		t.Fatal("KKDCP redirect was accepted")
 	}
 	if destinationCalls != 0 {
@@ -159,14 +166,15 @@ func TestKKDCPDoesNotFollowRedirects(t *testing.T) {
 }
 
 func TestKKDCPRejectsNonHTTPSURL(t *testing.T) {
-	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", config.New())
-	if _, err := cl.sendKKDCP("http://proxy.example.org/KdcProxy", "EXAMPLE.ORG", []byte("request")); err == nil {
+	cl := NewWithPassword("user", clientTestOrgRealm, "password", config.New())
+	if _, err := cl.sendKKDCP("http://proxy.example.org/KdcProxy", clientTestOrgRealm, []byte("request")); err == nil {
 		t.Fatal("non-HTTPS KKDCP URL was accepted")
 	}
 }
 
 func TestKKDCPPasswordTransport(t *testing.T) {
-	kdcErr := messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KRB_ERR_GENERIC, "password response")
+	var principal types.PrincipalName
+	kdcErr := messages.NewKRBError(principal, clientTestOrgRealm, errorcode.KRB_ERR_GENERIC, "password response")
 	kdcErr.EData = []byte{0, 0}
 	krbErrorBytes, err := kdcErr.Marshal()
 	if err != nil {
@@ -181,7 +189,30 @@ func TestKKDCPPasswordTransport(t *testing.T) {
 	binary.BigEndian.PutUint16(passwordReply[2:4], 1)
 	copy(passwordReply[6:], krbErrorBytes)
 
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(kkdcpPasswordTestHandler(t, passwordReply))
+	defer server.Close()
+
+	cfg := config.New()
+	cfg.LibDefaults.DNSLookupKDC = false
+	cfg.LibDefaults.UDPPreferenceLimit = 1
+	var realm config.Realm
+	realm.Realm = clientTestOrgRealm
+	realm.KPasswdServer = []string{server.URL}
+	cfg.Realms = []config.Realm{realm}
+	cl := NewWithPassword("user", clientTestOrgRealm, "password", cfg, KKDCPClient(server.Client()))
+	var passwordRequest kadmin.Request
+	reply, err := cl.sendToKPasswd(passwordRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reply.IsKRBError || reply.ResultCode != KRB5_KPASSWD_SUCCESS {
+		t.Fatalf("unexpected password reply: %#v", reply)
+	}
+}
+
+func kkdcpPasswordTestHandler(t *testing.T, passwordReply []byte) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
 		body, readErr := io.ReadAll(r.Body)
 		if readErr != nil {
 			t.Errorf("read request: %v", readErr)
@@ -208,19 +239,5 @@ func TestKKDCPPasswordTransport(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", kkdcpContentType)
 		_, _ = w.Write(encoded)
-	}))
-	defer server.Close()
-
-	cfg := config.New()
-	cfg.LibDefaults.DNSLookupKDC = false
-	cfg.LibDefaults.UDPPreferenceLimit = 1
-	cfg.Realms = []config.Realm{{Realm: "EXAMPLE.ORG", KPasswdServer: []string{server.URL}}}
-	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", cfg, KKDCPClient(server.Client()))
-	reply, err := cl.sendToKPasswd(kadmin.Request{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reply.IsKRBError || reply.ResultCode != KRB5_KPASSWD_SUCCESS {
-		t.Fatalf("unexpected password reply: %#v", reply)
 	}
 }

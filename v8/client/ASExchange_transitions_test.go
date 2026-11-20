@@ -32,7 +32,8 @@ func asPKINITClient(t *testing.T, assume, freshness bool) (*Client, messages.ASR
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
-	template := &x509.Certificate{SerialNumber: big.NewInt(1)}
+	template := new(x509.Certificate)
+	template.SerialNumber = big.NewInt(1)
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	require.NoError(t, err)
 	cert, err := x509.ParseCertificate(der)
@@ -40,8 +41,13 @@ func asPKINITClient(t *testing.T, assume, freshness bool) (*Client, messages.ASR
 	cfg := config.New()
 	cfg.LibDefaults.DNSLookupKDC = true
 	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{17}
-	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", cfg,
-		PKINITIdentity(&pkinit.Identity{Certificate: cert, Signer: key}),
+	cl := NewWithPassword("user", exchangeFixtureRealm, "password", cfg,
+		PKINITIdentity(&pkinit.Identity{
+			Chain:       nil,
+			SID:         "",
+			KeyTrust:    false,
+			Certificate: cert, Signer: key,
+		}),
 		AssumePreAuthentication(assume), PKINITRequireFreshness(freshness))
 	cl.settings.pkinitOptions.ValidateIdentity = func(*pkinit.Identity, types.PrincipalName, string) error { return nil }
 	request, err := cl.newASReq()
@@ -51,12 +57,16 @@ func asPKINITClient(t *testing.T, assume, freshness bool) (*Client, messages.ASR
 
 func asPKINITError(t *testing.T, code int32, token string) messages.KRBError {
 	t.Helper()
-	response := messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.ORG", code, "scripted")
+	var emptyPrincipal types.PrincipalName
+
+	response := messages.NewKRBError(emptyPrincipal, exchangeFixtureRealm, code, "scripted")
 	response.STime = time.Time{}
 	response.Susec = 0
 	if token != "" {
 		var err error
-		response.EData, err = asn1.Marshal(types.PADataSequence{{PADataType: patype.PA_AS_FRESHNESS, PADataValue: []byte(token)}})
+		response.EData, err = asn1.Marshal(
+			types.PADataSequence{{PADataType: patype.PA_AS_FRESHNESS, PADataValue: []byte(token)}},
+		)
 		require.NoError(t, err)
 	}
 	return response
@@ -64,6 +74,8 @@ func asPKINITError(t *testing.T, code int32, token string) messages.KRBError {
 
 func asPKINITAuthPack(t *testing.T, request messages.ASReq) pkinit.AuthPack {
 	t.Helper()
+	var emptyAuthPack pkinit.AuthPack
+
 	for _, pa := range request.PAData {
 		if pa.PADataType != patype.PA_PK_AS_REQ {
 			continue
@@ -78,7 +90,7 @@ func asPKINITAuthPack(t *testing.T, request messages.ASReq) pkinit.AuthPack {
 		return pack
 	}
 	t.Fatal("missing PA-PK-AS-REQ")
-	return pkinit.AuthPack{}
+	return emptyAuthPack
 }
 
 type asPKINITStep struct {
@@ -86,11 +98,16 @@ type asPKINITStep struct {
 	token string
 }
 
-func runASPKINITScript(t *testing.T, cl *Client, request messages.ASReq, steps []asPKINITStep) ([]messages.ASReq, error) {
+func runASPKINITScript(
+	t *testing.T,
+	cl *Client,
+	request messages.ASReq,
+	steps []asPKINITStep,
+) ([]messages.ASReq, error) {
 	t.Helper()
 	var requests []messages.ASReq
 	cl.sendToKDCFunc = func(b []byte, realm string) ([]byte, error) {
-		require.Equal(t, "EXAMPLE.ORG", realm)
+		require.Equal(t, exchangeFixtureRealm, realm)
 		var req messages.ASReq
 		require.NoError(t, req.Unmarshal(b))
 		require.Less(t, len(requests), len(steps), "unexpected retry")
@@ -98,9 +115,9 @@ func runASPKINITScript(t *testing.T, cl *Client, request messages.ASReq, steps [
 		requests = append(requests, req)
 		return nil, asPKINITError(t, step.code, step.token)
 	}
-	_, err := cl.ASExchange("EXAMPLE.ORG", request, 0)
+	_, err := cl.ASExchange(exchangeFixtureRealm, request, 0)
 	require.Len(t, requests, len(steps))
-	_, published := cl.takePKINITReplyKey("EXAMPLE.ORG")
+	_, published := cl.takePKINITReplyKey(exchangeFixtureRealm)
 	require.False(t, published, "failed exchange published a reply key")
 	return requests, err
 }
@@ -112,13 +129,18 @@ func TestASExchangePKINITInitiation(t *testing.T) {
 		freshness bool
 		signed    bool
 	}{
-		{name: "discovery"},
-		{name: "preemptive", assume: true, signed: true},
-		{name: "required freshness defers signing", assume: true, freshness: true},
+		{
+			assume:    false,
+			freshness: false,
+			signed:    false,
+			name:      "discovery",
+		},
+		{freshness: false, name: "preemptive", assume: true, signed: true},
+		{signed: false, name: "required freshness defers signing", assume: true, freshness: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cl, req := asPKINITClient(t, tc.assume, tc.freshness)
-			requests, err := runASPKINITScript(t, cl, req, []asPKINITStep{{code: errorcode.KDC_ERR_CLIENT_REVOKED}})
+			requests, err := runASPKINITScript(t, cl, req, []asPKINITStep{{token: "", code: errorcode.KDC_ERR_CLIENT_REVOKED}})
 			require.ErrorContains(t, err, "kerberos error response from KDC")
 			require.Equal(t, tc.signed, requests[0].PAData.Contains(patype.PA_PK_AS_REQ))
 			require.Equal(t, !tc.signed, requests[0].PAData.Contains(patype.PA_AS_FRESHNESS))
@@ -135,17 +157,37 @@ func TestASExchangePKINITFreshnessBudgets(t *testing.T) {
 		steps     []asPKINITStep
 		want      string
 	}{
-		{name: "required missing", freshness: true, steps: []asPKINITStep{{code: errorcode.KDC_ERR_PREAUTH_REQUIRED}}, want: "did not provide required PKINIT freshness token"},
-		{name: "expired missing", steps: []asPKINITStep{{code: errorcode.KDC_ERR_PREAUTH_EXPIRED}}, want: "PKINIT freshness retry failed"},
-		{name: "expired once", steps: []asPKINITStep{{code: errorcode.KDC_ERR_PREAUTH_EXPIRED, token: "one"}, {code: errorcode.KDC_ERR_PREAUTH_EXPIRED, token: "two"}}, want: "PKINIT freshness retry failed"},
-		{name: "five rounds", steps: []asPKINITStep{
-			{code: errorcode.KDC_ERR_PREAUTH_REQUIRED, token: "one"},
-			{code: errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED, token: "two"},
-			{code: errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED, token: "three"},
-			{code: errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED, token: "four"},
-			{code: errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED, token: "five"},
-			{code: errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED, token: "six"},
-		}, want: "maximum PKINIT pre-authentication rounds exceeded"},
+		{
+			name:      "required missing",
+			freshness: true,
+			steps:     []asPKINITStep{{token: "", code: errorcode.KDC_ERR_PREAUTH_REQUIRED}},
+			want:      "did not provide required PKINIT freshness token",
+		},
+		{
+			freshness: false,
+			name:      "expired missing",
+			steps:     []asPKINITStep{{token: "", code: errorcode.KDC_ERR_PREAUTH_EXPIRED}},
+			want:      "PKINIT freshness retry failed",
+		},
+		{
+			freshness: false,
+			name:      "expired once",
+			steps: []asPKINITStep{
+				{code: errorcode.KDC_ERR_PREAUTH_EXPIRED, token: "one"},
+				{code: errorcode.KDC_ERR_PREAUTH_EXPIRED, token: "two"},
+			},
+			want: "PKINIT freshness retry failed",
+		},
+		{
+			freshness: false, name: "five rounds", steps: []asPKINITStep{
+				{code: errorcode.KDC_ERR_PREAUTH_REQUIRED, token: "one"},
+				{code: errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED, token: "two"},
+				{code: errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED, token: "three"},
+				{code: errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED, token: "four"},
+				{code: errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED, token: "five"},
+				{code: errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED, token: "six"},
+			}, want: "maximum PKINIT pre-authentication rounds exceeded",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cl, req := asPKINITClient(t, false, tc.freshness)
@@ -166,12 +208,21 @@ func TestASExchangePKINITTypedFallbackBudget(t *testing.T) {
 		kind error
 	}{
 		{name: "KDF", code: errorcode.KDC_ERR_NO_ACCEPTABLE_KDF, kind: pkinit.ErrNoAcceptableKDF},
-		{name: "RSA to DH", code: errorcode.KDC_ERR_PUBLIC_KEY_ENCRYPTION_NOT_SUPPORTED, kind: pkinit.ErrPublicKeyEncryptionUnsupported},
+		{
+			name: "RSA to DH",
+			code: errorcode.KDC_ERR_PUBLIC_KEY_ENCRYPTION_NOT_SUPPORTED,
+			kind: pkinit.ErrPublicKeyEncryptionUnsupported,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cl, req := asPKINITClient(t, true, false)
 			cl.settings.pkinitOptions.Mode = pkinit.ModeRSA
-			requests, err := runASPKINITScript(t, cl, req, []asPKINITStep{{code: tc.code}, {code: tc.code}})
+			requests, err := runASPKINITScript(
+				t,
+				cl,
+				req,
+				[]asPKINITStep{{token: "", code: tc.code}, {token: "", code: tc.code}},
+			)
 			require.ErrorIs(t, err, tc.kind)
 			first := asPKINITAuthPack(t, requests[0])
 			second := asPKINITAuthPack(t, requests[1])
@@ -207,7 +258,7 @@ func TestASExchangePKINITGenericFailureSkewOrdering(t *testing.T) {
 			// Later times must not replace the first skew correction.
 			return nil, asErrorAt(response, serverTime.Add(time.Duration(calls-2)*skew))
 		}
-		_, err := cl.ASExchange("EXAMPLE.ORG", req, 0)
+		_, err := cl.ASExchange(exchangeFixtureRealm, req, 0)
 		require.ErrorContains(t, err, "kerberos error response from KDC")
 		require.Equal(t, 4, calls)
 		require.Equal(t, skew, cl.KDCTimeOffset())
@@ -221,7 +272,7 @@ func TestASExchangePKINITMalformedFreshness(t *testing.T) {
 		response.EData = []byte{0x30, 0x01}
 		return nil, response
 	}
-	_, err := cl.ASExchange("EXAMPLE.ORG", req, 0)
+	_, err := cl.ASExchange(exchangeFixtureRealm, req, 0)
 	require.ErrorContains(t, err, "invalid PKINIT freshness response")
 }
 
@@ -232,7 +283,7 @@ func TestASExchangeReferralRecursionBoundary(t *testing.T) {
 		calls++
 		return nil, asPKINITError(t, errorcode.KDC_ERR_WRONG_REALM, "")
 	}
-	_, err := cl.ASExchange("EXAMPLE.ORG", req, 0)
+	_, err := cl.ASExchange(exchangeFixtureRealm, req, 0)
 	require.ErrorContains(t, err, "maximum number of client referrals exceeded")
 	require.Equal(t, 7, calls)
 }
@@ -245,7 +296,7 @@ func TestASExchangePKINITBuildFailure(t *testing.T) {
 		t.Fatal("invalid identity reached transport")
 		return nil, cause
 	}
-	_, err := cl.ASExchange("EXAMPLE.ORG", req, 0)
+	_, err := cl.ASExchange(exchangeFixtureRealm, req, 0)
 	require.ErrorIs(t, err, cause)
 	require.ErrorContains(t, err, "could not build PKINIT request")
 	require.ErrorContains(t, err, "initialize PKINIT exchange")
@@ -274,7 +325,7 @@ func TestASExchangePKINITDHFallback(t *testing.T) {
 				response.EData = typed
 				return nil, response
 			}
-			_, err = cl.ASExchange("EXAMPLE.ORG", req, 0)
+			_, err = cl.ASExchange(exchangeFixtureRealm, req, 0)
 			require.ErrorIs(t, err, pkinit.ErrDHParametersNotAccepted)
 			wantCalls := 1
 			if accept {
@@ -287,10 +338,20 @@ func TestASExchangePKINITDHFallback(t *testing.T) {
 
 func asPKINITReply(t *testing.T, request messages.ASReq, accepted *pkinit.AcceptorResult, invalid bool) []byte {
 	t.Helper()
+	var (
+		emptyEncryptedData types.EncryptedData
+		emptyReplyPart     messages.EncKDCRepPart
+	)
+
 	now := time.Now().UTC()
 	part := messages.EncKDCRepPart{
-		Key:   types.EncryptionKey{KeyType: 17, KeyValue: []byte("session-key-1234")},
-		Nonce: request.ReqBody.Nonce, Flags: types.NewKrbFlags(),
+		LastReqs:      nil,
+		KeyExpiration: time.Time{},
+		RenewTill:     time.Time{},
+		CAddr:         nil,
+		EncPAData:     nil,
+		Key:           types.EncryptionKey{KeyType: 17, KeyValue: []byte("session-key-1234")},
+		Nonce:         request.ReqBody.Nonce, Flags: types.NewKrbFlags(),
 		AuthTime: now, StartTime: now, EndTime: now.Add(time.Hour),
 		SRealm: request.ReqBody.Realm, SName: request.ReqBody.SName,
 	}
@@ -300,7 +361,9 @@ func asPKINITReply(t *testing.T, request messages.ASReq, accepted *pkinit.Accept
 	plain, err := part.Marshal()
 	require.NoError(t, err)
 	reply := messages.ASRep{KDCRepFields: messages.KDCRepFields{
-		PVNO: iana.PVNO, MsgType: msgtype.KRB_AS_REP,
+		EncPart:          emptyEncryptedData,
+		DecryptedEncPart: emptyReplyPart,
+		PVNO:             iana.PVNO, MsgType: msgtype.KRB_AS_REP,
 		CRealm: request.ReqBody.Realm, CName: request.ReqBody.CName,
 		Ticket: s4uTestTicket(request.ReqBody.Realm, request.ReqBody.SName.PrincipalNameString()),
 		PAData: types.PADataSequence{{PADataType: patype.PA_PK_AS_REP, PADataValue: accepted.ReplyPAData}},
@@ -320,11 +383,15 @@ func TestASExchangePKINITReplyKeyPublication(t *testing.T) {
 			cl.settings.pkinitOptions.ValidateKDCSigner = func(*pkinit.VerifiedSignedData) error { return nil }
 			var replyKey types.EncryptionKey
 			cl.sendToKDCFunc = func(b []byte, _ string) ([]byte, error) {
-				_, published := cl.takePKINITReplyKey("EXAMPLE.ORG")
+				_, published := cl.takePKINITReplyKey(exchangeFixtureRealm)
 				require.False(t, published)
 				var request messages.ASReq
 				require.NoError(t, request.Unmarshal(b))
 				accepted, err := pkinit.AcceptExchange(&request, pkinit.AcceptorOptions{
+					MinimumDHBits:  0,
+					Random:         nil,
+					CurrentTime:    time.Time{},
+					ClockSkew:      0,
 					Identity:       cl.settings.pkinitOptions.Identity,
 					ValidateSigner: func(*pkinit.VerifiedSignedData) error { return nil },
 				})
@@ -332,11 +399,11 @@ func TestASExchangePKINITReplyKeyPublication(t *testing.T) {
 				replyKey = accepted.ReplyKey
 				return asPKINITReply(t, request, accepted, invalid), nil
 			}
-			_, err := cl.ASExchange("EXAMPLE.ORG", req, 0)
+			_, err := cl.ASExchange(exchangeFixtureRealm, req, 0)
 			if !invalid {
 				require.NoError(t, err)
 			}
-			published, ok := cl.takePKINITReplyKey("EXAMPLE.ORG")
+			published, ok := cl.takePKINITReplyKey(exchangeFixtureRealm)
 			require.Equal(t, !invalid, ok)
 			if invalid {
 				require.ErrorContains(t, err, "PKINIT AS_REP is not valid")
@@ -357,7 +424,12 @@ func asFASTPeerState(t *testing.T, peer *fastState, b []byte) messages.ASReq {
 	var armor messages.APReq
 	require.NoError(t, armor.Unmarshal(wrapped.ArmoredData.Armor.ArmorValue))
 	require.NoError(t, armor.DecryptAuthenticatorWithKeyUsage(peer.armor.key, keyusage.AP_REQ_AUTHENTICATOR))
-	peer.armorKey, err = crypto.KRBFXCF2(armor.Authenticator.SubKey, peer.armor.key, []byte("subkeyarmor"), []byte("ticketarmor"))
+	peer.armorKey, err = crypto.KRBFXCF2(
+		armor.Authenticator.SubKey,
+		peer.armor.key,
+		[]byte("subkeyarmor"),
+		[]byte("ticketarmor"),
+	)
 	require.NoError(t, err)
 	return request
 }
@@ -400,7 +472,7 @@ func TestASExchangeFASTErrorCause(t *testing.T) {
 				require.NoError(t, err)
 				return nil, fastTestError(t, peer, request.ReqBody.Nonce+tt.nonceDelta, types.PADataSequence{pa})
 			}
-			_, err := cl.ASExchange("EXAMPLE.ORG", req, tt.referral)
+			_, err := cl.ASExchange(exchangeFixtureRealm, req, tt.referral)
 			require.ErrorContains(t, err, tt.context)
 			require.NotContains(t, err.Error(), "%!")
 			var classified krberror.Krberror
@@ -428,12 +500,17 @@ func TestASExchangeNormalPreAuthBudgets(t *testing.T) {
 		want  string
 	}{
 		{name: "required once", code: errorcode.KDC_ERR_PREAUTH_REQUIRED, calls: 2, want: "kerberos error response from KDC"},
-		{name: "more data five rounds", code: errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED, calls: 6, want: "maximum FAST pre-authentication rounds exceeded"},
+		{
+			name:  "more data five rounds",
+			code:  errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED,
+			calls: 6,
+			want:  "maximum FAST pre-authentication rounds exceeded",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cl, _, req := newFASTTestState(t)
 			cl.settings.fastArmor = nil
-			info, err := asn1.Marshal(types.ETypeInfo2{{EType: 17}})
+			info, err := asn1.Marshal(types.ETypeInfo2{{Salt: "", S2KParams: nil, EType: 17}})
 			require.NoError(t, err)
 			methodData, err := asn1.Marshal(types.PADataSequence{{PADataType: patype.PA_ETYPE_INFO2, PADataValue: info}})
 			require.NoError(t, err)
@@ -444,7 +521,7 @@ func TestASExchangeNormalPreAuthBudgets(t *testing.T) {
 				response.EData = methodData
 				return nil, response
 			}
-			_, err = cl.ASExchange("EXAMPLE.ORG", req, 0)
+			_, err = cl.ASExchange(exchangeFixtureRealm, req, 0)
 			require.ErrorContains(t, err, tc.want)
 			require.Equal(t, tc.calls, calls)
 		})
@@ -455,35 +532,39 @@ func TestASExchangePKINITTypedBudgetShared(t *testing.T) {
 	cl, req := asPKINITClient(t, true, false)
 	cl.settings.pkinitOptions.Mode = pkinit.ModeRSA
 	_, err := runASPKINITScript(t, cl, req, []asPKINITStep{
-		{code: errorcode.KDC_ERR_NO_ACCEPTABLE_KDF},
-		{code: errorcode.KDC_ERR_PUBLIC_KEY_ENCRYPTION_NOT_SUPPORTED},
+		{token: "", code: errorcode.KDC_ERR_NO_ACCEPTABLE_KDF},
+		{token: "", code: errorcode.KDC_ERR_PUBLIC_KEY_ENCRYPTION_NOT_SUPPORTED},
 	})
 	require.ErrorIs(t, err, pkinit.ErrPublicKeyEncryptionUnsupported)
 }
 
 func TestASExchangePKINITReplyOrdering(t *testing.T) {
+	var emptyReplyPart messages.EncKDCRepPart
+
 	for _, tc := range []struct {
 		name   string
 		assume bool
 		want   string
 	}{
-		{name: "before negotiation", want: "KDC returned AS_REP before PKINIT negotiation"},
+		{assume: false, name: "before negotiation", want: "KDC returned AS_REP before PKINIT negotiation"},
 		{name: "missing PKINIT reply", assume: true, want: "invalid PA-PK-AS-REP"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cl, req := asPKINITClient(t, tc.assume, false)
 			cl.sendToKDCFunc = func([]byte, string) ([]byte, error) {
 				reply := messages.ASRep{KDCRepFields: messages.KDCRepFields{
-					PVNO: iana.PVNO, MsgType: msgtype.KRB_AS_REP,
+					PAData:           nil,
+					DecryptedEncPart: emptyReplyPart,
+					PVNO:             iana.PVNO, MsgType: msgtype.KRB_AS_REP,
 					CRealm: req.ReqBody.Realm, CName: req.ReqBody.CName,
 					Ticket:  s4uTestTicket(req.ReqBody.Realm, req.ReqBody.SName.PrincipalNameString()),
-					EncPart: types.EncryptedData{EType: 17, Cipher: []byte("unused")},
+					EncPart: types.EncryptedData{KVNO: 0, EType: 17, Cipher: []byte("unused")},
 				}}
 				b, err := reply.Marshal()
 				require.NoError(t, err)
 				return b, nil
 			}
-			_, err := cl.ASExchange("EXAMPLE.ORG", req, 0)
+			_, err := cl.ASExchange(exchangeFixtureRealm, req, 0)
 			require.ErrorContains(t, err, tc.want)
 		})
 	}
@@ -505,6 +586,8 @@ func asFASTInnerRequest(t *testing.T, peer *fastState, b []byte) messages.ASReq 
 
 func asFASTPKINITReply(t *testing.T, peer *fastState, replyBytes []byte, nonce int, invalid bool) []byte {
 	t.Helper()
+	var emptyKey types.EncryptionKey
+
 	if nonce < 0 || nonce > math.MaxInt32 {
 		t.Fatal("nonce outside AS-REQ range")
 		return nil
@@ -522,7 +605,8 @@ func asFASTPKINITReply(t *testing.T, peer *fastState, replyBytes []byte, nonce i
 	}
 	now := time.Now().UTC()
 	response := types.KrbFastResponse{
-		PAData: reply.PAData, Nonce: uint32(nonce),
+		StrengthenKey: emptyKey,
+		PAData:        reply.PAData, Nonce: uint32(nonce),
 		Finished: types.KrbFastFinished{
 			Timestamp: now, Usec: now.Nanosecond() / int(time.Microsecond),
 			CRealm: reply.CRealm, CName: reply.CName,
@@ -533,7 +617,9 @@ func asFASTPKINITReply(t *testing.T, peer *fastState, replyBytes []byte, nonce i
 	require.NoError(t, err)
 	encrypted, err := crypto.GetEncryptedData(encoded, peer.armorKey, keyusage.FAST_REP, 0)
 	require.NoError(t, err)
-	pa, err := types.NewPAFXFastReplyPAData(types.PAFXFastReply{ArmoredData: types.KrbFastArmoredRep{EncFastRep: encrypted}})
+	pa, err := types.NewPAFXFastReplyPAData(
+		types.PAFXFastReply{ArmoredData: types.KrbFastArmoredRep{EncFastRep: encrypted}},
+	)
 	require.NoError(t, err)
 	reply.PAData = types.PADataSequence{pa}
 	b, err := reply.Marshal()
@@ -552,6 +638,10 @@ func TestASExchangeFASTPKINITReply(t *testing.T) {
 			cl.sendToKDCFunc = func(b []byte, _ string) ([]byte, error) {
 				request := asFASTInnerRequest(t, peer, b)
 				accepted, err := pkinit.AcceptExchange(&request, pkinit.AcceptorOptions{
+					MinimumDHBits:  0,
+					Random:         nil,
+					CurrentTime:    time.Time{},
+					ClockSkew:      0,
 					Identity:       cl.settings.pkinitOptions.Identity,
 					ValidateSigner: func(*pkinit.VerifiedSignedData) error { return nil },
 				})
@@ -559,13 +649,13 @@ func TestASExchangeFASTPKINITReply(t *testing.T) {
 				replyBytes := asPKINITReply(t, request, accepted, false)
 				return asFASTPKINITReply(t, peer, replyBytes, request.ReqBody.Nonce, invalid), nil
 			}
-			_, err := cl.ASExchange("EXAMPLE.ORG", req, 0)
+			_, err := cl.ASExchange(exchangeFixtureRealm, req, 0)
 			if invalid {
 				require.ErrorContains(t, err, "FAST PKINIT AS_REP is not valid")
 			} else {
 				require.NoError(t, err)
 			}
-			_, published := cl.takePKINITReplyKey("EXAMPLE.ORG")
+			_, published := cl.takePKINITReplyKey(exchangeFixtureRealm)
 			require.Equal(t, !invalid, published)
 		})
 	}
@@ -578,7 +668,10 @@ func TestASExchangeInitialRequestBytesAndAliasing(t *testing.T) {
 	req.PAData[0] = types.PAData{PADataType: patype.PA_PAC_REQUEST, PADataValue: []byte{1, 2, 3}}
 	DisablePAReqEncPARep(false)(cl.settings)
 	expected := req
-	expected.PAData = append(append(types.PADataSequence(nil), req.PAData...), types.PAData{PADataType: patype.PA_REQ_ENC_PA_REP})
+	expected.PAData = append(
+		append(types.PADataSequence(nil), req.PAData...),
+		types.PAData{PADataValue: nil, PADataType: patype.PA_REQ_ENC_PA_REP},
+	)
 	want, err := expected.Marshal()
 	require.NoError(t, err)
 	cause := errors.New("stop after capture")
@@ -586,7 +679,7 @@ func TestASExchangeInitialRequestBytesAndAliasing(t *testing.T) {
 		require.Equal(t, want, b)
 		return nil, cause
 	}
-	_, err = cl.ASExchange("EXAMPLE.ORG", req, 0)
+	_, err = cl.ASExchange(exchangeFixtureRealm, req, 0)
 	require.ErrorIs(t, err, cause)
 	require.Len(t, req.PAData, 1, "caller slice header must not change")
 	require.Equal(t, expected.PAData, req.PAData[:2], "caller backing array remains shared")
@@ -595,22 +688,22 @@ func TestASExchangeInitialRequestBytesAndAliasing(t *testing.T) {
 func TestASExchangePKINITPreparationAliasing(t *testing.T) {
 	cl, req := asPKINITClient(t, false, false)
 	req.PAData = make(types.PADataSequence, 4, 8)
-	req.PAData[0] = types.PAData{PADataType: patype.PA_ENC_TIMESTAMP}
-	req.PAData[1] = types.PAData{PADataType: patype.PA_PK_AS_REQ}
-	req.PAData[2] = types.PAData{PADataType: patype.PA_PK_OCSP_RESPONSE}
-	req.PAData[3] = types.PAData{PADataType: patype.PA_PAC_REQUEST}
+	req.PAData[0] = types.PAData{PADataValue: nil, PADataType: patype.PA_ENC_TIMESTAMP}
+	req.PAData[1] = types.PAData{PADataValue: nil, PADataType: patype.PA_PK_AS_REQ}
+	req.PAData[2] = types.PAData{PADataValue: nil, PADataType: patype.PA_PK_OCSP_RESPONSE}
+	req.PAData[3] = types.PAData{PADataValue: nil, PADataType: patype.PA_PAC_REQUEST}
 	var sent messages.ASReq
 	cl.sendToKDCFunc = func(b []byte, _ string) ([]byte, error) {
 		require.NoError(t, sent.Unmarshal(b))
 		return nil, asPKINITError(t, errorcode.KDC_ERR_CLIENT_REVOKED, "")
 	}
-	_, err := cl.ASExchange("EXAMPLE.ORG", req, 0)
+	_, err := cl.ASExchange(exchangeFixtureRealm, req, 0)
 	require.Error(t, err)
 	require.Len(t, sent.PAData, 3)
 	require.Equal(t, types.PADataSequence{
-		{PADataType: patype.PA_PAC_REQUEST},
-		{PADataType: patype.PA_REQ_ENC_PA_REP},
-		{PADataType: patype.PA_AS_FRESHNESS},
+		{PADataValue: nil, PADataType: patype.PA_PAC_REQUEST},
+		{PADataValue: nil, PADataType: patype.PA_REQ_ENC_PA_REP},
+		{PADataValue: nil, PADataType: patype.PA_AS_FRESHNESS},
 	}, req.PAData[:3])
 	require.Len(t, req.PAData, 4)
 }

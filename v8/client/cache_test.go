@@ -2,7 +2,7 @@ package client
 
 import (
 	"encoding/json"
-	"fmt"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -17,85 +17,51 @@ import (
 func TestCache_addEntry_getEntry_remove_clear(t *testing.T) {
 	t.Parallel()
 	c := NewCache()
-	cnt := 10
+	const cnt byte = 10
 	var wg sync.WaitGroup
-	for i := 0; i < cnt; i++ {
-		wg.Add(1)
-		tkt := messages.Ticket{
-			SName: types.PrincipalName{
-				NameType:   1,
-				NameString: []string{fmt.Sprintf("%d", i), "test.cache"},
-			},
-		}
-		key := types.EncryptionKey{
-			KeyType:  1,
-			KeyValue: []byte{byte(i)},
-		}
-		go func(i int) {
-			e := c.addEntry(tkt, time.Unix(int64(0+i), 0).UTC(), time.Unix(int64(10+i), 0).UTC(), time.Unix(int64(20+i), 0).UTC(), time.Unix(int64(30+i), 0).UTC(), key)
-			assert.Equal(t, fmt.Sprintf("%d/test.cache", i), e.SPN, "SPN cache key not as expected")
-			wg.Done()
-		}(i)
+	for i := range cnt {
+		wg.Go(func() {
+			addTestCacheEntry(t, c, i)
+		})
 	}
 	wg.Wait()
-	for i := 0; i < cnt; i++ {
-		wg.Add(1)
-		go func(i int) {
-			e, ok := c.getEntry(fmt.Sprintf("%d/test.cache", i))
-			assert.True(t, ok, "cache entry %d was not found", i)
-			assert.Equal(t, time.Unix(int64(0+i), 0).UTC(), e.AuthTime, "auth time not as expected")
-			assert.Equal(t, time.Unix(int64(10+i), 0).UTC(), e.StartTime, "start time not as expected")
-			assert.Equal(t, time.Unix(int64(20+i), 0).UTC(), e.EndTime, "end time not as expected")
-			assert.Equal(t, time.Unix(int64(30+i), 0).UTC(), e.RenewTill, "renew time not as expected")
-			assert.Equal(t, []string{fmt.Sprintf("%d", i), "test.cache"}, e.Ticket.SName.NameString, "ticket not correct")
-			assert.Equal(t, []byte{byte(i)}, e.SessionKey.KeyValue, "session key not correct") // #nosec G115 -- i is bounded by the test count.
-			wg.Done()
-		}(i)
+	for i := range cnt {
+		wg.Go(func() {
+			assertTestCacheEntry(t, c, i)
+		})
 	}
 	wg.Wait()
-	_, ok := c.getEntry(fmt.Sprintf("%d/test.cache", cnt+1))
+	missingSPN := testCacheSPN(int(cnt) + 1)
+	_, ok := c.getEntry(missingSPN)
 	assert.False(t, ok, "entry found in cache when it shouldn't have been")
 
 	// Remove just the even entries
-	for i := 0; i < cnt; i += 2 {
-		wg.Add(1)
-		go func(i int) {
-			c.RemoveEntry(fmt.Sprintf("%d/test.cache", i))
-			wg.Done()
-		}(i)
+	for i := 0; i < int(cnt); i += 2 {
+		wg.Go(func() {
+			c.RemoveEntry(testCacheSPN(i))
+		})
 	}
 	wg.Wait()
 
-	for i := 0; i < cnt; i++ {
-		wg.Add(1)
-		go func(i int) {
+	for i := range cnt {
+		wg.Go(func() {
 			if i%2 == 0 {
-				_, ok := c.getEntry(fmt.Sprintf("%d/test.cache", cnt+1))
+				_, ok := c.getEntry(missingSPN)
 				assert.False(t, ok, "entry %d found in cache when it shouldn't have been", i)
 			} else {
-				e, ok := c.getEntry(fmt.Sprintf("%d/test.cache", i))
-				assert.True(t, ok, "cache entry %d was not found", i)
-				assert.Equal(t, time.Unix(int64(0+i), 0).UTC(), e.AuthTime, "auth time not as expected")
-				assert.Equal(t, time.Unix(int64(10+i), 0).UTC(), e.StartTime, "start time not as expected")
-				assert.Equal(t, time.Unix(int64(20+i), 0).UTC(), e.EndTime, "end time not as expected")
-				assert.Equal(t, time.Unix(int64(30+i), 0).UTC(), e.RenewTill, "renew time not as expected")
-				assert.Equal(t, []string{fmt.Sprintf("%d", i), "test.cache"}, e.Ticket.SName.NameString, "ticket not correct")
-				assert.Equal(t, []byte{byte(i)}, e.SessionKey.KeyValue, "session key not correct") // #nosec G115 -- i is bounded by the test count.
+				assertTestCacheEntry(t, c, i)
 			}
-			wg.Done()
-		}(i)
+		})
 	}
 	wg.Wait()
 
 	// Clear the cache
 	c.clear()
-	for i := 0; i < cnt; i++ {
-		wg.Add(1)
-		go func(i int) {
-			_, ok := c.getEntry(fmt.Sprintf("%d/test.cache", cnt+1))
+	for i := range cnt {
+		wg.Go(func() {
+			_, ok := c.getEntry(missingSPN)
 			assert.False(t, ok, "entry %d found in cache when it shouldn't have been", i)
-			wg.Done()
-		}(i)
+		})
 	}
 	wg.Wait()
 }
@@ -103,20 +69,8 @@ func TestCache_addEntry_getEntry_remove_clear(t *testing.T) {
 func TestCache_JSON(t *testing.T) {
 	t.Parallel()
 	c := NewCache()
-	cnt := 3
-	for i := 0; i < cnt; i++ {
-		tkt := messages.Ticket{
-			SName: types.PrincipalName{
-				NameType:   1,
-				NameString: []string{fmt.Sprintf("%d", i), "test.cache"},
-			},
-		}
-		key := types.EncryptionKey{
-			KeyType:  1,
-			KeyValue: []byte{byte(i)},
-		}
-		e := c.addEntry(tkt, time.Unix(int64(0+i), 0).UTC(), time.Unix(int64(10+i), 0).UTC(), time.Unix(int64(20+i), 0).UTC(), time.Unix(int64(30+i), 0).UTC(), key)
-		assert.Equal(t, fmt.Sprintf("%d/test.cache", i), e.SPN, "SPN cache key not as expected")
+	for i := range byte(3) {
+		addTestCacheEntry(t, c, i)
 	}
 	expected := `[
   {
@@ -146,6 +100,45 @@ func TestCache_JSON(t *testing.T) {
 		t.Errorf("error getting json output of cache: %v", err)
 	}
 	assert.Equal(t, expected, j, "json output not as expected")
+}
+
+const cacheTestHost = "test.cache"
+
+func testCacheSPN(index int) string {
+	return strconv.Itoa(index) + "/" + cacheTestHost
+}
+
+func addTestCacheEntry(t *testing.T, c *Cache, index byte) {
+	t.Helper()
+	var ticket messages.Ticket
+	ticket.SName = types.PrincipalName{
+		NameType:   1,
+		NameString: []string{strconv.Itoa(int(index)), cacheTestHost},
+	}
+	key := types.EncryptionKey{KeyType: 1, KeyValue: []byte{index}}
+	offset := int64(index)
+	entry := c.addEntry(
+		ticket,
+		time.Unix(offset, 0).UTC(),
+		time.Unix(10+offset, 0).UTC(),
+		time.Unix(20+offset, 0).UTC(),
+		time.Unix(30+offset, 0).UTC(),
+		key,
+	)
+	assert.Equal(t, testCacheSPN(int(index)), entry.SPN, "SPN cache key not as expected")
+}
+
+func assertTestCacheEntry(t *testing.T, c *Cache, index byte) {
+	t.Helper()
+	entry, ok := c.getEntry(testCacheSPN(int(index)))
+	assert.True(t, ok, "cache entry %d was not found", index)
+	offset := int64(index)
+	assert.Equal(t, time.Unix(offset, 0).UTC(), entry.AuthTime, "auth time not as expected")
+	assert.Equal(t, time.Unix(10+offset, 0).UTC(), entry.StartTime, "start time not as expected")
+	assert.Equal(t, time.Unix(20+offset, 0).UTC(), entry.EndTime, "end time not as expected")
+	assert.Equal(t, time.Unix(30+offset, 0).UTC(), entry.RenewTill, "renew time not as expected")
+	assert.Equal(t, []string{strconv.Itoa(int(index)), cacheTestHost}, entry.Ticket.SName.NameString, "ticket not correct")
+	assert.Equal(t, []byte{index}, entry.SessionKey.KeyValue, "session key not correct")
 }
 
 func TestCacheJSONRetainsEncodingFailure(t *testing.T) {

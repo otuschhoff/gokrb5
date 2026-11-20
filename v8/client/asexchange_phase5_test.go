@@ -28,16 +28,27 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+const exchangeFixtureRealm = "EXAMPLE.ORG"
+
 func phase5Keytab(t *testing.T, etypes ...int32) *keytab.Keytab {
 	t.Helper()
 	kt := keytab.New()
-	principal := keytab.Principal{Realm: "EXAMPLE.ORG", Components: []string{"user"}, NameType: nametype.KRB_NT_PRINCIPAL}
+	principal := keytab.Principal{
+		Realm:      exchangeFixtureRealm,
+		Components: []string{"user"},
+		NameType:   nametype.KRB_NT_PRINCIPAL,
+	}
 	for _, id := range etypes {
 		et, err := crypto.GetEtype(id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := kt.AddKey(principal, 1, types.EncryptionKey{KeyType: id, KeyValue: make([]byte, et.GetKeyByteSize())}, time.Now()); err != nil {
+		if err := kt.AddKey(
+			principal,
+			1,
+			types.EncryptionKey{KeyType: id, KeyValue: make([]byte, et.GetKeyByteSize())},
+			time.Now(),
+		); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -68,25 +79,36 @@ func TestPKINITExchangeHelpers(t *testing.T) {
 		t.Fatal("unrelated KDC error was classified as PKINIT pre-auth")
 	}
 
-	if _, err := processPKINITReply(nil, nil, etypeID.AES256_CTS_HMAC_SHA1_96); err == nil || !strings.Contains(err.Error(), "omitted") {
+	if _, err := processPKINITReply(
+		nil,
+		nil,
+		etypeID.AES256_CTS_HMAC_SHA1_96,
+	); err == nil || !strings.Contains(err.Error(), "omitted") {
 		t.Fatalf("missing reply error = %v", err)
 	}
 	duplicate := types.PADataSequence{
 		{PADataType: patype.PA_PK_AS_REP, PADataValue: []byte{1}},
 		{PADataType: patype.PA_PK_AS_REP, PADataValue: []byte{2}},
 	}
-	if _, err := processPKINITReply(nil, duplicate, etypeID.AES256_CTS_HMAC_SHA1_96); err == nil || !strings.Contains(err.Error(), "multiple") {
+	if _, err := processPKINITReply(
+		nil,
+		duplicate,
+		etypeID.AES256_CTS_HMAC_SHA1_96,
+	); err == nil || !strings.Contains(err.Error(), "multiple") {
 		t.Fatalf("duplicate reply error = %v", err)
 	}
 }
 
 func TestFirstAvailablePreAuthKeyFallback(t *testing.T) {
-	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", config.New())
+	cl := NewWithPassword("user", exchangeFixtureRealm, "password", config.New())
 	et, key, _, err := firstAvailablePreAuthKey(cl, []int32{-1, etypeID.AES256_CTS_HMAC_SHA1_96})
 	if err != nil || et.GetETypeID() != etypeID.AES256_CTS_HMAC_SHA1_96 || len(key.KeyValue) == 0 {
 		t.Fatalf("selected key = %v/%d bytes, %v", et, len(key.KeyValue), err)
 	}
-	if _, _, _, err := firstAvailablePreAuthKey(cl, nil); err == nil || !strings.Contains(err.Error(), "no encryption types") {
+	if _, _, _, err := firstAvailablePreAuthKey(cl, nil); err == nil || !strings.Contains(
+		err.Error(),
+		"no encryption types",
+	) {
 		t.Fatalf("empty enctype error = %v", err)
 	}
 }
@@ -94,7 +116,7 @@ func TestFirstAvailablePreAuthKeyFallback(t *testing.T) {
 func TestASReqETypesRestrictedToKeytab(t *testing.T) {
 	cfg := config.New()
 	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{18, 17, 23}
-	cl := NewWithKeytab("user", "EXAMPLE.ORG", phase5Keytab(t, 17, 18), cfg)
+	cl := NewWithKeytab("user", exchangeFixtureRealm, phase5Keytab(t, 17, 18), cfg)
 	req, err := cl.newASReq()
 	if err != nil {
 		t.Fatal(err)
@@ -104,12 +126,10 @@ func TestASReqETypesRestrictedToKeytab(t *testing.T) {
 
 func TestASExchangeTopLevelFailures(t *testing.T) {
 	t.Run("configuration", func(t *testing.T) {
-		client := NewWithPassword("user", "EXAMPLE.ORG", "password", config.New())
+		client := NewWithPassword("user", exchangeFixtureRealm, "password", config.New())
 		request, err := client.newASReq()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := client.ASExchange("EXAMPLE.ORG", request, 0); err == nil {
+		require.NoError(t, err)
+		if _, err := client.ASExchange(exchangeFixtureRealm, request, 0); err == nil {
 			t.Fatal("unconfigured client performed AS exchange")
 		}
 	})
@@ -118,17 +138,18 @@ func TestASExchangeTopLevelFailures(t *testing.T) {
 		cfg := config.New()
 		cfg.LibDefaults.DNSLookupKDC = true
 		cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES128_CTS_HMAC_SHA1_96}
-		client := NewWithPassword("user", "EXAMPLE.ORG", "password", cfg, options...)
+		client := NewWithPassword("user", exchangeFixtureRealm, "password", cfg, options...)
 		request, err := client.newASReq()
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		return client, request
 	}
 	t.Run("transport", func(t *testing.T) {
 		client, request := newClient()
 		client.sendToKDCFunc = func([]byte, string) ([]byte, error) { return nil, errors.New("offline") }
-		if _, err := client.ASExchange("EXAMPLE.ORG", request, 0); err == nil || !strings.Contains(err.Error(), "failed sending AS_REQ") {
+		if _, err := client.ASExchange(exchangeFixtureRealm, request, 0); err == nil || !strings.Contains(
+			err.Error(),
+			"failed sending AS_REQ",
+		) {
 			t.Fatalf("transport error = %v", err)
 		}
 	})
@@ -137,30 +158,35 @@ func TestASExchangeTopLevelFailures(t *testing.T) {
 		client.sendToKDCFunc = func([]byte, string) ([]byte, error) {
 			return nil, messages.NewKRBError(request.ReqBody.CName, "OTHER.ORG", errorcode.KDC_ERR_WRONG_REALM, "referral")
 		}
-		if _, err := client.ASExchange("EXAMPLE.ORG", request, 6); err == nil || !strings.Contains(err.Error(), "maximum number") {
+		if _, err := client.ASExchange(exchangeFixtureRealm, request, 6); err == nil || !strings.Contains(
+			err.Error(),
+			"maximum number",
+		) {
 			t.Fatalf("referral error = %v", err)
 		}
 	})
 	t.Run("malformed reply", func(t *testing.T) {
 		client, request := newClient()
 		client.sendToKDCFunc = func([]byte, string) ([]byte, error) { return []byte("malformed"), nil }
-		if _, err := client.ASExchange("EXAMPLE.ORG", request, 0); err == nil || !strings.Contains(err.Error(), "failed to process") {
+		if _, err := client.ASExchange(exchangeFixtureRealm, request, 0); err == nil || !strings.Contains(
+			err.Error(),
+			"failed to process",
+		) {
 			t.Fatalf("malformed reply error = %v", err)
 		}
 	})
 	t.Run("required FAST", func(t *testing.T) {
 		client, request := newClient(RequireFAST(true))
 		client.sendToKDCFunc = func([]byte, string) ([]byte, error) { return nil, errors.New("unexpected") }
-		if _, err := client.ASExchange("EXAMPLE.ORG", request, 0); err == nil || !strings.Contains(err.Error(), "FAST") {
-			t.Fatalf("required FAST error = %v", err)
-		}
+		_, err := client.ASExchange(exchangeFixtureRealm, request, 0)
+		require.ErrorContains(t, err, "FAST")
 	})
 }
 
 func TestASReqETypesIntersectionError(t *testing.T) {
 	cfg := config.New()
 	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{18}
-	cl := NewWithKeytab("user", "EXAMPLE.ORG", phase5Keytab(t, 17), cfg)
+	cl := NewWithKeytab("user", exchangeFixtureRealm, phase5Keytab(t, 17), cfg)
 	_, err := cl.newASReq()
 	assert.EqualError(t, err, "no supported encryption types (config file error?)")
 }
@@ -169,7 +195,7 @@ func TestSetPADataETypeFromTktEnctypes(t *testing.T) {
 	cfg := config.New()
 	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{18, 17}
 	cfg.LibDefaults.PreferredPreauthTypes = []int{2}
-	cl := NewWithKeytab("user", "EXAMPLE.ORG", phase5Keytab(t, 17), cfg, AssumePreAuthentication(true))
+	cl := NewWithKeytab("user", exchangeFixtureRealm, phase5Keytab(t, 17), cfg, AssumePreAuthentication(true))
 	req, err := cl.newASReq()
 	if err != nil {
 		t.Fatal(err)
@@ -194,7 +220,7 @@ func TestSetPADataETypeFromTktEnctypes(t *testing.T) {
 }
 
 func TestSetPADataDoesNotRecordTimestampWithoutPreAuth(t *testing.T) {
-	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", config.New())
+	cl := NewWithPassword("user", exchangeFixtureRealm, "password", config.New())
 	req, err := cl.newASReq()
 	if err != nil {
 		t.Fatal(err)
@@ -231,20 +257,28 @@ func TestPKINITPreAuthHelpers(t *testing.T) {
 		t.Fatal("unrelated KDC error was classified as PKINIT preauth")
 	}
 
-	if _, err := processPKINITReply(nil, nil, etypeID.AES128_CTS_HMAC_SHA1_96); err == nil || !strings.Contains(err.Error(), "omitted") {
+	if _, err := processPKINITReply(
+		nil,
+		nil,
+		etypeID.AES128_CTS_HMAC_SHA1_96,
+	); err == nil || !strings.Contains(err.Error(), "omitted") {
 		t.Fatalf("missing reply error = %v", err)
 	}
 	duplicate := types.PADataSequence{
 		{PADataType: patype.PA_PK_AS_REP, PADataValue: []byte("one")},
 		{PADataType: patype.PA_PK_AS_REP, PADataValue: []byte("two")},
 	}
-	if _, err := processPKINITReply(nil, duplicate, etypeID.AES128_CTS_HMAC_SHA1_96); err == nil || !strings.Contains(err.Error(), "multiple") {
+	if _, err := processPKINITReply(
+		nil,
+		duplicate,
+		etypeID.AES128_CTS_HMAC_SHA1_96,
+	); err == nil || !strings.Contains(err.Error(), "multiple") {
 		t.Fatalf("duplicate reply error = %v", err)
 	}
 }
 
 func TestFirstAvailablePreAuthKey(t *testing.T) {
-	client := NewWithKeytab("user", "EXAMPLE.ORG", phase5Keytab(t, etypeID.AES128_CTS_HMAC_SHA1_96), config.New())
+	client := NewWithKeytab("user", exchangeFixtureRealm, phase5Keytab(t, etypeID.AES128_CTS_HMAC_SHA1_96), config.New())
 	et, key, kvno, err := firstAvailablePreAuthKey(client, []int32{9999, etypeID.AES128_CTS_HMAC_SHA1_96})
 	if err != nil {
 		t.Fatal(err)
@@ -252,7 +286,10 @@ func TestFirstAvailablePreAuthKey(t *testing.T) {
 	if et.GetETypeID() != etypeID.AES128_CTS_HMAC_SHA1_96 || key.KeyType != etypeID.AES128_CTS_HMAC_SHA1_96 || kvno != 1 {
 		t.Fatalf("selected key = etype %d, key %d, kvno %d", et.GetETypeID(), key.KeyType, kvno)
 	}
-	if _, _, _, err := firstAvailablePreAuthKey(client, nil); err == nil || !strings.Contains(err.Error(), "no encryption types") {
+	if _, _, _, err := firstAvailablePreAuthKey(client, nil); err == nil || !strings.Contains(
+		err.Error(),
+		"no encryption types",
+	) {
 		t.Fatalf("empty request error = %v", err)
 	}
 	if _, _, _, err := firstAvailablePreAuthKey(client, []int32{9999}); err == nil {
@@ -261,7 +298,12 @@ func TestFirstAvailablePreAuthKey(t *testing.T) {
 }
 
 func TestPreAuthETypeUsesFirstRequestedKDCOffer(t *testing.T) {
-	entries := types.ETypeInfo2{{EType: etypeID.AES256_CTS_HMAC_SHA1_96}, {EType: etypeID.AES128_CTS_HMAC_SHA1_96}}
+	var emptyPrincipal types.PrincipalName
+
+	entries := types.ETypeInfo2{
+		{Salt: "", S2KParams: nil, EType: etypeID.AES256_CTS_HMAC_SHA1_96},
+		{Salt: "", S2KParams: nil, EType: etypeID.AES128_CTS_HMAC_SHA1_96},
+	}
 	info, err := asn1.Marshal(entries)
 	if err != nil {
 		t.Fatal(err)
@@ -270,7 +312,21 @@ func TestPreAuthETypeUsesFirstRequestedKDCOffer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	et, err := preAuthEType(&messages.KRBError{EData: methodData}, []int32{etypeID.AES128_CTS_HMAC_SHA1_96})
+	et, err := preAuthEType(&messages.KRBError{
+		PVNO:      0,
+		MsgType:   0,
+		CTime:     time.Time{},
+		Cusec:     0,
+		STime:     time.Time{},
+		Susec:     0,
+		ErrorCode: 0,
+		CRealm:    "",
+		CName:     emptyPrincipal,
+		Realm:     "",
+		SName:     emptyPrincipal,
+		EText:     "",
+		EData:     methodData,
+	}, []int32{etypeID.AES128_CTS_HMAC_SHA1_96})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,6 +334,8 @@ func TestPreAuthETypeUsesFirstRequestedKDCOffer(t *testing.T) {
 }
 
 func TestPreAuthETypeAcceptsETypeInfoOnly(t *testing.T) {
+	var emptyPrincipal types.PrincipalName
+
 	entries := types.ETypeInfo{{EType: etypeID.DES3_CBC_SHA1_KD, Salt: []byte("legacy-salt")}}
 	info, err := asn1.Marshal(entries)
 	if err != nil {
@@ -287,7 +345,21 @@ func TestPreAuthETypeAcceptsETypeInfoOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	et, err := preAuthEType(&messages.KRBError{EData: methodData}, []int32{etypeID.DES3_CBC_SHA1_KD})
+	et, err := preAuthEType(&messages.KRBError{
+		PVNO:      0,
+		MsgType:   0,
+		CTime:     time.Time{},
+		Cusec:     0,
+		STime:     time.Time{},
+		Susec:     0,
+		ErrorCode: 0,
+		CRealm:    "",
+		CName:     emptyPrincipal,
+		Realm:     "",
+		SName:     emptyPrincipal,
+		EText:     "",
+		EData:     methodData,
+	}, []int32{etypeID.DES3_CBC_SHA1_KD})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,130 +368,135 @@ func TestPreAuthETypeAcceptsETypeInfoOnly(t *testing.T) {
 
 func TestASExchangePasswordReplyUsesPreAuthSalt(t *testing.T) {
 	const salt = "non-default-kdc-salt"
-	entries := types.ETypeInfo2{{EType: etypeID.AES128_CTS_HMAC_SHA1_96, Salt: salt}}
+	entries := types.ETypeInfo2{{S2KParams: nil, EType: etypeID.AES128_CTS_HMAC_SHA1_96, Salt: salt}}
 	info, err := asn1.Marshal(entries)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	methodData, err := asn1.Marshal(types.PADataSequence{{PADataType: patype.PA_ETYPE_INFO2, PADataValue: info}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	et, err := crypto.GetEtype(etypeID.AES128_CTS_HMAC_SHA1_96)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	replyKey, err := et.StringToKey("password", salt, et.GetDefaultStringToKeyParams())
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	cfg := config.New()
 	cfg.LibDefaults.DNSLookupKDC = true
 	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES128_CTS_HMAC_SHA1_96}
-	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", cfg, DisablePAReqEncPARep(true))
+	cl := NewWithPassword("user", exchangeFixtureRealm, "password", cfg, DisablePAReqEncPARep(true))
 	request, err := cl.newASReq()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	calls := 0
 	cl.sendToKDCFunc = func(requestBytes []byte, _ string) ([]byte, error) {
 		calls++
 		if calls == 1 {
-			preAuthError := messages.NewKRBError(request.ReqBody.CName, request.ReqBody.Realm, errorcode.KDC_ERR_PREAUTH_REQUIRED, "pre-authentication required")
+			preAuthError := messages.NewKRBError(
+				request.ReqBody.CName,
+				request.ReqBody.Realm,
+				errorcode.KDC_ERR_PREAUTH_REQUIRED,
+				"pre-authentication required",
+			)
 			preAuthError.EData = methodData
 			return nil, preAuthError
 		}
 		var retried messages.ASReq
-		if err := retried.Unmarshal(requestBytes); err != nil {
-			t.Fatal(err)
-		}
-		now := time.Now().UTC()
-		part := messages.EncKDCRepPart{
-			Key:       types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("session-key-1234")},
-			Nonce:     retried.ReqBody.Nonce,
-			Flags:     types.NewKrbFlags(),
-			AuthTime:  now,
-			StartTime: now,
-			EndTime:   now.Add(time.Hour),
-			SRealm:    retried.ReqBody.Realm,
-			SName:     retried.ReqBody.SName,
-		}
-		partBytes, err := part.Marshal()
-		if err != nil {
-			t.Fatal(err)
-		}
-		reply := messages.ASRep{KDCRepFields: messages.KDCRepFields{
-			PVNO:    iana.PVNO,
-			MsgType: msgtype.KRB_AS_REP,
-			CRealm:  retried.ReqBody.Realm,
-			CName:   retried.ReqBody.CName,
-			Ticket:  s4uTestTicket(retried.ReqBody.Realm, retried.ReqBody.SName.PrincipalNameString()),
-		}}
-		reply.EncPart, err = crypto.GetEncryptedData(partBytes, types.EncryptionKey{KeyType: et.GetETypeID(), KeyValue: replyKey}, keyusage.AS_REP_ENCPART, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, retried.Unmarshal(requestBytes))
+		partBytes := marshalPasswordASReplyPart(t, &retried.ReqBody)
+		reply := messages.ASRep{KDCRepFields: testKDCReplyFields(&retried.ReqBody, msgtype.KRB_AS_REP)}
+		reply.EncPart, err = crypto.GetEncryptedData(
+			partBytes,
+			types.EncryptionKey{KeyType: et.GetETypeID(), KeyValue: replyKey},
+			keyusage.AS_REP_ENCPART,
+			0,
+		)
+		require.NoError(t, err)
 		return reply.Marshal()
 	}
 
-	if _, err := cl.ASExchange("EXAMPLE.ORG", request, 0); err != nil {
+	if _, err := cl.ASExchange(exchangeFixtureRealm, request, 0); err != nil {
 		t.Fatal(err)
 	}
 	assert.Equal(t, 2, calls)
 }
 
 func TestLoginWithOptionsCachesServiceASReply(t *testing.T) {
+	var (
+		emptyEncryptedData types.EncryptedData
+		emptyReplyPart     messages.EncKDCRepPart
+	)
+
 	cfg := config.New()
 	cfg.LibDefaults.DNSLookupKDC = true
 	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES128_CTS_HMAC_SHA1_96}
-	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", cfg,
+	cl := NewWithPassword("user", exchangeFixtureRealm, "password", cfg,
 		AssumePreAuthentication(true), DisablePAReqEncPARep(true))
 	service := types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "HTTP/server.example.org")
 	calls := 0
 	cl.sendToKDCFunc = func(requestBytes []byte, _ string) ([]byte, error) {
 		calls++
 		var request messages.ASReq
-		if err := request.Unmarshal(requestBytes); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, request.Unmarshal(requestBytes))
 		if !request.ReqBody.SName.Equal(service) || !request.PAData.Contains(patype.PA_ENC_TIMESTAMP) {
 			t.Fatalf("AS request service/pre-auth = %+v/%+v", request.ReqBody.SName, request.PAData)
 		}
 		replyKey, _, err := crypto.GetKeyFromPassword("password", request.ReqBody.CName, request.ReqBody.Realm,
 			etypeID.AES128_CTS_HMAC_SHA1_96, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		now := time.Now().UTC()
-		part := messages.EncKDCRepPart{
-			Key:   types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("session-key-1234")},
-			Nonce: request.ReqBody.Nonce, Flags: types.NewKrbFlags(), AuthTime: now, StartTime: now,
-			EndTime: now.Add(time.Hour), SRealm: request.ReqBody.Realm, SName: request.ReqBody.SName,
-		}
-		partBytes, err := part.Marshal()
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
+		partBytes := marshalPasswordASReplyPart(t, &request.ReqBody)
 		reply := messages.ASRep{KDCRepFields: messages.KDCRepFields{
-			PVNO: iana.PVNO, MsgType: msgtype.KRB_AS_REP, CRealm: request.ReqBody.Realm,
+			PAData:           nil,
+			EncPart:          emptyEncryptedData,
+			DecryptedEncPart: emptyReplyPart,
+			PVNO:             iana.PVNO, MsgType: msgtype.KRB_AS_REP, CRealm: request.ReqBody.Realm,
 			CName: request.ReqBody.CName, Ticket: s4uTestTicket(request.ReqBody.Realm, service.PrincipalNameString()),
 		}}
 		reply.EncPart, err = crypto.GetEncryptedData(partBytes, replyKey, keyusage.AS_REP_ENCPART, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		return reply.Marshal()
 	}
-	if err := cl.LoginWithOptions(messages.ASReqOptions{ServicePrincipal: &service}); err != nil {
+	if err := cl.LoginWithOptions(messages.ASReqOptions{
+		Lifetime:         nil,
+		RenewLifetime:    nil,
+		Forwardable:      nil,
+		Proxiable:        nil,
+		Canonicalize:     nil,
+		IncludePAC:       nil,
+		Addresses:        nil,
+		Enterprise:       nil,
+		StartTime:        nil,
+		ServicePrincipal: &service,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 1 {
 		t.Fatalf("KDC calls = %d, want 1", calls)
 	}
-	if ticket, key, ok := cl.GetCachedTicket(service.PrincipalNameString()); !ok || !ticket.SName.Equal(service) || string(key.KeyValue) != "session-key-1234" {
+	if ticket, key, ok := cl.GetCachedTicket(
+		service.PrincipalNameString(),
+	); !ok || !ticket.SName.Equal(service) || string(key.KeyValue) != "session-key-1234" {
 		t.Fatalf("cached service ticket = %+v/%x/%v", ticket.SName, key.KeyValue, ok)
 	}
+}
+
+func marshalPasswordASReplyPart(t *testing.T, body *messages.KDCReqBody) []byte {
+	t.Helper()
+	now := time.Now().UTC()
+	part := messages.EncKDCRepPart{
+		Key:           types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("session-key-1234")},
+		LastReqs:      nil,
+		Nonce:         body.Nonce,
+		KeyExpiration: time.Time{},
+		Flags:         types.NewKrbFlags(),
+		AuthTime:      now,
+		StartTime:     now,
+		EndTime:       now.Add(time.Hour),
+		RenewTill:     time.Time{},
+		SRealm:        body.Realm,
+		SName:         body.SName,
+		CAddr:         nil,
+		EncPAData:     nil,
+	}
+	data, err := part.Marshal()
+	require.NoError(t, err)
+	return data
 }
 
 func TestClientCCacheExportRoundTrip(t *testing.T) {
@@ -494,7 +571,10 @@ func TestNewFromCCacheMatchesTGTRealmCaseInsensitively(t *testing.T) {
 	// original (upper-case) realm, simulating the casing mismatch.
 	realm := original.DefaultPrincipal.Realm
 	original.DefaultPrincipal.Realm = strings.ToLower(realm)
-	original.DefaultPrincipal.PrincipalName.NameString = append([]string(nil), original.DefaultPrincipal.PrincipalName.NameString...)
+	original.DefaultPrincipal.PrincipalName.NameString = append(
+		[]string(nil),
+		original.DefaultPrincipal.PrincipalName.NameString...,
+	)
 
 	cl, err := NewFromCCache(original, config.New())
 	if err != nil {
@@ -525,8 +605,8 @@ func TestClientCCacheExportAssociatesPATypeWithInitialService(t *testing.T) {
 		t.Fatal(ierr)
 	}
 	ticket.SName = types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "HTTP/host.example.org")
-	ticket.Realm = "EXAMPLE.ORG"
-	cl := NewWithPassword("user", "EXAMPLE.ORG", "password", config.New())
+	ticket.Realm = exchangeFixtureRealm
+	cl := NewWithPassword("user", exchangeFixtureRealm, "password", config.New())
 	cl.cache.addEntryWithDetails(ticket, credential.AuthTime, credential.StartTime, credential.EndTime,
 		credential.RenewTill, credential.Key, credential.TicketFlags, credential.Addresses,
 		credential.AuthData, credential.IsSKey, credential.SecondTicket)
@@ -563,6 +643,8 @@ func asErrorAt(response messages.KRBError, at time.Time) messages.KRBError {
 }
 
 func TestClockSkewRetry(t *testing.T) {
+	var emptyPrincipal types.PrincipalName
+
 	synctest.Test(t, func(t *testing.T) {
 		cfg := config.New()
 		cfg.LibDefaults.DNSLookupKDC = true
@@ -570,7 +652,7 @@ func TestClockSkewRetry(t *testing.T) {
 		kt := phase5Keytab(t, etypeID.AES128_CTS_HMAC_SHA1_96)
 		cl := NewWithKeytab(
 			"user",
-			"EXAMPLE.ORG",
+			exchangeFixtureRealm,
 			kt,
 			cfg,
 			AssumePreAuthentication(true),
@@ -583,16 +665,21 @@ func TestClockSkewRetry(t *testing.T) {
 			calls++
 			if calls == 1 {
 				response := messages.NewKRBError(
-					types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KRB_AP_ERR_SKEW, "skew",
+					emptyPrincipal, exchangeFixtureRealm, errorcode.KRB_AP_ERR_SKEW, "skew",
 				)
 				return nil, asErrorAt(response, serverTime)
 			}
 			retriedRequest = append([]byte(nil), request...)
-			return nil, messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KDC_ERR_CLIENT_REVOKED, "stop")
+			return nil, messages.NewKRBError(
+				emptyPrincipal,
+				exchangeFixtureRealm,
+				errorcode.KDC_ERR_CLIENT_REVOKED,
+				"stop",
+			)
 		}
 		req, err := cl.newASReq()
 		require.NoError(t, err)
-		_, err = cl.ASExchange("EXAMPLE.ORG", req, 0)
+		_, err = cl.ASExchange(exchangeFixtureRealm, req, 0)
 		var terminal messages.KRBError
 		require.ErrorAs(t, err, &terminal)
 		assert.Equal(t, errorcode.KDC_ERR_CLIENT_REVOKED, terminal.ErrorCode)
@@ -627,28 +714,30 @@ func decodeASReqTimestamp(t *testing.T, cl *Client, request []byte) time.Time {
 }
 
 func TestPreAuthRequiredLearnsKDCTimeOffset(t *testing.T) {
+	var emptyPrincipal types.PrincipalName
+
 	synctest.Test(t, func(t *testing.T) {
 		cfg := config.New()
 		cfg.LibDefaults.DNSLookupKDC = true
 		cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES128_CTS_HMAC_SHA1_96}
-		cl := NewWithKeytab("user", "EXAMPLE.ORG", phase5Keytab(t, etypeID.AES128_CTS_HMAC_SHA1_96), cfg)
+		cl := NewWithKeytab("user", exchangeFixtureRealm, phase5Keytab(t, etypeID.AES128_CTS_HMAC_SHA1_96), cfg)
 		const skew = -time.Hour
 		serverTime := clientNow().UTC().Add(skew)
-		entries := types.ETypeInfo2{{EType: etypeID.AES128_CTS_HMAC_SHA1_96}}
+		entries := types.ETypeInfo2{{Salt: "", S2KParams: nil, EType: etypeID.AES128_CTS_HMAC_SHA1_96}}
 		info, err := asn1.Marshal(entries)
 		require.NoError(t, err)
 		methodData, err := asn1.Marshal(types.PADataSequence{{PADataType: patype.PA_ETYPE_INFO2, PADataValue: info}})
 		require.NoError(t, err)
 		cl.sendToKDCFunc = func(_ []byte, _ string) ([]byte, error) {
 			response := messages.NewKRBError(
-				types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KDC_ERR_PREAUTH_REQUIRED, "pre-authentication required",
+				emptyPrincipal, exchangeFixtureRealm, errorcode.KDC_ERR_PREAUTH_REQUIRED, "pre-authentication required",
 			)
 			response.EData = methodData
 			return nil, asErrorAt(response, serverTime)
 		}
 		req, err := cl.newASReq()
 		require.NoError(t, err)
-		_, err = cl.ASExchange("EXAMPLE.ORG", req, 0)
+		_, err = cl.ASExchange(exchangeFixtureRealm, req, 0)
 		var terminal messages.KRBError
 		require.ErrorAs(t, err, &terminal)
 		assert.Equal(t, errorcode.KDC_ERR_PREAUTH_REQUIRED, terminal.ErrorCode)
@@ -657,21 +746,29 @@ func TestPreAuthRequiredLearnsKDCTimeOffset(t *testing.T) {
 }
 
 func TestClockSkewRetryDisabled(t *testing.T) {
+	var emptyPrincipal types.PrincipalName
+
 	cfg := config.New()
 	cfg.LibDefaults.DNSLookupKDC = true
 	cfg.LibDefaults.KDCTimeSync = 0
 	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{etypeID.AES128_CTS_HMAC_SHA1_96}
-	cl := NewWithKeytab("user", "EXAMPLE.ORG", phase5Keytab(t, etypeID.AES128_CTS_HMAC_SHA1_96), cfg, AssumePreAuthentication(true))
+	cl := NewWithKeytab(
+		"user",
+		exchangeFixtureRealm,
+		phase5Keytab(t, etypeID.AES128_CTS_HMAC_SHA1_96),
+		cfg,
+		AssumePreAuthentication(true),
+	)
 	calls := 0
 	cl.sendToKDCFunc = func(_ []byte, _ string) ([]byte, error) {
 		calls++
-		return nil, messages.NewKRBError(types.PrincipalName{}, "EXAMPLE.ORG", errorcode.KRB_AP_ERR_SKEW, "skew")
+		return nil, messages.NewKRBError(emptyPrincipal, exchangeFixtureRealm, errorcode.KRB_AP_ERR_SKEW, "skew")
 	}
 	req, err := cl.newASReq()
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = cl.ASExchange("EXAMPLE.ORG", req, 0)
+	_, err = cl.ASExchange(exchangeFixtureRealm, req, 0)
 	assert.Error(t, err)
 	assert.Equal(t, 1, calls)
 	assert.Zero(t, cl.KDCTimeOffset())

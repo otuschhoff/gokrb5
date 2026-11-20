@@ -55,13 +55,15 @@ func TestClient_GetServiceTicket_AD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error getting service ticket for %s: %v", spn, err)
 	}
-	assert.True(t, strings.EqualFold(spn, tkt.SName.PrincipalNameString()), "ticket sname %q should match %q", tkt.SName.PrincipalNameString(), spn)
+	sname := tkt.SName.PrincipalNameString()
+	assert.True(t, strings.EqualFold(spn, sname), "ticket sname %q should match %q", sname, spn)
 	assert.NotEmpty(t, key.KeyValue, "session key should be present")
 
 	if ierr := tkt.DecryptEncPart(env.Keytab, nil); ierr != nil {
 		t.Fatalf("could not decrypt service ticket with %s: %v", env.KeytabPath, ierr)
 	}
-	assert.True(t, strings.EqualFold(env.User, tkt.DecryptedEncPart.CName.PrincipalNameString()), "ticket cname should be the logged in user")
+	cname := tkt.DecryptedEncPart.CName.PrincipalNameString()
+	assert.True(t, strings.EqualFold(env.User, cname), "ticket cname should be the logged in user")
 
 	w := bytes.NewBufferString("")
 	l := log.New(w, "", 0)
@@ -73,7 +75,10 @@ func TestClient_GetServiceTicket_AD(t *testing.T) {
 	if !assert.True(t, isPAC, "AD service ticket should carry a PAC") {
 		return
 	}
-	assert.True(t, strings.EqualFold(env.User, pac.KerbValidationInfo.EffectiveName.Value), "PAC EffectiveName %q should match user %q", pac.KerbValidationInfo.EffectiveName.Value, env.User)
+	effectiveName := pac.KerbValidationInfo.EffectiveName.Value
+	assert.True(
+		t, strings.EqualFold(env.User, effectiveName), "PAC EffectiveName %q should match user %q", effectiveName, env.User,
+	)
 	assert.NotEmpty(t, pac.KerbValidationInfo.LogonDomainName.Value, "PAC should name the logon domain")
 	assert.NotEmpty(t, pac.KerbValidationInfo.GetGroupMembershipSIDs(), "PAC should list group SIDs")
 	assert.NotNil(t, pac.ClientInfo, "PAC should carry client info")

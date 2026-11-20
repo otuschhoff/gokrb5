@@ -16,6 +16,7 @@ import (
 const (
 	kkdcpContentType     = "application/kerberos"
 	maxKKDCPResponseSize = 16 << 20
+	maxKKDCPErrorDrain   = 4096
 )
 
 func isKKDCPServer(server string) bool {
@@ -58,8 +59,9 @@ func (cl *Client) sendKKDCP(proxyURL, realm string, message []byte) ([]byte, err
 
 func readKKDCPResponse(resp *http.Response, proxyURL string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
-		if _, drainErr := io.Copy(io.Discard, io.LimitReader(resp.Body, 4096)); drainErr != nil {
-			return nil, fmt.Errorf("KKDCP server %s returned HTTP status %s; drain response body: %w", proxyURL, resp.Status, drainErr)
+		if _, drainErr := io.Copy(io.Discard, io.LimitReader(resp.Body, maxKKDCPErrorDrain)); drainErr != nil {
+			return nil, fmt.Errorf("KKDCP server %s returned HTTP status %s; drain response body: %w",
+				proxyURL, resp.Status, drainErr)
 		}
 		return nil, fmt.Errorf("KKDCP server %s returned HTTP status %s", proxyURL, resp.Status)
 	}

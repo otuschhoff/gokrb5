@@ -12,15 +12,27 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
-// TGSREQGenerateAndExchange generates the TGS_REQ and performs a TGS exchange to retrieve a ticket to the specified SPN.
-func (cl *Client) TGSREQGenerateAndExchange(spn types.PrincipalName, kdcRealm string, tgt messages.Ticket, sessionKey types.EncryptionKey, renewal bool) (messages.TGSReq, messages.TGSRep, error) {
+const maxExchangeReferrals = 5
+
+// TGSREQGenerateAndExchange generates a TGS_REQ and exchanges it for a ticket to the specified SPN.
+func (cl *Client) TGSREQGenerateAndExchange(
+	spn types.PrincipalName,
+	kdcRealm string,
+	tgt messages.Ticket,
+	sessionKey types.EncryptionKey,
+	renewal bool,
+) (messages.TGSReq, messages.TGSRep, error) {
 	var tgsReq messages.TGSReq
 	var tgsRep messages.TGSRep
 	var err error
 	options := cl.tgsReqOptions(kdcRealm)
-	tgsReq, err = messages.NewTGSReqWithOptions(cl.Credentials.CName(), kdcRealm, cl.Config, tgt, sessionKey, spn, renewal, options)
+	tgsReq, err = messages.NewTGSReqWithOptions(
+		cl.Credentials.CName(), kdcRealm, cl.Config, tgt, sessionKey, spn, renewal, options,
+	)
 	if err != nil {
-		return tgsReq, tgsRep, krberror.Errorf(err, krberror.KRBMsgError, "TGS Exchange Error: failed to generate a new TGS_REQ")
+		return tgsReq, tgsRep, krberror.Errorf(
+			err, krberror.KRBMsgError, "TGS Exchange Error: failed to generate a new TGS_REQ",
+		)
 	}
 	return cl.TGSExchange(tgsReq, kdcRealm, tgt, sessionKey, 0)
 }
@@ -28,7 +40,13 @@ func (cl *Client) TGSREQGenerateAndExchange(spn types.PrincipalName, kdcRealm st
 // TGSExchange exchanges the provided TGS_REQ with the KDC to retrieve a TGS_REP.
 // Referrals are automatically handled.
 // The client's cache is updated with the ticket received.
-func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messages.Ticket, sessionKey types.EncryptionKey, referral int) (messages.TGSReq, messages.TGSRep, error) {
+func (cl *Client) TGSExchange(
+	tgsReq messages.TGSReq,
+	kdcRealm string,
+	tgt messages.Ticket,
+	sessionKey types.EncryptionKey,
+	referral int,
+) (messages.TGSReq, messages.TGSRep, error) {
 	var tgsRep messages.TGSRep
 	request := tgsReq
 	fast := cl.newTGSFASTState(kdcRealm)
@@ -36,7 +54,9 @@ func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messa
 	if fast != nil {
 		request, err = fast.wrapTGSRequest(request, tgt, sessionKey)
 		if err != nil {
-			return tgsReq, tgsRep, krberror.Errorf(err, krberror.KRBMsgError, "TGS Exchange Error: failed to build FAST request")
+			return tgsReq, tgsRep, krberror.Errorf(
+				err, krberror.KRBMsgError, "TGS Exchange Error: failed to build FAST request",
+			)
 		}
 	}
 	b, err := request.Marshal()
@@ -45,45 +65,65 @@ func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messa
 	}
 	r, err := cl.sendKDCRequest(b, kdcRealm)
 	if err != nil {
-		if kdcErr, ok := errors.AsType[messages.KRBError](err); ok {
-			if fast != nil {
-				unwrappedKDC, unwrapErr := fast.unwrapError(kdcErr, tgsReq.ReqBody.Nonce)
-				if unwrapErr != nil {
-					return tgsReq, tgsRep, krberror.Errorf(unwrapErr, krberror.KRBMsgError, "TGS Exchange Error: invalid FAST error response")
-				}
-				err = unwrappedKDC
-			}
-			return tgsReq, tgsRep, krberror.Errorf(err, krberror.KDCError, "TGS Exchange Error: kerberos error response from KDC when requesting for %s", tgsReq.ReqBody.SName.PrincipalNameString())
-		}
-		return tgsReq, tgsRep, krberror.Errorf(err, krberror.NetworkingError, "TGS Exchange Error: issue sending TGS_REQ to KDC")
+		return tgsReq, tgsRep, tgsRequestError(err, fast, tgsReq)
 	}
-	err = tgsRep.Unmarshal(r)
-	if err != nil {
-		return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: failed to process the TGS_REP")
+	if err := tgsRep.Unmarshal(r); err != nil {
+		return tgsReq, tgsRep, krberror.Errorf(
+			err, krberror.EncodingError, "TGS Exchange Error: failed to process the TGS_REP",
+		)
 	}
-	if fast != nil {
-		if ierr := fast.verifyTGSReply(cl, &tgsRep, tgsReq); ierr != nil {
-			return tgsReq, tgsRep, krberror.Errorf(ierr, krberror.EncodingError, "TGS Exchange Error: FAST TGS_REP is not valid")
-		}
-	} else {
-		err = tgsRep.DecryptEncPart(sessionKey)
-		if err != nil {
-			return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: failed to process the TGS_REP")
-		}
-		if ok, ierr := tgsRep.Verify(cl.Config, tgsReq); !ok {
-			return tgsReq, tgsRep, krberror.Errorf(ierr, krberror.EncodingError, "TGS Exchange Error: TGS_REP is not valid")
-		}
+	if err := cl.verifyTGSExchangeReply(&tgsRep, tgsReq, sessionKey, fast); err != nil {
+		return tgsReq, tgsRep, err
 	}
 
 	serverName := tgsRep.Ticket.SName
 	if len(serverName.NameString) == 0 {
 		return tgsReq, tgsRep, newTGSExchangeError("reply ticket has no server principal components")
 	}
-	if serverName.NameString[0] == "krbtgt" && !serverName.Equal(tgsReq.ReqBody.SName) {
+	if serverName.NameString[0] == tgtServiceName && !serverName.Equal(tgsReq.ReqBody.SName) {
 		return cl.followTGSReferral(tgsReq, tgsRep, referral)
 	}
 	cl.cacheTGSReply(tgsRep)
 	return tgsReq, tgsRep, nil
+}
+
+func tgsRequestError(cause error, fast *fastState, req messages.TGSReq) error {
+	kdcErr, ok := errors.AsType[messages.KRBError](cause)
+	if !ok {
+		return krberror.Errorf(cause, krberror.NetworkingError, "TGS Exchange Error: issue sending TGS_REQ to KDC")
+	}
+	if fast != nil {
+		unwrapped, err := fast.unwrapError(kdcErr, req.ReqBody.Nonce)
+		if err != nil {
+			return krberror.Errorf(err, krberror.KRBMsgError, "TGS Exchange Error: invalid FAST error response")
+		}
+		cause = unwrapped
+	}
+	return krberror.Errorf(
+		cause, krberror.KDCError, "TGS Exchange Error: kerberos error response from KDC when requesting for %s",
+		req.ReqBody.SName.PrincipalNameString(),
+	)
+}
+
+func (cl *Client) verifyTGSExchangeReply(
+	rep *messages.TGSRep,
+	req messages.TGSReq,
+	sessionKey types.EncryptionKey,
+	fast *fastState,
+) error {
+	if fast != nil {
+		if err := fast.verifyTGSReply(cl, rep, req); err != nil {
+			return krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: FAST TGS_REP is not valid")
+		}
+		return nil
+	}
+	if err := rep.DecryptEncPart(sessionKey); err != nil {
+		return krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: failed to process the TGS_REP")
+	}
+	if ok, err := rep.Verify(cl.Config, req); !ok {
+		return krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: TGS_REP is not valid")
+	}
+	return nil
 }
 
 func (cl *Client) cacheTGSReply(reply messages.TGSRep) {
@@ -113,7 +153,7 @@ func (cl *Client) followTGSReferral(
 	rep messages.TGSRep,
 	count int,
 ) (messages.TGSReq, messages.TGSRep, error) {
-	if count > 5 {
+	if count > maxExchangeReferrals {
 		return req, rep, newTGSExchangeError("maximum number of referrals exceeded")
 	}
 	// RFC 6806 section 8: the reply contains the TGT for the next realm.
@@ -168,7 +208,7 @@ func (cl *Client) newReferralRequest(req messages.TGSReq, rep messages.TGSRep, r
 }
 
 func (cl *Client) tgsReqOptions(realm string) messages.TGSReqOptions {
-	options := messages.TGSReqOptions{}
+	var options messages.TGSReqOptions
 	if session, ok := cl.sessions.get(realm); ok {
 		options.SupportedEncTypes = session.supportedEncryptionTypes()
 	}
@@ -223,11 +263,16 @@ func (cl *Client) GetServiceTicket(spn string) (messages.Ticket, types.Encryptio
 // GetDelegatedCredential requests a forwarded TGT and wraps it in a KRB-CRED
 // encrypted with the service-ticket session key. Unless force is true, the
 // service ticket must carry the ok-as-delegate flag.
-func (cl *Client) GetDelegatedCredential(serviceTicket messages.Ticket, serviceSessionKey types.EncryptionKey, addresses types.HostAddresses, force bool) ([]byte, error) {
+func (cl *Client) GetDelegatedCredential(
+	serviceTicket messages.Ticket,
+	serviceSessionKey types.EncryptionKey,
+	addresses types.HostAddresses,
+	force bool,
+) ([]byte, error) {
 	if !force {
 		entry, ok := cl.cache.getEntry(serviceTicket.SName.PrincipalNameString())
 		if !ok || !types.IsFlagSet(&entry.TicketFlags, flags.OKAsDelegate) {
-			return nil, fmt.Errorf("service ticket is not trusted for delegation")
+			return nil, errors.New("service ticket is not trusted for delegation")
 		}
 	}
 	realm := cl.Credentials.Realm()
@@ -242,8 +287,10 @@ func (cl *Client) GetDelegatedCredential(serviceTicket messages.Ticket, serviceS
 	options.Forwarded = &forwarded
 	options.Forwardable = &forwardable
 	options.Addresses = &addressCopy
-	sname := types.PrincipalName{NameType: nametype.KRB_NT_SRV_INST, NameString: []string{"krbtgt", realm}}
-	request, err := messages.NewTGSReqWithOptions(cl.Credentials.CName(), realm, cl.Config, tgt, tgtKey, sname, false, options)
+	sname := types.PrincipalName{NameType: nametype.KRB_NT_SRV_INST, NameString: []string{tgtServiceName, realm}}
+	request, err := messages.NewTGSReqWithOptions(
+		cl.Credentials.CName(), realm, cl.Config, tgt, tgtKey, sname, false, options,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("could not create forwarded-TGT request: %w", err)
 	}

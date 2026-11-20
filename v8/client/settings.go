@@ -21,6 +21,11 @@ type fastArmorCredentials struct {
 	realm  string
 }
 
+const (
+	defaultKKDCPTimeout = 5 * time.Second
+	clientLogCallDepth  = 2
+)
+
 // Settings holds optional client settings.
 type Settings struct {
 	disablePAFXFast         bool
@@ -40,7 +45,7 @@ type Settings struct {
 func PKINITIdentity(identity *pkinit.Identity) func(*Settings) {
 	return func(settings *Settings) {
 		if settings.pkinitOptions == nil {
-			settings.pkinitOptions = &pkinit.ExchangeOptions{}
+			settings.pkinitOptions = new(pkinit.ExchangeOptions)
 		}
 		settings.pkinitOptions.Identity = identity
 	}
@@ -50,7 +55,7 @@ func PKINITIdentity(identity *pkinit.Identity) func(*Settings) {
 func PKINITAnchors(anchors *x509.CertPool) func(*Settings) {
 	return func(settings *Settings) {
 		if settings.pkinitOptions == nil {
-			settings.pkinitOptions = &pkinit.ExchangeOptions{}
+			settings.pkinitOptions = new(pkinit.ExchangeOptions)
 		}
 		settings.pkinitOptions.KDCCertificate.Roots = anchors
 	}
@@ -60,7 +65,7 @@ func PKINITAnchors(anchors *x509.CertPool) func(*Settings) {
 func PKINITKDCCertificatePolicy(policy pkinit.KDCCertificatePolicy) func(*Settings) {
 	return func(settings *Settings) {
 		if settings.pkinitOptions == nil {
-			settings.pkinitOptions = &pkinit.ExchangeOptions{}
+			settings.pkinitOptions = new(pkinit.ExchangeOptions)
 		}
 		settings.pkinitOptions.KDCCertificate = policy
 	}
@@ -70,7 +75,7 @@ func PKINITKDCCertificatePolicy(policy pkinit.KDCCertificatePolicy) func(*Settin
 func PKINITMode(mode pkinit.Mode) func(*Settings) {
 	return func(settings *Settings) {
 		if settings.pkinitOptions == nil {
-			settings.pkinitOptions = &pkinit.ExchangeOptions{}
+			settings.pkinitOptions = new(pkinit.ExchangeOptions)
 		}
 		settings.pkinitOptions.Mode = mode
 	}
@@ -80,7 +85,7 @@ func PKINITMode(mode pkinit.Mode) func(*Settings) {
 func PKINITMinimumDHBits(bits int) func(*Settings) {
 	return func(settings *Settings) {
 		if settings.pkinitOptions == nil {
-			settings.pkinitOptions = &pkinit.ExchangeOptions{}
+			settings.pkinitOptions = new(pkinit.ExchangeOptions)
 		}
 		settings.pkinitOptions.MinimumDHBits = bits
 	}
@@ -90,7 +95,7 @@ func PKINITMinimumDHBits(bits int) func(*Settings) {
 func PKINITRequireFreshness(required bool) func(*Settings) {
 	return func(settings *Settings) {
 		if settings.pkinitOptions == nil {
-			settings.pkinitOptions = &pkinit.ExchangeOptions{}
+			settings.pkinitOptions = new(pkinit.ExchangeOptions)
 		}
 		settings.pkinitOptions.RequireFreshness = required
 	}
@@ -100,7 +105,7 @@ func PKINITRequireFreshness(required bool) func(*Settings) {
 func PKINITOCSPResponse(response []byte) func(*Settings) {
 	return func(settings *Settings) {
 		if settings.pkinitOptions == nil {
-			settings.pkinitOptions = &pkinit.ExchangeOptions{}
+			settings.pkinitOptions = new(pkinit.ExchangeOptions)
 		}
 		settings.pkinitOptions.OCSPResponse = append([]byte(nil), response...)
 	}
@@ -176,12 +181,15 @@ func (s *Settings) AssumePreAuthentication() bool {
 // FASTArmor configures an armor TGT belonging to the client's principal.
 func FASTArmor(ticket messages.Ticket, key types.EncryptionKey) func(*Settings) {
 	return func(s *Settings) {
-		s.fastArmor = &fastArmorCredentials{ticket: ticket, key: key}
+		var cname types.PrincipalName
+		s.fastArmor = &fastArmorCredentials{ticket: ticket, key: key, cname: cname, realm: ""}
 	}
 }
 
 // FASTArmorWithIdentity configures an armor TGT and its client identity.
-func FASTArmorWithIdentity(ticket messages.Ticket, key types.EncryptionKey, cname types.PrincipalName, realm string) func(*Settings) {
+func FASTArmorWithIdentity(
+	ticket messages.Ticket, key types.EncryptionKey, cname types.PrincipalName, realm string,
+) func(*Settings) {
 	return func(s *Settings) {
 		s.fastArmor = &fastArmorCredentials{ticket: ticket, key: key, cname: cname, realm: realm}
 	}
@@ -215,13 +223,6 @@ func KKDCPClient(httpClient *http.Client) func(*Settings) {
 	}
 }
 
-func (s *Settings) httpClient() *http.Client {
-	if s.kkdcpClient != nil {
-		return s.kkdcpClient
-	}
-	return &http.Client{Timeout: 5 * time.Second}
-}
-
 // Logger used to configure client with a logger.
 //
 // s := NewSettings(kt, Logger(l))
@@ -237,9 +238,10 @@ func (s *Settings) Logger() *log.Logger {
 }
 
 // Log will write to the service's logger if it is configured.
-func (cl *Client) Log(format string, v ...interface{}) {
+func (cl *Client) Log(format string, v ...any) {
 	if cl.settings.Logger() != nil {
-		_ = cl.settings.Logger().Output(2, fmt.Sprintf(format, v...)) // Logging is deliberately best effort behind this void API.
+		// Logging is deliberately best effort behind this void API.
+		_ = cl.settings.Logger().Output(clientLogCallDepth, fmt.Sprintf(format, v...))
 	}
 }
 
@@ -250,9 +252,17 @@ func (s *Settings) JSON() (string, error) {
 		AssumePreAuthentication: s.assumePreAuthentication,
 		RequireFAST:             s.requireFAST,
 	}
+
 	b, err := json.MarshalIndent(js, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("encode client settings as JSON: %w", err)
 	}
 	return string(b), nil
+}
+
+func (s *Settings) httpClient() *http.Client {
+	if s.kkdcpClient != nil {
+		return s.kkdcpClient
+	}
+	return &http.Client{Transport: nil, CheckRedirect: nil, Jar: nil, Timeout: defaultKKDCPTimeout}
 }

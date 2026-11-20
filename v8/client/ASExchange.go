@@ -16,12 +16,15 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+const maxASPreAuthRounds = 5
+
 // ASExchange performs an AS exchange for the client to retrieve a TGT.
 func (cl *Client) ASExchange(realm string, asReq messages.ASReq, referral int) (messages.ASRep, error) {
 	if ok, err := cl.IsConfigured(); !ok {
 		return messages.ASRep{}, krberror.Errorf(err, krberror.ConfigError, "AS Exchange cannot be performed")
 	}
-	exchange := asExchange{cl: cl, realm: realm, request: asReq}
+	var exchange asExchange
+	exchange.cl, exchange.realm, exchange.request = cl, realm, asReq
 	if err := exchange.prepare(); err != nil {
 		return messages.ASRep{}, err
 	}
@@ -57,11 +60,9 @@ func (x *asExchange) prepare() error {
 	}
 	x.pkinitEnabled = x.cl.settings.pkinitOptions != nil && x.cl.settings.pkinitOptions.Identity != nil
 	if x.pkinitEnabled {
-		if err := x.preparePKINIT(); err != nil {
-			return err
-		}
+		return x.preparePKINIT()
 	}
-	if x.fastActive() && x.cl.settings.AssumePreAuthentication() && !x.pkinitEnabled {
+	if x.fastActive() && x.cl.settings.AssumePreAuthentication() {
 		if err := x.fast.setASPreAuth(x.cl, nil, &x.request); err != nil {
 			return krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: issue with setting FAST PAData on AS_REQ")
 		}
@@ -79,7 +80,8 @@ func (x *asExchange) preparePKINIT() error {
 	if x.pkinitOptions.KDCCertificate.HTTPClient == nil {
 		x.pkinitOptions.KDCCertificate.HTTPClient = x.cl.settings.httpClient()
 	}
-	x.request.PAData = append(removePAData(x.request.PAData, patype.PA_ENC_TIMESTAMP, patype.PA_PK_AS_REQ, patype.PA_PK_OCSP_RESPONSE, patype.PA_AS_FRESHNESS), types.PAData{PADataType: patype.PA_AS_FRESHNESS})
+	x.request.PAData = removePKINITRequestPAData(x.request.PAData)
+	x.request.PAData = append(x.request.PAData, types.PAData{PADataType: patype.PA_AS_FRESHNESS, PADataValue: nil})
 	if x.cl.settings.AssumePreAuthentication() && !x.pkinitOptions.RequireFreshness {
 		return x.beginPKINIT("AS Exchange Error: could not build PKINIT request")
 	}
@@ -131,7 +133,9 @@ func (x *asExchange) run(referral int) (messages.ASRep, error) {
 func (x *asExchange) handleError(cause error, referral int) (messages.ASRep, bool, error) {
 	e, ok := errors.AsType[messages.KRBError](cause)
 	if !ok {
-		return messages.ASRep{}, false, krberror.Errorf(cause, krberror.NetworkingError, "AS Exchange Error: failed sending AS_REQ to KDC")
+		return messages.ASRep{}, false, krberror.Errorf(
+			cause, krberror.NetworkingError, "AS Exchange Error: failed sending AS_REQ to KDC",
+		)
 	}
 	if x.fastActive() {
 		inner, err := x.fast.unwrapError(e, x.request.ReqBody.Nonce)
@@ -142,10 +146,8 @@ func (x *asExchange) handleError(cause error, referral int) (messages.ASRep, boo
 		}
 		// RFC 6113 section 5.4.4: use the authenticated error, not the outer KRB-ERROR.
 		e, cause = inner, inner
-	} else if x.fast != nil && fastAdvertised(e) {
-		if err := x.fast.activate(x.cl, x.realm); err != nil {
-			return messages.ASRep{}, false, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: could not activate FAST")
-		}
+	} else if err := x.activateAdvertisedFAST(e); err != nil {
+		return messages.ASRep{}, false, err
 	}
 	if !x.timeSynced {
 		x.timeSynced = x.cl.syncKDCTime(e)
@@ -158,11 +160,23 @@ func (x *asExchange) handleError(cause error, referral int) (messages.ASRep, boo
 	if retry || err != nil {
 		return messages.ASRep{}, retry, err
 	}
-	return messages.ASRep{}, false, krberror.Errorf(cause, krberror.KDCError, "AS Exchange Error: kerberos error response from KDC")
+	return messages.ASRep{}, false, krberror.Errorf(
+		cause, krberror.KDCError, "AS Exchange Error: kerberos error response from KDC",
+	)
+}
+
+func (x *asExchange) activateAdvertisedFAST(e messages.KRBError) error {
+	if x.fast == nil || !fastAdvertised(e) {
+		return nil
+	}
+	if err := x.fast.activate(x.cl, x.realm); err != nil {
+		return krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: could not activate FAST")
+	}
+	return nil
 }
 
 func (x *asExchange) refer(e messages.KRBError, cause error, referral int) (messages.ASRep, error) {
-	if referral > 5 {
+	if referral > maxExchangeReferrals {
 		return messages.ASRep{}, krberror.Errorf(cause, krberror.KRBMsgError, "maximum number of client referrals exceeded")
 	}
 	return x.cl.ASExchange(e.CRealm, x.request, referral+1)
@@ -177,14 +191,16 @@ func (x *asExchange) transition(e messages.KRBError) (bool, error) {
 	if !x.skewRetried && x.cl.shouldRetryClockSkew(e) {
 		return true, x.retryClockSkew(e)
 	}
-	if isASPreAuthError(e.ErrorCode) && (!x.preAuthRetried || e.ErrorCode == errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED) {
+	canRetry := !x.preAuthRetried || e.ErrorCode == errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED
+	if isASPreAuthError(e.ErrorCode) && canRetry {
 		return true, x.retryPreAuth(e)
 	}
 	return false, nil
 }
 
 func isASPreAuthError(code int32) bool {
-	return code == errorcode.KDC_ERR_PREAUTH_REQUIRED || code == errorcode.KDC_ERR_PREAUTH_FAILED || code == errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED
+	return code == errorcode.KDC_ERR_PREAUTH_REQUIRED || code == errorcode.KDC_ERR_PREAUTH_FAILED ||
+		code == errorcode.KDC_ERR_MORE_PREAUTH_DATA_REQUIRED
 }
 
 func newASExchangeError(message string) krberror.Krberror {
@@ -229,18 +245,26 @@ func (x *asExchange) retryPKINITFreshness(e messages.KRBError) (bool, error) {
 	if x.pkinitOptions.RequireFreshness && !found {
 		return false, newASExchangeError("KDC did not provide required PKINIT freshness token")
 	}
-	if e.ErrorCode == errorcode.KDC_ERR_PREAUTH_EXPIRED {
-		if x.freshnessRetried || !found {
-			return false, krberror.Errorf(e, krberror.KDCError, "AS Exchange Error: PKINIT freshness retry failed")
-		}
-		x.freshnessRetried = true
+	if err := x.recordPKINITFreshnessRetry(e, found); err != nil {
+		return false, err
 	}
 	x.freshnessToken = token
 	x.preAuthRounds++
-	if x.preAuthRounds > 5 {
+	if x.preAuthRounds > maxASPreAuthRounds {
 		return false, newASExchangeError("maximum PKINIT pre-authentication rounds exceeded")
 	}
 	return true, x.beginPKINIT("AS Exchange Error: could not build PKINIT request")
+}
+
+func (x *asExchange) recordPKINITFreshnessRetry(e messages.KRBError, found bool) error {
+	if e.ErrorCode != errorcode.KDC_ERR_PREAUTH_EXPIRED {
+		return nil
+	}
+	if x.freshnessRetried || !found {
+		return krberror.Errorf(e, krberror.KDCError, "AS Exchange Error: PKINIT freshness retry failed")
+	}
+	x.freshnessRetried = true
+	return nil
 }
 
 func (x *asExchange) selectPKINITFallback(typed *pkinit.KRBError) error {
@@ -294,7 +318,7 @@ func (x *asExchange) setSkewPreAuth(hint *messages.KRBError) error {
 
 func (x *asExchange) retryPreAuth(e messages.KRBError) error {
 	x.preAuthRounds++
-	if x.preAuthRounds > 5 {
+	if x.preAuthRounds > maxASPreAuthRounds {
 		return newASExchangeError("maximum FAST pre-authentication rounds exceeded")
 	}
 	x.cl.settings.assumePreAuthentication = true
@@ -303,7 +327,9 @@ func (x *asExchange) retryPreAuth(e messages.KRBError) error {
 			return krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: failed setting FAST pre-authentication data")
 		}
 	} else if err := setPAData(x.cl, &e, &x.request); err != nil {
-		return krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: failed setting AS_REQ PAData for pre-authentication required")
+		return krberror.Errorf(
+			err, krberror.KRBMsgError, "AS Exchange Error: failed setting AS_REQ PAData for pre-authentication required",
+		)
 	}
 	x.preAuthError = &e
 	x.preAuthRetried = true
@@ -313,7 +339,9 @@ func (x *asExchange) retryPreAuth(e messages.KRBError) error {
 func (x *asExchange) reply(rb, requestBytes []byte) (messages.ASRep, error) {
 	var ASRep messages.ASRep
 	if err := ASRep.Unmarshal(rb); err != nil {
-		return messages.ASRep{}, krberror.Errorf(err, krberror.EncodingError, "AS Exchange Error: failed to process the AS_REP")
+		return messages.ASRep{}, krberror.Errorf(
+			err, krberror.EncodingError, "AS Exchange Error: failed to process the AS_REP",
+		)
 	}
 	if x.fastActive() {
 		return x.fastReply(ASRep, requestBytes)
@@ -337,11 +365,14 @@ func (x *asExchange) fastReply(reply messages.ASRep, requestBytes []byte) (messa
 	if x.pkinitExchange == nil {
 		return messages.ASRep{}, newASExchangeError("KDC returned AS_REP before PKINIT negotiation")
 	}
-	replyKey, err := x.fast.verifyASReplyWithKey(x.cl, &reply, x.request, requestBytes, func(paData types.PADataSequence) (types.EncryptionKey, error) {
+	deriveKey := func(paData types.PADataSequence) (types.EncryptionKey, error) {
 		return processPKINITReply(x.pkinitExchange, paData, reply.EncPart.EType)
-	})
+	}
+	replyKey, err := x.fast.verifyASReplyWithKey(x.cl, &reply, x.request, requestBytes, deriveKey)
 	if err != nil {
-		return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: FAST PKINIT AS_REP is not valid")
+		return messages.ASRep{}, krberror.Errorf(
+			err, krberror.KRBMsgError, "AS Exchange Error: FAST PKINIT AS_REP is not valid",
+		)
 	}
 	x.cl.setPKINITReplyKey(x.realm, replyKey)
 	return reply, nil
@@ -366,19 +397,29 @@ func (x *asExchange) passwordReply(reply messages.ASRep, requestBytes []byte) (m
 	if x.preAuthError != nil && x.cl.Credentials.HasPassword() {
 		et, err := crypto.GetEtype(reply.EncPart.EType)
 		if err != nil {
-			return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: unsupported AS_REP encryption type")
+			return messages.ASRep{}, krberror.Errorf(
+				err, krberror.KRBMsgError, "AS Exchange Error: unsupported AS_REP encryption type",
+			)
 		}
 		replyKey, _, err := x.cl.Key(et, reply.EncPart.KVNO, x.preAuthError)
 		if err != nil {
-			return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: could not derive AS_REP reply key")
+			return messages.ASRep{}, krberror.Errorf(
+				err, krberror.KRBMsgError, "AS Exchange Error: could not derive AS_REP reply key",
+			)
 		}
-		if ok, err := reply.VerifyWithReplyKeyAndRequestBytes(x.cl.Config, x.cl.Credentials, x.request, replyKey, requestBytes); !ok {
-			return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: AS_REP is not valid or client password incorrect")
+		if ok, err := reply.VerifyWithReplyKeyAndRequestBytes(
+			x.cl.Config, x.cl.Credentials, x.request, replyKey, requestBytes,
+		); !ok {
+			return messages.ASRep{}, krberror.Errorf(
+				err, krberror.KRBMsgError, "AS Exchange Error: AS_REP is not valid or client password incorrect",
+			)
 		}
 		return reply, nil
 	}
 	if ok, err := reply.Verify(x.cl.Config, x.cl.Credentials, x.request); !ok {
-		return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "AS Exchange Error: AS_REP is not valid or client password/keytab incorrect")
+		return messages.ASRep{}, krberror.Errorf(
+			err, krberror.KRBMsgError, "AS Exchange Error: AS_REP is not valid or client password/keytab incorrect",
+		)
 	}
 	return reply, nil
 }
@@ -405,70 +446,72 @@ func kdcErrorTime(err messages.KRBError) time.Time {
 // setPAData adds pre-authentication data to the AS_REQ.
 func setPAData(cl *Client, krberr *messages.KRBError, asReq *messages.ASReq) error {
 	if !cl.settings.DisablePAReqEncPARep() && !asReq.PAData.Contains(patype.PA_REQ_ENC_PA_REP) {
-		pa := types.PAData{PADataType: patype.PA_REQ_ENC_PA_REP}
+		pa := types.PAData{PADataType: patype.PA_REQ_ENC_PA_REP, PADataValue: nil}
 		asReq.PAData = append(asReq.PAData, pa)
 	}
 	if cl.settings.pkinitOptions != nil && cl.settings.pkinitOptions.Identity != nil {
 		return nil
 	}
-	if cl.settings.AssumePreAuthentication() {
-		// Identify the etype to use to encrypt the PA Data
-		var et etype.EType
-		var err error
-		var key types.EncryptionKey
-		var kvno int
-		if krberr == nil {
-			// This is not in response to an error from the KDC. It is preemptive or renewal
-			// There is no KRB Error that tells us the etype to use
-			et, key, kvno, err = firstAvailablePreAuthKey(cl, asReq.ReqBody.EType)
-			if err != nil {
-				return krberror.Errorf(err, krberror.EncryptingError, "error getting key from credentials")
-			}
-			cl.settings.preAuthEType = et.GetETypeID()
-		} else {
-			// Get the etype to use from the PA data in the KRBError e-data
-			et, err = preAuthEType(krberr, asReq.ReqBody.EType)
-			if err != nil {
-				return krberror.Errorf(err, krberror.EncryptingError, "error getting etype for pre-auth encryption")
-			}
-			cl.settings.preAuthEType = et.GetETypeID() // Set the etype that has been defined for potential future use
-			key, kvno, err = cl.Key(et, 0, krberr)
-			if err != nil {
-				return krberror.Errorf(err, krberror.EncryptingError, "error getting key from credentials")
-			}
-		}
-		// Generate the PA data
-		paTSb, err := types.GetPAEncTSEncAsnMarshalledAt(clientNow().UTC().Add(cl.KDCTimeOffset()))
-		if err != nil {
-			return krberror.Errorf(err, krberror.KRBMsgError, "error creating PAEncTSEnc for Pre-Authentication")
-		}
-		paEncTS, err := crypto.GetEncryptedData(paTSb, key, keyusage.AS_REQ_PA_ENC_TIMESTAMP, kvno)
-		if err != nil {
-			return krberror.Errorf(err, krberror.EncryptingError, "error encrypting pre-authentication timestamp")
-		}
-		pb, err := paEncTS.Marshal()
-		if err != nil {
-			return krberror.Errorf(err, krberror.EncodingError, "error marshaling the PAEncTSEnc encrypted data")
-		}
-		pa := types.PAData{
-			PADataType:  patype.PA_ENC_TIMESTAMP,
-			PADataValue: pb,
-		}
-		filtered := asReq.PAData[:0]
-		for _, existing := range asReq.PAData {
-			if existing.PADataType != patype.PA_ENC_TIMESTAMP {
-				filtered = append(filtered, existing)
-			}
-		}
-		filtered = append(filtered, pa)
-		asReq.PAData = filtered
-		cl.settings.preAuthType = patype.PA_ENC_TIMESTAMP
+	if !cl.settings.AssumePreAuthentication() {
+		return nil
 	}
+	key, kvno, err := timestampPreAuthKey(cl, krberr, asReq.ReqBody.EType)
+	if err != nil {
+		return err
+	}
+	paTSb, err := types.GetPAEncTSEncAsnMarshalledAt(clientNow().UTC().Add(cl.KDCTimeOffset()))
+	if err != nil {
+		return krberror.Errorf(err, krberror.KRBMsgError, "error creating PAEncTSEnc for Pre-Authentication")
+	}
+	paEncTS, err := crypto.GetEncryptedData(paTSb, key, keyusage.AS_REQ_PA_ENC_TIMESTAMP, kvno)
+	if err != nil {
+		return krberror.Errorf(err, krberror.EncryptingError, "error encrypting pre-authentication timestamp")
+	}
+	pb, err := paEncTS.Marshal()
+	if err != nil {
+		return krberror.Errorf(err, krberror.EncodingError, "error marshaling the PAEncTSEnc encrypted data")
+	}
+	pa := types.PAData{PADataType: patype.PA_ENC_TIMESTAMP, PADataValue: pb}
+	asReq.PAData = append(removePAData(asReq.PAData, patype.PA_ENC_TIMESTAMP), pa)
+	cl.settings.preAuthType = patype.PA_ENC_TIMESTAMP
 	return nil
 }
 
-func beginPKINITExchange(request *messages.ASReq, options pkinit.ExchangeOptions, freshness []byte) (*pkinit.Exchange, error) {
-	request.PAData = removePAData(request.PAData, patype.PA_PK_AS_REQ, patype.PA_PK_OCSP_RESPONSE, patype.PA_AS_FRESHNESS, patype.PA_ENC_TIMESTAMP)
+func timestampPreAuthKey(cl *Client, hint *messages.KRBError, requested []int32) (types.EncryptionKey, int, error) {
+	if hint == nil {
+		et, key, kvno, err := firstAvailablePreAuthKey(cl, requested)
+		if err != nil {
+			return key, kvno, krberror.Errorf(err, krberror.EncryptingError, "error getting key from credentials")
+		}
+		cl.settings.preAuthEType = et.GetETypeID()
+		return key, kvno, nil
+	}
+	et, err := preAuthEType(hint, requested)
+	if err != nil {
+		return types.EncryptionKey{}, 0, krberror.Errorf(
+			err, krberror.EncryptingError, "error getting etype for pre-auth encryption",
+		)
+	}
+	cl.settings.preAuthEType = et.GetETypeID()
+	key, kvno, err := cl.Key(et, 0, hint)
+	if err != nil {
+		return key, kvno, krberror.Errorf(err, krberror.EncryptingError, "error getting key from credentials")
+	}
+	return key, kvno, nil
+}
+
+func removePKINITRequestPAData(data types.PADataSequence) types.PADataSequence {
+	return removePAData(
+		data, patype.PA_PK_AS_REQ, patype.PA_PK_OCSP_RESPONSE, patype.PA_AS_FRESHNESS, patype.PA_ENC_TIMESTAMP,
+	)
+}
+
+func beginPKINITExchange(
+	request *messages.ASReq,
+	options pkinit.ExchangeOptions,
+	freshness []byte,
+) (*pkinit.Exchange, error) {
+	request.PAData = removePKINITRequestPAData(request.PAData)
 	options.FreshnessToken = append([]byte(nil), freshness...)
 	options.CurrentTime = clientNow().UTC()
 	exchange, err := pkinit.BeginExchange(request, options)
@@ -513,19 +556,23 @@ func pkinitFreshnessToken(response messages.KRBError) ([]byte, bool, error) {
 	return nil, false, nil
 }
 
-func processPKINITReply(exchange *pkinit.Exchange, data types.PADataSequence, etype int32) (types.EncryptionKey, error) {
+func processPKINITReply(
+	exchange *pkinit.Exchange,
+	data types.PADataSequence,
+	etype int32,
+) (types.EncryptionKey, error) {
 	var value []byte
 	for _, item := range data {
 		if item.PADataType != patype.PA_PK_AS_REP {
 			continue
 		}
 		if value != nil {
-			return types.EncryptionKey{}, fmt.Errorf("KDC returned multiple PA-PK-AS-REP values")
+			return types.EncryptionKey{}, errors.New("KDC returned multiple PA-PK-AS-REP values")
 		}
 		value = item.PADataValue
 	}
 	if value == nil {
-		return types.EncryptionKey{}, fmt.Errorf("KDC omitted PA-PK-AS-REP")
+		return types.EncryptionKey{}, errors.New("KDC omitted PA-PK-AS-REP")
 	}
 	result, err := exchange.ProcessReply(value, etype)
 	if err != nil {
@@ -534,6 +581,7 @@ func processPKINITReply(exchange *pkinit.Exchange, data types.PADataSequence, et
 	return result.ReplyKey, nil
 }
 
+//nolint:ireturn // Callers use the selected encryption profile and its key together.
 func firstAvailablePreAuthKey(cl *Client, requested []int32) (etype.EType, types.EncryptionKey, int, error) {
 	var lastErr error
 	for _, etypeID := range requested {
@@ -549,12 +597,14 @@ func firstAvailablePreAuthKey(cl *Client, requested []int32) (etype.EType, types
 		lastErr = err
 	}
 	if lastErr == nil {
-		lastErr = fmt.Errorf("no encryption types requested")
+		lastErr = errors.New("no encryption types requested")
 	}
 	return nil, types.EncryptionKey{}, 0, lastErr
 }
 
 // preAuthEType establishes what encryption type to use for pre-authentication from the KRBError returned from the KDC.
+//
+//nolint:ireturn // Client.Key takes the negotiated encryption profile, not a concrete algorithm.
 func preAuthEType(krberr *messages.KRBError, requested []int32) (etype.EType, error) {
 	// RFC 4120 5.2.7.5 covers the preference order of ETYPE-INFO2 and ETYPE-INFO.
 	var pas types.PADataSequence
@@ -565,17 +615,9 @@ func preAuthEType(krberr *messages.KRBError, requested []int32) (etype.EType, er
 	for _, etypeID := range requested {
 		requestedSet[etypeID] = struct{}{}
 	}
-	for _, pa := range pas {
-		if pa.PADataType != patype.PA_ETYPE_INFO2 {
-			continue
-		}
-		info, err := pa.GetETypeInfo2()
-		if err != nil {
-			return nil, krberror.Errorf(err, krberror.EncodingError, "error unmashalling ETYPE-INFO2 data")
-		}
-		if et, ok := firstRequestedETypeInfo2(info, requestedSet); ok {
-			return et, nil
-		}
+	et, found, err := preferredETypeInfo2(pas, requestedSet)
+	if err != nil || found {
+		return et, err
 	}
 	for _, pa := range pas {
 		if pa.PADataType != patype.PA_ETYPE_INFO {
@@ -585,19 +627,45 @@ func preAuthEType(krberr *messages.KRBError, requested []int32) (etype.EType, er
 		if err != nil {
 			return nil, krberror.Errorf(err, krberror.EncodingError, "error unmashalling ETYPE-INFO data")
 		}
-		for _, entry := range info {
-			if _, ok := requestedSet[entry.EType]; !ok {
-				continue
-			}
-			et, err := crypto.GetEtype(entry.EType)
-			if err == nil {
-				return et, nil
-			}
+		if et, ok := firstRequestedEType(info, requestedSet); ok {
+			return et, nil
 		}
 	}
-	return nil, fmt.Errorf("KDC did not offer a requested supported pre-authentication encryption type")
+	return nil, errors.New("KDC did not offer a requested supported pre-authentication encryption type")
 }
 
+//nolint:ireturn // Concrete encryption profiles vary with the negotiated algorithm.
+func preferredETypeInfo2(pas types.PADataSequence, requested map[int32]struct{}) (etype.EType, bool, error) {
+	for _, pa := range pas {
+		if pa.PADataType != patype.PA_ETYPE_INFO2 {
+			continue
+		}
+		info, err := pa.GetETypeInfo2()
+		if err != nil {
+			return nil, false, krberror.Errorf(err, krberror.EncodingError, "error unmashalling ETYPE-INFO2 data")
+		}
+		if et, ok := firstRequestedETypeInfo2(info, requested); ok {
+			return et, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+//nolint:ireturn // Concrete encryption profiles vary with the negotiated algorithm.
+func firstRequestedEType(info types.ETypeInfo, requested map[int32]struct{}) (etype.EType, bool) {
+	for _, entry := range info {
+		if _, ok := requested[entry.EType]; !ok {
+			continue
+		}
+		et, err := crypto.GetEtype(entry.EType)
+		if err == nil {
+			return et, true
+		}
+	}
+	return nil, false
+}
+
+//nolint:ireturn // Concrete encryption profiles vary with the negotiated algorithm.
 func firstRequestedETypeInfo2(info types.ETypeInfo2, requested map[int32]struct{}) (etype.EType, bool) {
 	for _, entry := range info {
 		if _, ok := requested[entry.EType]; !ok {

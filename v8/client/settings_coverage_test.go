@@ -21,25 +21,27 @@ import (
 )
 
 func TestSettingsOptions(t *testing.T) {
-	identity := &pkinit.Identity{SID: "S-1-5-21"}
+	var identity pkinit.Identity
+	identity.SID = "S-1-5-21"
 	anchors := x509.NewCertPool()
-	policy := pkinit.KDCCertificatePolicy{
-		Realm:             "EXAMPLE.COM",
-		Hostname:          "kdc.example.com",
-		EKUChecking:       pkinit.KDCEKUKDCAuthentication,
-		RequireRevocation: true,
-	}
+	var policy pkinit.KDCCertificatePolicy
+	policy.Realm = clientTestComRealm
+	policy.Hostname = "kdc.example.com"
+	policy.EKUChecking = pkinit.KDCEKUKDCAuthentication
+	policy.RequireRevocation = true
 	ocspResponse := []byte{1, 2, 3}
-	armorTicket := messages.Ticket{Realm: "EXAMPLE.COM"}
+	var armorTicket messages.Ticket
+	armorTicket.Realm = clientTestComRealm
 	armorKey := types.EncryptionKey{KeyType: 18, KeyValue: []byte{4, 5, 6}}
 	armorName := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "armor")
 	armorKeytab := keytab.New()
-	httpClient := &http.Client{Timeout: 17 * time.Second}
+	var httpClient http.Client
+	httpClient.Timeout = 17 * time.Second
 	var logOutput bytes.Buffer
 	logger := log.New(&logOutput, "", 0)
 
 	settings := NewSettings(
-		PKINITIdentity(identity),
+		PKINITIdentity(&identity),
 		PKINITKDCCertificatePolicy(policy),
 		PKINITAnchors(anchors),
 		PKINITMode(pkinit.ModeRSA),
@@ -48,53 +50,88 @@ func TestSettingsOptions(t *testing.T) {
 		PKINITOCSPResponse(ocspResponse),
 		DisablePAFXFAST(true),
 		AssumePreAuthentication(true),
-		FASTArmorWithIdentity(armorTicket, armorKey, armorName, "EXAMPLE.COM"),
+		FASTArmorWithIdentity(armorTicket, armorKey, armorName, clientTestComRealm),
 		FASTArmorFromKeytab(armorKeytab),
 		RequireFAST(true),
-		KKDCPClient(httpClient),
+		KKDCPClient(&httpClient),
 		Logger(logger),
 	)
 	ocspResponse[0] = 9
 
-	if settings.pkinitOptions.Identity != identity {
+	if settings.pkinitOptions.Identity != &identity {
 		t.Fatal("PKINIT identity was not retained")
 	}
-	if settings.pkinitOptions.KDCCertificate.Roots != anchors {
+	assertPKINITCertificatePolicy(t, settings.pkinitOptions.KDCCertificate, anchors, policy)
+	assertPKINITSettings(t, settings)
+	assertArmorSettings(t, settings, armorTicket.Realm, armorKey, armorKeytab)
+	if settings.httpClient() != &httpClient || settings.Logger() != logger {
+		t.Fatal("client dependencies were not retained")
+	}
+
+	client := NewWithPassword("user", clientTestComRealm, "password", config.New(), Logger(logger))
+	client.Log("message %d", 7)
+	if got := logOutput.String(); !strings.Contains(got, "message 7") {
+		t.Fatalf("log output = %q", got)
+	}
+	NewWithPassword("user", clientTestComRealm, "password", config.New()).Log("discarded")
+}
+
+func assertPKINITCertificatePolicy(
+	t *testing.T,
+	gotPolicy pkinit.KDCCertificatePolicy,
+	anchors *x509.CertPool,
+	policy pkinit.KDCCertificatePolicy,
+) {
+	t.Helper()
+	if gotPolicy.Roots != anchors {
 		t.Fatal("PKINIT trust anchors were not retained")
 	}
-	gotPolicy := settings.pkinitOptions.KDCCertificate
-	if gotPolicy.Realm != policy.Realm || gotPolicy.Hostname != policy.Hostname || gotPolicy.EKUChecking != policy.EKUChecking || !gotPolicy.RequireRevocation {
+	if gotPolicy.Realm != policy.Realm || gotPolicy.Hostname != policy.Hostname ||
+		gotPolicy.EKUChecking != policy.EKUChecking || !gotPolicy.RequireRevocation {
 		t.Fatalf("KDC certificate policy = %+v, want %+v", gotPolicy, policy)
 	}
-	if settings.pkinitOptions.Mode != pkinit.ModeRSA || settings.pkinitOptions.MinimumDHBits != 3072 || !settings.pkinitOptions.RequireFreshness {
+}
+
+func assertPKINITSettings(t *testing.T, settings *Settings) {
+	t.Helper()
+	if settings.pkinitOptions.Mode != pkinit.ModeRSA || settings.pkinitOptions.MinimumDHBits != 3072 ||
+		!settings.pkinitOptions.RequireFreshness {
 		t.Fatalf("PKINIT options = %+v", settings.pkinitOptions)
 	}
 	if got := settings.pkinitOptions.OCSPResponse; len(got) != 3 || got[0] != 1 {
 		t.Fatalf("OCSP response was not defensively copied: %v", got)
 	}
-	if !settings.DisablePAReqEncPARep() || !settings.DisablePAFXFAST() || !settings.AssumePreAuthentication() || !settings.RequireFAST() {
-		t.Fatal("boolean settings were not applied")
+}
+
+func assertArmorSettings(
+	t *testing.T,
+	settings *Settings,
+	armorRealm string,
+	armorKey types.EncryptionKey,
+	armorKeytab *keytab.Keytab,
+) {
+	t.Helper()
+	for _, enabled := range []func() bool{
+		settings.DisablePAReqEncPARep, settings.DisablePAFXFAST, settings.AssumePreAuthentication, settings.RequireFAST,
+	} {
+		if !enabled() {
+			t.Fatal("boolean settings were not applied")
+		}
 	}
-	if settings.fastArmor == nil || settings.fastArmor.realm != "EXAMPLE.COM" || settings.fastArmor.cname.NameString[0] != "armor" {
+	if settings.fastArmor == nil || settings.fastArmor.realm != clientTestComRealm ||
+		settings.fastArmor.cname.NameString[0] != "armor" {
 		t.Fatalf("FAST armor identity = %+v", settings.fastArmor)
 	}
-	if settings.fastArmor.ticket.Realm != armorTicket.Realm || settings.fastArmor.key.KeyType != armorKey.KeyType || settings.fastArmorKeytab != armorKeytab {
+	if settings.fastArmor.ticket.Realm != armorRealm || settings.fastArmor.key.KeyType != armorKey.KeyType ||
+		settings.fastArmorKeytab != armorKeytab {
 		t.Fatal("FAST armor credentials were not retained")
 	}
-	if settings.httpClient() != httpClient || settings.Logger() != logger {
-		t.Fatal("client dependencies were not retained")
-	}
-
-	client := NewWithPassword("user", "EXAMPLE.COM", "password", config.New(), Logger(logger))
-	client.Log("message %d", 7)
-	if got := logOutput.String(); !strings.Contains(got, "message 7") {
-		t.Fatalf("log output = %q", got)
-	}
-	NewWithPassword("user", "EXAMPLE.COM", "password", config.New()).Log("discarded")
 }
 
 func TestSettingsDefaultsAndJSON(t *testing.T) {
-	settings := NewSettings(FASTArmor(messages.Ticket{}, types.EncryptionKey{}))
+	var ticket messages.Ticket
+	var key types.EncryptionKey
+	settings := NewSettings(FASTArmor(ticket, key))
 	if settings.httpClient().Timeout != 5*time.Second {
 		t.Fatalf("default HTTP timeout = %v", settings.httpClient().Timeout)
 	}
@@ -118,12 +155,12 @@ func TestSettingsDefaultsAndJSON(t *testing.T) {
 }
 
 func TestPKINITReplyKeyLifecycle(t *testing.T) {
-	client := NewWithPassword("user", "EXAMPLE.COM", "password", config.New())
+	client := NewWithPassword("user", clientTestComRealm, "password", config.New())
 	input := types.EncryptionKey{KeyType: 18, KeyValue: []byte{1, 2, 3}}
 	client.setPKINITReplyKey("example.com", input)
 	input.KeyValue[0] = 9
 
-	got, ok := client.takePKINITReplyKey("EXAMPLE.COM")
+	got, ok := client.takePKINITReplyKey(clientTestComRealm)
 	if !ok || got.KeyType != 18 || !bytes.Equal(got.KeyValue, []byte{1, 2, 3}) {
 		t.Fatalf("reply key = %+v, %v", got, ok)
 	}
@@ -133,7 +170,7 @@ func TestPKINITReplyKeyLifecycle(t *testing.T) {
 }
 
 func TestPKINITCredentialsLifecycle(t *testing.T) {
-	client := NewWithPassword("user", "EXAMPLE.COM", "password", config.New())
+	client := NewWithPassword("user", clientTestComRealm, "password", config.New())
 	if _, err := client.PKINITCredentials(); err == nil {
 		t.Fatal("missing PKINIT credentials did not return an error")
 	}
@@ -145,7 +182,11 @@ func TestPKINITCredentialsLifecycle(t *testing.T) {
 	}
 
 	client.pkinitCredErr = nil
-	client.pkinitCreds = &pac.CredentialData{Credentials: []pac.SECPKGSupplementalCred{{Credentials: []byte{1, 2, 3}}}}
+	var credentials pac.CredentialData
+	var supplemental pac.SECPKGSupplementalCred
+	supplemental.Credentials = []byte{1, 2, 3}
+	credentials.Credentials = []pac.SECPKGSupplementalCred{supplemental}
+	client.pkinitCreds = &credentials
 	got, err := client.PKINITCredentials()
 	if err != nil {
 		t.Fatal(err)

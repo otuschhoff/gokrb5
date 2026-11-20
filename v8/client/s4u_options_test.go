@@ -4,12 +4,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/iana/flags"
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/messages"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
+
+const s4uOptionsTestRealm = "EXAMPLE.COM"
 
 func TestApplyS4UOptions(t *testing.T) {
 	certificate := []byte{1, 2, 3}
@@ -36,22 +40,46 @@ func TestApplyS4UOptions(t *testing.T) {
 }
 
 func TestS4UIdentityForTicket(t *testing.T) {
-	client := NewWithPassword("service", "EXAMPLE.COM", "unused", config.New())
+	var (
+		emptyPrincipal     types.PrincipalName
+		emptyEncryptedData types.EncryptedData
+		emptyKey           types.EncryptionKey
+		emptyFlags         asn1.BitString
+	)
+
+	client := NewWithPassword("service", s4uOptionsTestRealm, "unused", config.New())
 	user := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
-	ticket := s4uTestTicket("EXAMPLE.COM", "HTTP/service.example.com")
+	ticket := s4uTestTicket(s4uOptionsTestRealm, "HTTP/service.example.com")
 	now := time.Now().UTC()
-	client.addS4UCacheEntry(user, "EXAMPLE.COM", "HTTP/service.example.com", messages.TGSRep{
+	client.addS4UCacheEntry(user, s4uOptionsTestRealm, "HTTP/service.example.com", messages.TGSRep{
 		KDCRepFields: messages.KDCRepFields{
-			Ticket: ticket,
+			PVNO:    0,
+			MsgType: 0,
+			PAData:  nil,
+			CRealm:  "",
+			CName:   emptyPrincipal,
+			EncPart: emptyEncryptedData,
+			Ticket:  ticket,
 			DecryptedEncPart: messages.EncKDCRepPart{
-				StartTime: now.Add(-time.Minute),
-				EndTime:   now.Add(time.Hour),
+				Key:           emptyKey,
+				LastReqs:      nil,
+				Nonce:         0,
+				KeyExpiration: time.Time{},
+				Flags:         emptyFlags,
+				AuthTime:      time.Time{},
+				RenewTill:     time.Time{},
+				SRealm:        "",
+				SName:         emptyPrincipal,
+				CAddr:         nil,
+				EncPAData:     nil,
+				StartTime:     now.Add(-time.Minute),
+				EndTime:       now.Add(time.Hour),
 			},
 		},
 	})
 
 	gotUser, gotRealm, ok := client.s4uIdentityForTicket(ticket)
-	if !ok || !gotUser.Equal(user) || gotRealm != "EXAMPLE.COM" {
+	if !ok || !gotUser.Equal(user) || gotRealm != s4uOptionsTestRealm {
 		t.Fatalf("identity = %v@%s, %v", gotUser, gotRealm, ok)
 	}
 	unknown := ticket
@@ -62,7 +90,7 @@ func TestS4UIdentityForTicket(t *testing.T) {
 }
 
 func TestTicketsEqualFields(t *testing.T) {
-	base := s4uTestTicket("EXAMPLE.COM", "HTTP/service.example.com")
+	base := s4uTestTicket(s4uOptionsTestRealm, "HTTP/service.example.com")
 	base.EncPart.KVNO = 7
 	if !ticketsEqual(base, base) {
 		t.Fatal("identical tickets were not equal")
@@ -98,21 +126,43 @@ func TestTicketsEqualFields(t *testing.T) {
 }
 
 func TestS4UForwardableCacheBoundary(t *testing.T) {
-	client := NewWithPassword("service", "EXAMPLE.COM", "unused", config.New())
+	var (
+		emptyPrincipal     types.PrincipalName
+		emptyEncryptedData types.EncryptedData
+		emptyKey           types.EncryptionKey
+	)
+
+	client := NewWithPassword("service", s4uOptionsTestRealm, "unused", config.New())
 	user := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
 	spn := "HTTP/service.example.com"
 	now := time.Now().UTC()
 	ticketFlags := types.NewKrbFlags()
 	types.SetFlag(&ticketFlags, flags.Forwardable)
-	client.addS4UCacheEntry(user, "EXAMPLE.COM", spn, messages.TGSRep{KDCRepFields: messages.KDCRepFields{
-		Ticket: s4uTestTicket("EXAMPLE.COM", spn),
+	client.addS4UCacheEntry(user, s4uOptionsTestRealm, spn, messages.TGSRep{KDCRepFields: messages.KDCRepFields{
+		PVNO:    0,
+		MsgType: 0,
+		PAData:  nil,
+		CRealm:  "",
+		CName:   emptyPrincipal,
+		EncPart: emptyEncryptedData,
+		Ticket:  s4uTestTicket(s4uOptionsTestRealm, spn),
 		DecryptedEncPart: messages.EncKDCRepPart{
-			StartTime: now.Add(time.Minute),
-			EndTime:   now.Add(time.Hour),
-			Flags:     ticketFlags,
+			Key:           emptyKey,
+			LastReqs:      nil,
+			Nonce:         0,
+			KeyExpiration: time.Time{},
+			AuthTime:      time.Time{},
+			RenewTill:     time.Time{},
+			SRealm:        "",
+			SName:         emptyPrincipal,
+			CAddr:         nil,
+			EncPAData:     nil,
+			StartTime:     now.Add(time.Minute),
+			EndTime:       now.Add(time.Hour),
+			Flags:         ticketFlags,
 		},
 	}})
-	if _, ok := client.GetCachedServiceTicketForUserInfo(user, "EXAMPLE.COM", spn); ok {
+	if _, ok := client.GetCachedServiceTicketForUserInfo(user, s4uOptionsTestRealm, spn); ok {
 		t.Fatal("not-yet-valid S4U ticket was returned")
 	}
 }

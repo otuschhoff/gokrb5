@@ -14,62 +14,71 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/messages"
 )
 
-const maxKDCResponseSize = 16 << 20
+const (
+	maxKDCResponseSize = 16 << 20
+	kdcTimeout         = 5 * time.Second
+	maxUDPDatagramSize = 65535
+	kdcTCPHeaderSize   = 4
+)
 
 // SendToKDC performs network actions to send data to the KDC.
 func (cl *Client) sendToKDC(b []byte, realm string) ([]byte, error) {
-	var rb []byte
-	if cl.Config.LibDefaults.UDPPreferenceLimit == 1 {
+	switch limit := cl.Config.LibDefaults.UDPPreferenceLimit; {
+	case limit == 1:
 		// 1 means we should always use TCP
-		rtcp, errtcp := cl.sendKDCTCP(realm, b)
-		if errtcp != nil {
-			if e, ok := errors.AsType[messages.KRBError](errtcp); ok {
-				return rtcp, e
-			}
-			return rtcp, fmt.Errorf("communication error with KDC via TCP: %w", errtcp)
-		}
-		return rtcp, nil
+		return cl.sendToKDCOnlyTCP(realm, b)
+	case len(b) <= limit:
+		return cl.sendToKDCUDPFirst(realm, b)
+	default:
+		return cl.sendToKDCTCPFirst(realm, b)
 	}
-	if len(b) <= cl.Config.LibDefaults.UDPPreferenceLimit {
-		// Try UDP first, TCP second
-		rudp, errudp := cl.sendKDCUDP(realm, b)
-		if errudp != nil {
-			if e, ok := errors.AsType[messages.KRBError](errudp); ok && e.ErrorCode != errorcode.KRB_ERR_RESPONSE_TOO_BIG {
-				// Got a KRBError from KDC
-				// If this is not a KRB_ERR_RESPONSE_TOO_BIG we will return immediately otherwise will try TCP.
-				return rudp, e
-			}
-			// Try TCP
-			r, errtcp := cl.sendKDCTCP(realm, b)
-			if errtcp != nil {
-				if e, ok := errors.AsType[messages.KRBError](errtcp); ok {
-					// Got a KRBError
-					return r, e
-				}
-				return r, fmt.Errorf("failed to communicate with KDC via UDP and TCP: %w", errors.Join(errudp, errtcp))
-			}
-			rudp = r
-		}
-		return rudp, nil
+}
+
+func (cl *Client) sendToKDCOnlyTCP(realm string, b []byte) ([]byte, error) {
+	reply, err := cl.sendKDCTCP(realm, b)
+	if err == nil {
+		return reply, nil
 	}
-	// Try TCP first, UDP second
+	if e, ok := errors.AsType[messages.KRBError](err); ok {
+		return reply, e
+	}
+	return reply, fmt.Errorf("communication error with KDC via TCP: %w", err)
+}
+
+func (cl *Client) sendToKDCUDPFirst(realm string, b []byte) ([]byte, error) {
+	reply, errudp := cl.sendKDCUDP(realm, b)
+	if errudp == nil {
+		return reply, nil
+	}
+	if e, ok := errors.AsType[messages.KRBError](errudp); ok && e.ErrorCode != errorcode.KRB_ERR_RESPONSE_TOO_BIG {
+		return reply, e
+	}
+	reply, errtcp := cl.sendKDCTCP(realm, b)
+	if errtcp == nil {
+		return reply, nil
+	}
+	if e, ok := errors.AsType[messages.KRBError](errtcp); ok {
+		return reply, e
+	}
+	return reply, fmt.Errorf("failed to communicate with KDC via UDP and TCP: %w", errors.Join(errudp, errtcp))
+}
+
+func (cl *Client) sendToKDCTCPFirst(realm string, b []byte) ([]byte, error) {
 	rb, errtcp := cl.sendKDCTCP(realm, b)
-	if errtcp != nil {
-		if e, ok := errors.AsType[messages.KRBError](errtcp); ok {
-			// Got a KRBError from KDC so returning and not trying UDP.
-			return rb, e
-		}
-		var errudp error
-		rb, errudp = cl.sendKDCUDP(realm, b)
-		if errudp != nil {
-			if e, ok := errors.AsType[messages.KRBError](errudp); ok {
-				// Got a KRBError
-				return rb, e
-			}
-			return rb, fmt.Errorf("failed to communicate with KDC via TCP and UDP: %w", errors.Join(errtcp, errudp))
-		}
+	if errtcp == nil {
+		return rb, nil
 	}
-	return rb, nil
+	if e, ok := errors.AsType[messages.KRBError](errtcp); ok {
+		return rb, e
+	}
+	rb, errudp := cl.sendKDCUDP(realm, b)
+	if errudp == nil {
+		return rb, nil
+	}
+	if e, ok := errors.AsType[messages.KRBError](errudp); ok {
+		return rb, e
+	}
+	return rb, fmt.Errorf("failed to communicate with KDC via TCP and UDP: %w", errors.Join(errtcp, errudp))
 }
 
 // sendKDCUDP sends bytes to the KDC via UDP.
@@ -90,12 +99,12 @@ func (cl *Client) sendKDCUDP(realm string, b []byte) ([]byte, error) {
 func dialSendUDP(kdcs map[int]string, b []byte) ([]byte, error) {
 	var errs []error
 	for i := 1; i <= len(kdcs); i++ {
-		conn, err := net.DialTimeout("udp", kdcs[i], 5*time.Second)
+		conn, err := net.DialTimeout("udp", kdcs[i], kdcTimeout)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("error establishing connection to %s: %w", kdcs[i], err))
 			continue
 		}
-		if ierr := conn.SetDeadline(time.Now().Add(5 * time.Second)); ierr != nil {
+		if ierr := conn.SetDeadline(time.Now().Add(kdcTimeout)); ierr != nil {
 			closeErr := conn.Close()
 			errs = append(errs, fmt.Errorf("error setting deadline on connection to %s: %w", kdcs[i], ierr))
 			if closeErr != nil {
@@ -127,7 +136,7 @@ func exchangeUDP(conn net.Conn, b []byte) ([]byte, error) {
 	if n != len(b) {
 		return r, fmt.Errorf("error sending to (%s): %w", conn.RemoteAddr().String(), io.ErrShortWrite)
 	}
-	udpbuf := make([]byte, 65535)
+	udpbuf := make([]byte, maxUDPDatagramSize)
 	n, err = conn.Read(udpbuf)
 	r = udpbuf[:n]
 	if err != nil {
@@ -157,12 +166,12 @@ func (cl *Client) sendKDCTCP(realm string, b []byte) ([]byte, error) {
 func dialSendTCP(kdcs map[int]string, b []byte) ([]byte, error) {
 	var errs []error
 	for i := 1; i <= len(kdcs); i++ {
-		conn, err := net.DialTimeout("tcp", kdcs[i], 5*time.Second)
+		conn, err := net.DialTimeout("tcp", kdcs[i], kdcTimeout)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("error establishing connection to %s: %w", kdcs[i], err))
 			continue
 		}
-		if ierr := conn.SetDeadline(time.Now().Add(5 * time.Second)); ierr != nil {
+		if ierr := conn.SetDeadline(time.Now().Add(kdcTimeout)); ierr != nil {
 			closeErr := conn.Close()
 			errs = append(errs, fmt.Errorf("error setting deadline on connection to %s: %w", kdcs[i], ierr))
 			if closeErr != nil {
@@ -220,7 +229,7 @@ func exchangeTCP(conn net.Conn, b []byte) ([]byte, error) {
 		return nil, errors.New("KDC request exceeds the TCP frame size")
 	}
 	// RFC 4120 7.2.2 specifies the first 4 bytes indicate the length of the message in big endian order.
-	hb := make([]byte, 4)
+	hb := make([]byte, kdcTCPHeaderSize, kdcTCPHeaderSize+len(b))
 	length, err := clientUint32FromInt("KDC TCP frame length", len(b))
 	if err != nil {
 		return nil, err
@@ -232,7 +241,7 @@ func exchangeTCP(conn net.Conn, b []byte) ([]byte, error) {
 		return r, fmt.Errorf("error sending to KDC (%s): %w", conn.RemoteAddr().String(), err)
 	}
 
-	sh := make([]byte, 4)
+	sh := make([]byte, kdcTCPHeaderSize)
 	if _, err := io.ReadFull(conn, sh); err != nil {
 		return r, fmt.Errorf("error reading response size header: %w", err)
 	}

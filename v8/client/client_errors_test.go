@@ -30,18 +30,26 @@ func (w diagnosticFailureWriter) Write(data []byte) (int, error) {
 	return 0, w.cause
 }
 
+func failingDiagnosticWriter(prefix string, cause error) diagnosticFailureWriter {
+	return diagnosticFailureWriter{prefix: prefix, cause: cause, short: false}
+}
+
+func shortDiagnosticWriter(prefix string) diagnosticFailureWriter {
+	return diagnosticFailureWriter{prefix: prefix, cause: nil, short: true}
+}
+
 func TestPrintLogsOutputFailure(t *testing.T) {
 	var logged bytes.Buffer
-	kerberos := NewWithPassword("user", "EXAMPLE.COM", "password", config.New(), Logger(log.New(&logged, "", 0)))
+	kerberos := NewWithPassword("user", clientTestComRealm, "password", config.New(), Logger(log.New(&logged, "", 0)))
 	cause := errors.New("injected diagnostic failure")
-	kerberos.Print(diagnosticFailureWriter{prefix: "Credentials:", cause: cause})
+	kerberos.Print(failingDiagnosticWriter(diagnosticCredentials, cause))
 	if !strings.Contains(logged.String(), cause.Error()) {
 		t.Fatalf("diagnostic failure not logged: %s", logged.String())
 	}
 }
 
 func TestDiagnosticsRetainsEncodingFailure(t *testing.T) {
-	kerberos := NewWithPassword("user", "EXAMPLE.COM", "password", config.New())
+	kerberos := NewWithPassword("user", clientTestComRealm, "password", config.New())
 	kerberos.Credentials.SetValidUntil(time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC))
 	err := kerberos.Diagnostics(io.Discard)
 	if _, ok := errors.AsType[*json.MarshalerError](err); !ok {
@@ -52,15 +60,15 @@ func TestDiagnosticsRetainsEncodingFailure(t *testing.T) {
 func TestDiagnosticsRetainsValidationAndWriterFailures(t *testing.T) {
 	cause := errors.New("injected diagnostic failure")
 	cfg := config.New()
-	cfg.Realms = []config.Realm{{Realm: "EXAMPLE.COM", KDC: []string{"127.0.0.1:88"}}}
+	cfg.Realms = []config.Realm{kdcTestRealmConfig(clientTestComRealm, []string{clientTestKDCAddress})}
 	cfg.LibDefaults.DefaultTktEnctypeIDs = []int32{17}
 	cfg.LibDefaults.PreferredPreauthTypes = nil
 	keys := keytab.New()
-	if err := keys.AddEntry("user", "EXAMPLE.COM", "test password", time.Now(), 1, 18); err != nil {
+	if err := keys.AddEntry("user", clientTestComRealm, "test password", time.Now(), 1, 18); err != nil {
 		t.Fatal(err)
 	}
-	kerberos := NewWithKeytab("user", "EXAMPLE.COM", keys, cfg)
-	err := kerberos.Diagnostics(diagnosticFailureWriter{prefix: "UDP KDCs:", cause: cause})
+	kerberos := NewWithKeytab("user", clientTestComRealm, keys, cfg)
+	err := kerberos.Diagnostics(failingDiagnosticWriter("UDP KDCs:", cause))
 	if !errors.Is(err, cause) || !strings.Contains(err.Error(), "default_tkt_enctypes specifies 17") {
 		t.Fatalf("validation or output failure lost: %v", err)
 	}
@@ -73,16 +81,16 @@ func TestDiagnosticsRetainsWriterFailures(t *testing.T) {
 		writer diagnosticFailureWriter
 		want   error
 	}{
-		{name: "client details", writer: diagnosticFailureWriter{prefix: "Credentials:", cause: cause}, want: cause},
-		{name: "UDP diagnostics", writer: diagnosticFailureWriter{prefix: "UDP KDCs:", cause: cause}, want: cause},
-		{name: "TCP diagnostics", writer: diagnosticFailureWriter{prefix: "TCP KDCs:", cause: cause}, want: cause},
-		{name: "short write", writer: diagnosticFailureWriter{prefix: "Credentials:", short: true}, want: io.ErrShortWrite},
-		{name: "short TCP write", writer: diagnosticFailureWriter{prefix: "TCP KDCs:", short: true}, want: io.ErrShortWrite},
+		{name: "client details", writer: failingDiagnosticWriter(diagnosticCredentials, cause), want: cause},
+		{name: "UDP diagnostics", writer: failingDiagnosticWriter("UDP KDCs:", cause), want: cause},
+		{name: "TCP diagnostics", writer: failingDiagnosticWriter("TCP KDCs:", cause), want: cause},
+		{name: "short write", writer: shortDiagnosticWriter(diagnosticCredentials), want: io.ErrShortWrite},
+		{name: "short TCP write", writer: shortDiagnosticWriter("TCP KDCs:"), want: io.ErrShortWrite},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := config.New()
-			cfg.Realms = []config.Realm{{Realm: "EXAMPLE.COM", KDC: []string{"127.0.0.1:88"}}}
-			kerberos := NewWithPassword("user", "EXAMPLE.COM", "password", cfg)
+			cfg.Realms = []config.Realm{kdcTestRealmConfig(clientTestComRealm, []string{clientTestKDCAddress})}
+			kerberos := NewWithPassword("user", clientTestComRealm, "password", cfg)
 			if err := kerberos.Diagnostics(tt.writer); !errors.Is(err, tt.want) {
 				t.Fatalf("diagnostic error = %v, want %v", err, tt.want)
 			}

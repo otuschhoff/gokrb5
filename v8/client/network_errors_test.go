@@ -36,8 +36,8 @@ func (c *faultConn) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 func (c *faultConn) Close() error                   { c.closes++; return c.closeErr }
-func (*faultConn) LocalAddr() net.Addr              { return &net.TCPAddr{} }
-func (*faultConn) RemoteAddr() net.Addr             { return &net.TCPAddr{} }
+func (*faultConn) LocalAddr() net.Addr              { return new(net.TCPAddr) }
+func (*faultConn) RemoteAddr() net.Addr             { return new(net.TCPAddr) }
 func (*faultConn) SetDeadline(time.Time) error      { return nil }
 func (*faultConn) SetReadDeadline(time.Time) error  { return nil }
 func (*faultConn) SetWriteDeadline(time.Time) error { return nil }
@@ -45,18 +45,22 @@ func (*faultConn) SetWriteDeadline(time.Time) error { return nil }
 func TestKDCExchangeErrorIdentityAndOwnership(t *testing.T) {
 	primary := errors.New("injected network failure")
 	cleanup := errors.New("injected close failure")
-	deadline := &net.OpError{Op: "read", Net: "tcp", Err: os.ErrDeadlineExceeded}
+	deadline := &net.OpError{Op: "read", Net: "tcp", Source: nil, Addr: nil, Err: os.ErrDeadlineExceeded}
 	tests := []struct {
 		name string
-		conn faultConn
+		conn func(*faultConn)
 		want error
 	}{
-		{name: "write", conn: faultConn{writeErr: primary}, want: primary},
-		{name: "short write", conn: faultConn{short: true}, want: io.ErrShortWrite},
-		{name: "read", conn: faultConn{readErr: primary}, want: primary},
-		{name: "timeout", conn: faultConn{readErr: deadline}, want: os.ErrDeadlineExceeded},
-		{name: "close", conn: faultConn{closeErr: cleanup}, want: cleanup},
-		{name: "primary and close", conn: faultConn{readErr: primary, closeErr: cleanup}, want: primary},
+		{name: "write", conn: func(c *faultConn) { c.writeErr = primary }, want: primary},
+		{name: "short write", conn: func(c *faultConn) { c.short = true }, want: io.ErrShortWrite},
+		{name: "read", conn: func(c *faultConn) { c.readErr = primary }, want: primary},
+		{name: "timeout", conn: func(c *faultConn) { c.readErr = deadline }, want: os.ErrDeadlineExceeded},
+		{name: "close", conn: func(c *faultConn) { c.closeErr = cleanup }, want: cleanup},
+		{
+			name: "primary and close",
+			conn: func(c *faultConn) { c.readErr, c.closeErr = primary, cleanup },
+			want: primary,
+		},
 	}
 	for _, protocol := range []struct {
 		name string
@@ -69,7 +73,8 @@ func TestKDCExchangeErrorIdentityAndOwnership(t *testing.T) {
 		t.Run(protocol.name, func(t *testing.T) {
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
-					conn := tt.conn
+					var conn faultConn
+					tt.conn(&conn)
 					conn.reader = bytes.NewReader(protocol.wire)
 					_, err := protocol.send(&conn, []byte("request"))
 					if !errors.Is(err, tt.want) || conn.closes != 1 {
@@ -85,8 +90,8 @@ func TestKDCExchangeErrorIdentityAndOwnership(t *testing.T) {
 }
 
 func TestKDCFailoverRetainsFirstTypedCause(t *testing.T) {
-	first := &net.OpError{Op: "first endpoint", Err: os.ErrDeadlineExceeded}
-	last := &net.OpError{Op: "last endpoint", Err: os.ErrPermission}
+	first := &net.OpError{Op: "first endpoint", Net: "", Source: nil, Addr: nil, Err: os.ErrDeadlineExceeded}
+	last := &net.OpError{Op: "last endpoint", Net: "", Source: nil, Addr: nil, Err: os.ErrPermission}
 	err := kdcAttemptsError([]error{first, last})
 	got, ok := errors.AsType[*net.OpError](err)
 	if !ok || got != first || !errors.Is(err, os.ErrPermission) || !got.Timeout() {
@@ -99,16 +104,18 @@ func TestKDCFailoverRetainsFirstTypedCause(t *testing.T) {
 
 func TestSendUDPDoesNotTruncateLargeDatagram(t *testing.T) {
 	want := bytes.Repeat([]byte{1}, 5000)
-	conn := &faultConn{reader: bytes.NewReader(want)}
-	got, err := sendUDP(conn, []byte("request"))
+	var conn faultConn
+	conn.reader = bytes.NewReader(want)
+	got, err := sendUDP(&conn, []byte("request"))
 	if err != nil || !bytes.Equal(got, want) {
 		t.Fatalf("UDP received %d bytes, %v; want %d", len(got), err, len(want))
 	}
 }
 
 func TestKDCTruncatedFrameErrorIdentity(t *testing.T) {
-	conn := &faultConn{reader: bytes.NewReader([]byte{0, 0, 0, 5, 1})}
-	if _, err := sendTCP(conn, []byte("request")); !errors.Is(err, io.ErrUnexpectedEOF) {
+	var conn faultConn
+	conn.reader = bytes.NewReader([]byte{0, 0, 0, 5, 1})
+	if _, err := sendTCP(&conn, []byte("request")); !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Fatalf("truncated response = %v, want unexpected EOF", err)
 	}
 }

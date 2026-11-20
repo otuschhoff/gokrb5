@@ -34,9 +34,20 @@ func TestKDCDiscoveryErrorsRetainTransportContext(t *testing.T) {
 	require.ErrorContains(t, errors.Unwrap(errors.Unwrap(err)), "no KDCs defined in configuration")
 }
 
-func mustClientTestType[T any](t *testing.T, value any) T {
+const testKDCReply = "KDC"
+
+func mustClientTCPAddr(t *testing.T, value net.Addr) *net.TCPAddr {
 	t.Helper()
-	result, ok := value.(T)
+	result, ok := value.(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("unexpected type %T", value)
+	}
+	return result
+}
+
+func mustClientUDPAddr(t *testing.T, value net.Addr) *net.UDPAddr {
+	t.Helper()
+	result, ok := value.(*net.UDPAddr)
 	if !ok {
 		t.Fatalf("unexpected type %T", value)
 	}
@@ -45,7 +56,7 @@ func mustClientTestType[T any](t *testing.T, value any) T {
 
 func startTCPResponseServer(t *testing.T, response []byte) (*net.TCPAddr, <-chan error) {
 	t.Helper()
-	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0, Zone: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +82,7 @@ func startTCPResponseServer(t *testing.T, response []byte) (*net.TCPAddr, <-chan
 		_, writeErr := io.Copy(connection, bytes.NewReader(response))
 		serverErr <- writeErr
 	}()
-	return mustClientTestType[*net.TCPAddr](t, listener.Addr()), serverErr
+	return mustClientTCPAddr(t, listener.Addr()), serverErr
 }
 
 func TestSendTCPResponseFraming(t *testing.T) {
@@ -81,10 +92,13 @@ func TestSendTCPResponseFraming(t *testing.T) {
 		want     []byte
 		wantErr  string
 	}{
-		{name: "success", response: append([]byte{0, 0, 0, 3}, []byte("KDC")...), want: []byte("KDC")},
-		{name: "empty", response: []byte{0, 0, 0, 0}, wantErr: "no response data"},
-		{name: "truncated header", response: []byte{0, 0}, wantErr: "response size header"},
-		{name: "truncated body", response: append([]byte{0, 0, 0, 4}, []byte("KDC")...), wantErr: "reading response"},
+		{name: "success", response: append([]byte{0, 0, 0, 3}, testKDCReply...), want: []byte(testKDCReply), wantErr: ""},
+		{name: "empty", response: []byte{0, 0, 0, 0}, want: nil, wantErr: "no response data"},
+		{name: "truncated header", response: []byte{0, 0}, want: nil, wantErr: "response size header"},
+		{
+			name: "truncated body", response: append([]byte{0, 0, 0, 4}, testKDCReply...),
+			want: nil, wantErr: "reading response",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -113,13 +127,13 @@ func TestSendTCPResponseFraming(t *testing.T) {
 
 func TestSendToKDCTransportSelection(t *testing.T) {
 	t.Run("forced TCP", func(t *testing.T) {
-		address, serverErr := startTCPResponseServer(t, append([]byte{0, 0, 0, 3}, []byte("KDC")...))
+		address, serverErr := startTCPResponseServer(t, append([]byte{0, 0, 0, 3}, testKDCReply...))
 		cfg := config.New()
 		cfg.LibDefaults.UDPPreferenceLimit = 1
-		cfg.Realms = []config.Realm{{Realm: "EXAMPLE.ORG", KDC: []string{address.String()}}}
-		client := NewWithPassword("user", "EXAMPLE.ORG", "password", cfg)
-		response, err := client.sendToKDC([]byte("request"), "EXAMPLE.ORG")
-		if err != nil || string(response) != "KDC" {
+		cfg.Realms = []config.Realm{kdcTestRealmConfig(clientTestOrgRealm, []string{address.String()})}
+		client := NewWithPassword("user", clientTestOrgRealm, "password", cfg)
+		response, err := client.sendToKDC([]byte("request"), clientTestOrgRealm)
+		if err != nil || string(response) != testKDCReply {
 			t.Fatalf("forced TCP response = %q, %v", response, err)
 		}
 		if err := <-serverErr; err != nil {
@@ -128,7 +142,7 @@ func TestSendToKDCTransportSelection(t *testing.T) {
 	})
 
 	t.Run("TCP failure falls back to UDP", func(t *testing.T) {
-		server, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+		server, err := net.ListenUDP("udp", testLoopbackUDPAddr())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -141,15 +155,15 @@ func TestSendToKDCTransportSelection(t *testing.T) {
 				serverErr <- readErr
 				return
 			}
-			_, writeErr := server.WriteToUDP([]byte("KDC"), clientAddress)
+			_, writeErr := server.WriteToUDP([]byte(testKDCReply), clientAddress)
 			serverErr <- writeErr
 		}()
 		cfg := config.New()
 		cfg.LibDefaults.UDPPreferenceLimit = 4
-		cfg.Realms = []config.Realm{{Realm: "EXAMPLE.ORG", KDC: []string{server.LocalAddr().String()}}}
-		client := NewWithPassword("user", "EXAMPLE.ORG", "password", cfg)
-		response, err := client.sendToKDC([]byte("request"), "EXAMPLE.ORG")
-		if err != nil || string(response) != "KDC" {
+		cfg.Realms = []config.Realm{kdcTestRealmConfig(clientTestOrgRealm, []string{server.LocalAddr().String()})}
+		client := NewWithPassword("user", clientTestOrgRealm, "password", cfg)
+		response, err := client.sendToKDC([]byte("request"), clientTestOrgRealm)
+		if err != nil || string(response) != testKDCReply {
 			t.Fatalf("TCP-to-UDP response = %q, %v", response, err)
 		}
 		if err := <-serverErr; err != nil {
@@ -159,7 +173,7 @@ func TestSendToKDCTransportSelection(t *testing.T) {
 }
 
 func TestSendUDPSuccess(t *testing.T) {
-	server, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	server, err := net.ListenUDP("udp", testLoopbackUDPAddr())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,11 +190,11 @@ func TestSendUDPSuccess(t *testing.T) {
 			serverErr <- io.ErrUnexpectedEOF
 			return
 		}
-		_, writeErr := server.WriteToUDP([]byte("KDC"), clientAddress)
+		_, writeErr := server.WriteToUDP([]byte(testKDCReply), clientAddress)
 		serverErr <- writeErr
 	}()
 
-	connection, err := net.DialUDP("udp", nil, mustClientTestType[*net.UDPAddr](t, server.LocalAddr()))
+	connection, err := net.DialUDP("udp", nil, mustClientUDPAddr(t, server.LocalAddr()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +202,7 @@ func TestSendUDPSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(response) != "KDC" {
+	if string(response) != testKDCReply {
 		t.Fatalf("response = %q, want KDC", response)
 	}
 	if err := <-serverErr; err != nil {
@@ -197,13 +211,13 @@ func TestSendUDPSuccess(t *testing.T) {
 }
 
 func TestDialSendTCPFailover(t *testing.T) {
-	response := append([]byte{0, 0, 0, 3}, []byte("KDC")...)
+	response := append([]byte{0, 0, 0, 3}, testKDCReply...)
 	address, serverErr := startTCPResponseServer(t, response)
 	got, err := dialSendTCP(map[int]string{1: ":", 2: address.String()}, []byte("request"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "KDC" {
+	if string(got) != testKDCReply {
 		t.Fatalf("response = %q, want KDC", got)
 	}
 	if err := <-serverErr; err != nil {
@@ -212,7 +226,7 @@ func TestDialSendTCPFailover(t *testing.T) {
 }
 
 func TestDialSendUDPFailover(t *testing.T) {
-	server, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	server, err := net.ListenUDP("udp", testLoopbackUDPAddr())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +239,7 @@ func TestDialSendUDPFailover(t *testing.T) {
 			serverErr <- readErr
 			return
 		}
-		_, writeErr := server.WriteToUDP([]byte("KDC"), clientAddress)
+		_, writeErr := server.WriteToUDP([]byte(testKDCReply), clientAddress)
 		serverErr <- writeErr
 	}()
 
@@ -233,7 +247,7 @@ func TestDialSendUDPFailover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "KDC" {
+	if string(got) != testKDCReply {
 		t.Fatalf("response = %q, want KDC", got)
 	}
 	if err := <-serverErr; err != nil {
@@ -242,7 +256,7 @@ func TestDialSendUDPFailover(t *testing.T) {
 }
 
 func TestSendUDPRejectsEmptyResponse(t *testing.T) {
-	server, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	server, err := net.ListenUDP("udp", testLoopbackUDPAddr())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +273,7 @@ func TestSendUDPRejectsEmptyResponse(t *testing.T) {
 		serverErr <- writeErr
 	}()
 
-	connection, err := net.DialUDP("udp", nil, mustClientTestType[*net.UDPAddr](t, server.LocalAddr()))
+	connection, err := net.DialUDP("udp", nil, mustClientUDPAddr(t, server.LocalAddr()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,28 +287,41 @@ func TestSendUDPRejectsEmptyResponse(t *testing.T) {
 }
 
 func TestSendOnClosedConnections(t *testing.T) {
-	udpServer, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	testSendOnClosedUDPConnection(t)
+	testSendOnClosedTCPConnection(t)
+}
+
+func testLoopbackUDPAddr() *net.UDPAddr {
+	return &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0, Zone: ""}
+}
+
+func testSendOnClosedUDPConnection(t *testing.T) {
+	t.Helper()
+	udpServer, err := net.ListenUDP("udp", testLoopbackUDPAddr())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = udpServer.Close() }()
-	udpConnection, err := net.DialUDP("udp", nil, mustClientTestType[*net.UDPAddr](t, udpServer.LocalAddr()))
+	udpConnection, err := net.DialUDP("udp", nil, mustClientUDPAddr(t, udpServer.LocalAddr()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ierr := udpConnection.Close(); ierr != nil {
 		t.Fatal(ierr)
 	}
-	if _, ierr := sendUDP(udpConnection, []byte("request")); ierr == nil || !strings.Contains(ierr.Error(), "error sending") {
-		t.Fatalf("closed UDP connection error = %v", ierr)
+	if _, err := sendUDP(udpConnection, []byte("request")); err == nil || !strings.Contains(err.Error(), "error sending") {
+		t.Fatalf("closed UDP connection error = %v", err)
 	}
+}
 
-	tcpListener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+func testSendOnClosedTCPConnection(t *testing.T) {
+	t.Helper()
+	tcpListener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0, Zone: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = tcpListener.Close() }()
-	tcpConnection, err := net.DialTCP("tcp", nil, mustClientTestType[*net.TCPAddr](t, tcpListener.Addr()))
+	tcpConnection, err := net.DialTCP("tcp", nil, mustClientTCPAddr(t, tcpListener.Addr()))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,10 +18,14 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+const testDefaultRealm = "DEFAULT.ORG"
+
 func TestAssumePreauthentication(t *testing.T) {
 	t.Parallel()
 
-	cl := NewWithKeytab("username", "REALM", &keytab.Keytab{}, &config.Config{}, AssumePreAuthentication(true))
+	var kt keytab.Keytab
+	var cfg config.Config
+	cl := NewWithKeytab("username", "REALM", &kt, &cfg, AssumePreAuthentication(true))
 	if !cl.settings.assumePreAuthentication {
 		t.Fatal("assumePreAuthentication should be true")
 	}
@@ -42,14 +46,14 @@ func TestKDCTimeOffsetOption(t *testing.T) {
 
 func TestPrincipalDefaulting(t *testing.T) {
 	cfg := config.New()
-	cfg.LibDefaults.DefaultRealm = "DEFAULT.ORG"
+	cfg.LibDefaults.DefaultRealm = testDefaultRealm
 
 	cl, err := NewFromPrincipalString("service/host", cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cl.Credentials.Domain() != "DEFAULT.ORG" {
-		t.Fatalf("default realm = %q, want DEFAULT.ORG", cl.Credentials.Domain())
+	if cl.Credentials.Domain() != testDefaultRealm {
+		t.Fatalf("default realm = %q, want %q", cl.Credentials.Domain(), testDefaultRealm)
 	}
 	if got := cl.Credentials.CName().NameString; len(got) != 2 || got[0] != "service" || got[1] != "host" {
 		t.Fatalf("principal components = %#v", got)
@@ -72,11 +76,11 @@ func TestPrincipalDefaulting(t *testing.T) {
 
 func TestConstructorsResolveDefaultRealm(t *testing.T) {
 	cfg := config.New()
-	cfg.LibDefaults.DefaultRealm = "DEFAULT.ORG"
-	if got := NewWithPassword("user", "", "password", cfg).Credentials.Domain(); got != "DEFAULT.ORG" {
+	cfg.LibDefaults.DefaultRealm = testDefaultRealm
+	if got := NewWithPassword("user", "", "password", cfg).Credentials.Domain(); got != testDefaultRealm {
 		t.Fatalf("password client realm = %q", got)
 	}
-	if got := NewWithKeytab("user", "", keytab.New(), cfg).Credentials.Domain(); got != "DEFAULT.ORG" {
+	if got := NewWithKeytab("user", "", keytab.New(), cfg).Credentials.Domain(); got != testDefaultRealm {
 		t.Fatalf("keytab client realm = %q", got)
 	}
 }
