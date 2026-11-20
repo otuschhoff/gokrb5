@@ -760,13 +760,15 @@ func newPKU2URoot(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	template := &x509.Certificate{
-		SerialNumber: big.NewInt(100), Subject: pkix.Name{CommonName: "PKU2U Test Root"},
-		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
-		IsCA: true, BasicConstraintsValid: true,
-		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
-	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	var template x509.Certificate
+	template.SerialNumber = big.NewInt(100)
+	template.Subject.CommonName = "PKU2U Test Root"
+	template.NotBefore = now.Add(-time.Hour)
+	template.NotAfter = now.Add(time.Hour)
+	template.IsCA = true
+	template.BasicConstraintsValid = true
+	template.KeyUsage = x509.KeyUsageCertSign | x509.KeyUsageCRLSign
+	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -777,22 +779,31 @@ func newPKU2URoot(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey) {
 	return certificate, key
 }
 
-func newPKU2ULeaf(t *testing.T, root *x509.Certificate, rootKey *ecdsa.PrivateKey, commonName string, dnsNames []string, san []byte) (*x509.Certificate, *ecdsa.PrivateKey) {
+func newPKU2ULeaf(
+	t *testing.T,
+	root *x509.Certificate,
+	rootKey *ecdsa.PrivateKey,
+	commonName string,
+	dnsNames []string,
+	san []byte,
+) (*x509.Certificate, *ecdsa.PrivateKey) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	template := &x509.Certificate{
-		SerialNumber: big.NewInt(now.UnixNano()), Subject: pkix.Name{CommonName: commonName}, DNSNames: dnsNames,
-		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature,
-	}
+	var template x509.Certificate
+	template.SerialNumber = big.NewInt(now.UnixNano())
+	template.Subject.CommonName = commonName
+	template.DNSNames = dnsNames
+	template.NotBefore = now.Add(-time.Hour)
+	template.NotAfter = now.Add(time.Hour)
+	template.KeyUsage = x509.KeyUsageDigitalSignature
 	if san != nil {
-		template.ExtraExtensions = []pkix.Extension{{Id: oidSubjectAlternativeName, Value: san}}
+		template.ExtraExtensions = []pkix.Extension{{Id: oidSubjectAlternativeName, Critical: false, Value: san}}
 	}
-	der, err := x509.CreateCertificate(rand.Reader, template, root, &key.PublicKey, rootKey)
+	der, err := x509.CreateCertificate(rand.Reader, &template, root, &key.PublicKey, rootKey)
 	if err != nil {
 		t.Fatal(err)
 	}

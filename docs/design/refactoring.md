@@ -2,8 +2,8 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-91 done. The latest v8
-inventories contain 528 canonical and 3,498 supplemental findings. Most
+(floor raised to 86.0%), and Phase 5 slices 1-92 done. The latest v8
+inventories contain 528 canonical and 3,492 supplemental findings. Most
 remaining canonical findings are from `revive`, complexity and nesting
 checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
 Phase 3/4 interoperability and Windows exit evidence remains an external CI
@@ -30,7 +30,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.2% cross-package statement coverage; 528 canonical lint findings after Slice 91 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.2% cross-package statement coverage; 528 canonical lint findings after Slice 92 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -819,6 +819,25 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 92 (2026-11-20, v8 shared PKU2U root and leaf fixtures; Q-10):
+Set the relevant fields on zero-value certificate templates, make the
+optional SAN's existing noncritical setting explicit, and wrap the leaf
+helper signature. Preserve the validity calculations, subjects, serial
+numbers, DNS names, SAN bytes, key usages, and signing relationships.
+No production code changed.
+
+The PKU2U suite passed before and after the edit. The context, NEGOEX,
+SPNEGO, HTTP, and peer trust tests passed 100 shuffled runs under the race
+detector. Both module suites, v8 build and vet, Linux/386 PKU2U tests, and a
+Windows/amd64 PKU2U test cross-build passed. Live Windows interoperability
+was not run.
+
+Changed-line lint passed against `ee34468` and `origin/main` for both
+modules. V8 cross-package statement coverage stayed at 88.2%. Canonical
+findings stayed at 528; supplemental findings fell from 3,498 to 3,492
+after removing five `exhaustruct_v5` findings and one `lll` finding.
+Neither inventory gained findings, and no suppressions were added.
 
 Slice 91 (2026-11-20, v8 PKU2U concurrent HTTP test workers; Q-10):
 Use an integer range and `sync.WaitGroup.Go` to launch the two HTTP test
