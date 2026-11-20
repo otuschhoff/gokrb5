@@ -100,7 +100,7 @@ func (context *SecurityContext) Unwrap(token []byte) ([]byte, bool, error) {
 		return nil, false, fmt.Errorf("RFC 4121 wrap token is shorter than its header")
 	}
 	header := token[:HdrLen]
-	if !bytes.Equal(header[:2], getGssWrapTokenId()[:]) || header[3] != FillerByte {
+	if !bytes.Equal(header[:2], wrapTokenID()[:]) || header[3] != FillerByte {
 		return nil, false, fmt.Errorf("invalid RFC 4121 wrap token header")
 	}
 	flags := header[2]
@@ -274,7 +274,7 @@ func (context *SecurityContext) receiveSignUsage() uint32 {
 
 func wrapHeader(flags byte, ec, rrc uint16, sequence uint64) []byte {
 	header := make([]byte, HdrLen)
-	copy(header, getGssWrapTokenId()[:])
+	copy(header, wrapTokenID()[:])
 	header[2], header[3] = flags, FillerByte
 	binary.BigEndian.PutUint16(header[4:6], ec)
 	binary.BigEndian.PutUint16(header[6:8], rrc)

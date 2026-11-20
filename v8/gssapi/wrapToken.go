@@ -37,7 +37,7 @@ type WrapToken struct {
 }
 
 // Return the 2 bytes identifying a GSS API Wrap token
-func getGssWrapTokenId() *[2]byte {
+func wrapTokenID() *[2]byte {
 	return &[2]byte{0x05, 0x04}
 }
 
@@ -144,9 +144,9 @@ func (wt *WrapToken) Unmarshal(b []byte, expectFromAcceptor bool) error {
 		return errors.New("bytes shorter than header length")
 	}
 	// Is the Token ID correct?
-	if !bytes.Equal(getGssWrapTokenId()[:], b[0:2]) {
+	if !bytes.Equal(wrapTokenID()[:], b[0:2]) {
 		return fmt.Errorf("wrong Token ID. Expected %s, was %s",
-			hex.EncodeToString(getGssWrapTokenId()[:]),
+			hex.EncodeToString(wrapTokenID()[:]),
 			hex.EncodeToString(b[0:2]))
 	}
 	// Check the acceptor flag
