@@ -2,7 +2,7 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-127 done. The latest measured
+(floor raised to 86.0%), and Phase 5 slices 1-128 done. The latest measured
 v8 inventories (Slice 116) contain 518 canonical and 3,392 supplemental
 findings. Most remaining canonical findings are from `revive`, complexity and
 nesting checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
@@ -30,7 +30,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.3% cross-package statement coverage (Slice 102); 518 canonical lint findings after Slice 116 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.3%-88.4% local cross-package statement coverage (Slice 128); 518 canonical lint findings after Slice 116 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -819,6 +819,17 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 128 (2026-11-20, v8 coverage baseline refresh):
+Measure the Slice 127 source (`e4c5967`) from `v8` on Linux/amd64 with
+Go 1.26.11. Two uncached runs of
+`go test -count=1 -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...`
+passed. `go tool cover -func=coverage.out` reported 88.3% and 88.4% total
+statement coverage. Both runs passed the existing 86.0% CI floor, which
+remains unchanged. The second profile covered 460 of 465 `config` statements
+(98.9%) after merging repeated source blocks from cross-package tests.
+This is local test evidence, not live KDC interoperability or native Windows
+evidence. No code or CI changes; PKINIT and PKU2U remain deferred.
 
 Slice 127 (2026-11-20, v8 config domain-realm assignment splitting; Q-10):
 Use `strings.Cut` to read the key and first value field without building a
