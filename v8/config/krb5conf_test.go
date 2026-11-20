@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"io"
@@ -98,6 +99,37 @@ func TestNewFromReaderReturnsReadError(t *testing.T) {
 	assert.False(t, r.isClosed, "NewFromReader closed its input")
 	assert.ErrorIs(t, err, readErr)
 	assert.Nil(t, cfg)
+}
+
+func TestNewFromScannerReturnsLateReadError(t *testing.T) {
+	t.Parallel()
+
+	readErr := errors.New("configuration stream interrupted")
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "valid section",
+			input: "[libdefaults]\ndefault_realm = EXAMPLE.COM\n",
+		},
+		{
+			name:  "invalid section",
+			input: "[domain_realm]\nmissing assignment\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			r := io.MultiReader(strings.NewReader(tt.input), failingConfigReader{err: readErr})
+			cfg, err := NewFromScanner(bufio.NewScanner(r))
+
+			assert.ErrorIs(t, err, readErr)
+			assert.Nil(t, cfg)
+		})
+	}
 }
 
 const (
