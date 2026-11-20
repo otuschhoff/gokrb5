@@ -2,7 +2,7 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-129 done. The latest measured
+(floor raised to 86.0%), and Phase 5 slices 1-130 done. The latest measured
 v8 inventories (Slice 129) contain 518 canonical and 3,392 supplemental
 findings. Most remaining canonical findings are from `revive`, complexity and
 nesting checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
@@ -819,6 +819,15 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 130 (2026-11-20, v8 config JSON test assertions; Q-10):
+Use Testify's structural JSON comparison for the existing config fixture.
+Stop on parse or marshal failure and omit the unconditional output dump.
+The same input and full expected JSON are checked without relying on
+whitespace or object field order. No production changes.
+
+The JSON tests passed 100 shuffled runs with the race detector. Changed-line
+lint passed for both modules against `07a414a` and `origin/main`.
 
 Slice 129 (2026-11-20, lint inventory refresh; Q-10):
 Rerun `scripts/lint.sh full` and `report` on Linux/amd64 with Go 1.26.11

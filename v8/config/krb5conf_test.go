@@ -963,23 +963,13 @@ func TestDefaultCCacheName(t *testing.T) {
 
 func TestJSON(t *testing.T) {
 	t.Parallel()
+
 	c, err := NewFromString(krb5Conf)
-	if err != nil {
-		t.Fatalf("Error loading config: %v", err)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, c)
+
 	c.LibDefaults.K5LoginDirectory = "/home/test"
 	j, err := c.JSON()
-	if err != nil {
-		t.Errorf("error marshaling krb config to JSON: %v", err)
-	}
-	var expected, actual any
-	if err := json.Unmarshal([]byte(krb5ConfJSON), &expected); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal([]byte(j), &actual); err != nil {
-		t.Fatal(err)
-	}
-	assert.Equal(t, expected, actual, "krb config marshaled json not as expected")
-
-	t.Log(j)
+	require.NoError(t, err)
+	assert.JSONEq(t, krb5ConfJSON, j)
 }
