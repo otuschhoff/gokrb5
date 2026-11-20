@@ -8,7 +8,8 @@ import (
 )
 
 func TestAttributesInfoRoundTrip(t *testing.T) {
-	want := AttributesInfo{Flags: PACWasRequested}
+	var want AttributesInfo
+	want.Flags = PACWasRequested
 	b, err := want.Marshal()
 	if err != nil {
 		t.Fatal(err)

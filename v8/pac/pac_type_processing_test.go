@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/otuschhoff/gokrb5/v8/crypto"
+	"github.com/otuschhoff/gokrb5/v8/iana/chksumtype"
+	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 	"github.com/otuschhoff/gokrb5/v8/iana/keyusage"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
 	"github.com/otuschhoff/gokrb5/v8/types"
@@ -31,8 +33,7 @@ func processingPAC(t *testing.T, buffers ...pacBuffer) PACType {
 
 func seedProcessedPAC(value *PACType) {
 	fields := reflect.ValueOf(value).Elem()
-	for i := 0; i < fields.NumField(); i++ {
-		field := fields.Field(i)
+	for _, field := range fields.Fields() {
 		if field.Kind() == reflect.Pointer {
 			field.Set(reflect.New(field.Type().Elem()))
 		}
@@ -44,7 +45,7 @@ func TestPACProcessingValidationBeforeReset(t *testing.T) {
 	seedProcessedPAC(&value)
 	value.CBuffers++
 	before := value
-	err := value.ProcessPACInfoBuffersWithCredentialKey(types.EncryptionKey{}, types.EncryptionKey{}, nil)
+	err := value.ProcessPACInfoBuffersWithCredentialKey(noEncryptionKey(), noEncryptionKey(), nil)
 	if !errors.Is(err, ErrPACMalformed) || !reflect.DeepEqual(value, before) {
 		t.Fatalf("validation changed prior state: error=%v, before=%+v, after=%+v", err, before, value)
 	}
@@ -56,7 +57,8 @@ func TestPACProcessingResetAndMetadata(t *testing.T) {
 	seedProcessedPAC(&value)
 	value.ZeroSigData = bytes.Repeat([]byte{0xff}, len(value.Data)+16)
 	var logged bytes.Buffer
-	err := value.ProcessPACInfoBuffersWithCredentialKey(types.EncryptionKey{}, types.EncryptionKey{}, log.New(&logged, "", 0))
+	logger := log.New(&logged, "", 0)
+	err := value.ProcessPACInfoBuffersWithCredentialKey(noEncryptionKey(), noEncryptionKey(), logger)
 	if err == nil || err.Error() != "PAC Info Buffers does not contain a KerbValidationInfo" {
 		t.Fatalf("verification error = %v", err)
 	}
@@ -83,7 +85,7 @@ func TestPACProcessingSkippedDuplicates(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			value := processingPAC(t, pacBuffer{typeID: tt.typeID, data: tt.data}, pacBuffer{typeID: tt.typeID, data: tt.data})
-			err := value.ProcessPACInfoBuffers(types.EncryptionKey{}, nil)
+			err := value.ProcessPACInfoBuffers(noEncryptionKey(), nil)
 			if err == nil || err.Error() != tt.want || value.CredentialsInfo != nil || value.ClientClaimsInfo != nil {
 				t.Fatalf("error=%v, credentials=%+v, claims=%+v", err, value.CredentialsInfo, value.ClientClaimsInfo)
 			}
@@ -129,7 +131,7 @@ func TestPACProcessingDecoderErrorChains(t *testing.T) {
 				t.Fatal("malformed fixture decoded successfully")
 			}
 			want := processingErrorChain(fmt.Errorf("error processing %s: %w", tt.name, cause))
-			err := value.ProcessPACInfoBuffersWithCredentialKey(types.EncryptionKey{}, key, nil)
+			err := value.ProcessPACInfoBuffersWithCredentialKey(noEncryptionKey(), key, nil)
 			if !reflect.DeepEqual(processingErrorChain(err), want) || !reflect.DeepEqual(value, expected) {
 				t.Fatalf("error chain=%q, want=%q; partial state=%+v", processingErrorChain(err), want, value)
 			}
@@ -148,7 +150,13 @@ func TestPACProcessingSignatureOrder(t *testing.T) {
 		{"TicketChecksum", infoTypePACTicketChecksum, "TicketChecksum"},
 		{"FullChecksum", infoTypePACFullChecksum, "FullChecksum"},
 	}
-	signature := SignatureData{SignatureType: 15, Signature: bytes.Repeat([]byte{0x5a}, 12), RODCIdentifier: 42, HasRODCIdentifier: true}
+	const checksumLength = 12
+	signature := SignatureData{
+		SignatureType:     uint32(chksumtype.HMAC_SHA1_96_AES128),
+		Signature:         bytes.Repeat([]byte{0x5a}, checksumLength),
+		RODCIdentifier:    42,
+		HasRODCIdentifier: true,
+	}
 	payload, err := signature.Marshal()
 	if err != nil {
 		t.Fatal(err)
@@ -160,12 +168,7 @@ func TestPACProcessingSignatureOrder(t *testing.T) {
 			wantZero := append([]byte(nil), original...)
 			offset := value.Buffers[0].Offset
 			clear(wantZero[offset+4 : offset+16])
-			err := value.ProcessPACInfoBuffers(types.EncryptionKey{}, nil)
-			wantErr := fmt.Sprintf("PAC is malformed: duplicate buffer type %d", tt.typeID)
-			decoded := reflect.ValueOf(value).FieldByName(tt.field).Interface()
-			if err == nil || err.Error() != wantErr || !errors.Is(err, ErrPACMalformed) || !reflect.DeepEqual(decoded, &signature) {
-				t.Fatalf("duplicate error=%v, signature=%+v", err, decoded)
-			}
+			checkDuplicateSignature(t, &value, tt.typeID, tt.field, &signature)
 			if !bytes.Equal(value.ZeroSigData, wantZero) || !bytes.Equal(value.Data, original) {
 				t.Fatal("signature copy timing or Data preservation changed")
 			}
@@ -175,11 +178,22 @@ func TestPACProcessingSignatureOrder(t *testing.T) {
 			expected := value
 			_, cause := new(SignatureData).Unmarshal([]byte{1})
 			want := processingErrorChain(fmt.Errorf("error processing %s: %w", tt.name, cause))
-			err := value.ProcessPACInfoBuffers(types.EncryptionKey{}, nil)
+			err := value.ProcessPACInfoBuffers(noEncryptionKey(), nil)
 			if !reflect.DeepEqual(processingErrorChain(err), want) || !reflect.DeepEqual(value, expected) {
 				t.Fatalf("failed signature decode changed state: error=%v, state=%+v", err, value)
 			}
 		})
+	}
+}
+
+func checkDuplicateSignature(t *testing.T, value *PACType, typeID uint32, field string, signature *SignatureData) {
+	t.Helper()
+	err := value.ProcessPACInfoBuffers(noEncryptionKey(), nil)
+	wantErr := fmt.Sprintf("PAC is malformed: duplicate buffer type %d", typeID)
+	decoded := reflect.ValueOf(value).Elem().FieldByName(field).Interface()
+	if err == nil || err.Error() != wantErr || !errors.Is(err, ErrPACMalformed) ||
+		!reflect.DeepEqual(decoded, signature) {
+		t.Fatalf("duplicate error=%v, signature=%+v", err, decoded)
 	}
 }
 
@@ -188,13 +202,18 @@ func TestPACProcessingEarlierMutationSurvivesError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	value := processingPAC(t, pacBuffer{typeID: infoTypePACClientInfo, data: client}, pacBuffer{typeID: infoTypePACRequestor, data: []byte{1}})
+	value := processingPAC(
+		t,
+		pacBuffer{typeID: infoTypePACClientInfo, data: client},
+		pacBuffer{typeID: infoTypePACRequestor, data: []byte{1}},
+	)
 	var expected ClientInfo
 	if err = expected.Unmarshal(client); err != nil {
 		t.Fatal(err)
 	}
-	err = value.ProcessPACInfoBuffers(types.EncryptionKey{}, nil)
-	if err == nil || !bytes.HasPrefix([]byte(err.Error()), []byte("error processing Requestor: ")) || !reflect.DeepEqual(value.ClientInfo, &expected) || value.Requestor != nil {
+	err = value.ProcessPACInfoBuffers(noEncryptionKey(), nil)
+	if err == nil || !bytes.HasPrefix([]byte(err.Error()), []byte("error processing Requestor: ")) ||
+		!reflect.DeepEqual(value.ClientInfo, &expected) || value.Requestor != nil {
 		t.Fatalf("error=%v, client=%+v, requestor=%+v", err, value.ClientInfo, value.Requestor)
 	}
 }
@@ -215,7 +234,10 @@ func TestPACProcessingSuccessfulDecoders(t *testing.T) {
 		hex    string
 		value  interface{ Unmarshal([]byte) error }
 	}{
-		{"KerbValidationInfo", infoTypeKerbValidationInfo, testdata.MarshaledPAC_Kerb_Validation_Info_MS, new(KerbValidationInfo)},
+		{
+			"KerbValidationInfo", infoTypeKerbValidationInfo,
+			testdata.MarshaledPAC_Kerb_Validation_Info_MS, new(KerbValidationInfo),
+		},
 		{"ClientInfo", infoTypePACClientInfo, testdata.MarshaledPAC_Client_Info, new(ClientInfo)},
 		{"S4UDelegationInfo", infoTypeS4UDelegationInfo, hex.EncodeToString(processingEmptyNDR()), new(S4UDelegationInfo)},
 		{"UPNDNSInfo", infoTypeUPNDNSInfo, testdata.MarshaledPAC_UPN_DNS_Info, new(UPNDNSInfo)},
@@ -235,7 +257,7 @@ func TestPACProcessingSuccessfulDecoders(t *testing.T) {
 				t.Fatal(err)
 			}
 			value := processingPAC(t, pacBuffer{typeID: tt.typeID, data: payload}, pacBuffer{typeID: tt.typeID, data: []byte{1}})
-			err = value.ProcessPACInfoBuffers(types.EncryptionKey{}, nil)
+			err = value.ProcessPACInfoBuffers(noEncryptionKey(), nil)
 			want := fmt.Sprintf("PAC is malformed: duplicate buffer type %d", tt.typeID)
 			got := reflect.ValueOf(value).FieldByName(tt.name).Interface()
 			if err == nil || err.Error() != want || !errors.Is(err, ErrPACMalformed) || !reflect.DeepEqual(got, tt.value) {
@@ -253,8 +275,9 @@ func TestPACProcessingCredentialDecryptionFailureState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	payload := make([]byte, 8)
-	binary.LittleEndian.PutUint32(payload[4:], 17)
+	const credentialHeaderSize = 8
+	payload := make([]byte, credentialHeaderSize, credentialHeaderSize+len(encrypted))
+	binary.LittleEndian.PutUint32(payload[4:], uint32(etypeID.AES128_CTS_HMAC_SHA1_96))
 	payload = append(payload, encrypted...)
 	value := processingPAC(t, pacBuffer{typeID: infoTypeCredentials, data: payload})
 	expected := value
@@ -263,7 +286,7 @@ func TestPACProcessingCredentialDecryptionFailureState(t *testing.T) {
 	if cause == nil || cause.Error() != "error unmarshaling PAC credential data: missing conformant array maximum" {
 		t.Fatalf("credential fixture error = %v", cause)
 	}
-	err = value.ProcessPACInfoBuffersWithCredentialKey(types.EncryptionKey{}, key, nil)
+	err = value.ProcessPACInfoBuffersWithCredentialKey(noEncryptionKey(), key, nil)
 	want := processingErrorChain(fmt.Errorf("error processing CredentialsInfo: %w", cause))
 	if !reflect.DeepEqual(processingErrorChain(err), want) || !reflect.DeepEqual(value, expected) {
 		t.Fatalf("error=%v, credentials=%+v", err, value.CredentialsInfo)
@@ -312,11 +335,11 @@ func FuzzPACProcessingInfoBuffers(f *testing.F) {
 		}
 		value := processingPAC(t, buffers...)
 		original := append([]byte(nil), value.Data...)
-		key := types.EncryptionKey{}
+		var key types.EncryptionKey
 		if withKey {
 			key = types.EncryptionKey{KeyType: 17, KeyValue: bytes.Repeat([]byte{1}, 16)}
 		}
-		_ = value.ProcessPACInfoBuffersWithCredentialKey(types.EncryptionKey{}, key, nil)
+		_ = value.ProcessPACInfoBuffersWithCredentialKey(noEncryptionKey(), key, nil)
 		if !bytes.Equal(value.Data, original) || len(value.ZeroSigData) != len(original) {
 			t.Fatal("processing mutated Data or changed ZeroSigData length")
 		}

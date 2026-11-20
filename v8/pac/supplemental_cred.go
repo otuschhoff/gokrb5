@@ -16,14 +16,18 @@ const (
 	NTLMSupCredLMOWF uint32 = 31
 	// NTLMSupCredNTOWF indicates that the NT OWF member is present and valid.
 	NTLMSupCredNTOWF uint32 = 30
+
+	ntlmOWFLength = 16
 )
 
 // NTLMSupplementalCred implements https://msdn.microsoft.com/en-us/library/cc237949.aspx
 type NTLMSupplementalCred struct {
-	Version    uint32 // A 32-bit unsigned integer that defines the credential version.This field MUST be 0x00000000.
-	Flags      uint32
-	LMPassword []byte // A 16-element array of unsigned 8-bit integers that define the LM OWF. The LMPassword member MUST be ignored if the L flag is not set in the Flags member.
-	NTPassword []byte // A 16-element array of unsigned 8-bit integers that define the NT OWF. The NTPassword member MUST be ignored if the N flag is not set in the Flags member.
+	Version uint32 // A 32-bit unsigned integer that defines the credential version.This field MUST be 0x00000000.
+	Flags   uint32
+	// LMPassword is the 16-byte LM OWF. It must be ignored when the L flag is not set.
+	LMPassword []byte
+	// NTPassword is the 16-byte NT OWF. It must be ignored when the N flag is not set.
+	NTPassword []byte
 }
 
 // Unmarshal converts the bytes provided into a NTLMSupplementalCred.
@@ -42,13 +46,13 @@ func (c *NTLMSupplementalCred) Unmarshal(b []byte) error {
 		return err
 	}
 	if isFlagSet(c.Flags, NTLMSupCredLMOWF) {
-		c.LMPassword, err = readPACBytes(r, 16, "supplemental LM credential")
+		c.LMPassword, err = readPACBytes(r, ntlmOWFLength, "supplemental LM credential")
 		if err != nil {
 			return err
 		}
 	}
 	if isFlagSet(c.Flags, NTLMSupCredNTOWF) {
-		c.NTPassword, err = readPACBytes(r, 16, "supplemental NT credential")
+		c.NTPassword, err = readPACBytes(r, ntlmOWFLength, "supplemental NT credential")
 		if err != nil {
 			return err
 		}
@@ -56,14 +60,16 @@ func (c *NTLMSupplementalCred) Unmarshal(b []byte) error {
 	return nil
 }
 
-// isFlagSet tests if a flag is set in the uint32 little endian flag
+// isFlagSet numbers bits from the most significant bit of each little-endian byte.
 func isFlagSet(f uint32, i uint32) bool {
-	// Which byte?
-	b := int(i / 8)
-	// Which bit in byte
-	p := uint(7 - (int(i) - 8*b))
-	fb := make([]byte, 4)
-	binary.LittleEndian.PutUint32(fb, f)
+	const (
+		bitsPerByte    = 8
+		flagsByteCount = 4
+	)
+	b := int(i / bitsPerByte)
+	p := bitsPerByte - 1 - i%bitsPerByte
+	var fb [flagsByteCount]byte
+	binary.LittleEndian.PutUint32(fb[:], f)
 	return fb[b]&(1<<p) != 0
 }
 

@@ -48,6 +48,7 @@ func FuzzPACUnmarshal(f *testing.F) {
 		if err := value.Unmarshal(b); err != nil {
 			return
 		}
-		_ = value.ProcessPACInfoBuffers(types.EncryptionKey{}, logger)
+		var key types.EncryptionKey
+		_ = value.ProcessPACInfoBuffers(key, logger)
 	})
 }

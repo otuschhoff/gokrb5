@@ -52,7 +52,10 @@ func TestPACVerifyOptions(t *testing.T) {
 		want   string
 	}{
 		{"client name", func(_ *PACType, o *VerifyOptions) { o.ExpectedClientName = "other" }, "client name"},
-		{"client time", func(_ *PACType, o *VerifyOptions) { later := authTime.Add(time.Second); o.ExpectedAuthTime = &later }, "authentication time"},
+		{"client time", func(_ *PACType, o *VerifyOptions) {
+			later := authTime.Add(time.Second)
+			o.ExpectedAuthTime = &later
+		}, "authentication time"},
 		{"requestor SID", func(p *PACType, _ *VerifyOptions) { p.Requestor.SID.SubAuthority[3]++ }, "requestor SID"},
 		{"UPN SID", func(p *PACType, _ *VerifyOptions) { p.UPNDNSInfo.ObjectSID.SubAuthority[3]++ }, "UPN/DNS SID"},
 		{"SAM name", func(p *PACType, _ *VerifyOptions) { p.UPNDNSInfo.SAMAccountName = "other" }, "SAM account name"},
@@ -81,29 +84,24 @@ func parsedPACForVerification(t *testing.T, data []byte, authTime time.Time) PAC
 	for _, buffer := range parsed.Buffers {
 		start := mustPACInt(t, buffer.Offset)
 		payload := parsed.Data[start : start+int(buffer.CBBufferSize)]
-		var signature SignatureData
+		var target **SignatureData
 		switch buffer.ULType {
 		case infoTypePACServerSignatureData:
-			if _, err := signature.Unmarshal(payload); err != nil {
-				t.Fatal(err)
-			}
-			parsed.ServerChecksum = &signature
+			target = &parsed.ServerChecksum
 		case infoTypePACKDCSignatureData:
-			if _, err := signature.Unmarshal(payload); err != nil {
-				t.Fatal(err)
-			}
-			parsed.KDCChecksum = &signature
+			target = &parsed.KDCChecksum
 		case infoTypePACFullChecksum:
-			if _, err := signature.Unmarshal(payload); err != nil {
-				t.Fatal(err)
-			}
-			parsed.FullChecksum = &signature
+			target = &parsed.FullChecksum
 		case infoTypePACTicketChecksum:
-			if _, err := signature.Unmarshal(payload); err != nil {
-				t.Fatal(err)
-			}
-			parsed.TicketChecksum = &signature
+			target = &parsed.TicketChecksum
+		default:
+			continue
 		}
+		var signature SignatureData
+		if _, err := signature.Unmarshal(payload); err != nil {
+			t.Fatal(err)
+		}
+		*target = &signature
 	}
 	domainSID := mstypes.RPCSID{
 		Revision: 1, SubAuthorityCount: 3,
@@ -115,10 +113,15 @@ func parsedPACForVerification(t *testing.T, data []byte, authTime time.Time) PAC
 	userSID.SubAuthorityCount = 4
 	objectSID := userSID
 	objectSID.SubAuthority = append([]uint32(nil), userSID.SubAuthority...)
-	parsed.KerbValidationInfo = &KerbValidationInfo{LogonDomainID: domainSID, UserID: 500}
+	parsed.KerbValidationInfo = new(KerbValidationInfo)
+	parsed.KerbValidationInfo.LogonDomainID = domainSID
+	parsed.KerbValidationInfo.UserID = 500
 	parsed.KerbValidationInfo.EffectiveName.Value = "testuser"
-	parsed.ClientInfo = &ClientInfo{ClientID: mstypes.GetFileTime(authTime), Name: "testuser"}
+	parsed.ClientInfo = &ClientInfo{ClientID: mstypes.GetFileTime(authTime), NameLength: 0, Name: "testuser"}
 	parsed.Requestor = &Requestor{SID: userSID}
-	parsed.UPNDNSInfo = &UPNDNSInfo{Flags: UPNDNSInfoFlagExtended, SAMAccountName: "TESTUSER", ObjectSID: &objectSID}
+	parsed.UPNDNSInfo = new(UPNDNSInfo)
+	parsed.UPNDNSInfo.Flags = UPNDNSInfoFlagExtended
+	parsed.UPNDNSInfo.SAMAccountName = "TESTUSER"
+	parsed.UPNDNSInfo.ObjectSID = &objectSID
 	return parsed
 }

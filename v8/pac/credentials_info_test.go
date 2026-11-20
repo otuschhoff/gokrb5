@@ -15,17 +15,18 @@ import (
 func TestNTLMSupplementalCredUnmarshal(t *testing.T) {
 	lm := bytes.Repeat([]byte{0x11}, 16)
 	nt := bytes.Repeat([]byte{0x22}, 16)
-	buffer := new(bytes.Buffer)
-	_ = binary.Write(buffer, binary.LittleEndian, uint32(0))
-	_ = binary.Write(buffer, binary.LittleEndian, uint32(1<<24|1<<25))
-	buffer.Write(lm)
-	buffer.Write(nt)
+	const supplementalFlags = 1<<24 | 1<<25
+	data := binary.LittleEndian.AppendUint32(nil, 0)
+	data = binary.LittleEndian.AppendUint32(data, supplementalFlags)
+	data = append(data, lm...)
+	data = append(data, nt...)
 
 	var credential NTLMSupplementalCred
-	if err := credential.Unmarshal(buffer.Bytes()); err != nil {
+	if err := credential.Unmarshal(data); err != nil {
 		t.Fatal(err)
 	}
-	if credential.Flags != 1<<24|1<<25 || !bytes.Equal(credential.LMPassword, lm) || !bytes.Equal(credential.NTPassword, nt) {
+	if credential.Flags != supplementalFlags ||
+		!bytes.Equal(credential.LMPassword, lm) || !bytes.Equal(credential.NTPassword, nt) {
 		t.Fatal("supplemental credential fixture did not round-trip")
 	}
 
@@ -80,14 +81,16 @@ func TestCredentialInfoFailurePaths(t *testing.T) {
 		})
 	}
 
-	info := CredentialsInfo{EType: uint32(etypeID.RC4_HMAC)}
+	var info CredentialsInfo
+	info.EType = uint32(etypeID.RC4_HMAC)
 	if err := info.DecryptEncPart(key); err == nil || !strings.Contains(err.Error(), "not the correct type") {
 		t.Fatalf("key type error = %v", err)
 	}
 	if err := new(CredentialData).Unmarshal([]byte{1}); err == nil || !strings.Contains(err.Error(), "unmarshaling") {
 		t.Fatalf("credential data error = %v", err)
 	}
-	if err := new(SECPKGSupplementalCred).Unmarshal([]byte{1}); err == nil || !strings.Contains(err.Error(), "unmarshaling") {
+	if err := new(SECPKGSupplementalCred).Unmarshal([]byte{1}); err == nil ||
+		!strings.Contains(err.Error(), "unmarshaling") {
 		t.Fatalf("supplemental credential error = %v", err)
 	}
 }

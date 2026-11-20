@@ -23,17 +23,8 @@ type VerifyOptions struct {
 
 // Verify validates PAC signatures and binds embedded identity data together.
 func (pac *PACType) Verify(serverKey types.EncryptionKey, options VerifyOptions) error {
-	if pac.KerbValidationInfo == nil {
-		return errors.New("PAC Info Buffers does not contain a KerbValidationInfo")
-	}
-	if pac.ServerChecksum == nil {
-		return errors.New("PAC Info Buffers does not contain a ServerChecksum")
-	}
-	if pac.KDCChecksum == nil {
-		return errors.New("PAC Info Buffers does not contain a KDCChecksum")
-	}
-	if pac.ClientInfo == nil {
-		return errors.New("PAC Info Buffers does not contain a ClientInfo")
+	if err := pac.verifyRequiredBuffers(); err != nil {
+		return err
 	}
 	serverInput, err := pac.checksumInput(false)
 	if err != nil {
@@ -42,41 +33,76 @@ func (pac *PACType) Verify(serverKey types.EncryptionKey, options VerifyOptions)
 	if err := verifyPACChecksum(pac.ServerChecksum, serverKey, serverInput, "service"); err != nil {
 		return err
 	}
-	if options.KDCKey != nil {
-		if err := verifyPACChecksum(pac.KDCChecksum, *options.KDCKey, pac.ServerChecksum.Signature, "KDC"); err != nil {
-			return err
-		}
-		if pac.FullChecksum != nil {
-			fullInput, err := pac.checksumInput(true)
-			if err != nil {
-				return err
-			}
-			if err := verifyPACChecksum(pac.FullChecksum, *options.KDCKey, fullInput, "full KDC"); err != nil {
-				return err
-			}
-		} else if options.RequireFullChecksum {
-			return errors.New("PAC Info Buffers does not contain a FullChecksum")
-		}
-		if len(options.TicketData) != 0 {
-			if pac.TicketChecksum == nil {
-				return errors.New("PAC Info Buffers does not contain a TicketChecksum")
-			}
-			if err := verifyPACChecksum(pac.TicketChecksum, *options.KDCKey, options.TicketData, "ticket"); err != nil {
-				return err
-			}
-		} else if options.RequireTicketChecksum {
-			return errors.New("PAC ticket checksum verification requires ticket data")
-		}
-	} else if options.RequireFullChecksum || options.RequireTicketChecksum {
-		return errors.New("PAC KDC checksum verification requires a KDC key")
+	if err := pac.verifyKDCChecksums(options); err != nil {
+		return err
 	}
 	if options.ExpectedClientName != "" && !strings.EqualFold(pac.ClientInfo.Name, options.ExpectedClientName) {
-		return fmt.Errorf("PAC client name %q does not match ticket client %q", pac.ClientInfo.Name, options.ExpectedClientName)
+		return fmt.Errorf(
+			"PAC client name %q does not match ticket client %q", pac.ClientInfo.Name, options.ExpectedClientName,
+		)
 	}
 	if options.ExpectedAuthTime != nil && pac.ClientInfo.ClientID.Time().Unix() != options.ExpectedAuthTime.UTC().Unix() {
-		return fmt.Errorf("PAC client authentication time %s does not match ticket authentication time %s", pac.ClientInfo.ClientID.Time().UTC(), options.ExpectedAuthTime.UTC())
+		return fmt.Errorf(
+			"PAC client authentication time %s does not match ticket authentication time %s",
+			pac.ClientInfo.ClientID.Time().UTC(), options.ExpectedAuthTime.UTC(),
+		)
 	}
 	return pac.verifyIdentityBuffers()
+}
+
+func (pac *PACType) verifyRequiredBuffers() error {
+	switch {
+	case pac.KerbValidationInfo == nil:
+		return errors.New("PAC Info Buffers does not contain a KerbValidationInfo")
+	case pac.ServerChecksum == nil:
+		return errors.New("PAC Info Buffers does not contain a ServerChecksum")
+	case pac.KDCChecksum == nil:
+		return errors.New("PAC Info Buffers does not contain a KDCChecksum")
+	case pac.ClientInfo == nil:
+		return errors.New("PAC Info Buffers does not contain a ClientInfo")
+	default:
+		return nil
+	}
+}
+
+func (pac *PACType) verifyKDCChecksums(options VerifyOptions) error {
+	if options.KDCKey == nil {
+		if options.RequireFullChecksum || options.RequireTicketChecksum {
+			return errors.New("PAC KDC checksum verification requires a KDC key")
+		}
+		return nil
+	}
+	key := *options.KDCKey
+	if err := verifyPACChecksum(pac.KDCChecksum, key, pac.ServerChecksum.Signature, "KDC"); err != nil {
+		return err
+	}
+	if err := pac.verifyFullChecksum(key, options.RequireFullChecksum); err != nil {
+		return err
+	}
+	if len(options.TicketData) == 0 {
+		if options.RequireTicketChecksum {
+			return errors.New("PAC ticket checksum verification requires ticket data")
+		}
+		return nil
+	}
+	if pac.TicketChecksum == nil {
+		return errors.New("PAC Info Buffers does not contain a TicketChecksum")
+	}
+	return verifyPACChecksum(pac.TicketChecksum, key, options.TicketData, "ticket")
+}
+
+func (pac *PACType) verifyFullChecksum(key types.EncryptionKey, required bool) error {
+	if pac.FullChecksum == nil {
+		if required {
+			return errors.New("PAC Info Buffers does not contain a FullChecksum")
+		}
+		return nil
+	}
+	input, err := pac.checksumInput(true)
+	if err != nil {
+		return err
+	}
+	return verifyPACChecksum(pac.FullChecksum, key, input, "full KDC")
 }
 
 func (pac *PACType) checksumInput(includeFull bool) ([]byte, error) {
@@ -104,25 +130,30 @@ func (pac *PACType) zeroChecksum(data []byte, typeID uint32) error {
 			return fmt.Errorf("%w: duplicate checksum buffer type %d", ErrPACMalformed, typeID)
 		}
 		found = true
-		end := buffer.Offset + uint64(buffer.CBBufferSize)
-		if buffer.CBBufferSize < 4 || end < buffer.Offset || end > uint64(len(data)) {
-			return fmt.Errorf("%w: invalid checksum buffer type %d", ErrPACMalformed, typeID)
-		}
-		start, err := pacIntFromUint64("checksum buffer offset", buffer.Offset)
-		if err != nil {
+		if err := zeroChecksumBuffer(data, buffer); err != nil {
 			return err
-		}
-		stop, err := pacIntFromUint64("checksum buffer end", end)
-		if err != nil {
-			return err
-		}
-		for i := start + 4; i < stop; i++ {
-			data[i] = 0
 		}
 	}
 	if !found {
 		return fmt.Errorf("PAC checksum buffer type %d is missing", typeID)
 	}
+	return nil
+}
+
+func zeroChecksumBuffer(data []byte, buffer InfoBuffer) error {
+	end := buffer.Offset + uint64(buffer.CBBufferSize)
+	if buffer.CBBufferSize < pacSignatureTypeSize || end < buffer.Offset || end > uint64(len(data)) {
+		return fmt.Errorf("%w: invalid checksum buffer type %d", ErrPACMalformed, buffer.ULType)
+	}
+	start, err := pacIntFromUint64("checksum buffer offset", buffer.Offset)
+	if err != nil {
+		return err
+	}
+	stop, err := pacIntFromUint64("checksum buffer end", end)
+	if err != nil {
+		return err
+	}
+	clear(data[start+pacSignatureTypeSize : stop])
 	return nil
 }
 
@@ -151,7 +182,10 @@ func (pac *PACType) verifyIdentityBuffers() error {
 			return fmt.Errorf("PAC UPN/DNS SID does not match user SID %s", expectedSID)
 		}
 		if !strings.EqualFold(pac.UPNDNSInfo.SAMAccountName, pac.KerbValidationInfo.EffectiveName.Value) {
-			return fmt.Errorf("PAC SAM account name %q does not match effective name %q", pac.UPNDNSInfo.SAMAccountName, pac.KerbValidationInfo.EffectiveName.Value)
+			return fmt.Errorf(
+				"PAC SAM account name %q does not match effective name %q",
+				pac.UPNDNSInfo.SAMAccountName, pac.KerbValidationInfo.EffectiveName.Value,
+			)
 		}
 	}
 	return nil

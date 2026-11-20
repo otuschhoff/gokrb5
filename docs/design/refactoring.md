@@ -820,6 +820,21 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 139 (2026-11-20, complete top-level v8 PAC lint cleanup; Q-10):
+Separate buffer validation, signature preparation, and checksum verification
+while preserving the wire format, validation order, and public API.
+Simplify record decoding and group membership lookup, retaining existing
+fixture bytes and all 56 test entry points. Narrow naming exceptions
+preserve the published `PACType` and `USERFLAG` identifiers.
+
+Uncapped whole-v8 scans report zero top-level PAC findings, down from 19
+canonical and 236 supplemental. The internal NDR decoder and diagnostics
+outside the top-level PAC package are unchanged. Whole-v8 totals are 408
+canonical and 1,967 supplemental. PAC statement coverage rose from 87.6%
+to 88.1%. PAC passes 100 shuffled race-enabled runs, and PAC and NDR tests
+pass on Linux/386. The full v8 build, vet, and race suite pass, as does
+changed-line lint for both modules. Live interoperability was not run.
+
 Slice 138 (2026-11-20, complete v8 client lint cleanup; Q-10):
 Separate request preparation, transport fallback, reply verification, and
 referral handling in the AS, TGS, FAST, and S4U exchanges. Simplify login,

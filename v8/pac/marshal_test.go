@@ -29,7 +29,8 @@ func TestPACMarshalAlignmentAndPreservation(t *testing.T) {
 	if decoded.CBuffers != 1 || decoded.Buffers[0].Offset%8 != 0 {
 		t.Fatalf("unexpected buffer table: %+v", decoded.Buffers)
 	}
-	if got := data[decoded.Buffers[0].Offset : decoded.Buffers[0].Offset+uint64(decoded.Buffers[0].CBBufferSize)]; !bytes.Equal(got, []byte{1, 2, 3}) {
+	info := decoded.Buffers[0]
+	if got := data[info.Offset : info.Offset+uint64(info.CBBufferSize)]; !bytes.Equal(got, []byte{1, 2, 3}) {
 		t.Fatalf("payload = %x", got)
 	}
 	again, err := decoded.Marshal()
@@ -43,24 +44,28 @@ func TestPACMarshalAlignmentAndPreservation(t *testing.T) {
 
 func TestPACMarshalReencodesTypedBuffers(t *testing.T) {
 	signature := &SignatureData{
-		SignatureType: uint32(chksumtype.HMAC_SHA1_96_AES128),
-		Signature:     bytes.Repeat([]byte{0x5a}, 12),
+		SignatureType:     uint32(chksumtype.HMAC_SHA1_96_AES128),
+		Signature:         bytes.Repeat([]byte{0x5a}, 12),
+		RODCIdentifier:    0,
+		HasRODCIdentifier: false,
 	}
 	requestor := &Requestor{SID: mstypes.RPCSID{
 		Revision: 1, SubAuthorityCount: 1,
 		IdentifierAuthority: [6]byte{0, 0, 0, 0, 0, 5},
 		SubAuthority:        []uint32{500},
 	}}
-	pac := PACType{
-		AttributesInfo: &AttributesInfo{Flags: PACWasRequested},
-		Requestor:      requestor,
-		ClientInfo:     &ClientInfo{Name: "alice"},
-		UPNDNSInfo:     &UPNDNSInfo{UPN: "alice@example.org", DNSDomain: "EXAMPLE.ORG"},
-		ServerChecksum: signature,
-		KDCChecksum:    signature,
-		TicketChecksum: signature,
-		FullChecksum:   signature,
-	}
+	var pac PACType
+	pac.AttributesInfo = &AttributesInfo{FlagsLength: 0, Flags: PACWasRequested}
+	pac.Requestor = requestor
+	pac.ClientInfo = new(ClientInfo)
+	pac.ClientInfo.Name = "alice"
+	pac.UPNDNSInfo = new(UPNDNSInfo)
+	pac.UPNDNSInfo.UPN = "alice@example.org"
+	pac.UPNDNSInfo.DNSDomain = "EXAMPLE.ORG"
+	pac.ServerChecksum = signature
+	pac.KDCChecksum = signature
+	pac.TicketChecksum = signature
+	pac.FullChecksum = signature
 	typeIDs := []uint32{
 		infoTypePACServerSignatureData, infoTypePACKDCSignatureData,
 		infoTypePACTicketChecksum, infoTypePACFullChecksum,
@@ -96,17 +101,21 @@ func TestPACMarshalReencodesTypedBuffers(t *testing.T) {
 }
 
 func TestPACMarshalRejectsInvalidMetadata(t *testing.T) {
+	var version, duplicate, outOfBounds PACType
+	version.Version = 1
+	version.Buffers = make([]InfoBuffer, 1)
+	duplicate.Buffers = []InfoBuffer{
+		{ULType: 1, CBBufferSize: 0, Offset: 40},
+		{ULType: 1, CBBufferSize: 0, Offset: 40},
+	}
+	duplicate.Data = make([]byte, 40)
+	outOfBounds.Buffers = []InfoBuffer{{ULType: 1, CBBufferSize: 2, Offset: 24}}
+	outOfBounds.Data = make([]byte, 24)
 	tests := map[string]*PACType{
-		"version": {Version: 1, Buffers: []InfoBuffer{{}}},
-		"empty":   {},
-		"duplicate": {
-			Buffers: []InfoBuffer{{ULType: 1, Offset: 40}, {ULType: 1, Offset: 40}},
-			Data:    make([]byte, 40),
-		},
-		"out of bounds": {
-			Buffers: []InfoBuffer{{ULType: 1, CBBufferSize: 2, Offset: 24}},
-			Data:    make([]byte, 24),
-		},
+		"version":       &version,
+		"empty":         new(PACType),
+		"duplicate":     &duplicate,
+		"out of bounds": &outOfBounds,
 	}
 	for name, value := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -124,7 +133,7 @@ func TestPACMarshalRejectsInvalidMetadata(t *testing.T) {
 	if err := value.Unmarshal(raw); err != nil {
 		t.Fatal(err)
 	}
-	value.AttributesInfo = &AttributesInfo{FlagsLength: 1}
+	value.AttributesInfo = &AttributesInfo{FlagsLength: 1, Flags: 0}
 	if _, err := value.Marshal(); err == nil {
 		t.Fatal("typed buffer marshal failure was ignored")
 	}
@@ -148,7 +157,7 @@ func TestPACSignPreservesEnctypeLookupError(t *testing.T) {
 func TestPACSignFullChecksumOrder(t *testing.T) {
 	serverKey := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: bytes.Repeat([]byte{0x11}, 16)}
 	kdcKey := types.EncryptionKey{KeyType: etypeID.AES256_CTS_HMAC_SHA1_96, KeyValue: bytes.Repeat([]byte{0x22}, 32)}
-	data, err := minimalPAC().Sign(serverKey, kdcKey, SignOptions{IncludeFullChecksum: true})
+	data, err := minimalPAC().Sign(serverKey, kdcKey, SignOptions{IncludeFullChecksum: true, TicketData: nil})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +191,9 @@ func TestPACSignFullChecksumOrder(t *testing.T) {
 	if etype == nil {
 		t.Fatal("checksum encryption type is nil")
 	}
-	if etype.VerifyChecksum(serverKey.KeyValue, tampered, serverSignatureData.Signature, keyusage.KERB_NON_KERB_CKSUM_SALT) {
+	if etype.VerifyChecksum(
+		serverKey.KeyValue, tampered, serverSignatureData.Signature, keyusage.KERB_NON_KERB_CKSUM_SALT,
+	) {
 		t.Fatal("server checksum accepted tampered PAC")
 	}
 }
@@ -191,7 +202,7 @@ func TestPACSignTicketChecksum(t *testing.T) {
 	serverKey := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: bytes.Repeat([]byte{0x33}, 16)}
 	kdcKey := types.EncryptionKey{KeyType: etypeID.AES256_CTS_HMAC_SHA1_96, KeyValue: bytes.Repeat([]byte{0x44}, 32)}
 	ticketData := []byte("DER EncTicketPart with one-byte PAC placeholder")
-	data, err := minimalPAC().Sign(serverKey, kdcKey, SignOptions{TicketData: ticketData})
+	data, err := minimalPAC().Sign(serverKey, kdcKey, SignOptions{IncludeFullChecksum: false, TicketData: ticketData})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,11 +213,10 @@ func TestPACSignTicketChecksum(t *testing.T) {
 func minimalPAC() *PACType {
 	data := make([]byte, 27)
 	copy(data[24:], []byte{1, 2, 3})
-	return &PACType{
-		Version: 0,
-		Buffers: []InfoBuffer{{ULType: 99, CBBufferSize: 3, Offset: 24}},
-		Data:    data,
-	}
+	var pac PACType
+	pac.Buffers = []InfoBuffer{{ULType: 99, CBBufferSize: 3, Offset: 24}}
+	pac.Data = data
+	return &pac
 }
 
 func readTestBuffers(t *testing.T, data []byte) []pacBuffer {

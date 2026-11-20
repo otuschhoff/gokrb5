@@ -26,9 +26,11 @@ func decodeClaimsSet(m *mstypes.ClaimsSetMetadata) (mstypes.ClaimsSet, error) {
 	}
 	switch m.CompressionFormat {
 	case mstypes.CompressionFormatLZNT1:
-		return c, fmt.Errorf("ClaimsSet compressed, format LZNT1 not currently supported: %s", hex.EncodeToString(m.ClaimsSetBytes))
+		return c, fmt.Errorf("ClaimsSet compressed, format LZNT1 not currently supported: %s",
+			hex.EncodeToString(m.ClaimsSetBytes))
 	case mstypes.CompressionFormatXPress:
-		return c, fmt.Errorf("ClaimsSet compressed, format XPress not currently supported: %s", hex.EncodeToString(m.ClaimsSetBytes))
+		return c, fmt.Errorf("ClaimsSet compressed, format XPress not currently supported: %s",
+			hex.EncodeToString(m.ClaimsSetBytes))
 	case mstypes.CompressionFormatXPressHuff:
 		buff := new(bytes.Buffer)
 		if _, err := hpack.HuffmanDecode(buff, m.ClaimsSetBytes); err != nil {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -25,6 +26,11 @@ func mustPACUint32(t *testing.T, value int) uint32 {
 		t.Fatal(err)
 	}
 	return result
+}
+
+func noEncryptionKey() types.EncryptionKey {
+	var key types.EncryptionKey
+	return key
 }
 
 func mustPACInt(t *testing.T, value uint64) int {
@@ -69,20 +75,26 @@ func TestPACBoundsChecks(t *testing.T) {
 		data   []byte
 		buffer []InfoBuffer
 	}{
-		{"count mismatch", make([]byte, 40), []InfoBuffer{{Offset: 24, CBBufferSize: 1}}},
-		{"misaligned", make([]byte, 40), []InfoBuffer{{Offset: 25, CBBufferSize: 1}}},
-		{"inside header", make([]byte, 40), []InfoBuffer{{Offset: 16, CBBufferSize: 1}}},
-		{"past end", make([]byte, 40), []InfoBuffer{{Offset: 32, CBBufferSize: 9}}},
-		{"range overflow", make([]byte, 40), []InfoBuffer{{Offset: ^uint64(0) - 7, CBBufferSize: 16}}},
-		{"overlap", make([]byte, 64), []InfoBuffer{{Offset: 40, CBBufferSize: 16}, {Offset: 48, CBBufferSize: 8}}},
+		{"count mismatch", make([]byte, 40), []InfoBuffer{{ULType: 0, Offset: 24, CBBufferSize: 1}}},
+		{"misaligned", make([]byte, 40), []InfoBuffer{{ULType: 0, Offset: 25, CBBufferSize: 1}}},
+		{"inside header", make([]byte, 40), []InfoBuffer{{ULType: 0, Offset: 16, CBBufferSize: 1}}},
+		{"past end", make([]byte, 40), []InfoBuffer{{ULType: 0, Offset: 32, CBBufferSize: 9}}},
+		{"range overflow", make([]byte, 40), []InfoBuffer{{ULType: 0, Offset: ^uint64(0) - 7, CBBufferSize: 16}}},
+		{"overlap", make([]byte, 64), []InfoBuffer{
+			{ULType: 0, Offset: 40, CBBufferSize: 16}, {ULType: 0, Offset: 48, CBBufferSize: 8},
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pac := PACType{CBuffers: mustPACUint32(t, len(tt.buffer)), Buffers: tt.buffer, Data: tt.data}
+			var pac PACType
+			pac.CBuffers = mustPACUint32(t, len(tt.buffer))
+			pac.Buffers = tt.buffer
+			pac.Data = tt.data
 			if tt.name == "count mismatch" {
 				pac.CBuffers++
 			}
-			if err := pac.ProcessPACInfoBuffers(types.EncryptionKey{}, log.New(&bytes.Buffer{}, "", 0)); !errors.Is(err, ErrPACMalformed) {
+			err := pac.ProcessPACInfoBuffers(noEncryptionKey(), log.New(&bytes.Buffer{}, "", 0))
+			if !errors.Is(err, ErrPACMalformed) {
 				t.Fatalf("ProcessPACInfoBuffers error = %v, want ErrPACMalformed", err)
 			}
 		})
@@ -98,10 +110,11 @@ func TestPACRejectsDuplicateValidationInfo(t *testing.T) {
 	if ierr := original.Unmarshal(b); ierr != nil {
 		t.Fatal(ierr)
 	}
-	var buffers []pacBuffer
+	buffers := make([]pacBuffer, 0, len(original.Buffers)+1)
 	var validation pacBuffer
 	for _, info := range original.Buffers {
-		payload := append([]byte(nil), original.Data[mustPACInt(t, info.Offset):mustPACInt(t, info.Offset)+int(info.CBBufferSize)]...)
+		start := mustPACInt(t, info.Offset)
+		payload := append([]byte(nil), original.Data[start:start+int(info.CBBufferSize)]...)
 		buffer := pacBuffer{typeID: info.ULType, data: payload}
 		buffers = append(buffers, buffer)
 		if info.ULType == infoTypeKerbValidationInfo {
@@ -116,19 +129,18 @@ func TestPACRejectsDuplicateValidationInfo(t *testing.T) {
 	if ierr := duplicate.Unmarshal(data); ierr != nil {
 		t.Fatal(ierr)
 	}
-	err = duplicate.ProcessPACInfoBuffers(types.EncryptionKey{}, log.New(&bytes.Buffer{}, "", 0))
+	err = duplicate.ProcessPACInfoBuffers(noEncryptionKey(), log.New(&bytes.Buffer{}, "", 0))
 	if !errors.Is(err, ErrPACMalformed) {
 		t.Fatalf("ProcessPACInfoBuffers error = %v, want ErrPACMalformed", err)
 	}
 }
 
 func TestPACAllowsEmptyClientClaimsInfo(t *testing.T) {
-	pac := PACType{
-		CBuffers: 1,
-		Buffers:  []InfoBuffer{{ULType: infoTypePACClientClaimsInfo, Offset: 24}},
-		Data:     make([]byte, 24),
-	}
-	err := pac.ProcessPACInfoBuffers(types.EncryptionKey{}, log.New(&bytes.Buffer{}, "", 0))
+	var pac PACType
+	pac.CBuffers = 1
+	pac.Buffers = []InfoBuffer{{ULType: infoTypePACClientClaimsInfo, CBBufferSize: 0, Offset: 24}}
+	pac.Data = make([]byte, 24)
+	err := pac.ProcessPACInfoBuffers(noEncryptionKey(), log.New(&bytes.Buffer{}, "", 0))
 	if err == nil || strings.Contains(err.Error(), "ClientClaimsInfo is empty") {
 		t.Fatalf("ProcessPACInfoBuffers error = %v; want normal PAC verification error", err)
 	}
@@ -156,7 +168,7 @@ func TestPACInfoBufferDecoderFailures(t *testing.T) {
 	}
 	credentialKey := types.EncryptionKey{KeyType: 17, KeyValue: bytes.Repeat([]byte{1}, 16)}
 	for _, typeID := range typesToDecode {
-		t.Run(fmt.Sprint(typeID), func(t *testing.T) {
+		t.Run(strconv.FormatUint(uint64(typeID), 10), func(t *testing.T) {
 			data, err := marshalPACBuffers(0, []pacBuffer{{typeID: typeID, data: []byte{1}}})
 			if err != nil {
 				t.Fatal(err)
@@ -165,7 +177,8 @@ func TestPACInfoBufferDecoderFailures(t *testing.T) {
 			if err := value.Unmarshal(data); err != nil {
 				t.Fatal(err)
 			}
-			if err := value.ProcessPACInfoBuffersWithCredentialKey(types.EncryptionKey{}, credentialKey, log.New(io.Discard, "", 0)); err == nil {
+			logger := log.New(io.Discard, "", 0)
+			if err := value.ProcessPACInfoBuffersWithCredentialKey(noEncryptionKey(), credentialKey, logger); err == nil {
 				t.Fatalf("malformed PAC buffer type %d was accepted", typeID)
 			}
 		})

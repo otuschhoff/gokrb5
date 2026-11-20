@@ -4,6 +4,7 @@ package pac
 import (
 	"bytes"
 	"fmt"
+	"slices"
 
 	"github.com/jcmturner/rpc/v2/mstypes"
 
@@ -11,19 +12,28 @@ import (
 )
 
 // KERB_VALIDATION_INFO flags.
+//
+//nolint:revive // Preserve published flag names from the protocol.
 const (
-	USERFLAG_GUEST                                    = 31 // Authentication was done via the GUEST account; no password was used.
-	USERFLAG_NO_ENCRYPTION_AVAILABLE                  = 30 // No encryption is available.
-	USERFLAG_LAN_MANAGER_KEY                          = 28 // LAN Manager key was used for authentication.
-	USERFLAG_SUB_AUTH                                 = 25 // Sub-authentication used; session key came from the sub-authentication package.
-	USERFLAG_EXTRA_SIDS                               = 26 // Indicates that the ExtraSids field is populated and contains additional SIDs.
-	USERFLAG_MACHINE_ACCOUNT                          = 24 // Indicates that the account is a machine account.
-	USERFLAG_DC_NTLM2                                 = 23 // Indicates that the domain controller understands NTLMv2.
-	USERFLAG_RESOURCE_GROUPIDS                        = 22 // Indicates that the ResourceGroupIds field is populated.
-	USERFLAG_PROFILEPATH                              = 21 // Indicates that ProfilePath is populated.
-	USERFLAG_NTLM2_NTCHALLENGERESP                    = 20 // The NTLMv2 response from the NtChallengeResponseFields ([MS-NLMP] section 2.2.1.3) was used for authentication and session key generation.
-	USERFLAG_LM2_LMCHALLENGERESP                      = 19 // The LMv2 response from the LmChallengeResponseFields ([MS-NLMP] section 2.2.1.3) was used for authentication and session key generation.
-	USERFLAG_AUTH_LMCHALLENGERESP_KEY_NTCHALLENGERESP = 18 // The LMv2 response from the LmChallengeResponseFields ([MS-NLMP] section 2.2.1.3) was used for authentication and the NTLMv2 response from the NtChallengeResponseFields ([MS-NLMP] section 2.2.1.3) was used session key generation.
+	// Authentication used the GUEST account without a password.
+	USERFLAG_GUEST                   = 31
+	USERFLAG_NO_ENCRYPTION_AVAILABLE = 30 // No encryption is available.
+	USERFLAG_LAN_MANAGER_KEY         = 28 // LAN Manager key was used for authentication.
+	// The session key came from the sub-authentication package.
+	USERFLAG_SUB_AUTH          = 25
+	USERFLAG_EXTRA_SIDS        = 26 // ExtraSIDs contains additional SIDs.
+	USERFLAG_MACHINE_ACCOUNT   = 24 // The account is a machine account.
+	USERFLAG_DC_NTLM2          = 23 // The domain controller understands NTLMv2.
+	USERFLAG_RESOURCE_GROUPIDS = 22 // ResourceGroupIDs is populated.
+	USERFLAG_PROFILEPATH       = 21 // ProfilePath is populated.
+	// The NTLMv2 NtChallengeResponseFields response authenticated and generated the session key.
+	USERFLAG_NTLM2_NTCHALLENGERESP = 20
+	// The LMv2 LmChallengeResponseFields response authenticated and generated the session key.
+	USERFLAG_LM2_LMCHALLENGERESP = 19
+	// The LMv2 LmChallengeResponseFields response authenticated;
+	// the NTLMv2 NtChallengeResponseFields response generated the session key.
+	// Both fields are specified in [MS-NLMP] section 2.2.1.3.
+	USERFLAG_AUTH_LMCHALLENGERESP_KEY_NTCHALLENGERESP = 18
 )
 
 // KerbValidationInfo implement https://msdn.microsoft.com/en-us/library/cc237948.aspx
@@ -83,29 +93,16 @@ func (k *KerbValidationInfo) GetGroupMembershipSIDs() []string {
 	for i := range k.GroupIDs {
 		g = append(g, fmt.Sprintf("%s-%d", lSID, k.GroupIDs[i].RelativeID))
 	}
-	for _, s := range k.ExtraSIDs {
-		exists := false
-		for _, es := range g {
-			if es == s.SID.String() {
-				exists = true
-				break
-			}
-		}
-		if !exists {
-			g = append(g, s.SID.String())
+	for _, entry := range k.ExtraSIDs {
+		sid := entry.SID.String()
+		if !slices.Contains(g, sid) {
+			g = append(g, sid)
 		}
 	}
 	for _, r := range k.ResourceGroupIDs {
-		exists := false
-		s := fmt.Sprintf("%s-%d", k.ResourceGroupDomainSID.String(), r.RelativeID)
-		for _, es := range g {
-			if es == s {
-				exists = true
-				break
-			}
-		}
-		if !exists {
-			g = append(g, s)
+		sid := fmt.Sprintf("%s-%d", k.ResourceGroupDomainSID.String(), r.RelativeID)
+		if !slices.Contains(g, sid) {
+			g = append(g, sid)
 		}
 	}
 	return g

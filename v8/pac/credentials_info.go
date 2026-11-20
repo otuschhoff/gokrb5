@@ -16,7 +16,8 @@ import (
 
 // CredentialsInfo implements https://msdn.microsoft.com/en-us/library/cc237953.aspx
 type CredentialsInfo struct {
-	Version                    uint32 // A 32-bit unsigned integer in little-endian format that defines the version. MUST be 0x00000000.
+	// Version is a little-endian wire field and must be zero.
+	Version                    uint32
 	EType                      uint32
 	PACCredentialDataEncrypted []byte // Key usage number for encryption: KERB_NON_KERB_SALT (16)
 	PACCredentialData          CredentialData

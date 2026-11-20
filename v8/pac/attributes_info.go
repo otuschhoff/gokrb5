@@ -11,6 +11,7 @@ const (
 	// PACWasGivenImplicitly indicates the PAC was included without being requested (MS-PAC 2.10).
 	PACWasGivenImplicitly uint32 = 1 << 1
 	pacAttributesFlagBits uint32 = 2
+	pacAttributesLength          = 8
 )
 
 // AttributesInfo describes how the PAC was requested by the client.
@@ -21,7 +22,7 @@ type AttributesInfo struct {
 
 // Unmarshal decodes a PAC_ATTRIBUTES_INFO buffer.
 func (a *AttributesInfo) Unmarshal(b []byte) error {
-	if len(b) != 8 {
+	if len(b) != pacAttributesLength {
 		return fmt.Errorf("%w: PAC_ATTRIBUTES_INFO is %d bytes, want 8", ErrPACMalformed, len(b))
 	}
 	a.FlagsLength = binary.LittleEndian.Uint32(b[0:4])
@@ -46,7 +47,7 @@ func (a AttributesInfo) Marshal() ([]byte, error) {
 	if a.Flags & ^(PACWasRequested|PACWasGivenImplicitly) != 0 {
 		return nil, fmt.Errorf("PAC_ATTRIBUTES_INFO contains unknown flags %#x", a.Flags)
 	}
-	b := make([]byte, 8)
+	b := make([]byte, pacAttributesLength)
 	binary.LittleEndian.PutUint32(b[0:4], a.FlagsLength)
 	binary.LittleEndian.PutUint32(b[4:8], a.Flags)
 	return b, nil

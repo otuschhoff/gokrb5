@@ -22,27 +22,34 @@ https://msdn.microsoft.com/en-us/library/dd357117.aspx
 
 // SignatureData implements https://msdn.microsoft.com/en-us/library/cc237955.aspx
 type SignatureData struct {
-	SignatureType     uint32 // A 32-bit unsigned integer value in little-endian format that defines the cryptographic system used to calculate the checksum. This MUST be one of the following checksum types: KERB_CHECKSUM_HMAC_MD5 (signature size = 16), HMAC_SHA1_96_AES128 (signature size = 12), HMAC_SHA1_96_AES256 (signature size = 12).
-	Signature         []byte // Size depends on the type. See comment above.
-	RODCIdentifier    uint16 // A 16-bit unsigned integer value in little-endian format that contains the first 16 bits of the key version number ([MS-KILE] section 3.1.5.8) when the KDC is an RODC. When the KDC is not an RODC, this field does not exist.
+	// SignatureType identifies the checksum algorithm and determines the signature size.
+	SignatureType uint32
+	Signature     []byte
+	// RODCIdentifier holds the first 16 bits of the key version number for an RODC (MS-KILE 3.1.5.8).
+	// The field is absent from the wire encoding when the KDC is not an RODC.
+	RODCIdentifier    uint16
 	HasRODCIdentifier bool
 }
 
 const (
 	signatureTypeLength  = 4
 	rodcIdentifierLength = 2
+	hmacMD5Length        = 16
+	hmacSHA196Length     = 12
+	hmacSHA256128Length  = 16
+	hmacSHA384192Length  = 24
 )
 
 func signatureLength(signatureType uint32) (int, error) {
 	switch signatureType {
 	case chksumtype.KERB_CHECKSUM_HMAC_MD5_UNSIGNED:
-		return 16, nil
+		return hmacMD5Length, nil
 	case uint32(chksumtype.HMAC_SHA1_96_AES128), uint32(chksumtype.HMAC_SHA1_96_AES256):
-		return 12, nil
+		return hmacSHA196Length, nil
 	case uint32(chksumtype.HMAC_SHA256_128_AES128):
-		return 16, nil
+		return hmacSHA256128Length, nil
 	case uint32(chksumtype.HMAC_SHA384_192_AES256):
-		return 24, nil
+		return hmacSHA384192Length, nil
 	default:
 		return 0, fmt.Errorf("unsupported PAC signature type %d", signatureType)
 	}

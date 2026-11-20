@@ -10,16 +10,6 @@ func (pac *PACType) processInfoBuffer(buf InfoBuffer, p []byte, credentialKey ty
 	switch buf.ULType {
 	case infoTypeKerbValidationInfo:
 		return pac.processValidationInfo(p)
-	case infoTypeCredentials:
-		return pac.processCredentialsInfo(p, credentialKey)
-	case infoTypePACServerSignatureData:
-		return pac.processSignatureInfo(buf, p, &pac.ServerChecksum, "ServerChecksum")
-	case infoTypePACKDCSignatureData:
-		return pac.processSignatureInfo(buf, p, &pac.KDCChecksum, "KDCChecksum")
-	case infoTypePACTicketChecksum:
-		return pac.processSignatureInfo(buf, p, &pac.TicketChecksum, "TicketChecksum")
-	case infoTypePACFullChecksum:
-		return pac.processSignatureInfo(buf, p, &pac.FullChecksum, "FullChecksum")
 	case infoTypePACClientInfo:
 		return pac.processClientInfo(p)
 	case infoTypeS4UDelegationInfo:
@@ -36,6 +26,22 @@ func (pac *PACType) processInfoBuffer(buf InfoBuffer, p []byte, credentialKey ty
 		return pac.processAttributesInfo(p)
 	case infoTypePACRequestor:
 		return pac.processRequestorInfo(p)
+	}
+	return pac.processSecurityBuffer(buf, p, credentialKey)
+}
+
+func (pac *PACType) processSecurityBuffer(buf InfoBuffer, p []byte, credentialKey types.EncryptionKey) error {
+	switch buf.ULType {
+	case infoTypeCredentials:
+		return pac.processCredentialsInfo(p, credentialKey)
+	case infoTypePACServerSignatureData:
+		return pac.processSignatureInfo(buf, p, &pac.ServerChecksum, "ServerChecksum")
+	case infoTypePACKDCSignatureData:
+		return pac.processSignatureInfo(buf, p, &pac.KDCChecksum, "KDCChecksum")
+	case infoTypePACTicketChecksum:
+		return pac.processSignatureInfo(buf, p, &pac.TicketChecksum, "TicketChecksum")
+	case infoTypePACFullChecksum:
+		return pac.processSignatureInfo(buf, p, &pac.FullChecksum, "FullChecksum")
 	}
 	return nil
 }

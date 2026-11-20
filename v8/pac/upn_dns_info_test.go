@@ -38,11 +38,12 @@ func TestUPNDNSInfoExtendedRoundTrip(t *testing.T) {
 		IdentifierAuthority: [6]byte{0, 0, 0, 0, 0, 5},
 		SubAuthority:        []uint32{21, 1, 2, 500},
 	}
-	want := UPNDNSInfo{
-		Flags: UPNDNSInfoFlagNoUPNAttribute | UPNDNSInfoFlagExtended,
-		UPN:   "user\U0001f600@example.test", DNSDomain: "EXAMPLE.TEST",
-		SAMAccountName: "user", ObjectSID: &sid,
-	}
+	var want UPNDNSInfo
+	want.Flags = UPNDNSInfoFlagNoUPNAttribute | UPNDNSInfoFlagExtended
+	want.UPN = "user\U0001f600@example.test"
+	want.DNSDomain = "EXAMPLE.TEST"
+	want.SAMAccountName = "user"
+	want.ObjectSID = &sid
 	b, err := want.Marshal()
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +52,8 @@ func TestUPNDNSInfoExtendedRoundTrip(t *testing.T) {
 	if err := got.Unmarshal(b); err != nil {
 		t.Fatal(err)
 	}
-	if got.UPN != want.UPN || got.DNSDomain != want.DNSDomain || got.SAMAccountName != want.SAMAccountName || got.ObjectSID.String() != sid.String() {
+	if got.UPN != want.UPN || got.DNSDomain != want.DNSDomain ||
+		got.SAMAccountName != want.SAMAccountName || got.ObjectSID.String() != sid.String() {
 		t.Fatalf("round trip mismatch: %+v", got)
 	}
 }
@@ -59,10 +61,12 @@ func TestUPNDNSInfoExtendedRoundTrip(t *testing.T) {
 func TestUPNDNSInfoExtendedRequiresHeaderAndSID(t *testing.T) {
 	b := make([]byte, 12)
 	binary.LittleEndian.PutUint32(b[8:12], UPNDNSInfoFlagExtended)
-	if err := (&UPNDNSInfo{}).Unmarshal(b); !errors.Is(err, ErrPACMalformed) {
+	if err := new(UPNDNSInfo).Unmarshal(b); !errors.Is(err, ErrPACMalformed) {
 		t.Fatalf("short extension error = %v, want ErrPACMalformed", err)
 	}
-	_, err := (&UPNDNSInfo{Flags: UPNDNSInfoFlagExtended}).Marshal()
+	var info UPNDNSInfo
+	info.Flags = UPNDNSInfoFlagExtended
+	_, err := info.Marshal()
 	if err == nil {
 		t.Fatal("Marshal accepted extended UPN_DNS_INFO without SID")
 	}
@@ -75,7 +79,7 @@ func TestUPNDNSInfoRejectsUnpairedSurrogate(t *testing.T) {
 	binary.LittleEndian.PutUint16(b[4:6], 2)
 	binary.LittleEndian.PutUint16(b[6:8], 14)
 	binary.LittleEndian.PutUint16(b[12:14], 0xd800)
-	if err := (&UPNDNSInfo{}).Unmarshal(b); !errors.Is(err, ErrPACMalformed) {
+	if err := new(UPNDNSInfo).Unmarshal(b); !errors.Is(err, ErrPACMalformed) {
 		t.Fatalf("Unmarshal error = %v, want ErrPACMalformed", err)
 	}
 }
@@ -102,7 +106,7 @@ func TestUPNDNSInfoBoundsChecks(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			b := validHeader()
 			tt.mutate(b)
-			if err := (&UPNDNSInfo{}).Unmarshal(b); !errors.Is(err, ErrPACMalformed) {
+			if err := new(UPNDNSInfo).Unmarshal(b); !errors.Is(err, ErrPACMalformed) {
 				t.Fatalf("Unmarshal error = %v, want ErrPACMalformed", err)
 			}
 		})

@@ -15,7 +15,7 @@ import (
 var ErrPACMalformed = errors.New("PAC is malformed")
 
 func pacUint32FromInt(name string, value int) (uint32, error) {
-	if value < 0 || uint64(value) > uint64(math.MaxUint32) { // #nosec G115 -- nonnegative branch required before conversion is checked.
+	if value < 0 || int64(value) > math.MaxUint32 {
 		return 0, fmt.Errorf("%w: %s %d exceeds uint32 range", ErrPACMalformed, name, value)
 	}
 	return uint32(value), nil // #nosec G115 -- bounded above by MaxUint32.
@@ -76,6 +76,9 @@ func copyPACRange(data []byte, offset, size uint64) ([]byte, error) {
 }
 
 const (
+	pacHeaderSize     = 8
+	pacInfoBufferSize = 16
+
 	infoTypeKerbValidationInfo     uint32 = 1
 	infoTypeCredentials            uint32 = 2
 	infoTypePACServerSignatureData uint32 = 6
@@ -93,6 +96,8 @@ const (
 )
 
 // PACType implements: https://msdn.microsoft.com/en-us/library/cc237950.aspx
+//
+//nolint:revive // Retain the exported name for API compatibility.
 type PACType struct {
 	CBuffers           uint32
 	Version            uint32
@@ -117,24 +122,24 @@ type PACType struct {
 
 // InfoBuffer implements the PAC Info Buffer: https://msdn.microsoft.com/en-us/library/cc237954.aspx
 type InfoBuffer struct {
-	ULType       uint32 // A 32-bit unsigned integer in little-endian format that describes the type of data present in the buffer contained at Offset.
-	CBBufferSize uint32 // A 32-bit unsigned integer in little-endian format that contains the size, in bytes, of the buffer in the PAC located at Offset.
-	Offset       uint64 // A 64-bit unsigned integer in little-endian format that contains the offset to the beginning of the buffer, in bytes, from the beginning of the PACTYPE structure. The data offset MUST be a multiple of eight. The following sections specify the format of each type of element.
+	ULType       uint32 // Little-endian type of the data at Offset.
+	CBBufferSize uint32 // Little-endian size in bytes of the data at Offset.
+	Offset       uint64 // Little-endian byte offset from the start of the PAC; must be a multiple of eight.
 }
 
 // Unmarshal bytes into the PACType struct
 func (pac *PACType) Unmarshal(b []byte) error {
-	if len(b) < 8 {
-		return fmt.Errorf("%w: header is %d bytes, want at least 8", ErrPACMalformed, len(b))
+	if len(b) < pacHeaderSize {
+		return fmt.Errorf("%w: header is %d bytes, want at least %d", ErrPACMalformed, len(b), pacHeaderSize)
 	}
 	pac.Data = b
 	pac.ZeroSigData = bytes.Clone(b)
 	pac.CBuffers = binary.LittleEndian.Uint32(b[:4])
-	pac.Version = binary.LittleEndian.Uint32(b[4:8])
+	pac.Version = binary.LittleEndian.Uint32(b[4:pacHeaderSize])
 	if pac.Version != 0 {
 		return fmt.Errorf("%w: unsupported version %d", ErrPACMalformed, pac.Version)
 	}
-	maxBuffers, err := pacUint32FromInt("table capacity", (len(b)-8)/16)
+	maxBuffers, err := pacUint32FromInt("table capacity", (len(b)-pacHeaderSize)/pacInfoBufferSize)
 	if err != nil {
 		return err
 	}
@@ -142,61 +147,25 @@ func (pac *PACType) Unmarshal(b []byte) error {
 		return fmt.Errorf("%w: buffer count %d exceeds table capacity %d", ErrPACMalformed, pac.CBuffers, maxBuffers)
 	}
 	buf := make([]InfoBuffer, int(pac.CBuffers))
-	if _, err := binary.Decode(b[8:], binary.LittleEndian, buf); err != nil {
+	if _, err := binary.Decode(b[pacHeaderSize:], binary.LittleEndian, buf); err != nil {
 		return fmt.Errorf("%w: decode buffer table: %w", ErrPACMalformed, err)
 	}
 	pac.Buffers = buf
 	return nil
 }
 
-func (pac *PACType) validateInfoBuffers() error {
-	if uint64(pac.CBuffers) != uint64(len(pac.Buffers)) {
-		return fmt.Errorf("%w: declared buffer count %d does not match table length %d", ErrPACMalformed, pac.CBuffers, len(pac.Buffers))
-	}
-	headerEnd := uint64(8) + uint64(len(pac.Buffers))*16
-	if headerEnd > uint64(len(pac.Data)) {
-		return fmt.Errorf("%w: buffer table ends at %d beyond PAC size %d", ErrPACMalformed, headerEnd, len(pac.Data))
-	}
-	for i, buf := range pac.Buffers {
-		if buf.Offset%8 != 0 {
-			return fmt.Errorf("%w: buffer %d offset %d is not 8-byte aligned", ErrPACMalformed, i, buf.Offset)
-		}
-		end := buf.Offset + uint64(buf.CBBufferSize)
-		if end < buf.Offset {
-			return fmt.Errorf("%w: buffer %d range overflows", ErrPACMalformed, i)
-		}
-		if buf.Offset < headerEnd {
-			return fmt.Errorf("%w: buffer %d starts at %d inside header ending at %d", ErrPACMalformed, i, buf.Offset, headerEnd)
-		}
-		if end > uint64(len(pac.Data)) {
-			return fmt.Errorf("%w: buffer %d ends at %d beyond PAC size %d", ErrPACMalformed, i, end, len(pac.Data))
-		}
-		if buf.CBBufferSize == 0 {
-			continue
-		}
-		for j := 0; j < i; j++ {
-			other := pac.Buffers[j]
-			if other.CBBufferSize == 0 {
-				continue
-			}
-			otherEnd := other.Offset + uint64(other.CBBufferSize)
-			if buf.Offset < otherEnd && other.Offset < end {
-				return fmt.Errorf("%w: buffers %d and %d overlap", ErrPACMalformed, j, i)
-			}
-		}
-	}
-	return nil
-}
-
 // ProcessPACInfoBuffers processes the PAC Info Buffers.
 // https://msdn.microsoft.com/en-us/library/cc237954.aspx
 func (pac *PACType) ProcessPACInfoBuffers(key types.EncryptionKey, l *log.Logger) error {
-	return pac.ProcessPACInfoBuffersWithCredentialKey(key, types.EncryptionKey{}, l)
+	var credentialKey types.EncryptionKey
+	return pac.ProcessPACInfoBuffersWithCredentialKey(key, credentialKey, l)
 }
 
 // ProcessPACInfoBuffersWithCredentialKey processes PAC buffers and decrypts
 // PAC_CREDENTIAL_INFO with the PKINIT AS reply key when one is provided.
-func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey types.EncryptionKey, _ *log.Logger) error {
+func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(
+	key, credentialKey types.EncryptionKey, _ *log.Logger,
+) error {
 	if err := pac.validateInfoBuffers(); err != nil {
 		return err
 	}
@@ -226,6 +195,56 @@ func (pac *PACType) ProcessPACInfoBuffersWithCredentialKey(key, credentialKey ty
 	return nil
 }
 
+func (pac *PACType) validateInfoBuffers() error {
+	if uint64(pac.CBuffers) != uint64(len(pac.Buffers)) {
+		return fmt.Errorf(
+			"%w: declared buffer count %d does not match table length %d",
+			ErrPACMalformed, pac.CBuffers, len(pac.Buffers),
+		)
+	}
+	headerEnd := pacHeaderSize + uint64(len(pac.Buffers))*pacInfoBufferSize
+	if headerEnd > uint64(len(pac.Data)) {
+		return fmt.Errorf("%w: buffer table ends at %d beyond PAC size %d", ErrPACMalformed, headerEnd, len(pac.Data))
+	}
+	for i, buf := range pac.Buffers {
+		if buf.Offset%pacAlignment != 0 {
+			return fmt.Errorf("%w: buffer %d offset %d is not 8-byte aligned", ErrPACMalformed, i, buf.Offset)
+		}
+		end := buf.Offset + uint64(buf.CBBufferSize)
+		if end < buf.Offset {
+			return fmt.Errorf("%w: buffer %d range overflows", ErrPACMalformed, i)
+		}
+		if buf.Offset < headerEnd {
+			return fmt.Errorf(
+				"%w: buffer %d starts at %d inside header ending at %d", ErrPACMalformed, i, buf.Offset, headerEnd,
+			)
+		}
+		if end > uint64(len(pac.Data)) {
+			return fmt.Errorf("%w: buffer %d ends at %d beyond PAC size %d", ErrPACMalformed, i, end, len(pac.Data))
+		}
+		if err := pac.validateBufferOverlap(i, buf, end); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (pac *PACType) validateBufferOverlap(i int, buf InfoBuffer, end uint64) error {
+	if buf.CBBufferSize == 0 {
+		return nil
+	}
+	for j, other := range pac.Buffers[:i] {
+		if other.CBBufferSize == 0 {
+			continue
+		}
+		otherEnd := other.Offset + uint64(other.CBBufferSize)
+		if buf.Offset < otherEnd && other.Offset < end {
+			return fmt.Errorf("%w: buffers %d and %d overlap", ErrPACMalformed, j, i)
+		}
+	}
+	return nil
+}
+
 func (pac *PACType) resetInfoBuffers() {
 	pac.KerbValidationInfo = nil
 	pac.CredentialsInfo = nil
@@ -244,7 +263,8 @@ func (pac *PACType) resetInfoBuffers() {
 }
 
 func (pac *PACType) verify(key types.EncryptionKey) (bool, error) {
-	if err := pac.Verify(key, VerifyOptions{}); err != nil {
+	var options VerifyOptions
+	if err := pac.Verify(key, options); err != nil {
 		return false, err
 	}
 	return true, nil

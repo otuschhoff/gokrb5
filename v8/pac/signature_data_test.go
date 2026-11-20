@@ -51,7 +51,7 @@ func TestSignatureDataStrictMarshal(t *testing.T) {
 
 	unknown := make([]byte, 4)
 	binary.LittleEndian.PutUint32(unknown, 12345)
-	if _, err := (&SignatureData{}).Unmarshal(unknown); err == nil {
+	if _, err := new(SignatureData).Unmarshal(unknown); err == nil {
 		t.Fatal("unknown checksum type was accepted")
 	}
 	for _, size := range []int{0, 3, 15, 17, 19} {
@@ -59,11 +59,13 @@ func TestSignatureDataStrictMarshal(t *testing.T) {
 		if size >= 4 {
 			binary.LittleEndian.PutUint32(malformed, uint32(chksumtype.HMAC_SHA1_96_AES128))
 		}
-		if zeroed, err := (&SignatureData{}).Unmarshal(malformed); err == nil || zeroed != nil {
+		if zeroed, err := new(SignatureData).Unmarshal(malformed); err == nil || zeroed != nil {
 			t.Fatalf("signature length %d returned zeroed data %x, error %v", size, zeroed, err)
 		}
 	}
-	if _, err := (&SignatureData{SignatureType: uint32(chksumtype.HMAC_SHA1_96_AES128)}).Marshal(); err == nil {
+	var invalid SignatureData
+	invalid.SignatureType = uint32(chksumtype.HMAC_SHA1_96_AES128)
+	if _, err := invalid.Marshal(); err == nil {
 		t.Fatal("invalid signature length was accepted")
 	}
 }

@@ -36,11 +36,8 @@ func TestDecodeClaimsSetRejectsOversizedConformantCount(t *testing.T) {
 	// the 20-byte ClaimsSet body. Inflate it beyond the input size; the
 	// bounded decoder must reject it instead of allocating from it.
 	binary.LittleEndian.PutUint32(claims[40:], 0xffffffff)
-	m := &mstypes.ClaimsSetMetadata{
-		ClaimsSetSize:     mustPACUint32(t, len(claims)),
-		ClaimsSetBytes:    claims,
-		CompressionFormat: mstypes.CompressionFormatNone,
-	}
+	m := claimsMetadataForTest(claims, mstypes.CompressionFormatNone)
+	m.ClaimsSetSize = mustPACUint32(t, len(claims))
 	start := time.Now()
 	_, err := decodeClaimsSet(m)
 	require.Error(t, err)
@@ -50,7 +47,7 @@ func TestDecodeClaimsSetRejectsOversizedConformantCount(t *testing.T) {
 
 func TestDecodeClaimsSetNoBytes(t *testing.T) {
 	t.Parallel()
-	_, err := decodeClaimsSet(&mstypes.ClaimsSetMetadata{CompressionFormat: mstypes.CompressionFormatNone})
+	_, err := decodeClaimsSet(claimsMetadataForTest(nil, mstypes.CompressionFormatNone))
 	require.EqualError(t, err, "no bytes available for ClaimsSet")
 }
 
@@ -63,7 +60,7 @@ func TestDecodeClaimsSetUnsupportedCompression(t *testing.T) {
 		if format == mstypes.CompressionFormatXPress {
 			name = "XPress"
 		}
-		m := &mstypes.ClaimsSetMetadata{ClaimsSetBytes: claims, CompressionFormat: format}
+		m := claimsMetadataForTest(claims, format)
 		_, err := decodeClaimsSet(m)
 		require.EqualError(t, err, "ClaimsSet compressed, format "+name+" not currently supported: "+encoded)
 	}
@@ -72,13 +69,17 @@ func TestDecodeClaimsSetUnsupportedCompression(t *testing.T) {
 func TestDecodeClaimsSetXPressHuffDeflateError(t *testing.T) {
 	t.Parallel()
 	// Trailing one bits are not valid Huffman coding or padding.
-	m := &mstypes.ClaimsSetMetadata{
-		ClaimsSetBytes:    bytes.Repeat([]byte{0xff}, 16),
-		CompressionFormat: mstypes.CompressionFormatXPressHuff,
-	}
+	m := claimsMetadataForTest(bytes.Repeat([]byte{0xff}, 16), mstypes.CompressionFormatXPressHuff)
 	_, err := decodeClaimsSet(m)
 	require.Error(t, err)
 	assert.True(t, strings.HasPrefix(err.Error(), "error deflating: "), "unexpected error: %v", err)
+}
+
+func claimsMetadataForTest(claims []byte, compression uint16) *mstypes.ClaimsSetMetadata {
+	m := new(mstypes.ClaimsSetMetadata)
+	m.ClaimsSetBytes = claims
+	m.CompressionFormat = compression
+	return m
 }
 
 func TestPAC_DeviceClaimsInfoStr_Unmarshal(t *testing.T) {
@@ -88,12 +89,24 @@ func TestPAC_DeviceClaimsInfoStr_Unmarshal(t *testing.T) {
 	var k DeviceClaimsInfo
 	require.NoError(t, k.Unmarshal(b))
 	assert.Equal(t, uint32(1), k.ClaimsSet.ClaimsArrayCount, "claims array count not as expected")
-	assert.Equal(t, mstypes.ClaimsSourceTypeAD, k.ClaimsSet.ClaimsArrays[0].ClaimsSourceType, "claims source type not as expected")
+	assert.Equal(
+		t,
+		mstypes.ClaimsSourceTypeAD, k.ClaimsSet.ClaimsArrays[0].ClaimsSourceType,
+		"claims source type not as expected",
+	)
 	assert.Equal(t, uint32(1), k.ClaimsSet.ClaimsArrays[0].ClaimsCount, "claims count not as expected")
 	assert.Equal(t, uint16(3), k.ClaimsSet.ClaimsArrays[0].ClaimEntries[0].Type, "claims entry type not as expected")
 	assert.Equal(t, ClaimsEntryIDStr, k.ClaimsSet.ClaimsArrays[0].ClaimEntries[0].ID, "claims entry ID not as expected")
-	assert.Equal(t, []mstypes.LPWSTR{{Value: ClaimsEntryValueStr}}, k.ClaimsSet.ClaimsArrays[0].ClaimEntries[0].TypeString.Value, "claims value not as expected")
-	assert.Equal(t, mstypes.CompressionFormatNone, k.ClaimsSetMetadata.CompressionFormat, "compression format not as expected")
+	assert.Equal(
+		t,
+		[]mstypes.LPWSTR{{Value: ClaimsEntryValueStr}}, k.ClaimsSet.ClaimsArrays[0].ClaimEntries[0].TypeString.Value,
+		"claims value not as expected",
+	)
+	assert.Equal(
+		t,
+		mstypes.CompressionFormatNone, k.ClaimsSetMetadata.CompressionFormat,
+		"compression format not as expected",
+	)
 }
 
 func TestPAC_DeviceClaimsInfoRejectsOversizedClaims(t *testing.T) {
