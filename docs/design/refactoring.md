@@ -2,7 +2,7 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-124 done. The latest measured
+(floor raised to 86.0%), and Phase 5 slices 1-125 done. The latest measured
 v8 inventories (Slice 116) contain 518 canonical and 3,392 supplemental
 findings. Most remaining canonical findings are from `revive`, complexity and
 nesting checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
@@ -819,6 +819,16 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 125 (2026-11-20, v8 config realm suffix lookup; Q-10):
+Simplify `ResolveRealm` by slicing the hostname at each dot from left to
+right instead of counting dots and repeatedly splitting the hostname. Each
+lookup uses the same dot-prefixed key in the same order. The API and matching
+behavior are unchanged; PKINIT and PKU2U remain deferred.
+
+Config and client vet and shuffled race-enabled suites passed. The realm
+lookup tests also passed 100 shuffled runs with the race detector. Changed-line
+lint passed for both modules against `0c3b37a` and `origin/main`.
 
 Slice 124 (2026-11-20, v8 config realm lookup contract; Q-10):
 Document `ResolveRealm` matching order, trailing-dot handling, case

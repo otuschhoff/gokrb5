@@ -455,16 +455,15 @@ func (d *DomainRealm) addMapping(domain, realm string) {
 func (c *Config) ResolveRealm(domainName string) string {
 	domainName = strings.TrimSuffix(domainName, ".")
 
-	// Try to match the entire hostname first
 	if r, ok := c.DomainRealm[domainName]; ok {
 		return r
 	}
 
-	// Try to match all DNS domain parts
-	periods := strings.Count(domainName, ".") + 1
-	for i := 2; i <= periods; i++ {
-		z := strings.SplitN(domainName, ".", i)
-		if r, ok := c.DomainRealm["."+z[len(z)-1]]; ok {
+	for i, ch := range domainName {
+		if ch != '.' {
+			continue
+		}
+		if r, ok := c.DomainRealm[domainName[i:]]; ok {
 			return r
 		}
 	}
