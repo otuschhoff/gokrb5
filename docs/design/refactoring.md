@@ -820,6 +820,25 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 146 (2026-11-20, complete top-level v8 crypto lint cleanup; Q-10):
+Separate KDC password-hint decoding, enctype selection, and key
+derivation. Preserve hint precedence, omitted versus explicit salts,
+and error behavior. Name protocol sizes in the enctype wrappers and
+reorganize test vectors without changing their bytes or assertions.
+Four narrow lint exceptions retain public interface return types; one
+retains MD4 solely for legacy RC4-HMAC compatibility.
+
+Uncapped whole-v8 scans report zero top-level crypto findings, down from
+7 canonical and 147 supplemental. Diagnostics outside that package,
+including the RFC subpackages, are unchanged; whole-v8 totals are 363
+canonical and 666 supplemental. All 43 test entry points and 75 executed
+test cases were retained. Statement coverage is 91.3% with both the
+original and updated tests (previously 92.1%). The full v8 build, vet,
+and race suite pass, as do 25 shuffled race-enabled crypto runs,
+Linux/386 crypto tests including subpackages, and changed-line lint from
+both baselines. Windows/amd64 crypto tests and interop-tagged tests
+compile; native Windows and live interoperability were not run.
+
 Slice 145 (2026-11-20, complete v8 types lint cleanup; Q-10):
 Separate nested authorization-data decoding from traversal and reuse IP
 conversion in local address discovery. Name wire sizes and flags, make

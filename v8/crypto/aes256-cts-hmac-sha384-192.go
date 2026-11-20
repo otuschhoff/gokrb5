@@ -17,6 +17,8 @@ import (
 // Aes256CtsHmacSha384192 implements Kerberos encryption type aes256-cts-hmac-sha384-192
 type Aes256CtsHmacSha384192 struct{}
 
+const aesSHA384MACBits = 192
+
 // GetETypeID returns the EType ID number.
 func (e Aes256CtsHmacSha384192) GetETypeID() int32 {
 	return etypeID.AES256_CTS_HMAC_SHA384_192
@@ -29,12 +31,12 @@ func (e Aes256CtsHmacSha384192) GetHashID() int32 {
 
 // GetKeyByteSize returns the number of bytes for key of this etype.
 func (e Aes256CtsHmacSha384192) GetKeyByteSize() int {
-	return 256 / 8
+	return aes256KeyBits / bitsPerByte
 }
 
 // GetKeySeedBitLength returns the number of bits for the seed for key generation.
 func (e Aes256CtsHmacSha384192) GetKeySeedBitLength() int {
-	return e.GetKeyByteSize() * 8
+	return e.GetKeyByteSize() * bitsPerByte
 }
 
 // GetHashFunc returns the hash function for this etype.
@@ -59,12 +61,12 @@ func (e Aes256CtsHmacSha384192) GetConfounderByteSize() int {
 
 // GetHMACBitLength returns the bit count size of the integrity hash.
 func (e Aes256CtsHmacSha384192) GetHMACBitLength() int {
-	return 192
+	return aesSHA384MACBits
 }
 
 // GetCypherBlockBitLength returns the bit count size of the cypher block.
 func (e Aes256CtsHmacSha384192) GetCypherBlockBitLength() int {
-	return aes.BlockSize * 8
+	return aes.BlockSize * bitsPerByte
 }
 
 // StringToKey returns a key derived from the string provided.
@@ -85,7 +87,7 @@ func (e Aes256CtsHmacSha384192) EncryptData(key, data []byte) ([]byte, []byte, e
 	return cryptoOperation("aes256-cts-hmac-sha384-192 encrypt data").blocks(rfc8009.EncryptData(key, data, e))
 }
 
-// EncryptMessage encrypts the message provided and concatenates it with the integrity hash to create an encrypted message.
+// EncryptMessage encrypts the message and appends its integrity hash.
 func (e Aes256CtsHmacSha384192) EncryptMessage(key, message []byte, usage uint32) ([]byte, []byte, error) {
 	return cryptoOperation("aes256-cts-hmac-sha384-192 encrypt message").blocks(
 		rfc8009.EncryptMessage(key, message, usage, e),

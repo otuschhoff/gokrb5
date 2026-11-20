@@ -8,6 +8,7 @@ import (
 	"io"
 
 	// #nosec G506 -- retained for the legacy RC4HMAC.RandomToKey contract.
+	//nolint:staticcheck // MD4 is retained only for legacy RC4-HMAC compatibility.
 	"golang.org/x/crypto/md4"
 
 	"github.com/otuschhoff/gokrb5/v8/crypto/rfc3961"
@@ -18,6 +19,11 @@ import (
 
 // RC4HMAC implements Kerberos encryption type rc4-hmac
 type RC4HMAC struct{}
+
+const (
+	rc4KeyBytes        = 16
+	rc4ConfounderBytes = 8
+)
 
 // GetETypeID returns the EType ID number.
 func (e RC4HMAC) GetETypeID() int32 {
@@ -31,12 +37,12 @@ func (e RC4HMAC) GetHashID() int32 {
 
 // GetKeyByteSize returns the number of bytes for key of this etype.
 func (e RC4HMAC) GetKeyByteSize() int {
-	return 16
+	return rc4KeyBytes
 }
 
 // GetKeySeedBitLength returns the number of bits for the seed for key generation.
 func (e RC4HMAC) GetKeySeedBitLength() int {
-	return e.GetKeyByteSize() * 8
+	return e.GetKeyByteSize() * bitsPerByte
 }
 
 // GetHashFunc returns the hash function for this etype.
@@ -56,17 +62,17 @@ func (e RC4HMAC) GetDefaultStringToKeyParams() string {
 
 // GetConfounderByteSize returns the byte count for confounder to be used during cryptographic operations.
 func (e RC4HMAC) GetConfounderByteSize() int {
-	return 8
+	return rc4ConfounderBytes
 }
 
 // GetHMACBitLength returns the bit count size of the integrity hash.
 func (e RC4HMAC) GetHMACBitLength() int {
-	return md5.Size * 8
+	return md5.Size * bitsPerByte
 }
 
 // GetCypherBlockBitLength returns the bit count size of the cypher block.
 func (e RC4HMAC) GetCypherBlockBitLength() int {
-	return 8 // doesn't really apply
+	return bitsPerByte // RC4 is a stream cipher; expose the legacy one-byte value.
 }
 
 // StringToKey returns a key derived from the string provided. RC4-HMAC
@@ -90,7 +96,7 @@ func (e RC4HMAC) EncryptData(key, data []byte) ([]byte, []byte, error) {
 	return []byte{}, b, cryptoOperation("rc4-hmac encrypt data").wrap(err)
 }
 
-// EncryptMessage encrypts the message provided and concatenates it with the integrity hash to create an encrypted message.
+// EncryptMessage encrypts the message and includes its integrity hash.
 func (e RC4HMAC) EncryptMessage(key, message []byte, usage uint32) ([]byte, []byte, error) {
 	b, err := rfc4757.EncryptMessage(key, message, usage, false, e)
 	return []byte{}, b, cryptoOperation("rc4-hmac encrypt message").wrap(err)

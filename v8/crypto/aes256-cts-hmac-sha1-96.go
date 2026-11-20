@@ -30,12 +30,12 @@ func (e Aes256CtsHmacSha96) GetHashID() int32 {
 
 // GetKeyByteSize returns the number of bytes for key of this etype.
 func (e Aes256CtsHmacSha96) GetKeyByteSize() int {
-	return 256 / 8
+	return aes256KeyBits / bitsPerByte
 }
 
 // GetKeySeedBitLength returns the number of bits for the seed for key generation.
 func (e Aes256CtsHmacSha96) GetKeySeedBitLength() int {
-	return e.GetKeyByteSize() * 8
+	return e.GetKeyByteSize() * bitsPerByte
 }
 
 // GetHashFunc returns the hash function for this etype.
@@ -60,12 +60,12 @@ func (e Aes256CtsHmacSha96) GetConfounderByteSize() int {
 
 // GetHMACBitLength returns the bit count size of the integrity hash.
 func (e Aes256CtsHmacSha96) GetHMACBitLength() int {
-	return 96
+	return aesSHA1MACBits
 }
 
 // GetCypherBlockBitLength returns the bit count size of the cypher block.
 func (e Aes256CtsHmacSha96) GetCypherBlockBitLength() int {
-	return aes.BlockSize * 8
+	return aes.BlockSize * bitsPerByte
 }
 
 // StringToKey returns a key derived from the string provided.
@@ -83,7 +83,7 @@ func (e Aes256CtsHmacSha96) EncryptData(key, data []byte) ([]byte, []byte, error
 	return cryptoOperation("aes256-cts-hmac-sha1-96 encrypt data").blocks(rfc3962.EncryptData(key, data, e))
 }
 
-// EncryptMessage encrypts the message provided and concatenates it with the integrity hash to create an encrypted message.
+// EncryptMessage encrypts the message and appends its integrity hash.
 func (e Aes256CtsHmacSha96) EncryptMessage(key, message []byte, usage uint32) ([]byte, []byte, error) {
 	return cryptoOperation("aes256-cts-hmac-sha1-96 encrypt message").blocks(
 		rfc3962.EncryptMessage(key, message, usage, e),

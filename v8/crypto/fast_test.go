@@ -15,7 +15,11 @@ func TestKRBFXCF2RFC6113Vectors(t *testing.T) {
 		result string
 	}{
 		{name: "AES128", etype: etypeID.AES128_CTS_HMAC_SHA1_96, result: "97df97e4b798b29eb31ed7280287a92a"},
-		{name: "AES256", etype: etypeID.AES256_CTS_HMAC_SHA1_96, result: "4d6ca4e629785c1f01baf55e2e548566b9617ae3a96868c337cb93b5e72b1c7b"},
+		{
+			name:   "AES256",
+			etype:  etypeID.AES256_CTS_HMAC_SHA1_96,
+			result: "4d6ca4e629785c1f01baf55e2e548566b9617ae3a96868c337cb93b5e72b1c7b",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -54,8 +58,18 @@ func TestKRBFXCF2RFC8009Vectors(t *testing.T) {
 		keyLen int
 		result string
 	}{
-		{name: "AES128-SHA256", etype: etypeID.AES128_CTS_HMAC_SHA256_128, keyLen: 16, result: "cd679b7b6e11268185f91e95ffaee9c0"},
-		{name: "AES256-SHA384", etype: etypeID.AES256_CTS_HMAC_SHA384_192, keyLen: 32, result: "e9ce8095a99e4107baaabbffab0669ca8eaf295f74f6050f82c3b485e37fbbe9"},
+		{
+			name:   "AES128-SHA256",
+			etype:  etypeID.AES128_CTS_HMAC_SHA256_128,
+			keyLen: 16,
+			result: "cd679b7b6e11268185f91e95ffaee9c0",
+		},
+		{
+			name:   "AES256-SHA384",
+			etype:  etypeID.AES256_CTS_HMAC_SHA384_192,
+			keyLen: 32,
+			result: "e9ce8095a99e4107baaabbffab0669ca8eaf295f74f6050f82c3b485e37fbbe9",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

@@ -18,6 +18,12 @@ import (
 // Aes128CtsHmacSha96 implements Kerberos encryption type aes128-cts-hmac-sha1-96
 type Aes128CtsHmacSha96 struct{}
 
+const (
+	aes128KeyBits  = 128
+	aes256KeyBits  = 256
+	aesSHA1MACBits = 96
+)
+
 // GetETypeID returns the EType ID number.
 func (e Aes128CtsHmacSha96) GetETypeID() int32 {
 	return etypeID.AES128_CTS_HMAC_SHA1_96
@@ -30,12 +36,12 @@ func (e Aes128CtsHmacSha96) GetHashID() int32 {
 
 // GetKeyByteSize returns the number of bytes for key of this etype.
 func (e Aes128CtsHmacSha96) GetKeyByteSize() int {
-	return 128 / 8
+	return aes128KeyBits / bitsPerByte
 }
 
 // GetKeySeedBitLength returns the number of bits for the seed for key generation.
 func (e Aes128CtsHmacSha96) GetKeySeedBitLength() int {
-	return e.GetKeyByteSize() * 8
+	return e.GetKeyByteSize() * bitsPerByte
 }
 
 // GetHashFunc returns the hash function for this etype.
@@ -60,12 +66,12 @@ func (e Aes128CtsHmacSha96) GetConfounderByteSize() int {
 
 // GetHMACBitLength returns the bit count size of the integrity hash.
 func (e Aes128CtsHmacSha96) GetHMACBitLength() int {
-	return 96
+	return aesSHA1MACBits
 }
 
 // GetCypherBlockBitLength returns the bit count size of the cypher block.
 func (e Aes128CtsHmacSha96) GetCypherBlockBitLength() int {
-	return aes.BlockSize * 8
+	return aes.BlockSize * bitsPerByte
 }
 
 // StringToKey returns a key derived from the string provided.
@@ -83,7 +89,7 @@ func (e Aes128CtsHmacSha96) EncryptData(key, data []byte) ([]byte, []byte, error
 	return cryptoOperation("aes128-cts-hmac-sha1-96 encrypt data").blocks(rfc3962.EncryptData(key, data, e))
 }
 
-// EncryptMessage encrypts the message provided and concatenates it with the integrity hash to create an encrypted message.
+// EncryptMessage encrypts the message and appends its integrity hash.
 func (e Aes128CtsHmacSha96) EncryptMessage(key, message []byte, usage uint32) ([]byte, []byte, error) {
 	return cryptoOperation("aes128-cts-hmac-sha1-96 encrypt message").blocks(
 		rfc3962.EncryptMessage(key, message, usage, e),

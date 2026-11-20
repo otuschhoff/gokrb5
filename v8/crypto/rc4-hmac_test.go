@@ -10,6 +10,18 @@ import (
 
 func TestRC4HMACContractAndRoundTrip(t *testing.T) {
 	etype := RC4HMAC{}
+	checkRC4Metadata(t, etype)
+	if etype.GetDefaultStringToKeyParams() != "" || etype.GetHashFunc() == nil {
+		t.Fatal("unexpected RC4-HMAC defaults")
+	}
+	key := checkRC4KeyConversion(t, etype)
+	plaintext := []byte("RC4 wrapper payload")
+	message := checkRC4RoundTrips(t, etype, key, plaintext)
+	checkRC4DerivationAndChecksum(t, etype, key, plaintext, message)
+}
+
+func checkRC4Metadata(t *testing.T, etype RC4HMAC) {
+	t.Helper()
 	if etype.GetETypeID() != etypeID.RC4_HMAC || etype.GetHashID() != chksumtype.KERB_CHECKSUM_HMAC_MD5 {
 		t.Fatalf("IDs = %d/%d", etype.GetETypeID(), etype.GetHashID())
 	}
@@ -17,18 +29,22 @@ func TestRC4HMACContractAndRoundTrip(t *testing.T) {
 		etype.GetMessageBlockByteSize() != 1 || etype.GetConfounderByteSize() != 8 || etype.GetCypherBlockBitLength() != 8 {
 		t.Fatal("unexpected RC4-HMAC size contract")
 	}
-	if etype.GetDefaultStringToKeyParams() != "" || etype.GetHashFunc() == nil {
-		t.Fatal("unexpected RC4-HMAC defaults")
-	}
-	key, err := etype.StringToKey("password", "ignored", "ignored")
+}
+
+func checkRC4KeyConversion(t *testing.T, etype RC4HMAC) []byte {
+	t.Helper()
+	key, err := etype.StringToKey(fixturePassword, "ignored", "ignored")
 	if err != nil || len(key) != etype.GetKeyByteSize() {
 		t.Fatalf("StringToKey = %x, %v", key, err)
 	}
 	if randomKey := etype.RandomToKey([]byte("random material")); len(randomKey) != 16 {
 		t.Fatalf("RandomToKey length = %d", len(randomKey))
 	}
+	return key
+}
 
-	plaintext := []byte("RC4 wrapper payload")
+func checkRC4RoundTrips(t *testing.T, etype RC4HMAC, key, plaintext []byte) []byte {
+	t.Helper()
 	_, ciphertext, err := etype.EncryptData(key, plaintext)
 	if err != nil {
 		t.Fatal(err)
@@ -45,6 +61,11 @@ func TestRC4HMACContractAndRoundTrip(t *testing.T) {
 	if err != nil || !bytes.Equal(decrypted, plaintext) {
 		t.Fatalf("message round trip = %q, %v", decrypted, err)
 	}
+	return message
+}
+
+func checkRC4DerivationAndChecksum(t *testing.T, etype RC4HMAC, key, plaintext, message []byte) {
+	t.Helper()
 	derived, err := etype.DeriveKey(key, []byte("usage"))
 	if err != nil || len(derived) != 16 {
 		t.Fatalf("DeriveKey = %x, %v", derived, err)

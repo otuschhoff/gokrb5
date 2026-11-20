@@ -12,24 +12,34 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+const (
+	fixturePassword    = "password"
+	fixtureAES256Salt  = "aes256-salt"
+	fixtureAthenaSalt  = "ATHENA.MIT.EDUraeburn"
+	fixturePianistSalt = "EXAMPLE.COMpianist"
+)
+
 func TestGetKeyFromPasswordSelectsMatchingETypeInfo2Entry(t *testing.T) {
 	entries := types.ETypeInfo2{
-		{EType: etypeID.AES256_CTS_HMAC_SHA1_96, Salt: "aes256-salt"},
-		{EType: etypeID.AES128_CTS_HMAC_SHA1_96, Salt: "aes128-salt"},
+		{EType: etypeID.AES256_CTS_HMAC_SHA1_96, Salt: fixtureAES256Salt, S2KParams: nil},
+		{EType: etypeID.AES128_CTS_HMAC_SHA1_96, Salt: "aes128-salt", S2KParams: nil},
 	}
 	value, err := asn1.Marshal(entries)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pas := types.PADataSequence{{PADataType: patype.PA_ETYPE_INFO2, PADataValue: value}}
-	key, selected, err := GetKeyFromPasswordForETypes("password", types.PrincipalName{}, "EXAMPLE.ORG", []int32{etypeID.AES128_CTS_HMAC_SHA1_96}, pas)
+	var cname types.PrincipalName
+	key, selected, err := GetKeyFromPasswordForETypes(
+		fixturePassword, cname, "EXAMPLE.ORG", []int32{etypeID.AES128_CTS_HMAC_SHA1_96}, pas,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if selected == nil {
 		t.Fatal("selected encryption type is nil")
 	}
-	expected, err := selected.StringToKey("password", "aes128-salt", selected.GetDefaultStringToKeyParams())
+	expected, err := selected.StringToKey(fixturePassword, "aes128-salt", selected.GetDefaultStringToKeyParams())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,8 +48,8 @@ func TestGetKeyFromPasswordSelectsMatchingETypeInfo2Entry(t *testing.T) {
 }
 
 func TestGetKeyFromPasswordUsesDefaultForOmittedETypeInfo2Salt(t *testing.T) {
-	cname := types.PrincipalName{NameString: []string{"testuser1"}}
-	entries := types.ETypeInfo2{{EType: etypeID.AES256_CTS_HMAC_SHA1_96}}
+	cname := types.PrincipalName{NameType: 0, NameString: []string{"testuser1"}}
+	entries := types.ETypeInfo2{{EType: etypeID.AES256_CTS_HMAC_SHA1_96, Salt: "", S2KParams: nil}}
 	value, err := asn1.Marshal(entries)
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +62,9 @@ func TestGetKeyFromPasswordUsesDefaultForOmittedETypeInfo2Salt(t *testing.T) {
 	if selected == nil {
 		t.Fatal("selected encryption type is nil")
 	}
-	expected, err := selected.StringToKey("passwordvalue", cname.GetSalt("TEST.GOKRB5"), selected.GetDefaultStringToKeyParams())
+	expected, err := selected.StringToKey(
+		"passwordvalue", cname.GetSalt("TEST.GOKRB5"), selected.GetDefaultStringToKeyParams(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +72,7 @@ func TestGetKeyFromPasswordUsesDefaultForOmittedETypeInfo2Salt(t *testing.T) {
 }
 
 func TestGetKeyFromPasswordPreservesExplicitEmptyETypeInfo2Salt(t *testing.T) {
-	cname := types.PrincipalName{NameString: []string{"testuser1"}}
+	cname := types.PrincipalName{NameType: 0, NameString: []string{"testuser1"}}
 	value, err := hex.DecodeString("300b3009a003020112a1021b00")
 	if err != nil {
 		t.Fatal(err)
@@ -82,15 +94,16 @@ func TestGetKeyFromPasswordPreservesExplicitEmptyETypeInfo2Salt(t *testing.T) {
 
 func TestGetKeyFromPasswordUsesKDCPreferenceOrder(t *testing.T) {
 	entries := types.ETypeInfo2{
-		{EType: etypeID.AES256_CTS_HMAC_SHA1_96, Salt: "aes256-salt"},
-		{EType: etypeID.AES128_CTS_HMAC_SHA1_96, Salt: "aes128-salt"},
+		{EType: etypeID.AES256_CTS_HMAC_SHA1_96, Salt: fixtureAES256Salt, S2KParams: nil},
+		{EType: etypeID.AES128_CTS_HMAC_SHA1_96, Salt: "aes128-salt", S2KParams: nil},
 	}
 	value, err := asn1.Marshal(entries)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pas := types.PADataSequence{{PADataType: patype.PA_ETYPE_INFO2, PADataValue: value}}
-	key, _, err := GetKeyFromPasswordForETypes("password", types.PrincipalName{}, "EXAMPLE.ORG", []int32{
+	var cname types.PrincipalName
+	key, _, err := GetKeyFromPasswordForETypes(fixturePassword, cname, "EXAMPLE.ORG", []int32{
 		etypeID.AES128_CTS_HMAC_SHA1_96,
 		etypeID.AES256_CTS_HMAC_SHA1_96,
 	}, pas)
@@ -101,7 +114,7 @@ func TestGetKeyFromPasswordUsesKDCPreferenceOrder(t *testing.T) {
 }
 
 func TestGetKeyFromPasswordETypeInfo2PrecedesPasswordSalt(t *testing.T) {
-	entries := types.ETypeInfo2{{EType: etypeID.AES128_CTS_HMAC_SHA1_96, Salt: "info2-salt"}}
+	entries := types.ETypeInfo2{{EType: etypeID.AES128_CTS_HMAC_SHA1_96, Salt: "info2-salt", S2KParams: nil}}
 	value, err := asn1.Marshal(entries)
 	if err != nil {
 		t.Fatal(err)
@@ -110,14 +123,17 @@ func TestGetKeyFromPasswordETypeInfo2PrecedesPasswordSalt(t *testing.T) {
 		{PADataType: patype.PA_ETYPE_INFO2, PADataValue: value},
 		{PADataType: patype.PA_PW_SALT, PADataValue: []byte("password-salt")},
 	}
-	key, selected, err := GetKeyFromPassword("password", types.PrincipalName{}, "EXAMPLE.ORG", etypeID.AES128_CTS_HMAC_SHA1_96, pas)
+	var cname types.PrincipalName
+	key, selected, err := GetKeyFromPassword(
+		fixturePassword, cname, "EXAMPLE.ORG", etypeID.AES128_CTS_HMAC_SHA1_96, pas,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if selected == nil {
 		t.Fatal("selected encryption type is nil")
 	}
-	expected, err := selected.StringToKey("password", "info2-salt", selected.GetDefaultStringToKeyParams())
+	expected, err := selected.StringToKey(fixturePassword, "info2-salt", selected.GetDefaultStringToKeyParams())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,14 +147,17 @@ func TestGetKeyFromPasswordUsesETypeInfoOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	pas := types.PADataSequence{{PADataType: patype.PA_ETYPE_INFO, PADataValue: value}}
-	key, selected, err := GetKeyFromPasswordForETypes("password", types.PrincipalName{}, "EXAMPLE.ORG", []int32{etypeID.DES3_CBC_SHA1_KD}, pas)
+	var cname types.PrincipalName
+	key, selected, err := GetKeyFromPasswordForETypes(
+		fixturePassword, cname, "EXAMPLE.ORG", []int32{etypeID.DES3_CBC_SHA1_KD}, pas,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if selected == nil {
 		t.Fatal("selected encryption type is nil")
 	}
-	expected, err := selected.StringToKey("password", "legacy-salt", selected.GetDefaultStringToKeyParams())
+	expected, err := selected.StringToKey(fixturePassword, "legacy-salt", selected.GetDefaultStringToKeyParams())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +170,9 @@ func TestGetKeyFromPasswordETypeInfo2PrecedesETypeInfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	info2Value, err := asn1.Marshal(types.ETypeInfo2{{EType: etypeID.AES128_CTS_HMAC_SHA1_96, Salt: "info2-salt"}})
+	info2Value, err := asn1.Marshal(types.ETypeInfo2{
+		{EType: etypeID.AES128_CTS_HMAC_SHA1_96, Salt: "info2-salt", S2KParams: nil},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,14 +180,17 @@ func TestGetKeyFromPasswordETypeInfo2PrecedesETypeInfo(t *testing.T) {
 		{PADataType: patype.PA_ETYPE_INFO, PADataValue: infoValue},
 		{PADataType: patype.PA_ETYPE_INFO2, PADataValue: info2Value},
 	}
-	key, selected, err := GetKeyFromPasswordForETypes("password", types.PrincipalName{}, "EXAMPLE.ORG", []int32{etypeID.AES128_CTS_HMAC_SHA1_96}, pas)
+	var cname types.PrincipalName
+	key, selected, err := GetKeyFromPasswordForETypes(
+		fixturePassword, cname, "EXAMPLE.ORG", []int32{etypeID.AES128_CTS_HMAC_SHA1_96}, pas,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if selected == nil {
 		t.Fatal("selected encryption type is nil")
 	}
-	expected, err := selected.StringToKey("password", "info2-salt", selected.GetDefaultStringToKeyParams())
+	expected, err := selected.StringToKey(fixturePassword, "info2-salt", selected.GetDefaultStringToKeyParams())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +198,10 @@ func TestGetKeyFromPasswordETypeInfo2PrecedesETypeInfo(t *testing.T) {
 }
 
 func TestGetKeyFromPasswordSkipsUnsupportedRequestedEType(t *testing.T) {
-	key, _, err := GetKeyFromPasswordForETypes("password", types.PrincipalName{NameString: []string{"user"}}, "EXAMPLE.ORG", []int32{999, etypeID.AES128_CTS_HMAC_SHA1_96}, nil)
+	cname := types.PrincipalName{NameType: 0, NameString: []string{"user"}}
+	key, _, err := GetKeyFromPasswordForETypes(
+		fixturePassword, cname, "EXAMPLE.ORG", []int32{999, etypeID.AES128_CTS_HMAC_SHA1_96}, nil,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,14 +209,18 @@ func TestGetKeyFromPasswordSkipsUnsupportedRequestedEType(t *testing.T) {
 }
 
 func TestGetKeyFromPasswordRejectsUnmatchedETypeInfo(t *testing.T) {
-	entries := types.ETypeInfo2{{EType: etypeID.AES256_CTS_HMAC_SHA1_96, Salt: "aes256-salt"}}
+	entries := types.ETypeInfo2{{EType: etypeID.AES256_CTS_HMAC_SHA1_96, Salt: fixtureAES256Salt, S2KParams: nil}}
 	value, err := asn1.Marshal(entries)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = GetKeyFromPasswordForETypes("password", types.PrincipalName{}, "EXAMPLE.ORG", []int32{etypeID.AES128_CTS_HMAC_SHA1_96}, types.PADataSequence{{
+	var cname types.PrincipalName
+	pas := types.PADataSequence{{
 		PADataType:  patype.PA_ETYPE_INFO2,
 		PADataValue: value,
-	}})
+	}}
+	_, _, err = GetKeyFromPasswordForETypes(
+		fixturePassword, cname, "EXAMPLE.ORG", []int32{etypeID.AES128_CTS_HMAC_SHA1_96}, pas,
+	)
 	assert.Error(t, err)
 }

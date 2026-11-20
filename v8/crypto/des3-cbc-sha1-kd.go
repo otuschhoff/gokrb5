@@ -18,6 +18,11 @@ import (
 // Des3CbcSha1Kd implements Kerberos encryption type des3-cbc-hmac-sha1-kd
 type Des3CbcSha1Kd struct{}
 
+const (
+	des3KeyBytes  = 24
+	des3SeedBytes = 21
+)
+
 // GetETypeID returns the EType ID number.
 func (e Des3CbcSha1Kd) GetETypeID() int32 {
 	return etypeID.DES3_CBC_SHA1_KD
@@ -30,12 +35,12 @@ func (e Des3CbcSha1Kd) GetHashID() int32 {
 
 // GetKeyByteSize returns the number of bytes for key of this etype.
 func (e Des3CbcSha1Kd) GetKeyByteSize() int {
-	return 24
+	return des3KeyBytes
 }
 
 // GetKeySeedBitLength returns the number of bits for the seed for key generation.
 func (e Des3CbcSha1Kd) GetKeySeedBitLength() int {
-	return 21 * 8
+	return des3SeedBytes * bitsPerByte
 }
 
 // GetHashFunc returns the hash function for this etype.
@@ -62,12 +67,12 @@ func (e Des3CbcSha1Kd) GetConfounderByteSize() int {
 
 // GetHMACBitLength returns the bit count size of the integrity hash.
 func (e Des3CbcSha1Kd) GetHMACBitLength() int {
-	return e.GetHashFunc()().Size() * 8
+	return e.GetHashFunc()().Size() * bitsPerByte
 }
 
 // GetCypherBlockBitLength returns the bit count size of the cypher block.
 func (e Des3CbcSha1Kd) GetCypherBlockBitLength() int {
-	return des.BlockSize * 8
+	return des.BlockSize * bitsPerByte
 }
 
 // StringToKey returns a key derived from the string provided.
@@ -102,7 +107,7 @@ func (e Des3CbcSha1Kd) EncryptData(key, data []byte) ([]byte, []byte, error) {
 	return cryptoOperation("des3-cbc-sha1-kd encrypt data").blocks(rfc3961.DES3EncryptData(key, data, e))
 }
 
-// EncryptMessage encrypts the message provided and concatenates it with the integrity hash to create an encrypted message.
+// EncryptMessage encrypts the message and appends its integrity hash.
 func (e Des3CbcSha1Kd) EncryptMessage(key, message []byte, usage uint32) ([]byte, []byte, error) {
 	return cryptoOperation("des3-cbc-sha1-kd encrypt message").blocks(rfc3961.DES3EncryptMessage(key, message, usage, e))
 }

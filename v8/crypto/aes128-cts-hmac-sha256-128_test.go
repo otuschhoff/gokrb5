@@ -10,6 +10,12 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/crypto/rfc8009"
 )
 
+const (
+	aes128EncryptionKey = "9b197dd1e8c5609d6e67c3e37c62c72e"
+	aes128IntegrityKey  = "9fda0e56ab2d85e1569a688696c26a6c"
+	rfc8009PlaintextHex = "000102030405060708090a0b0c0d0e0f1011121314"
+)
+
 func TestAes128CtsHmacSha256128_StringToKey(t *testing.T) {
 	t.Parallel()
 	// Test vectors from RFC 8009 Appendix A
@@ -23,7 +29,14 @@ func TestAes128CtsHmacSha256128_StringToKey(t *testing.T) {
 		saltp      string
 		key        string
 	}{
-		{32768, "password", s + "ATHENA.MIT.EDUraeburn", "6165733132382d6374732d686d61632d7368613235362d3132380010df9dd783e5bc8acea1730e74355f61415448454e412e4d49542e4544557261656275726e", "089bca48b105ea6ea77ca5d2f39dc5e7"},
+		{
+			32768,
+			fixturePassword,
+			s + fixtureAthenaSalt,
+			"6165733132382d6374732d686d61632d7368613235362d3132380010df9dd783e5bc8acea1730e74355f6141" +
+				"5448454e412e4d49542e4544557261656275726e",
+			"089bca48b105ea6ea77ca5d2f39dc5e7",
+		},
 	}
 	var e Aes128CtsHmacSha256128
 	for _, test := range tests {
@@ -51,12 +64,12 @@ func TestAes128CtsHmacSha256128_DeriveKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error deriving encryption key: %v", err)
 	}
-	assert.Equal(t, "9b197dd1e8c5609d6e67c3e37c62c72e", hex.EncodeToString(k), "Encryption derived key not as epxected")
+	assert.Equal(t, aes128EncryptionKey, hex.EncodeToString(k), "Encryption derived key not as epxected")
 	k, err = e.DeriveKey(protocolBaseKey, common.GetUsageKi(testUsage))
 	if err != nil {
 		t.Fatalf("Error deriving integrity key: %v", err)
 	}
-	assert.Equal(t, "9fda0e56ab2d85e1569a688696c26a6c", hex.EncodeToString(k), "Integrity derived key not as epxected")
+	assert.Equal(t, aes128IntegrityKey, hex.EncodeToString(k), "Integrity derived key not as epxected")
 }
 
 func TestAes128CtsHmacSha256128_VerifyIntegrity(t *testing.T) {
@@ -70,7 +83,7 @@ func TestAes128CtsHmacSha256128_VerifyIntegrity(t *testing.T) {
 		pt     string
 		chksum string
 	}{
-		{"b31a018a48f54776f403e9a396325dc3", "000102030405060708090a0b0c0d0e0f1011121314", "d78367186643d67b411cba9139fc1dee"},
+		{"b31a018a48f54776f403e9a396325dc3", rfc8009PlaintextHex, "d78367186643d67b411cba9139fc1dee"},
 	}
 	for _, test := range tests {
 		p, _ := hex.DecodeString(test.pt)
@@ -82,27 +95,65 @@ func TestAes128CtsHmacSha256128_VerifyIntegrity(t *testing.T) {
 	}
 }
 
+type rfc8009CipherVector struct {
+	plain      string
+	confounder string
+	ke         string
+	ki         string
+	encrypted  string // AESOutput
+	hash       string // TruncatedHMACOutput
+	cipher     string // Ciphertext(AESOutput|HMACOutput)
+}
+
+func aes128RFC8009CipherVectors() []rfc8009CipherVector {
+	// Test vectors from RFC 8009 Appendix A
+	return []rfc8009CipherVector{
+		{
+			"",
+			"7e5895eaf2672435bad817f545a37148",
+			aes128EncryptionKey,
+			aes128IntegrityKey,
+			"ef85fb890bb8472f4dab20394dca781d",
+			"ad877eda39d50c870c0d5a0a8e48c718",
+			"ef85fb890bb8472f4dab20394dca781dad877eda39d50c870c0d5a0a8e48c718",
+		},
+		{
+			"000102030405",
+			"7bca285e2fd4130fb55b1a5c83bc5b24",
+			aes128EncryptionKey,
+			aes128IntegrityKey,
+			"84d7f30754ed987bab0bf3506beb09cfb55402cef7e6",
+			"877ce99e247e52d16ed4421dfdf8976c",
+			"84d7f30754ed987bab0bf3506beb09cfb55402cef7e6877ce99e247e52d16ed4421dfdf8976c",
+		},
+		{
+			"000102030405060708090a0b0c0d0e0f",
+			"56ab21713ff62c0a1457200f6fa9948f",
+			aes128EncryptionKey,
+			aes128IntegrityKey,
+			"3517d640f50ddc8ad3628722b3569d2ae07493fa8263254080ea65c1008e8fc2",
+			"95fb4852e7d83e1e7c48c37eebe6b0d3",
+			"3517d640f50ddc8ad3628722b3569d2ae07493fa8263254080ea65c1008e8fc295fb4852e7d83e1e7c48c37eebe6b0d3",
+		},
+		{
+			rfc8009PlaintextHex,
+			"a7a4e29a4728ce10664fb64e49ad3fac",
+			aes128EncryptionKey,
+			aes128IntegrityKey,
+			"720f73b18d9859cd6ccb4346115cd336c70f58edc0c4437c5573544c31c813bce1e6d072c1",
+			"86b39a413c2f92ca9b8334a287ffcbfc",
+			"720f73b18d9859cd6ccb4346115cd336c70f58edc0c4437c5573544c31c813bce1e6d072c186b39a413c2f92" +
+				"ca9b8334a287ffcbfc",
+		},
+	}
+}
+
 func TestAes128CtsHmacSha256128_Cypto(t *testing.T) {
 	t.Parallel()
 	protocolBaseKey, _ := hex.DecodeString("3705d96080c17728a0e800eab6e0d23c")
 	testUsage := uint32(2)
-	tests := []struct {
-		plain      string
-		confounder string
-		ke         string
-		ki         string
-		encrypted  string // AESOutput
-		hash       string // TruncatedHMACOutput
-		cipher     string // Ciphertext(AESOutput|HMACOutput)
-	}{
-		// Test vectors from RFC 8009 Appendix A
-		{"", "7e5895eaf2672435bad817f545a37148", "9b197dd1e8c5609d6e67c3e37c62c72e", "9fda0e56ab2d85e1569a688696c26a6c", "ef85fb890bb8472f4dab20394dca781d", "ad877eda39d50c870c0d5a0a8e48c718", "ef85fb890bb8472f4dab20394dca781dad877eda39d50c870c0d5a0a8e48c718"},
-		{"000102030405", "7bca285e2fd4130fb55b1a5c83bc5b24", "9b197dd1e8c5609d6e67c3e37c62c72e", "9fda0e56ab2d85e1569a688696c26a6c", "84d7f30754ed987bab0bf3506beb09cfb55402cef7e6", "877ce99e247e52d16ed4421dfdf8976c", "84d7f30754ed987bab0bf3506beb09cfb55402cef7e6877ce99e247e52d16ed4421dfdf8976c"},
-		{"000102030405060708090a0b0c0d0e0f", "56ab21713ff62c0a1457200f6fa9948f", "9b197dd1e8c5609d6e67c3e37c62c72e", "9fda0e56ab2d85e1569a688696c26a6c", "3517d640f50ddc8ad3628722b3569d2ae07493fa8263254080ea65c1008e8fc2", "95fb4852e7d83e1e7c48c37eebe6b0d3", "3517d640f50ddc8ad3628722b3569d2ae07493fa8263254080ea65c1008e8fc295fb4852e7d83e1e7c48c37eebe6b0d3"},
-		{"000102030405060708090a0b0c0d0e0f1011121314", "a7a4e29a4728ce10664fb64e49ad3fac", "9b197dd1e8c5609d6e67c3e37c62c72e", "9fda0e56ab2d85e1569a688696c26a6c", "720f73b18d9859cd6ccb4346115cd336c70f58edc0c4437c5573544c31c813bce1e6d072c1", "86b39a413c2f92ca9b8334a287ffcbfc", "720f73b18d9859cd6ccb4346115cd336c70f58edc0c4437c5573544c31c813bce1e6d072c186b39a413c2f92ca9b8334a287ffcbfc"},
-	}
 	var e Aes128CtsHmacSha256128
-	for i, test := range tests {
+	for i, test := range aes128RFC8009CipherVectors() {
 		m, _ := hex.DecodeString(test.plain)
 		b, _ := hex.DecodeString(test.encrypted)
 		ke, _ := hex.DecodeString(test.ke)
@@ -146,7 +197,8 @@ func TestAes128CtsHmacSha256128_Cypto(t *testing.T) {
 		assert.Equal(t, m, dm, "Message not as expected after encrypting and decrypting for test %v: %v", i+1, err)
 
 		// Test the integrity hash
-		ivz := make([]byte, e.GetConfounderByteSize())
+		ivSize := e.GetConfounderByteSize()
+		ivz := make([]byte, ivSize, ivSize+len(b))
 		ivz = append(ivz, b...)
 		hm := ivz
 		mac, _ := common.GetIntegrityHash(hm, protocolBaseKey, testUsage, e)

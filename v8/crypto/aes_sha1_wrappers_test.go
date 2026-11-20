@@ -24,34 +24,18 @@ func TestAESSHA1WrapperContracts(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			if test.etype.GetETypeID() != test.etypeID || test.etype.GetHashID() != test.hashID ||
-				test.etype.GetKeyByteSize() != test.keyBytes || test.etype.GetKeySeedBitLength() != test.keyBytes*8 ||
-				test.etype.GetMessageBlockByteSize() != 1 || test.etype.GetConfounderByteSize() != 16 ||
-				test.etype.GetHMACBitLength() != 96 || test.etype.GetCypherBlockBitLength() != 128 ||
-				test.etype.GetDefaultStringToKeyParams() != "00001000" || test.etype.GetHashFunc() == nil {
+				!hasAESSHA1Metadata(test.etype, test.keyBytes) {
 				t.Fatalf("unexpected etype metadata for %s", test.name)
 			}
 
 			message := []byte("wrapper contract plaintext")
-			_, encrypted, err := test.etype.EncryptMessage(test.key, message, 42)
-			if err != nil {
-				t.Fatal(err)
-			}
-			decrypted, err := test.etype.DecryptMessage(test.key, encrypted, 42)
-			if err != nil || !bytes.Equal(decrypted, message) {
-				t.Fatalf("decrypted = %q, %v", decrypted, err)
-			}
-			_, ciphertext, err := test.etype.EncryptData(test.key, message)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got, ierr := test.etype.DecryptData(test.key, ciphertext); ierr != nil || !bytes.Equal(got, message) {
-				t.Fatalf("raw decrypted = %x, %v", got, ierr)
-			}
+			encrypted := checkAESSHA1RoundTrips(t, test.etype, test.key, message)
 			if test.etype.VerifyIntegrity(test.key, encrypted, message, 42) {
 				t.Fatal("invalid integrity input was accepted")
 			}
 			checksum, err := test.etype.GetChecksumHash(test.key, message, 42)
-			if err != nil || !test.etype.VerifyChecksum(test.key, message, checksum, 42) || test.etype.VerifyChecksum(test.key, []byte("changed"), checksum, 42) {
+			if err != nil || !test.etype.VerifyChecksum(test.key, message, checksum, 42) ||
+				test.etype.VerifyChecksum(test.key, []byte("changed"), checksum, 42) {
 				t.Fatalf("checksum contract failed: %v", err)
 			}
 			if got := test.etype.RandomToKey(test.key); !bytes.Equal(got, test.key) {
@@ -59,6 +43,33 @@ func TestAESSHA1WrapperContracts(t *testing.T) {
 			}
 		})
 	}
+}
+
+func hasAESSHA1Metadata(enctype etype.EType, keyBytes int) bool {
+	return enctype.GetKeyByteSize() == keyBytes && enctype.GetKeySeedBitLength() == keyBytes*8 &&
+		enctype.GetMessageBlockByteSize() == 1 && enctype.GetConfounderByteSize() == 16 &&
+		enctype.GetHMACBitLength() == 96 && enctype.GetCypherBlockBitLength() == 128 &&
+		enctype.GetDefaultStringToKeyParams() == "00001000" && enctype.GetHashFunc() != nil
+}
+
+func checkAESSHA1RoundTrips(t *testing.T, enctype etype.EType, key, message []byte) []byte {
+	t.Helper()
+	_, encrypted, err := enctype.EncryptMessage(key, message, 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decrypted, err := enctype.DecryptMessage(key, encrypted, 42)
+	if err != nil || !bytes.Equal(decrypted, message) {
+		t.Fatalf("decrypted = %q, %v", decrypted, err)
+	}
+	_, ciphertext, err := enctype.EncryptData(key, message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ierr := enctype.DecryptData(key, ciphertext); ierr != nil || !bytes.Equal(got, message) {
+		t.Fatalf("raw decrypted = %x, %v", got, ierr)
+	}
+	return encrypted
 }
 
 func TestEncryptedDataRoundTripAndErrors(t *testing.T) {
@@ -72,10 +83,10 @@ func TestEncryptedDataRoundTripAndErrors(t *testing.T) {
 	if err != nil || !bytes.Equal(decrypted, message) {
 		t.Fatalf("decrypted = %q, %v", decrypted, err)
 	}
-	if _, err := GetEncryptedData(message, types.EncryptionKey{KeyType: -1}, 7, 0); err == nil {
+	if _, err := GetEncryptedData(message, types.EncryptionKey{KeyType: -1, KeyValue: nil}, 7, 0); err == nil {
 		t.Fatal("unknown encryption type was accepted")
 	}
-	if _, err := DecryptMessage(ed.Cipher, types.EncryptionKey{KeyType: -1}, 7); err == nil {
+	if _, err := DecryptMessage(ed.Cipher, types.EncryptionKey{KeyType: -1, KeyValue: nil}, 7); err == nil {
 		t.Fatal("unknown decryption type was accepted")
 	}
 	ed.Cipher[0] ^= 0xff

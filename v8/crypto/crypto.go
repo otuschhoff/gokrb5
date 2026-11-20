@@ -3,6 +3,7 @@ package crypto
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
@@ -16,6 +17,11 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+const (
+	bitsPerByte          = 8
+	s2kIterationByteSize = 4
+)
+
 type passwordKeyParameters struct {
 	etypeID   int32
 	salt      string
@@ -23,7 +29,21 @@ type passwordKeyParameters struct {
 	s2kParams []byte
 }
 
+type passwordKeySelection struct {
+	parameters passwordKeyParameters
+	etype      etype.EType
+}
+
+type passwordHints struct {
+	info2        []passwordKeyParameters
+	info         []passwordKeyParameters
+	passwordSalt *string
+	hasETypeInfo bool
+}
+
 // GetEtype returns an instances of the required etype struct for the etype ID.
+//
+//nolint:ireturn // Multiple enctypes implement the published interface.
 func GetEtype(id int32) (etype.EType, error) {
 	switch id {
 	case etypeID.AES128_CTS_HMAC_SHA1_96:
@@ -50,6 +70,8 @@ func GetEtype(id int32) (etype.EType, error) {
 }
 
 // GetChksumEtype returns an instances of the required etype struct for the checksum ID.
+//
+//nolint:ireturn // Multiple enctypes implement the published interface.
 func GetChksumEtype(id int32) (etype.EType, error) {
 	switch id {
 	case chksumtype.HMAC_SHA1_96_AES128:
@@ -79,90 +101,36 @@ func GetChksumEtype(id int32) (etype.EType, error) {
 }
 
 // GetKeyFromPassword generates an encryption key from the principal's password.
-func GetKeyFromPassword(passwd string, cname types.PrincipalName, realm string, etypeID int32, pas types.PADataSequence) (types.EncryptionKey, etype.EType, error) {
+//
+//nolint:ireturn // Preserve the published return type for the selected enctype.
+func GetKeyFromPassword(
+	passwd string, cname types.PrincipalName, realm string, etypeID int32, pas types.PADataSequence,
+) (types.EncryptionKey, etype.EType, error) {
 	return GetKeyFromPasswordForETypes(passwd, cname, realm, []int32{etypeID}, pas)
 }
 
 // GetKeyFromPasswordForETypes generates an encryption key using the first
 // KDC-offered encryption type present in requestedETypeIDs.
-func GetKeyFromPasswordForETypes(passwd string, cname types.PrincipalName, realm string, requestedETypeIDs []int32, pas types.PADataSequence) (types.EncryptionKey, etype.EType, error) {
+//
+//nolint:ireturn // Preserve the published return type for the selected enctype.
+func GetKeyFromPasswordForETypes(
+	passwd string, cname types.PrincipalName, realm string, requestedETypeIDs []int32, pas types.PADataSequence,
+) (types.EncryptionKey, etype.EType, error) {
 	var key types.EncryptionKey
 	if len(requestedETypeIDs) == 0 {
-		return key, nil, fmt.Errorf("no encryption types requested")
+		return key, nil, errors.New("no encryption types requested")
 	}
-	requested := make(map[int32]struct{}, len(requestedETypeIDs))
-	for _, id := range requestedETypeIDs {
-		requested[id] = struct{}{}
+	hints, err := readPasswordHints(requestedETypeIDs, pas)
+	if err != nil {
+		return key, nil, err
 	}
-
-	var info2 []passwordKeyParameters
-	var info []passwordKeyParameters
-	var passwordSalt *string
-	var hasETypeInfo bool
-	for _, pa := range pas {
-		switch pa.PADataType {
-		case patype.PA_ETYPE_INFO2:
-			hasETypeInfo = true
-			var entries types.ETypeInfo2
-			if err := entries.Unmarshal(pa.PADataValue); err != nil {
-				return key, nil, fmt.Errorf("error unmarshalling PA Data to PA-ETYPE-INFO2: %w", err)
-			}
-			saltPresent, err := etypeInfo2SaltPresence(pa.PADataValue, len(entries))
-			if err != nil {
-				return key, nil, err
-			}
-			for i, entry := range entries {
-				if _, ok := requested[entry.EType]; ok {
-					info2 = append(info2, passwordKeyParameters{etypeID: entry.EType, salt: entry.Salt, saltSet: saltPresent[i], s2kParams: entry.S2KParams})
-				}
-			}
-		case patype.PA_ETYPE_INFO:
-			hasETypeInfo = true
-			var entries types.ETypeInfo
-			if err := entries.Unmarshal(pa.PADataValue); err != nil {
-				return key, nil, fmt.Errorf("error unmarshalling PA Data to PA-ETYPE-INFO: %w", err)
-			}
-			for _, entry := range entries {
-				if _, ok := requested[entry.EType]; ok {
-					info = append(info, passwordKeyParameters{etypeID: entry.EType, salt: string(entry.Salt), saltSet: true})
-				}
-			}
-		case patype.PA_PW_SALT:
-			salt := string(pa.PADataValue)
-			passwordSalt = &salt
-		}
+	selected, err := hints.selectKey(requestedETypeIDs)
+	if err != nil {
+		return key, nil, err
 	}
-
-	parameters, et, found := firstSupportedKeyParameters(info2)
-	if !found {
-		parameters, et, found = firstSupportedKeyParameters(info)
-	}
-	if found && et == nil {
-		return key, nil, fmt.Errorf("selected encryption type implementation is unavailable")
-	}
-	if !found && hasETypeInfo {
-		return key, nil, fmt.Errorf("KDC did not provide parameters for a requested supported encryption type")
-	}
-	if !found {
-		for _, id := range requestedETypeIDs {
-			candidate, err := GetEtype(id)
-			if err == nil {
-				parameters = passwordKeyParameters{etypeID: id}
-				et = candidate
-				found = true
-				break
-			}
-		}
-	}
-	if !found || et == nil {
-		return key, nil, fmt.Errorf("none of the requested encryption types are supported")
-	}
-	if len(info2) == 0 && len(info) == 0 && passwordSalt != nil {
-		parameters.salt = *passwordSalt
-		parameters.saltSet = true
-	}
+	parameters, et := selected.parameters, selected.etype
 	sk2p := et.GetDefaultStringToKeyParams()
-	if len(parameters.s2kParams) == 4 {
+	if len(parameters.s2kParams) == s2kIterationByteSize {
 		sk2p = hex.EncodeToString(parameters.s2kParams)
 	}
 	if !parameters.saltSet {
@@ -172,11 +140,109 @@ func GetKeyFromPasswordForETypes(passwd string, cname types.PrincipalName, realm
 	if err != nil {
 		return key, et, fmt.Errorf("error deriving key from string: %+w", err)
 	}
-	key = types.EncryptionKey{
-		KeyType:  parameters.etypeID,
-		KeyValue: k,
+	return types.EncryptionKey{KeyType: parameters.etypeID, KeyValue: k}, et, nil
+}
+
+func readPasswordHints(requestedETypeIDs []int32, pas types.PADataSequence) (passwordHints, error) {
+	requested := make(map[int32]struct{}, len(requestedETypeIDs))
+	for _, id := range requestedETypeIDs {
+		requested[id] = struct{}{}
 	}
-	return key, et, nil
+
+	var hints passwordHints
+	for _, pa := range pas {
+		switch pa.PADataType {
+		case patype.PA_ETYPE_INFO2:
+			hints.hasETypeInfo = true
+			info, err := appendETypeInfo2(hints.info2, pa.PADataValue, requested)
+			if err != nil {
+				return hints, err
+			}
+			hints.info2 = info
+		case patype.PA_ETYPE_INFO:
+			hints.hasETypeInfo = true
+			info, err := appendETypeInfo(hints.info, pa.PADataValue, requested)
+			if err != nil {
+				return hints, err
+			}
+			hints.info = info
+		case patype.PA_PW_SALT:
+			salt := string(pa.PADataValue)
+			hints.passwordSalt = &salt
+		}
+	}
+	return hints, nil
+}
+
+func appendETypeInfo2(
+	dst []passwordKeyParameters, data []byte, requested map[int32]struct{},
+) ([]passwordKeyParameters, error) {
+	var entries types.ETypeInfo2
+	if err := entries.Unmarshal(data); err != nil {
+		return dst, fmt.Errorf("error unmarshalling PA Data to PA-ETYPE-INFO2: %w", err)
+	}
+	saltPresent, err := etypeInfo2SaltPresence(data, len(entries))
+	if err != nil {
+		return dst, err
+	}
+	for i, entry := range entries {
+		if _, ok := requested[entry.EType]; ok {
+			dst = append(dst, passwordKeyParameters{
+				etypeID: entry.EType, salt: entry.Salt, saltSet: saltPresent[i], s2kParams: entry.S2KParams,
+			})
+		}
+	}
+	return dst, nil
+}
+
+func appendETypeInfo(
+	dst []passwordKeyParameters, data []byte, requested map[int32]struct{},
+) ([]passwordKeyParameters, error) {
+	var entries types.ETypeInfo
+	if err := entries.Unmarshal(data); err != nil {
+		return dst, fmt.Errorf("error unmarshalling PA Data to PA-ETYPE-INFO: %w", err)
+	}
+	for _, entry := range entries {
+		if _, ok := requested[entry.EType]; ok {
+			dst = append(dst, passwordKeyParameters{
+				etypeID: entry.EType, salt: string(entry.Salt), saltSet: true, s2kParams: nil,
+			})
+		}
+	}
+	return dst, nil
+}
+
+func (h passwordHints) selectKey(requestedETypeIDs []int32) (passwordKeySelection, error) {
+	selected, found := firstSupportedKeyParameters(h.info2)
+	if !found {
+		selected, found = firstSupportedKeyParameters(h.info)
+	}
+	if found && selected.etype == nil {
+		return selected, errors.New("selected encryption type implementation is unavailable")
+	}
+	if found {
+		return selected, nil
+	}
+	if h.hasETypeInfo {
+		return selected, errors.New("KDC did not provide parameters for a requested supported encryption type")
+	}
+	for _, id := range requestedETypeIDs {
+		candidate, err := GetEtype(id)
+		if err != nil {
+			continue
+		}
+		if candidate == nil {
+			break
+		}
+		selected.etype = candidate
+		selected.parameters.etypeID = id
+		if h.passwordSalt != nil {
+			selected.parameters.salt = *h.passwordSalt
+			selected.parameters.saltSet = true
+		}
+		return selected, nil
+	}
+	return selected, errors.New("none of the requested encryption types are supported")
 }
 
 func etypeInfo2SaltPresence(data []byte, entryCount int) ([]bool, error) {
@@ -189,7 +255,7 @@ func etypeInfo2SaltPresence(data []byte, entryCount int) ([]bool, error) {
 		return nil, fmt.Errorf("decode etype-info2 salt fields: %w", err)
 	}
 	if len(entries) != entryCount {
-		return nil, fmt.Errorf("error determining PA-ETYPE-INFO2 salt presence")
+		return nil, errors.New("error determining PA-ETYPE-INFO2 salt presence")
 	}
 	present := make([]bool, len(entries))
 	for i, entry := range entries {
@@ -198,14 +264,15 @@ func etypeInfo2SaltPresence(data []byte, entryCount int) ([]bool, error) {
 	return present, nil
 }
 
-func firstSupportedKeyParameters(parameters []passwordKeyParameters) (passwordKeyParameters, etype.EType, bool) {
+func firstSupportedKeyParameters(parameters []passwordKeyParameters) (passwordKeySelection, bool) {
 	for _, parameters := range parameters {
 		et, err := GetEtype(parameters.etypeID)
 		if err == nil {
-			return parameters, et, true
+			return passwordKeySelection{parameters: parameters, etype: et}, true
 		}
 	}
-	return passwordKeyParameters{}, nil, false
+	var selected passwordKeySelection
+	return selected, false
 }
 
 // KRBFXCF2 combines two protocol keys using KRB-FX-CF2 from RFC 6113.
@@ -219,8 +286,8 @@ func KRBFXCF2(key1, key2 types.EncryptionKey, pepper1, pepper2 []byte) (types.En
 	if err != nil {
 		return types.EncryptionKey{}, fmt.Errorf("error getting second key enctype: %w", err)
 	}
-	seedBytes := et1.GetKeySeedBitLength() / 8
-	if seedBytes == 0 || et1.GetKeySeedBitLength()%8 != 0 {
+	seedBytes := et1.GetKeySeedBitLength() / bitsPerByte
+	if seedBytes == 0 || et1.GetKeySeedBitLength()%bitsPerByte != 0 {
 		return types.EncryptionKey{}, fmt.Errorf("invalid key seed length for enctype %d", key1.KeyType)
 	}
 	prf1, err := krbFXPRFPlus(key1.KeyValue, pepper1, seedBytes, et1)
@@ -241,7 +308,7 @@ func krbFXPRFPlus(key, pepper []byte, length int, et etype.EType) ([]byte, error
 	out := make([]byte, 0, length)
 	for counter := byte(1); len(out) < length; counter++ {
 		if counter == 0 {
-			return nil, fmt.Errorf("PRF+ output exceeds 255 iterations")
+			return nil, errors.New("PRF+ output exceeds 255 iterations")
 		}
 		input := make([]byte, 1, len(pepper)+1)
 		input[0] = counter
