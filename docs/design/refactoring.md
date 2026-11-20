@@ -2,8 +2,8 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-112 done. The latest v8
-inventories contain 518 canonical and 3,405 supplemental findings. Most
+(floor raised to 86.0%), and Phase 5 slices 1-113 done. The latest v8
+inventories contain 518 canonical and 3,403 supplemental findings. Most
 remaining canonical findings are from `revive`, complexity and nesting
 checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
 Phase 3/4 interoperability and Windows exit evidence remains an external CI
@@ -30,7 +30,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.3% cross-package statement coverage (Slice 102); 518 canonical lint findings after Slice 112 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.3% cross-package statement coverage (Slice 102); 518 canonical lint findings after Slice 113 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -819,6 +819,17 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 113 (2026-11-20, v8 config characterization inputs; Q-10):
+Spell out the empty body in the default enctype case and define the
+finalization test's malformed input in a single fixture. The successful
+parse uses the same fixture without its last line. Inputs, assertions,
+and production code are unchanged. PKINIT and PKU2U remain deferred.
+
+Config vet and 100 shuffled race-enabled config runs passed. Changed-line
+lint passed for both modules against `16b94d1` and `origin/main`. V8
+supplemental findings fell from 3,405 to 3,403 (`exhaustruct_v5` and
+`prealloc`); v8 canonical and both v7 inventories were unchanged.
 
 Slice 112 (2026-11-20, v8 config file fixture isolation; Q-10):
 Write the fixtures for `TestLoad`, `TestLoadWithV4Lines`, and `TestLoadTabs`

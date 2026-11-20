@@ -24,7 +24,7 @@ func TestLibDefaultsLegacyEnctypePolicy(t *testing.T) {
 		body string
 		want []int32
 	}{
-		{name: "defaults", want: aesDefaults},
+		{name: "defaults", body: "", want: aesDefaults},
 		{name: "opt-in without lists", body: "allow_weak_crypto=true\n", want: aesDefaults},
 		{name: "lists without opt-in", body: lists, want: []int32{aes128}},
 		{
@@ -251,18 +251,19 @@ func TestLibDefaultsEnctypeFinalizationTiming(t *testing.T) {
 	for _, weak := range []string{"true", "false"} {
 		t.Run(weak, func(t *testing.T) {
 			l := newLibDefaults()
-			lines := []string{
+			linesWithError := []string{
 				"default_tgs_enctypes=des-cbc-md5 aes128-cts-hmac-sha1-96",
 				"default_tkt_enctypes=des-cbc-md5 aes128-cts-hmac-sha1-96",
 				"permitted_enctypes=des-cbc-md5 aes128-cts-hmac-sha1-96",
 				"allow_weak_crypto=true", "allow_weak_crypto=" + weak,
+				"no equals",
 			}
 			want := newLibDefaults()
 			want.DefaultTGSEnctypes = []string{desCBCMD5, aes128CTSSHA1}
 			want.DefaultTktEnctypes = []string{desCBCMD5, aes128CTSSHA1}
 			want.PermittedEnctypes = []string{desCBCMD5, aes128CTSSHA1}
 			want.AllowWeakCrypto = weak == "true"
-			err := l.parseLines(append(lines, "no equals"))
+			err := l.parseLines(linesWithError)
 			assertLibDefaultsFailure(t, l, want, err, "libdefaults section line (no equals)")
 			if err := l.parseLines(nil); err != nil {
 				t.Fatal(err)
@@ -279,7 +280,8 @@ func TestLibDefaultsEnctypeFinalizationTiming(t *testing.T) {
 				)
 			}
 			l = newLibDefaults()
-			if err := l.parseLines(lines); err != nil {
+			validLines := linesWithError[:len(linesWithError)-1]
+			if err := l.parseLines(validLines); err != nil {
 				t.Fatal(err)
 			}
 			if !reflect.DeepEqual(l.DefaultTGSEnctypeIDs, ids) ||
