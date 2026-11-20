@@ -44,6 +44,7 @@ const (
 	defaultClockskew          = 5 * time.Minute
 	defaultTicketLifetime     = 24 * time.Hour
 	defaultUDPPreferenceLimit = 1465
+	defaultPKINITDHMinBits    = 2048
 )
 
 // New creates a new config struct instance.
@@ -158,40 +159,37 @@ type LibDefaults struct {
 
 // Create a new LibDefaults struct.
 func newLibDefaults() LibDefaults {
-	var hdir string
+	var l LibDefaults
 	usr, _ := user.Current()
 	if usr != nil {
-		hdir = usr.HomeDir
+		l.K5LoginDirectory = usr.HomeDir
 	}
 	optionBytes := []byte{0x00, 0x00, 0x00, 0x10}
-	opts := asn1.BitString{
+	l.KDCDefaultOptions = asn1.BitString{
 		Bytes:     optionBytes,
 		BitLength: len(optionBytes) * bitsPerByte,
 	}
-	l := LibDefaults{
-		CCacheType:              defaultCCacheType,
-		Clockskew:               defaultClockskew,
-		DefaultCCacheName:       "FILE:/tmp/krb5cc_%{uid}",
-		DefaultClientKeytabName: "FILE:/var/kerberos/krb5/user/%{euid}/client.keytab",
-		DefaultKeytabName:       "/etc/krb5.keytab",
-		DefaultTGSEnctypes:      strings.Fields(defaultEnctypes),
-		DefaultTktEnctypes:      strings.Fields(defaultEnctypes),
-		DNSCanonicalizeHostname: true,
-		K5LoginDirectory:        hdir,
-		KDCDefaultOptions:       opts,
-		KDCTimeSync:             1,
-		NoAddresses:             true,
-		PermittedEnctypes:       strings.Fields(defaultEnctypes),
-		PKINITEKUChecking:       "kdc",
-		PKINITDHMinBits:         2048,
-		RDNS:                    true,
-		RealmTryDomains:         -1,
-		RequestPAC:              true,
-		SafeChecksumType:        int(chksumtype.RSA_MD5_DES),
-		TicketLifetime:          defaultTicketLifetime,
-		UDPPreferenceLimit:      defaultUDPPreferenceLimit,
-		PreferredPreauthTypes:   []int{17, 16, 15, 14},
-	}
+	l.CCacheType = defaultCCacheType
+	l.Clockskew = defaultClockskew
+	l.DefaultCCacheName = "FILE:/tmp/krb5cc_%{uid}"
+	l.DefaultClientKeytabName = "FILE:/var/kerberos/krb5/user/%{euid}/client.keytab"
+	l.DefaultKeytabName = "/etc/krb5.keytab"
+	l.DefaultTGSEnctypes = strings.Fields(defaultEnctypes)
+	l.DefaultTktEnctypes = strings.Fields(defaultEnctypes)
+	l.DNSCanonicalizeHostname = true
+	l.KDCTimeSync = 1
+	l.NoAddresses = true
+	l.PermittedEnctypes = strings.Fields(defaultEnctypes)
+	l.PKINITEKUChecking = pkinitEKUModeKDC
+	l.PKINITDHMinBits = defaultPKINITDHMinBits
+	l.RDNS = true
+	l.RealmTryDomains = -1
+	l.RequestPAC = true
+	l.SafeChecksumType = int(chksumtype.RSA_MD5_DES)
+	l.TicketLifetime = defaultTicketLifetime
+	l.UDPPreferenceLimit = defaultUDPPreferenceLimit
+	l.PreferredPreauthTypes = []int{17, 16, 15, 14}
+
 	l.DefaultTGSEnctypeIDs = parseETypes(l.DefaultTGSEnctypes, l.AllowWeakCrypto)
 	l.DefaultTktEnctypeIDs = parseETypes(l.DefaultTktEnctypes, l.AllowWeakCrypto)
 	l.PermittedEnctypeIDs = parseETypes(l.PermittedEnctypes, l.AllowWeakCrypto)

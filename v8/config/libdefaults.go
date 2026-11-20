@@ -12,6 +12,7 @@ const (
 	bitsPerByte           = 8
 	maxCCacheType         = 4
 	maxUDPPreferenceLimit = 32700
+	pkinitEKUModeKDC      = "kdc"
 )
 
 func (l *LibDefaults) parseOption(key, value, line string) error {
@@ -48,26 +49,33 @@ func (l *LibDefaults) booleanOption(key string) *bool {
 		return &l.RequestPAC
 	case "pkinit_require_crl_checking":
 		return &l.PKINITRequireCRLCheck
+	case "forwardable":
+		return &l.Forwardable
+	case "k5login_authoritative":
+		return &l.K5LoginAuthoritative
+	case "proxiable":
+		return &l.Proxiable
+	case "verify_ap_req_nofail":
+		return &l.VerifyAPReqNofail
+	default:
+		return l.networkBooleanOption(key)
+	}
+}
+
+func (l *LibDefaults) networkBooleanOption(key string) *bool {
+	switch key {
 	case "dns_canonicalize_hostname":
 		return &l.DNSCanonicalizeHostname
 	case "dns_lookup_kdc":
 		return &l.DNSLookupKDC
 	case "dns_lookup_realm":
 		return &l.DNSLookupRealm
-	case "forwardable":
-		return &l.Forwardable
 	case "ignore_acceptor_hostname":
 		return &l.IgnoreAcceptorHostname
-	case "k5login_authoritative":
-		return &l.K5LoginAuthoritative
 	case "noaddresses":
 		return &l.NoAddresses
-	case "proxiable":
-		return &l.Proxiable
 	case "rdns":
 		return &l.RDNS
-	case "verify_ap_req_nofail":
-		return &l.VerifyAPReqNofail
 	default:
 		return nil
 	}
@@ -236,7 +244,7 @@ func (l *LibDefaults) parsePKINITDHMinBits(value, line string) error {
 
 func (l *LibDefaults) parsePKINITEKUChecking(value, line string) error {
 	value = strings.TrimSpace(value)
-	if value != "kdc" && value != "kpServerAuth" && value != "none" {
+	if value != pkinitEKUModeKDC && value != "kpServerAuth" && value != "none" {
 		return InvalidErrorf("libdefaults section line (%s): invalid PKINIT EKU checking mode", line)
 	}
 	l.PKINITEKUChecking = value

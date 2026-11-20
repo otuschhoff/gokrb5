@@ -820,6 +820,22 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 137 (2026-11-20, complete v8 config lint cleanup; Q-10):
+Separate hostname, address, and DNS boolean directives from the other
+boolean options without changing their field mappings or error handling.
+Apply the existing nonzero defaults to a zero-initialized `LibDefaults`,
+name the existing PKINIT EKU mode and DH default, and consolidate a repeated
+characterization fixture value. Parser behavior and the public API are
+unchanged; no suppressions or lint policy changes were added.
+
+Uncapped whole-v8 scans report zero config findings, down from zero
+canonical and six supplemental. Diagnostics outside config are unchanged;
+whole-v8 totals are 465 canonical and 2,785 supplemental. The config
+package passes 100 shuffled race-enabled runs, and its direct consumers
+pass under race detection. Default-tag config statement coverage is 98.6%.
+The v8 build, vet, and default test suite pass, as does changed-line lint
+for both modules.
+
 Slice 136 (2026-11-20, complete v8 SPNEGO lint cleanup; Q-10):
 Separate generic and Kerberos negotiation into mechanism selection, token
 verification, MIC handling, and context completion. Split HTTP negotiation
