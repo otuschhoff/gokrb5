@@ -18,6 +18,7 @@ import (
 
 	"github.com/jcmturner/gofork/encoding/asn1"
 
+	"github.com/otuschhoff/gokrb5/v8/iana/chksumtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 )
 
@@ -50,6 +51,7 @@ func New() *Config {
 	d := make(DomainRealm)
 	return &Config{
 		LibDefaults: newLibDefaults(),
+		Realms:      nil, // Preserve the JSON null when no realms are configured.
 		DomainRealm: d,
 	}
 }
@@ -176,7 +178,7 @@ func newLibDefaults() LibDefaults {
 		RDNS:                    true,
 		RealmTryDomains:         -1,
 		RequestPAC:              true,
-		SafeChecksumType:        8,
+		SafeChecksumType:        int(chksumtype.RSA_MD5_DES),
 		TicketLifetime:          defaultTicketLifetime,
 		UDPPreferenceLimit:      defaultUDPPreferenceLimit,
 		PreferredPreauthTypes:   []int{17, 16, 15, 14},

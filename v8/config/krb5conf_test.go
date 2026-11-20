@@ -16,6 +16,26 @@ import (
 
 type failingConfigReader struct{ err error }
 
+func TestNewWithoutRealms(t *testing.T) {
+	t.Parallel()
+
+	cfg := New()
+	if cfg.Realms != nil {
+		t.Errorf("New().Realms = %#v, want nil", cfg.Realms)
+	}
+	output, err := cfg.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(output), &fields); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(fields["Realms"]); got != "null" {
+		t.Errorf("JSON Realms = %q, want null", got)
+	}
+}
+
 func TestNewKDCDefaultOptions(t *testing.T) {
 	t.Parallel()
 
