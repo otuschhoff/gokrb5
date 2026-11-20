@@ -4,8 +4,11 @@ import "testing"
 
 func FuzzNegoExUnmarshal(f *testing.F) {
 	seed, err := (&NegoMessage{
-		Header:      testHeader(MessageTypeInitiatorNego, 0),
-		AuthSchemes: []AuthScheme{testScheme()},
+		Header:          testHeader(MessageTypeInitiatorNego, 0),
+		Random:          [32]byte{},
+		ProtocolVersion: 0,
+		AuthSchemes:     []AuthScheme{testScheme()},
+		Extensions:      nil,
 	}).MarshalBinary()
 	if err != nil {
 		f.Fatal(err)

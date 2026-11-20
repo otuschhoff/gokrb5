@@ -17,15 +17,6 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
-func mustNegoexTestType[T any](t *testing.T, value any) T {
-	t.Helper()
-	result, ok := value.(T)
-	if !ok {
-		t.Fatalf("unexpected type %T", value)
-	}
-	return result
-}
-
 func mustNewInitiator(t *testing.T, target string, schemes ...Scheme) *Conversation {
 	t.Helper()
 	conversation, err := NewInitiator(target, schemes...)
@@ -86,8 +77,11 @@ func TestNEGOEXConversionBounds(t *testing.T) {
 
 func testHeader(messageType, sequence uint32) MessageHeader {
 	return MessageHeader{
-		MessageType: messageType,
-		SequenceNum: sequence,
+		Signature:     0,
+		MessageType:   messageType,
+		SequenceNum:   sequence,
+		HeaderLength:  0,
+		MessageLength: 0,
 		ConversationID: ConversationID{
 			0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
 			0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe,
@@ -97,6 +91,15 @@ func testHeader(messageType, sequence uint32) MessageHeader {
 
 func testScheme() AuthScheme {
 	return AuthScheme{0x0d, 0x53, 0x3d, 0x30, 0x8c, 0x7e, 0x4d, 0x4f, 0x9e, 0x4a, 0x9f, 0x1e, 0x5b, 0x2c, 0x4a, 0x6f}
+}
+
+func mustUnmarshalTestMessages(t *testing.T, data []byte) []Message {
+	t.Helper()
+	messages, err := Unmarshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return messages
 }
 
 func TestMessageHeaderRoundTrip(t *testing.T) {
@@ -118,24 +121,27 @@ func TestMessageHeaderRoundTrip(t *testing.T) {
 	if got := binary.LittleEndian.Uint32(data[20:24]); got != mustNEGOEXUint32(t, len(data)) {
 		t.Fatalf("message length = %d, encoded length = %d", got, len(data))
 	}
-	decoded, err := Unmarshal(data)
-	if err != nil {
-		t.Fatal(err)
-	}
+	decoded := mustUnmarshalTestMessages(t, data)
 	if len(decoded) != 1 {
 		t.Fatalf("decoded message count = %d, want 1", len(decoded))
 	}
-	got := mustNegoexTestType[*ExchangeMessage](t, decoded[0])
-	if !reflect.DeepEqual(got.Exchange, message.Exchange) || got.Header.SequenceNum != 7 || got.AuthScheme != message.AuthScheme {
+	got, ok := decoded[0].(*ExchangeMessage)
+	if !ok {
+		t.Fatalf("unexpected type %T", decoded[0])
+	}
+	if !reflect.DeepEqual(got.Exchange, message.Exchange) ||
+		got.Header.SequenceNum != 7 || got.AuthScheme != message.AuthScheme {
 		t.Fatalf("round trip mismatch: %#v", got)
 	}
 }
 
 func TestNegoMessageVectors(t *testing.T) {
 	message := &NegoMessage{
-		Header:      testHeader(MessageTypeInitiatorNego, 0),
-		AuthSchemes: []AuthScheme{testScheme(), {1, 2, 3}},
-		Extensions:  []Extension{{Type: 12, Value: []byte("extension")}},
+		Header:          testHeader(MessageTypeInitiatorNego, 0),
+		Random:          [32]byte{},
+		ProtocolVersion: 0,
+		AuthSchemes:     []AuthScheme{testScheme(), {1, 2, 3}},
+		Extensions:      []Extension{{Type: 12, Value: []byte("extension")}},
 	}
 	for index := range message.Random {
 		message.Random[index] = byte(index)
@@ -150,15 +156,16 @@ func TestNegoMessageVectors(t *testing.T) {
 	if got := binary.LittleEndian.Uint16(data[84:86]); got != 2 {
 		t.Fatalf("auth scheme count = %d", got)
 	}
-	decoded, err := Unmarshal(data)
-	if err != nil {
-		t.Fatal(err)
-	}
+	decoded := mustUnmarshalTestMessages(t, data)
 	if len(decoded) != 1 {
 		t.Fatalf("decoded message count = %d, want 1", len(decoded))
 	}
-	got := mustNegoexTestType[*NegoMessage](t, decoded[0])
-	if !reflect.DeepEqual(got.AuthSchemes, message.AuthSchemes) || !reflect.DeepEqual(got.Extensions, message.Extensions) || got.Random != message.Random {
+	got, ok := decoded[0].(*NegoMessage)
+	if !ok {
+		t.Fatalf("unexpected type %T", decoded[0])
+	}
+	if !reflect.DeepEqual(got.AuthSchemes, message.AuthSchemes) ||
+		!reflect.DeepEqual(got.Extensions, message.Extensions) || got.Random != message.Random {
 		t.Fatalf("round trip mismatch: %#v", got)
 	}
 }
@@ -180,8 +187,15 @@ func TestMSExampleInitiatorNegoFixture(t *testing.T) {
 	if len(messages) != 1 {
 		t.Fatalf("decoded %d messages", len(messages))
 	}
-	nego := mustNegoexTestType[*NegoMessage](t, messages[0])
-	if len(nego.AuthSchemes) != 1 || nego.AuthSchemes[0] != (AuthScheme{0x5c, 0x33, 0x53, 0x0d, 0xea, 0xf9, 0x0d, 0x4d, 0xb2, 0xec, 0x4a, 0xe3, 0x78, 0x6e, 0xc3, 0x08}) {
+	nego, ok := messages[0].(*NegoMessage)
+	if !ok {
+		t.Fatalf("unexpected type %T", messages[0])
+	}
+	wantScheme := AuthScheme{
+		0x5c, 0x33, 0x53, 0x0d, 0xea, 0xf9, 0x0d, 0x4d,
+		0xb2, 0xec, 0x4a, 0xe3, 0x78, 0x6e, 0xc3, 0x08,
+	}
+	if len(nego.AuthSchemes) != 1 || nego.AuthSchemes[0] != wantScheme {
 		t.Fatalf("auth schemes = %x", nego.AuthSchemes)
 	}
 	encoded, err := nego.MarshalBinary()
@@ -197,36 +211,46 @@ func TestVerifyAndAlertRoundTrip(t *testing.T) {
 	verify := &VerifyMessage{
 		Header:     testHeader(MessageTypeVerify, 3),
 		AuthScheme: testScheme(),
-		Checksum:   Checksum{Type: 16, Value: []byte("checksum")},
+		Checksum:   Checksum{HeaderLength: 0, Scheme: 0, Type: 16, Value: []byte("checksum")},
+		Offset:     0,
 	}
 	alert := &AlertMessage{
 		Header:     testHeader(MessageTypeAlert, 4),
 		AuthScheme: testScheme(),
+		ErrorCode:  0,
 		Alerts:     []Alert{VerifyNoKeyAlert()},
 	}
 	token, err := Marshal(verify, alert)
 	if err != nil {
 		t.Fatal(err)
 	}
-	messages, err := Unmarshal(token)
-	if err != nil {
-		t.Fatal(err)
-	}
+	messages := mustUnmarshalTestMessages(t, token)
 	if len(messages) != 2 {
 		t.Fatalf("decoded %d messages", len(messages))
 	}
-	gotVerify := mustNegoexTestType[*VerifyMessage](t, messages[0])
-	if gotVerify.Offset != 0 || gotVerify.Checksum.Scheme != ChecksumSchemeRFC3961 || !reflect.DeepEqual(gotVerify.Checksum.Value, verify.Checksum.Value) {
+	gotVerify, ok := messages[0].(*VerifyMessage)
+	if !ok {
+		t.Fatalf("unexpected type %T", messages[0])
+	}
+	if gotVerify.Offset != 0 || gotVerify.Checksum.Scheme != ChecksumSchemeRFC3961 ||
+		!reflect.DeepEqual(gotVerify.Checksum.Value, verify.Checksum.Value) {
 		t.Fatalf("verify mismatch: %#v", gotVerify)
 	}
-	gotAlert := mustNegoexTestType[*AlertMessage](t, messages[1])
+	gotAlert, ok := messages[1].(*AlertMessage)
+	if !ok {
+		t.Fatalf("unexpected type %T", messages[1])
+	}
 	if len(gotAlert.Alerts) != 1 || !gotAlert.Alerts[0].IsVerifyNoKey() {
 		t.Fatalf("alert mismatch: %#v", gotAlert)
 	}
 }
 
 func TestDecoderRejectsOutOfRangeVectors(t *testing.T) {
-	message := &ExchangeMessage{Header: testHeader(MessageTypeChallenge, 1), Exchange: []byte{1}}
+	message := &ExchangeMessage{
+		Header:     testHeader(MessageTypeChallenge, 1),
+		AuthScheme: AuthScheme{},
+		Exchange:   []byte{1},
+	}
 	data, err := message.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -248,8 +272,11 @@ func TestDecoderRejectsOutOfRangeVectors(t *testing.T) {
 
 func TestDecoderRejectsCriticalExtension(t *testing.T) {
 	message := &NegoMessage{
-		Header:     testHeader(MessageTypeInitiatorNego, 0),
-		Extensions: []Extension{{Type: ExtensionFlagCritical | 1}},
+		Header:          testHeader(MessageTypeInitiatorNego, 0),
+		Random:          [32]byte{},
+		ProtocolVersion: 0,
+		AuthSchemes:     nil,
+		Extensions:      []Extension{{Type: ExtensionFlagCritical | 1, Value: nil}},
 	}
 	data, err := message.MarshalBinary()
 	if err != nil {
@@ -261,7 +288,11 @@ func TestDecoderRejectsCriticalExtension(t *testing.T) {
 }
 
 func TestDecoderRejectsMalformedHeaders(t *testing.T) {
-	message := &ExchangeMessage{Header: testHeader(MessageTypeAPRequest, 0)}
+	message := &ExchangeMessage{
+		Header:     testHeader(MessageTypeAPRequest, 0),
+		AuthScheme: AuthScheme{},
+		Exchange:   nil,
+	}
 	data, err := message.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -332,11 +363,20 @@ type testPKU2UMechanism struct {
 
 func (*testPKU2UMechanism) OID() asn1.ObjectIdentifier { return gssapi.OIDPKU2U.OID() }
 
-func (m *testPKU2UMechanism) InitSecContext(target string, input []byte, _ ...gssapi.MechanismOption) ([]byte, gssapi.Context, bool, error) {
+//nolint:ireturn // gssapi.Mechanism requires a gssapi.Context result.
+func (m *testPKU2UMechanism) InitSecContext(
+	target string,
+	input []byte,
+	_ ...gssapi.MechanismOption,
+) ([]byte, gssapi.Context, bool, error) {
 	return m.testSchemeMechanism.InitSecContext(target, input)
 }
 
-func (m *testPKU2UMechanism) AcceptSecContext(input []byte, _ ...gssapi.MechanismOption) ([]byte, gssapi.Context, bool, error) {
+//nolint:ireturn // gssapi.Mechanism requires a gssapi.Context result.
+func (m *testPKU2UMechanism) AcceptSecContext(
+	input []byte,
+	_ ...gssapi.MechanismOption,
+) ([]byte, gssapi.Context, bool, error) {
 	return m.testSchemeMechanism.AcceptSecContext(input)
 }
 
@@ -355,6 +395,8 @@ func (m *testPKU2UMechanism) ExchangeMetadata(metadata []byte, initiator bool) e
 }
 
 func (m *testSchemeMechanism) AuthScheme() AuthScheme { return m.id }
+
+//nolint:ireturn // Scheme requires a gssapi.Context result.
 func (m *testSchemeMechanism) InitSecContext(_ string, input []byte) ([]byte, gssapi.Context, bool, error) {
 	switch string(input) {
 	case "":
@@ -366,6 +408,7 @@ func (m *testSchemeMechanism) InitSecContext(_ string, input []byte) ([]byte, gs
 	}
 }
 
+//nolint:ireturn // Scheme requires a gssapi.Context result.
 func (m *testSchemeMechanism) AcceptSecContext(input []byte) ([]byte, gssapi.Context, bool, error) {
 	if m.acceptErr != nil {
 		return m.acceptErrorToken, nil, false, m.acceptErr
@@ -404,12 +447,19 @@ func TestPKU2USchemeDelegatesMechanism(t *testing.T) {
 	if scheme.AuthScheme() != PKU2UAuthScheme {
 		t.Fatalf("auth scheme = %v", scheme.AuthScheme())
 	}
-	if output, _, done, err := scheme.InitSecContext("host/server", nil); err != nil || done || string(output) != "request-1" {
+	output, _, done, err := scheme.InitSecContext("host/server", nil)
+	if err != nil || done || string(output) != "request-1" {
 		t.Fatalf("initiator output = %q, done=%v, err=%v", output, done, err)
 	}
-	if output, _, done, err := scheme.AcceptSecContext([]byte("request-1")); err != nil || done || string(output) != "challenge" {
+	output, _, done, err = scheme.AcceptSecContext([]byte("request-1"))
+	if err != nil || done || string(output) != "challenge" {
 		t.Fatalf("acceptor output = %q, done=%v, err=%v", output, done, err)
 	}
+	checkPKU2UMetadataDelegation(t, scheme)
+}
+
+func checkPKU2UMetadataDelegation(t *testing.T, scheme MetadataScheme) {
+	t.Helper()
 	if metadata, err := scheme.QueryMetadata("host/server", true); err != nil || string(metadata) != "metadata" {
 		t.Fatalf("query metadata = %q, %v", metadata, err)
 	}
@@ -435,15 +485,24 @@ func TestNilConversationAccessors(t *testing.T) {
 
 func TestConversationEndToEnd(t *testing.T) {
 	schemeID := testScheme()
-	initiator, err := NewInitiator("host/server", newTestScheme(schemeID))
-	if err != nil {
-		t.Fatal(err)
+	initiator := mustNewInitiator(t, "host/server", newTestScheme(schemeID))
+	acceptor := mustNewAcceptor(t, newTestScheme(schemeID))
+	challenge := startTestConversation(t, initiator, acceptor)
+	initiatorToken, done, err := initiator.Step(challenge)
+	if err != nil || !done {
+		t.Fatalf("final initiator step: done=%v err=%v", done, err)
 	}
-	acceptor, err := NewAcceptor(newTestScheme(schemeID))
-	if err != nil {
-		t.Fatal(err)
+	acceptorToken, done, err := acceptor.Step(initiatorToken)
+	if err != nil || !done || len(acceptorToken) != 0 {
+		t.Fatalf("final acceptor step: output=%x done=%v err=%v", acceptorToken, done, err)
 	}
+	if initiator.SelectedScheme() != schemeID || acceptor.SelectedScheme() != schemeID {
+		t.Fatal("conversation selected the wrong scheme")
+	}
+}
 
+func startTestConversation(t *testing.T, initiator, acceptor *Conversation) []byte {
+	t.Helper()
 	initiatorToken, done, err := initiator.Step(nil)
 	if err != nil || done {
 		t.Fatalf("initial initiator step: done=%v err=%v", done, err)
@@ -452,17 +511,7 @@ func TestConversationEndToEnd(t *testing.T) {
 	if err != nil || done {
 		t.Fatalf("initial acceptor step: done=%v err=%v", done, err)
 	}
-	initiatorToken, done, err = initiator.Step(acceptorToken)
-	if err != nil || !done {
-		t.Fatalf("final initiator step: done=%v err=%v", done, err)
-	}
-	acceptorToken, done, err = acceptor.Step(initiatorToken)
-	if err != nil || !done || len(acceptorToken) != 0 {
-		t.Fatalf("final acceptor step: output=%x done=%v err=%v", acceptorToken, done, err)
-	}
-	if initiator.SelectedScheme() != schemeID || acceptor.SelectedScheme() != schemeID {
-		t.Fatal("conversation selected the wrong scheme")
-	}
+	return acceptorToken
 }
 
 func TestMechanismEndToEndAndGuards(t *testing.T) {
@@ -472,7 +521,23 @@ func TestMechanismEndToEndAndGuards(t *testing.T) {
 	if !initiator.OID().Equal(gssapi.OIDNegoEx.OID()) {
 		t.Fatalf("mechanism OID = %v", initiator.OID())
 	}
+	challenge := startTestMechanism(t, initiator, acceptor)
+	finishTestMechanism(t, initiator, acceptor, challenge)
 
+	_, _, _, err := initiator.InitSecContext("other/target", nil)
+	if err == nil || !strings.Contains(err.Error(), "target changed") {
+		t.Fatalf("target change error = %v", err)
+	}
+	if _, _, _, err := New().InitSecContext("host/server", nil); !errors.Is(err, ErrNoAvailableSchemes) {
+		t.Fatalf("empty initiator error = %v", err)
+	}
+	if _, _, _, err := New().AcceptSecContext([]byte{1}); !errors.Is(err, ErrNoAvailableSchemes) {
+		t.Fatalf("empty acceptor error = %v", err)
+	}
+}
+
+func startTestMechanism(t *testing.T, initiator, acceptor *Mechanism) []byte {
+	t.Helper()
 	initiatorToken, initiatorContext, done, err := initiator.InitSecContext("host/server", nil)
 	if err != nil || done || initiatorContext == nil {
 		t.Fatalf("initial initiator = context %v, done %v, err %v", initiatorContext, done, err)
@@ -481,22 +546,18 @@ func TestMechanismEndToEndAndGuards(t *testing.T) {
 	if err != nil || done || acceptorContext == nil {
 		t.Fatalf("initial acceptor = context %v, done %v, err %v", acceptorContext, done, err)
 	}
-	initiatorToken, initiatorContext, done, err = initiator.InitSecContext("host/server", acceptorToken)
+	return acceptorToken
+}
+
+func finishTestMechanism(t *testing.T, initiator, acceptor *Mechanism, challenge []byte) {
+	t.Helper()
+	initiatorToken, initiatorContext, done, err := initiator.InitSecContext("host/server", challenge)
 	if err != nil || !done || initiatorContext == nil {
 		t.Fatalf("final initiator = context %v, done %v, err %v", initiatorContext, done, err)
 	}
-	acceptorToken, acceptorContext, done, err = acceptor.AcceptSecContext(initiatorToken)
+	acceptorToken, acceptorContext, done, err := acceptor.AcceptSecContext(initiatorToken)
 	if err != nil || !done || len(acceptorToken) != 0 || acceptorContext == nil {
 		t.Fatalf("final acceptor = output %x, context %v, done %v, err %v", acceptorToken, acceptorContext, done, err)
-	}
-	if _, _, _, err := initiator.InitSecContext("other/target", nil); err == nil || !strings.Contains(err.Error(), "target changed") {
-		t.Fatalf("target change error = %v", err)
-	}
-	if _, _, _, err := New().InitSecContext("host/server", nil); !errors.Is(err, ErrNoAvailableSchemes) {
-		t.Fatalf("empty initiator error = %v", err)
-	}
-	if _, _, _, err := New().AcceptSecContext([]byte{1}); !errors.Is(err, ErrNoAvailableSchemes) {
-		t.Fatalf("empty acceptor error = %v", err)
 	}
 }
 
@@ -638,6 +699,7 @@ type rejectEmptyScheme struct {
 	acceptCalls int
 }
 
+//nolint:ireturn // Scheme requires a gssapi.Context result.
 func (m *rejectEmptyScheme) AcceptSecContext(input []byte) ([]byte, gssapi.Context, bool, error) {
 	m.acceptCalls++
 	if len(input) == 0 {
@@ -650,7 +712,7 @@ func TestAcceptorIgnoresUnsupportedOptimisticToken(t *testing.T) {
 	firstID := AuthScheme{1}
 	selectedID := AuthScheme{2}
 	initiator := mustNewInitiator(t, "host/server", newTestScheme(firstID), newTestScheme(selectedID))
-	selected := &rejectEmptyScheme{testSchemeMechanism: newTestScheme(selectedID)}
+	selected := &rejectEmptyScheme{testSchemeMechanism: newTestScheme(selectedID), acceptCalls: 0}
 	acceptor := mustNewAcceptor(t, selected)
 
 	initiatorToken, _, err := initiator.Step(nil)
@@ -692,7 +754,12 @@ func (m *testMetadataScheme) ExchangeMetadata([]byte, bool) error {
 func TestMetadataFailurePrunesScheme(t *testing.T) {
 	failedID := AuthScheme{1}
 	selectedID := AuthScheme{2}
-	failed := &testMetadataScheme{testSchemeMechanism: newTestScheme(failedID), queryErr: errors.New("unavailable")}
+	failed := &testMetadataScheme{
+		testSchemeMechanism: newTestScheme(failedID),
+		queryErr:            errors.New("unavailable"),
+		exchangeErr:         nil,
+		exchangeCalls:       0,
+	}
 	initiator := mustNewInitiator(t, "host/server", failed, newTestScheme(selectedID))
 
 	token, _, err := initiator.Step(nil)
@@ -712,7 +779,12 @@ func TestMetadataFailurePrunesScheme(t *testing.T) {
 func TestMetadataExchangeFailurePrunesScheme(t *testing.T) {
 	failedID := AuthScheme{1}
 	selectedID := AuthScheme{2}
-	failed := &testMetadataScheme{testSchemeMechanism: newTestScheme(failedID), exchangeErr: errors.New("rejected")}
+	failed := &testMetadataScheme{
+		testSchemeMechanism: newTestScheme(failedID),
+		queryErr:            nil,
+		exchangeErr:         errors.New("rejected"),
+		exchangeCalls:       0,
+	}
 	acceptor := mustNewAcceptor(t, failed, newTestScheme(selectedID))
 	metadata := &ExchangeMessage{
 		Header:     testHeader(MessageTypeInitiatorMetaData, 1),
@@ -720,8 +792,11 @@ func TestMetadataExchangeFailurePrunesScheme(t *testing.T) {
 		Exchange:   []byte("metadata"),
 	}
 	nego := &NegoMessage{
-		Header:      testHeader(MessageTypeInitiatorNego, 0),
-		AuthSchemes: []AuthScheme{failedID, selectedID},
+		Header:          testHeader(MessageTypeInitiatorNego, 0),
+		Random:          [32]byte{},
+		ProtocolVersion: 0,
+		AuthSchemes:     []AuthScheme{failedID, selectedID},
+		Extensions:      nil,
 	}
 	token, err := Marshal(nego, metadata)
 	if err != nil {
@@ -744,11 +819,30 @@ func TestMetadataExchangeFailurePrunesScheme(t *testing.T) {
 
 func TestConversationProcessesEveryMetadataMessage(t *testing.T) {
 	schemeID := testScheme()
-	scheme := &testMetadataScheme{testSchemeMechanism: newTestScheme(schemeID)}
+	scheme := &testMetadataScheme{
+		testSchemeMechanism: newTestScheme(schemeID),
+		queryErr:            nil,
+		exchangeErr:         nil,
+		exchangeCalls:       0,
+	}
 	acceptor := mustNewAcceptor(t, scheme)
-	nego := &NegoMessage{Header: testHeader(MessageTypeInitiatorNego, 0), AuthSchemes: []AuthScheme{schemeID}}
-	first := &ExchangeMessage{Header: testHeader(MessageTypeInitiatorMetaData, 1), AuthScheme: schemeID, Exchange: []byte("first")}
-	second := &ExchangeMessage{Header: testHeader(MessageTypeInitiatorMetaData, 2), AuthScheme: schemeID, Exchange: []byte("second")}
+	nego := &NegoMessage{
+		Header:          testHeader(MessageTypeInitiatorNego, 0),
+		Random:          [32]byte{},
+		ProtocolVersion: 0,
+		AuthSchemes:     []AuthScheme{schemeID},
+		Extensions:      nil,
+	}
+	first := &ExchangeMessage{
+		Header:     testHeader(MessageTypeInitiatorMetaData, 1),
+		AuthScheme: schemeID,
+		Exchange:   []byte("first"),
+	}
+	second := &ExchangeMessage{
+		Header:     testHeader(MessageTypeInitiatorMetaData, 2),
+		AuthScheme: schemeID,
+		Exchange:   []byte("second"),
+	}
 	token, err := Marshal(nego, first, second)
 	if err != nil {
 		t.Fatal(err)
@@ -764,10 +858,18 @@ func TestConversationProcessesEveryMetadataMessage(t *testing.T) {
 func TestConversationMapsAlertNTStatus(t *testing.T) {
 	schemeID := testScheme()
 	acceptor := mustNewAcceptor(t, newTestScheme(schemeID))
-	nego := &NegoMessage{Header: testHeader(MessageTypeInitiatorNego, 0), AuthSchemes: []AuthScheme{schemeID}}
+	nego := &NegoMessage{
+		Header:          testHeader(MessageTypeInitiatorNego, 0),
+		Random:          [32]byte{},
+		ProtocolVersion: 0,
+		AuthSchemes:     []AuthScheme{schemeID},
+		Extensions:      nil,
+	}
 	alert := &AlertMessage{
-		Header: testHeader(MessageTypeAlert, 1), AuthScheme: schemeID,
-		ErrorCode: uint32(ntstatus.STATUS_ACCOUNT_DISABLED),
+		Header:     testHeader(MessageTypeAlert, 1),
+		AuthScheme: schemeID,
+		ErrorCode:  uint32(ntstatus.STATUS_ACCOUNT_DISABLED),
+		Alerts:     nil,
 	}
 	token, err := Marshal(nego, alert)
 	if err != nil {

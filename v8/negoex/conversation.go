@@ -69,9 +69,9 @@ type Conversation struct {
 
 // NewInitiator creates an initiator conversation.
 func NewInitiator(target string, schemes ...Scheme) (*Conversation, error) {
-	conversation := &Conversation{initiator: true, target: target, schemes: uniqueSchemes(schemes)}
-	if len(conversation.schemes) == 0 {
-		return nil, ErrNoAvailableSchemes
+	conversation, err := newConversation(true, target, schemes)
+	if err != nil {
+		return nil, err
 	}
 	if _, err := rand.Read(conversation.conversation[:]); err != nil {
 		return nil, fmt.Errorf("generate NEGOEX conversation ID: %w", err)
@@ -81,14 +81,33 @@ func NewInitiator(target string, schemes ...Scheme) (*Conversation, error) {
 
 // NewAcceptor creates an acceptor conversation.
 func NewAcceptor(schemes ...Scheme) (*Conversation, error) {
-	conversation := &Conversation{schemes: uniqueSchemes(schemes)}
-	if len(conversation.schemes) == 0 {
+	return newConversation(false, "", schemes)
+}
+
+func newConversation(initiator bool, target string, schemes []Scheme) (*Conversation, error) {
+	schemes = uniqueSchemes(schemes)
+	if len(schemes) == 0 {
 		return nil, ErrNoAvailableSchemes
 	}
-	return conversation, nil
+	return &Conversation{
+		initiator:     initiator,
+		target:        target,
+		schemes:       schemes,
+		selected:      nil,
+		context:       nil,
+		conversation:  ConversationID{},
+		sequence:      0,
+		step:          0,
+		transcript:    nil,
+		mechanismDone: false,
+		sentVerify:    false,
+		peerVerified:  false,
+	}, nil
 }
 
 // Context returns the selected mechanism context, if one has been created.
+//
+//nolint:ireturn // The concrete context is supplied by the selected scheme.
 func (c *Conversation) Context() gssapi.Context {
 	if c == nil {
 		return nil
@@ -140,18 +159,11 @@ func (c *Conversation) initialInitiatorToken() ([]byte, bool, error) {
 	if len(c.schemes) == 0 {
 		return nil, false, ErrNoAvailableSchemes
 	}
-	nego := &NegoMessage{Header: MessageHeader{MessageType: MessageTypeInitiatorNego}, AuthSchemes: schemeIDs(c.schemes)}
+	nego := newNegoMessage(MessageTypeInitiatorNego, c.schemes)
 	if _, err := rand.Read(nego.Random[:]); err != nil {
 		return nil, false, fmt.Errorf("generate initiator NEGOEX random value: %w", err)
 	}
-	var outgoing []Message
-	outgoing = append(outgoing, nego)
-	for _, scheme := range c.schemes {
-		metadata := metadataByScheme[scheme.AuthScheme()]
-		if len(metadata) > 0 {
-			outgoing = append(outgoing, &ExchangeMessage{Header: MessageHeader{MessageType: MessageTypeInitiatorMetaData}, AuthScheme: scheme.AuthScheme(), Exchange: metadata})
-		}
-	}
+	outgoing := c.appendMetadata([]Message{nego}, MessageTypeInitiatorMetaData, metadataByScheme)
 	c.selected = c.schemes[0]
 	mechanismToken, context, done, err := c.selected.InitSecContext(c.target, nil)
 	if err != nil {
@@ -159,86 +171,89 @@ func (c *Conversation) initialInitiatorToken() ([]byte, bool, error) {
 	}
 	c.context, c.mechanismDone = context, done
 	if len(mechanismToken) > 0 {
-		outgoing = append(outgoing, &ExchangeMessage{Header: MessageHeader{MessageType: MessageTypeAPRequest}, AuthScheme: c.selected.AuthScheme(), Exchange: mechanismToken})
+		outgoing = append(outgoing, newExchangeMessage(MessageTypeAPRequest, c.selected.AuthScheme(), mechanismToken))
 	}
 	return c.emit(outgoing, false)
 }
 
 func (c *Conversation) firstAcceptorStep(input []byte, messages []Message) ([]byte, bool, error) {
-	nego := findNego(messages, MessageTypeInitiatorNego)
-	if nego == nil {
-		return nil, false, ErrMissingNegoMessage
-	}
-	c.schemes = restrictSchemes(c.schemes, nego.AuthSchemes)
-	if len(c.schemes) == 0 {
-		return nil, false, ErrNoAvailableSchemes
-	}
-	c.processMetadata(messages, false)
-	var metadataByScheme map[AuthScheme][]byte
-	c.schemes, metadataByScheme = querySchemeMetadata(c.schemes, c.target, false)
-	if len(c.schemes) == 0 {
-		return nil, false, ErrNoAvailableSchemes
-	}
-	c.selected = c.schemes[0]
-	if err := incomingAlertError(messages, c.selected.AuthScheme()); err != nil {
+	metadataByScheme, err := c.selectAcceptorScheme(messages)
+	if err != nil {
 		return nil, false, err
 	}
-	request := findExchange(messages, MessageTypeAPRequest, c.selected.AuthScheme())
-	var mechanismToken []byte
-	if request != nil {
-		var err error
-		mechanismToken, c.context, c.mechanismDone, err = c.selected.AcceptSecContext(request.Exchange)
-		if err != nil && len(mechanismToken) == 0 {
-			// An optimistic mechanism failure is recoverable. The initiator can
-			// restart the selected mechanism after the acceptor negotiation.
-			c.context, c.mechanismDone = nil, false
-		}
+	if alertErr := incomingAlertError(messages, c.selected.AuthScheme()); alertErr != nil {
+		return nil, false, alertErr
 	}
+	mechanismToken := c.acceptOptimisticRequest(messages)
 	sendAlert, err := c.verifyIncoming(input, messages)
 	if err != nil {
 		return nil, false, err
 	}
 	c.transcript = append(c.transcript, input...)
 
-	response := &NegoMessage{Header: MessageHeader{MessageType: MessageTypeAcceptorNego}, AuthSchemes: schemeIDs(c.schemes)}
+	response := newNegoMessage(MessageTypeAcceptorNego, c.schemes)
 	if _, err := rand.Read(response.Random[:]); err != nil {
 		return nil, false, fmt.Errorf("generate acceptor NEGOEX random value: %w", err)
 	}
-	var outgoing []Message
-	outgoing = append(outgoing, response)
-	for _, scheme := range c.schemes {
-		metadata := metadataByScheme[scheme.AuthScheme()]
-		if len(metadata) > 0 {
-			outgoing = append(outgoing, &ExchangeMessage{Header: MessageHeader{MessageType: MessageTypeAcceptorMetaData}, AuthScheme: scheme.AuthScheme(), Exchange: metadata})
-		}
-	}
+	outgoing := c.appendMetadata([]Message{response}, MessageTypeAcceptorMetaData, metadataByScheme)
 	if len(mechanismToken) > 0 {
-		outgoing = append(outgoing, &ExchangeMessage{Header: MessageHeader{MessageType: MessageTypeChallenge}, AuthScheme: c.selected.AuthScheme(), Exchange: mechanismToken})
+		outgoing = append(outgoing, newExchangeMessage(MessageTypeChallenge, c.selected.AuthScheme(), mechanismToken))
 	}
 	return c.emit(outgoing, sendAlert)
 }
 
+func (c *Conversation) selectAcceptorScheme(messages []Message) (map[AuthScheme][]byte, error) {
+	nego := findNego(messages, MessageTypeInitiatorNego)
+	if nego == nil {
+		return nil, ErrMissingNegoMessage
+	}
+	c.schemes = restrictSchemes(c.schemes, nego.AuthSchemes)
+	if len(c.schemes) == 0 {
+		return nil, ErrNoAvailableSchemes
+	}
+	c.processMetadata(messages, false)
+	var metadataByScheme map[AuthScheme][]byte
+	c.schemes, metadataByScheme = querySchemeMetadata(c.schemes, c.target, false)
+	if len(c.schemes) == 0 {
+		return nil, ErrNoAvailableSchemes
+	}
+	c.selected = c.schemes[0]
+	return metadataByScheme, nil
+}
+
+func (c *Conversation) acceptOptimisticRequest(messages []Message) []byte {
+	request := findExchange(messages, MessageTypeAPRequest, c.selected.AuthScheme())
+	if request == nil {
+		return nil
+	}
+	var mechanismToken []byte
+	var err error
+	mechanismToken, c.context, c.mechanismDone, err = c.selected.AcceptSecContext(request.Exchange)
+	if err != nil && len(mechanismToken) == 0 {
+		// An optimistic mechanism failure is recoverable. The initiator can
+		// restart the selected mechanism after the acceptor negotiation.
+		c.context, c.mechanismDone = nil, false
+	}
+	return mechanismToken
+}
+
+func (c *Conversation) appendMetadata(
+	outgoing []Message,
+	messageType uint32,
+	metadataByScheme map[AuthScheme][]byte,
+) []Message {
+	for _, scheme := range c.schemes {
+		metadata := metadataByScheme[scheme.AuthScheme()]
+		if len(metadata) > 0 {
+			outgoing = append(outgoing, newExchangeMessage(messageType, scheme.AuthScheme(), metadata))
+		}
+	}
+	return outgoing
+}
+
 func (c *Conversation) continueStep(input []byte, messages []Message) ([]byte, bool, error) {
-	if c.initiator && c.step == 2 {
-		nego := findNego(messages, MessageTypeAcceptorNego)
-		if nego == nil {
-			return nil, false, ErrMissingNegoMessage
-		}
-		common := intersectSchemes(nego.AuthSchemes, c.schemes)
-		if len(common) == 0 {
-			return nil, false, ErrNoAvailableSchemes
-		}
-		previous := c.selected
-		c.schemes = common
-		c.processMetadata(messages, true)
-		if len(c.schemes) == 0 {
-			return nil, false, ErrNoAvailableSchemes
-		}
-		c.selected = c.schemes[0]
-		if previous == nil || previous.AuthScheme() != c.selected.AuthScheme() ||
-			(findExchange(messages, MessageTypeChallenge, c.selected.AuthScheme()) == nil && findVerify(messages, c.selected.AuthScheme()) == nil) {
-			c.context, c.mechanismDone = nil, false
-		}
+	if err := c.selectInitiatorScheme(messages); err != nil {
+		return nil, false, err
 	}
 	if err := incomingAlertError(messages, c.selected.AuthScheme()); err != nil {
 		return nil, false, err
@@ -255,34 +270,74 @@ func (c *Conversation) continueStep(input []byte, messages []Message) ([]byte, b
 	case exchange != nil:
 		mechanismInput = exchange.Exchange
 	case c.mechanismDone:
-		sendAlert, err := c.verifyIncoming(input, messages)
-		if err != nil {
-			return nil, false, err
-		}
-		if hasVerifyNoKeyAlert(messages, c.selected.AuthScheme()) {
-			c.sentVerify = false
-		}
-		c.transcript = append(c.transcript, input...)
-		return c.emit(nil, sendAlert)
+		return c.finishContinuation(input, messages, responseType, nil)
 	case !c.initiator || c.step != 2:
 		return nil, false, ErrUnexpectedToken
 	}
+	mechanismToken, err := c.advanceMechanism(mechanismInput)
+	if err != nil {
+		return nil, false, err
+	}
+	return c.finishContinuation(input, messages, responseType, mechanismToken)
+}
+
+func (c *Conversation) selectInitiatorScheme(messages []Message) error {
+	if !c.initiator || c.step != 2 {
+		return nil
+	}
+	nego := findNego(messages, MessageTypeAcceptorNego)
+	if nego == nil {
+		return ErrMissingNegoMessage
+	}
+	common := intersectSchemes(nego.AuthSchemes, c.schemes)
+	if len(common) == 0 {
+		return ErrNoAvailableSchemes
+	}
+	previous := c.selected
+	c.schemes = common
+	c.processMetadata(messages, true)
+	if len(c.schemes) == 0 {
+		return ErrNoAvailableSchemes
+	}
+	c.selected = c.schemes[0]
+	changed := previous == nil || previous.AuthScheme() != c.selected.AuthScheme()
+	if changed || c.missingOptimisticResponse(messages) {
+		c.context, c.mechanismDone = nil, false
+	}
+	return nil
+}
+
+func (c *Conversation) missingOptimisticResponse(messages []Message) bool {
+	return findExchange(messages, MessageTypeChallenge, c.selected.AuthScheme()) == nil &&
+		findVerify(messages, c.selected.AuthScheme()) == nil
+}
+
+func (c *Conversation) advanceMechanism(input []byte) ([]byte, error) {
 	var mechanismToken []byte
 	var context gssapi.Context
 	var done bool
 	var err error
 	if c.initiator {
-		mechanismToken, context, done, err = c.selected.InitSecContext(c.target, mechanismInput)
+		mechanismToken, context, done, err = c.selected.InitSecContext(c.target, input)
 	} else {
-		mechanismToken, context, done, err = c.selected.AcceptSecContext(mechanismInput)
+		mechanismToken, context, done, err = c.selected.AcceptSecContext(input)
 	}
 	if err != nil && len(mechanismToken) == 0 {
-		return nil, false, fmt.Errorf("continue NEGOEX mechanism: %w", err)
+		return nil, fmt.Errorf("continue NEGOEX mechanism: %w", err)
 	}
 	if context != nil {
 		c.context = context
 	}
 	c.mechanismDone = done
+	return mechanismToken, nil
+}
+
+func (c *Conversation) finishContinuation(
+	input []byte,
+	messages []Message,
+	responseType uint32,
+	mechanismToken []byte,
+) ([]byte, bool, error) {
 	sendAlert, err := c.verifyIncoming(input, messages)
 	if err != nil {
 		return nil, false, err
@@ -293,7 +348,7 @@ func (c *Conversation) continueStep(input []byte, messages []Message) ([]byte, b
 	c.transcript = append(c.transcript, input...)
 	var outgoing []Message
 	if len(mechanismToken) > 0 {
-		outgoing = append(outgoing, &ExchangeMessage{Header: MessageHeader{MessageType: responseType}, AuthScheme: c.selected.AuthScheme(), Exchange: mechanismToken})
+		outgoing = append(outgoing, newExchangeMessage(responseType, c.selected.AuthScheme(), mechanismToken))
 	}
 	return c.emit(outgoing, sendAlert)
 }
@@ -301,52 +356,76 @@ func (c *Conversation) continueStep(input []byte, messages []Message) ([]byte, b
 func (c *Conversation) emit(messages []Message, sendAlert bool) ([]byte, bool, error) {
 	if sendAlert {
 		messages = append(messages, &AlertMessage{
-			Header: MessageHeader{MessageType: MessageTypeAlert}, AuthScheme: c.selected.AuthScheme(), Alerts: []Alert{VerifyNoKeyAlert()},
+			Header:     outgoingMessageHeader(MessageTypeAlert, 0, ConversationID{}),
+			AuthScheme: c.selected.AuthScheme(),
+			ErrorCode:  0,
+			Alerts:     []Alert{VerifyNoKeyAlert()},
 		})
 	}
 	var output []byte
 	for _, message := range messages {
-		setMessageHeader(message, c.sequence, c.conversation)
-		encoded, err := marshalMessage(message)
+		encoded, err := c.encodeOutgoing(message)
 		if err != nil {
 			return nil, false, err
 		}
-		c.sequence++
-		c.transcript = append(c.transcript, encoded...)
 		output = append(output, encoded...)
 	}
-	if !c.sentVerify {
-		if c.context != nil {
-			if key, ok := c.context.NegoExKey(); ok {
-				usage := uint32(keyusage.NEGOEX_ACCEPTOR_CHECKSUM)
-				if c.initiator {
-					usage = keyusage.NEGOEX_INITIATOR_CHECKSUM
-				}
-				checksum, err := MakeChecksum(key, usage, c.transcript)
-				if err != nil {
-					return nil, false, err
-				}
-				verify := &VerifyMessage{Header: MessageHeader{MessageType: MessageTypeVerify}, AuthScheme: c.selected.AuthScheme(), Checksum: checksum}
-				setMessageHeader(verify, c.sequence, c.conversation)
-				encoded, err := marshalMessage(verify)
-				if err != nil {
-					return nil, false, err
-				}
-				c.sequence++
-				c.transcript = append(c.transcript, encoded...)
-				output = append(output, encoded...)
-				c.sentVerify = true
-			}
-		}
-		if c.mechanismDone && !c.sentVerify {
-			return nil, false, ErrNoVerifyKey
-		}
+	output, err := c.appendVerify(output)
+	if err != nil {
+		return nil, false, err
 	}
-	done := c.mechanismDone && c.sentVerify && c.peerVerified
-	if c.mechanismDone && c.sentVerify && !c.peerVerified && len(output) == 0 {
+	if !c.mechanismDone {
+		return output, false, nil
+	}
+	if !c.sentVerify {
+		return nil, false, ErrNoVerifyKey
+	}
+	if !c.peerVerified && len(output) == 0 {
 		return nil, false, ErrMissingVerify
 	}
-	return output, done, nil
+	return output, c.peerVerified, nil
+}
+
+func (c *Conversation) encodeOutgoing(message Message) ([]byte, error) {
+	setMessageHeader(message, c.sequence, c.conversation)
+	encoded, err := marshalMessage(message)
+	if err != nil {
+		return nil, err
+	}
+	c.sequence++
+	c.transcript = append(c.transcript, encoded...)
+	return encoded, nil
+}
+
+func (c *Conversation) appendVerify(output []byte) ([]byte, error) {
+	if c.sentVerify || c.context == nil {
+		return output, nil
+	}
+	key, ok := c.context.NegoExKey()
+	if !ok {
+		return output, nil
+	}
+	usage := uint32(keyusage.NEGOEX_ACCEPTOR_CHECKSUM)
+	if c.initiator {
+		usage = keyusage.NEGOEX_INITIATOR_CHECKSUM
+	}
+	checksum, err := MakeChecksum(key, usage, c.transcript)
+	if err != nil {
+		return nil, err
+	}
+	verify := &VerifyMessage{
+		Header:     outgoingMessageHeader(MessageTypeVerify, 0, ConversationID{}),
+		AuthScheme: c.selected.AuthScheme(),
+		Checksum:   checksum,
+		Offset:     0,
+	}
+	encoded, err := c.encodeOutgoing(verify)
+	if err != nil {
+		return nil, err
+	}
+	output = append(output, encoded...)
+	c.sentVerify = true
+	return output, nil
 }
 
 func (c *Conversation) validateIncoming(messages []Message) error {
@@ -404,25 +483,28 @@ func (c *Conversation) processMetadata(messages []Message, receivingAcceptorMeta
 	}
 	retained := c.schemes[:0]
 	for _, scheme := range c.schemes {
-		provider, handlesMetadata := scheme.(MetadataScheme)
-		accepted := true
-		if handlesMetadata {
-			for _, message := range messages {
-				metadata, ok := message.(*ExchangeMessage)
-				if !ok || metadata.Header.MessageType != messageType || metadata.AuthScheme != scheme.AuthScheme() {
-					continue
-				}
-				if err := provider.ExchangeMetadata(metadata.Exchange, c.initiator); err != nil {
-					accepted = false
-					break
-				}
-			}
-		}
-		if accepted {
+		if c.acceptsMetadata(scheme, messages, messageType) {
 			retained = append(retained, scheme)
 		}
 	}
 	c.schemes = retained
+}
+
+func (c *Conversation) acceptsMetadata(scheme Scheme, messages []Message, messageType uint32) bool {
+	provider, ok := scheme.(MetadataScheme)
+	if !ok {
+		return true
+	}
+	for _, message := range messages {
+		metadata, ok := message.(*ExchangeMessage)
+		if !ok || metadata.Header.MessageType != messageType || metadata.AuthScheme != scheme.AuthScheme() {
+			continue
+		}
+		if err := provider.ExchangeMetadata(metadata.Exchange, c.initiator); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func querySchemeMetadata(schemes []Scheme, target string, initiator bool) ([]Scheme, map[AuthScheme][]byte) {
@@ -505,7 +587,8 @@ func findNego(messages []Message, messageType uint32) *NegoMessage {
 
 func findExchange(messages []Message, messageType uint32, scheme AuthScheme) *ExchangeMessage {
 	for _, message := range messages {
-		if candidate, ok := message.(*ExchangeMessage); ok && candidate.Header.MessageType == messageType && candidate.AuthScheme == scheme {
+		candidate, ok := message.(*ExchangeMessage)
+		if ok && candidate.Header.MessageType == messageType && candidate.AuthScheme == scheme {
 			return candidate
 		}
 	}
@@ -546,8 +629,38 @@ func incomingAlertError(messages []Message, scheme AuthScheme) error {
 	return nil
 }
 
+func newNegoMessage(messageType uint32, schemes []Scheme) *NegoMessage {
+	return &NegoMessage{
+		Header:          outgoingMessageHeader(messageType, 0, ConversationID{}),
+		Random:          [32]byte{},
+		ProtocolVersion: 0,
+		AuthSchemes:     schemeIDs(schemes),
+		Extensions:      nil,
+	}
+}
+
+func newExchangeMessage(messageType uint32, scheme AuthScheme, exchange []byte) *ExchangeMessage {
+	return &ExchangeMessage{
+		Header:     outgoingMessageHeader(messageType, 0, ConversationID{}),
+		AuthScheme: scheme,
+		Exchange:   exchange,
+	}
+}
+
+func outgoingMessageHeader(messageType, sequence uint32, conversation ConversationID) MessageHeader {
+	// The message marshaler fills in the wire signature and lengths.
+	return MessageHeader{
+		Signature:      0,
+		MessageType:    messageType,
+		SequenceNum:    sequence,
+		HeaderLength:   0,
+		MessageLength:  0,
+		ConversationID: conversation,
+	}
+}
+
 func setMessageHeader(message Message, sequence uint32, conversation ConversationID) {
-	header := MessageHeader{MessageType: message.messageHeader().MessageType, SequenceNum: sequence, ConversationID: conversation}
+	header := outgoingMessageHeader(message.messageHeader().MessageType, sequence, conversation)
 	switch typed := message.(type) {
 	case *NegoMessage:
 		typed.Header = header
@@ -570,14 +683,20 @@ type Mechanism struct {
 
 // New creates a NEGOEX mechanism with schemes in preference order.
 func New(schemes ...Scheme) *Mechanism {
-	return &Mechanism{schemes: uniqueSchemes(schemes)}
+	return &Mechanism{schemes: uniqueSchemes(schemes), initiator: nil, acceptor: nil}
 }
 
 // OID returns the NEGOEX GSS mechanism OID.
 func (m *Mechanism) OID() asn1.ObjectIdentifier { return gssapi.OIDNegoEx.OID() }
 
 // InitSecContext advances the initiator conversation.
-func (m *Mechanism) InitSecContext(target string, input []byte, _ ...gssapi.MechanismOption) ([]byte, gssapi.Context, bool, error) {
+//
+//nolint:ireturn // Implements gssapi.ContextMechanism.
+func (m *Mechanism) InitSecContext(
+	target string,
+	input []byte,
+	_ ...gssapi.MechanismOption,
+) ([]byte, gssapi.Context, bool, error) {
 	if m.initiator == nil {
 		conversation, err := NewInitiator(target, m.schemes...)
 		if err != nil {
@@ -592,6 +711,8 @@ func (m *Mechanism) InitSecContext(target string, input []byte, _ ...gssapi.Mech
 }
 
 // AcceptSecContext advances the acceptor conversation.
+//
+//nolint:ireturn // Implements gssapi.ContextMechanism.
 func (m *Mechanism) AcceptSecContext(input []byte, _ ...gssapi.MechanismOption) ([]byte, gssapi.Context, bool, error) {
 	if m.acceptor == nil {
 		conversation, err := NewAcceptor(m.schemes...)

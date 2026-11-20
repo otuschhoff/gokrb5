@@ -7,7 +7,12 @@ import (
 )
 
 // PKU2UAuthScheme is the on-wire GUID 235f69ad-73fb-4dbc-8203-0629e739339b.
-var PKU2UAuthScheme = AuthScheme{0xad, 0x69, 0x5f, 0x23, 0xfb, 0x73, 0xbc, 0x4d, 0x82, 0x03, 0x06, 0x29, 0xe7, 0x39, 0x33, 0x9b}
+//
+//nolint:gochecknoglobals // Preserve the published GUID variable; arrays cannot be constants in Go.
+var PKU2UAuthScheme = AuthScheme{
+	0xad, 0x69, 0x5f, 0x23, 0xfb, 0x73, 0xbc, 0x4d,
+	0x82, 0x03, 0x06, 0x29, 0xe7, 0x39, 0x33, 0x9b,
+}
 
 // PKU2UMechanism is the interface required by the PKU2U NEGOEX adapter.
 type PKU2UMechanism interface {
@@ -21,12 +26,15 @@ type pku2uScheme struct {
 }
 
 // NewPKU2UScheme adapts a PKU2U context mechanism to a NEGOEX auth scheme.
+//
+//nolint:ireturn // Preserve the public adapter signature without exposing its concrete implementation.
 func NewPKU2UScheme(mechanism PKU2UMechanism) MetadataScheme {
 	return &pku2uScheme{mechanism: mechanism}
 }
 
 func (*pku2uScheme) AuthScheme() AuthScheme { return PKU2UAuthScheme }
 
+//nolint:ireturn // Implements MetadataScheme and forwards the underlying mechanism's context.
 func (scheme *pku2uScheme) InitSecContext(target string, input []byte) ([]byte, gssapi.Context, bool, error) {
 	output, context, done, err := scheme.mechanism.InitSecContext(target, input)
 	if err != nil {
@@ -35,6 +43,7 @@ func (scheme *pku2uScheme) InitSecContext(target string, input []byte) ([]byte, 
 	return output, context, done, nil
 }
 
+//nolint:ireturn // Implements MetadataScheme and forwards the underlying mechanism's context.
 func (scheme *pku2uScheme) AcceptSecContext(input []byte) ([]byte, gssapi.Context, bool, error) {
 	output, context, done, err := scheme.mechanism.AcceptSecContext(input)
 	if err != nil {

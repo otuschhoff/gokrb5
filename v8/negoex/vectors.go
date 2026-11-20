@@ -6,6 +6,15 @@ import (
 	"math"
 )
 
+const (
+	authSchemeVectorOffset = 80
+	extensionVectorOffset  = 86
+	alertVectorOffset      = 60
+	countVectorLength      = 6
+	descriptorValueOffset  = 4
+	checksumHeaderLength   = 20
+)
+
 // MarshalBinary marshals the NegoMessage message to bytes.
 func (m *NegoMessage) MarshalBinary() ([]byte, error) {
 	messageLength, err := negoMessageLength(m)
@@ -31,10 +40,12 @@ func (m *NegoMessage) MarshalBinary() ([]byte, error) {
 	if len(m.Extensions) == 0 {
 		extensionsOffset = 0
 	}
-	if err := putCountVector(data[80:86], authOffset, len(m.AuthSchemes)); err != nil {
+	authVector := data[authSchemeVectorOffset:extensionVectorOffset]
+	if err := putCountVector(authVector, authOffset, len(m.AuthSchemes)); err != nil {
 		return nil, err
 	}
-	if err := putCountVector(data[86:92], extensionsOffset, len(m.Extensions)); err != nil {
+	extensionVector := data[extensionVectorOffset : extensionVectorOffset+countVectorLength]
+	if err := putCountVector(extensionVector, extensionsOffset, len(m.Extensions)); err != nil {
 		return nil, err
 	}
 	return data, nil
@@ -81,13 +92,14 @@ func unmarshalNego(header MessageHeader, data []byte) (*NegoMessage, error) {
 	if err := checkHeaderLength(header, negoHeaderLength); err != nil {
 		return nil, err
 	}
-	message := &NegoMessage{Header: header}
+	var message NegoMessage
+	message.Header = header
 	copy(message.Random[:], data[40:72])
 	message.ProtocolVersion = binary.LittleEndian.Uint64(data[72:80])
 	if message.ProtocolVersion != 0 {
 		return nil, ErrUnsupportedVersion
 	}
-	authData, authCount, err := countVector(data, 80, len(AuthScheme{}))
+	authData, authCount, err := countVector(data, authSchemeVectorOffset, len(AuthScheme{}))
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +107,7 @@ func unmarshalNego(header MessageHeader, data []byte) (*NegoMessage, error) {
 	for index := range message.AuthSchemes {
 		copy(message.AuthSchemes[index][:], authData[index*16:(index+1)*16])
 	}
-	extensionData, extensionCount, err := countVector(data, 86, extensionLength)
+	extensionData, extensionCount, err := countVector(data, extensionVectorOffset, extensionLength)
 	if err != nil {
 		return nil, err
 	}
@@ -106,18 +118,19 @@ func unmarshalNego(header MessageHeader, data []byte) (*NegoMessage, error) {
 		if message.Extensions[index].Type&ExtensionFlagCritical != 0 {
 			return nil, ErrUnsupportedExtension
 		}
-		value, err := byteVector(data, descriptor, 4)
+		value, err := byteVector(data, descriptor, descriptorValueOffset)
 		if err != nil {
 			return nil, err
 		}
 		message.Extensions[index].Value = append([]byte(nil), value...)
 	}
-	return message, nil
+	return &message, nil
 }
 
 // MarshalBinary marshals the ExchangeMessage message to bytes.
 func (m *ExchangeMessage) MarshalBinary() ([]byte, error) {
-	if uint64(len(m.Exchange)) > math.MaxUint32-exchangeHeaderLength || len(m.Exchange) > int(^uint(0)>>1)-exchangeHeaderLength {
+	if uint64(len(m.Exchange)) > math.MaxUint32-exchangeHeaderLength ||
+		len(m.Exchange) > math.MaxInt-exchangeHeaderLength {
 		return nil, ErrInvalidMessageSize
 	}
 	if m.Header.MessageType < MessageTypeInitiatorMetaData || m.Header.MessageType > MessageTypeAPRequest {
@@ -139,19 +152,21 @@ func unmarshalExchange(header MessageHeader, data []byte) (*ExchangeMessage, err
 	if err := checkHeaderLength(header, exchangeHeaderLength); err != nil {
 		return nil, err
 	}
-	message := &ExchangeMessage{Header: header}
+	var message ExchangeMessage
+	message.Header = header
 	copy(message.AuthScheme[:], data[40:56])
 	value, err := byteVector(data, data[56:64], 0)
 	if err != nil {
 		return nil, err
 	}
 	message.Exchange = append([]byte(nil), value...)
-	return message, nil
+	return &message, nil
 }
 
 // MarshalBinary marshals the VerifyMessage message to bytes.
 func (m *VerifyMessage) MarshalBinary() ([]byte, error) {
-	if uint64(len(m.Checksum.Value)) > math.MaxUint32-verifyHeaderLength || len(m.Checksum.Value) > int(^uint(0)>>1)-verifyHeaderLength {
+	if uint64(len(m.Checksum.Value)) > math.MaxUint32-verifyHeaderLength ||
+		len(m.Checksum.Value) > math.MaxInt-verifyHeaderLength {
 		return nil, ErrInvalidMessageSize
 	}
 	if m.Checksum.Scheme != 0 && m.Checksum.Scheme != ChecksumSchemeRFC3961 {
@@ -163,7 +178,7 @@ func (m *VerifyMessage) MarshalBinary() ([]byte, error) {
 	}
 	data := marshalHeader(m.Header, MessageTypeVerify, verifyHeaderLength, messageLength)
 	copy(data[40:56], m.AuthScheme[:])
-	binary.LittleEndian.PutUint32(data[56:60], 20)
+	binary.LittleEndian.PutUint32(data[56:60], checksumHeaderLength)
 	binary.LittleEndian.PutUint32(data[60:64], ChecksumSchemeRFC3961)
 	binary.LittleEndian.PutUint32(data[64:68], m.Checksum.Type)
 	if err := putByteVector(data[68:76], verifyHeaderLength, len(m.Checksum.Value)); err != nil {
@@ -176,12 +191,13 @@ func unmarshalVerify(header MessageHeader, data []byte) (*VerifyMessage, error) 
 	if err := checkHeaderLength(header, verifyHeaderLength); err != nil {
 		return nil, err
 	}
-	message := &VerifyMessage{Header: header}
+	var message VerifyMessage
+	message.Header = header
 	copy(message.AuthScheme[:], data[40:56])
 	message.Checksum.HeaderLength = binary.LittleEndian.Uint32(data[56:60])
 	message.Checksum.Scheme = binary.LittleEndian.Uint32(data[60:64])
 	message.Checksum.Type = binary.LittleEndian.Uint32(data[64:68])
-	if message.Checksum.HeaderLength != 20 {
+	if message.Checksum.HeaderLength != checksumHeaderLength {
 		return nil, ErrInvalidMessageSize
 	}
 	if message.Checksum.Scheme != ChecksumSchemeRFC3961 {
@@ -192,25 +208,12 @@ func unmarshalVerify(header MessageHeader, data []byte) (*VerifyMessage, error) 
 		return nil, err
 	}
 	message.Checksum.Value = append([]byte(nil), value...)
-	return message, nil
+	return &message, nil
 }
 
 // MarshalBinary marshals the AlertMessage message to bytes.
 func (m *AlertMessage) MarshalBinary() ([]byte, error) {
-	if len(m.Alerts) > math.MaxUint16 {
-		return nil, ErrInvalidMessageSize
-	}
-	payloadLength := uint64(len(m.Alerts)) * uint64(alertLength)
-	for _, alert := range m.Alerts {
-		if uint64(len(alert.Value)) > math.MaxUint32 {
-			return nil, ErrInvalidMessageSize
-		}
-		payloadLength += uint64(len(alert.Value))
-	}
-	if payloadLength > math.MaxUint32-alertHeaderLength || payloadLength > uint64(int(^uint(0)>>1)-alertHeaderLength) {
-		return nil, ErrInvalidMessageSize
-	}
-	messageLength, err := negoexUint32FromInt(alertHeaderLength + int(payloadLength))
+	messageLength, err := alertMessageLength(m.Alerts)
 	if err != nil {
 		return nil, err
 	}
@@ -230,19 +233,40 @@ func (m *AlertMessage) MarshalBinary() ([]byte, error) {
 	if len(m.Alerts) == 0 {
 		alertsOffset = 0
 	}
-	if err := putCountVector(data[60:66], alertsOffset, len(m.Alerts)); err != nil {
+	alertVector := data[alertVectorOffset : alertVectorOffset+countVectorLength]
+	if err := putCountVector(alertVector, alertsOffset, len(m.Alerts)); err != nil {
 		return nil, err
 	}
 	return data, nil
+}
+
+func alertMessageLength(alerts []Alert) (uint32, error) {
+	if len(alerts) > math.MaxUint16 {
+		return 0, ErrInvalidMessageSize
+	}
+	payloadLength := uint64(len(alerts)) * alertLength
+	for _, alert := range alerts {
+		if uint64(len(alert.Value)) > math.MaxUint32 {
+			return 0, ErrInvalidMessageSize
+		}
+		payloadLength += uint64(len(alert.Value))
+	}
+	if payloadLength > math.MaxUint32-alertHeaderLength ||
+		payloadLength > uint64(math.MaxInt-alertHeaderLength) {
+		return 0, ErrInvalidMessageSize
+	}
+	return negoexUint32FromInt(alertHeaderLength + int(payloadLength))
 }
 
 func unmarshalAlert(header MessageHeader, data []byte) (*AlertMessage, error) {
 	if err := checkHeaderLength(header, alertHeaderLength); err != nil {
 		return nil, err
 	}
-	message := &AlertMessage{Header: header, ErrorCode: binary.LittleEndian.Uint32(data[56:60])}
+	var message AlertMessage
+	message.Header = header
+	message.ErrorCode = binary.LittleEndian.Uint32(data[56:60])
 	copy(message.AuthScheme[:], data[40:56])
-	alertData, alertCount, err := countVector(data, 60, alertLength)
+	alertData, alertCount, err := countVector(data, alertVectorOffset, alertLength)
 	if err != nil {
 		return nil, err
 	}
@@ -250,13 +274,13 @@ func unmarshalAlert(header MessageHeader, data []byte) (*AlertMessage, error) {
 	for index := range message.Alerts {
 		descriptor := alertData[index*alertLength : (index+1)*alertLength]
 		message.Alerts[index].Type = binary.LittleEndian.Uint32(descriptor[0:4])
-		value, err := byteVector(data, descriptor, 4)
+		value, err := byteVector(data, descriptor, descriptorValueOffset)
 		if err != nil {
 			return nil, err
 		}
 		message.Alerts[index].Value = append([]byte(nil), value...)
 	}
-	return message, nil
+	return &message, nil
 }
 
 // VerifyNoKeyAlert constructs the ALERT_TYPE_PULSE value used when a peer's

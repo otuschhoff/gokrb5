@@ -186,6 +186,7 @@ func Unmarshal(token []byte) ([]Message, error) {
 	return messages, nil
 }
 
+//nolint:ireturn // The wire message type selects one of several concrete message types.
 func unmarshalMessage(data []byte) (Message, error) {
 	header, err := unmarshalHeader(data)
 	if err != nil {
@@ -219,7 +220,8 @@ func unmarshalHeader(data []byte) (MessageHeader, error) {
 	if header.Signature != MessageSignature {
 		return header, ErrInvalidSignature
 	}
-	if uint64(header.MessageLength) != uint64(len(data)) || header.HeaderLength < messageHeaderLength || header.HeaderLength > header.MessageLength {
+	if uint64(header.MessageLength) != uint64(len(data)) ||
+		header.HeaderLength < messageHeaderLength || header.HeaderLength > header.MessageLength {
 		return header, ErrInvalidMessageSize
 	}
 	return header, nil

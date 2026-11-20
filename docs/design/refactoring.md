@@ -820,6 +820,22 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 140 (2026-11-20, complete v8 NEGOEX lint cleanup; Q-10):
+Separate scheme selection, mechanism continuation, and message emission
+while preserving negotiation order, transcript verification, and the
+wire format. Name protocol vector offsets and checksum header size, and
+retain the fixed fixtures and all 33 test and fuzz entry points. Narrow
+lint exceptions document intentional interface returns and preserve the
+published `PKU2UAuthScheme` GUID variable.
+
+Uncapped whole-v8 scans report zero NEGOEX findings, down from 19
+canonical and 82 supplemental. Diagnostics outside NEGOEX are unchanged;
+whole-v8 totals are 389 canonical and 1,885 supplemental. NEGOEX statement
+coverage rose from 87.2% to 88.3%. NEGOEX passes 100 shuffled race-enabled
+runs and Linux/386 tests. The full v8 build, vet, and race suite pass, as
+does changed-line lint for both modules. Interop-tagged tests compile;
+live interoperability was not run.
+
 Slice 139 (2026-11-20, complete top-level v8 PAC lint cleanup; Q-10):
 Separate buffer validation, signature preparation, and checksum verification
 while preserving the wire format, validation order, and public API.

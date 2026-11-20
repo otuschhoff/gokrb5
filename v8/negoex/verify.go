@@ -32,7 +32,7 @@ func MakeChecksum(key types.EncryptionKey, usage uint32, transcript []byte) (Che
 		return Checksum{}, fmt.Errorf("negative NEGOEX checksum type %d", hashID)
 	}
 	return Checksum{
-		HeaderLength: 20,
+		HeaderLength: checksumHeaderLength,
 		Scheme:       ChecksumSchemeRFC3961,
 		Type:         uint32(hashID), // #nosec G115 -- nonnegative check above.
 		Value:        value,
