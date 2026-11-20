@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/otuschhoff/gokrb5/v8/config"
@@ -21,20 +22,17 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
-var pku2uETypes = []int32{
-	etypeID.AES256_CTS_HMAC_SHA1_96,
-	etypeID.AES128_CTS_HMAC_SHA1_96,
-	etypeID.AES256_CTS_HMAC_SHA384_192,
-	etypeID.AES128_CTS_HMAC_SHA256_128,
+func supportedEnctypes() []int32 {
+	return []int32{
+		etypeID.AES256_CTS_HMAC_SHA1_96,
+		etypeID.AES128_CTS_HMAC_SHA1_96,
+		etypeID.AES256_CTS_HMAC_SHA384_192,
+		etypeID.AES128_CTS_HMAC_SHA256_128,
+	}
 }
 
 func isPKU2UEType(etype int32) bool {
-	for _, supported := range pku2uETypes {
-		if etype == supported {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(supportedEnctypes(), etype)
 }
 
 type initiatorASState struct {
@@ -54,7 +52,7 @@ type asResult struct {
 
 func beginASExchange(settings settings, target string) ([]byte, *initiatorASState, error) {
 	if settings.identity == nil || settings.identity.Certificate == nil {
-		return nil, nil, fmt.Errorf("PKU2U initiator identity is required")
+		return nil, nil, errors.New("PKU2U initiator identity is required")
 	}
 	cname, err := PrincipalFromCertificate(settings.identity.Certificate)
 	if err != nil {
@@ -62,38 +60,30 @@ func beginASExchange(settings settings, target string) ([]byte, *initiatorASStat
 	}
 	sname := types.NewPrincipalName(nametype.KRB_NT_SRV_HST, target)
 	includePAC := false
+	var requestOptions messages.ASReqOptions
+	requestOptions.IncludePAC = &includePAC
 	cfg := config.New()
-	req, err := messages.NewASReqWithOptions(Realm, cfg, cname, sname, messages.ASReqOptions{IncludePAC: &includePAC})
+	req, err := messages.NewASReqWithOptions(Realm, cfg, cname, sname, requestOptions)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build PKU2U AS request: %w", err)
 	}
-	req.ReqBody.EType = append([]int32(nil), pku2uETypes...)
-	state := &initiatorASState{request: req}
-	exchange, err := pkinit.BeginExchange(&req, pkinit.ExchangeOptions{
-		Identity: settings.identity,
-		ValidateIdentity: func(identity *pkinit.Identity, principal types.PrincipalName, realm string) error {
-			if realm != Realm {
-				return fmt.Errorf("PKU2U identity used with realm %q", realm)
-			}
-			mapped, perr := PrincipalFromCertificate(identity.Certificate)
-			if perr != nil {
-				return perr
-			}
-			if !mapped.Equal(principal) {
-				return fmt.Errorf("PKU2U identity does not match client principal")
-			}
-			return nil
-		},
-		Mode: pkinit.ModeDH, MinimumDHBits: settings.minimumDHBits, CurrentTime: settings.currentTime(),
-		ValidateKDCSigner: func(signed *pkinit.VerifiedSignedData) error {
-			chain, verr := settings.validatePeer(signed, sname)
-			if verr != nil {
-				return verr
-			}
-			state.peer, state.peerChain = signed, chain
-			return nil
-		},
-	})
+	req.ReqBody.EType = supportedEnctypes()
+	state := new(initiatorASState)
+	var options pkinit.ExchangeOptions
+	options.Identity = settings.identity
+	options.ValidateIdentity = validateInitiatorIdentity
+	options.Mode = pkinit.ModeDH
+	options.MinimumDHBits = settings.minimumDHBits
+	options.CurrentTime = settings.currentTime()
+	options.ValidateKDCSigner = func(signed *pkinit.VerifiedSignedData) error {
+		chain, verr := settings.validatePeer(signed, sname)
+		if verr != nil {
+			return verr
+		}
+		state.peer, state.peerChain = signed, chain
+		return nil
+	}
+	exchange, err := pkinit.BeginExchange(&req, options)
 	if err != nil {
 		return nil, nil, fmt.Errorf("begin PKU2U PKINIT exchange: %w", err)
 	}
@@ -101,6 +91,20 @@ func beginASExchange(settings settings, target string) ([]byte, *initiatorASStat
 	encoded, err := marshalASMessage("request", req.Marshal)
 	state.request = req
 	return encoded, state, err
+}
+
+func validateInitiatorIdentity(identity *pkinit.Identity, principal types.PrincipalName, realm string) error {
+	if realm != Realm {
+		return fmt.Errorf("PKU2U identity used with realm %q", realm)
+	}
+	mapped, err := PrincipalFromCertificate(identity.Certificate)
+	if err != nil {
+		return err
+	}
+	if !mapped.Equal(principal) {
+		return errors.New("PKU2U identity does not match client principal")
+	}
+	return nil
 }
 
 func finishASExchange(state *initiatorASState, encoded []byte, settings settings) (*asResult, error) {
