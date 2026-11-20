@@ -824,29 +824,35 @@ func assertLoadedConfig(t *testing.T, c *Config, wantRealms int) {
 
 func TestParseDuration(t *testing.T) {
 	t.Parallel()
+
 	// https://web.mit.edu/kerberos/krb5-1.12/doc/basic/date_format.html#duration
-	hms, _ := time.ParseDuration("12h30m15s")
-	hm, _ := time.ParseDuration("12h30m")
-	h, _ := time.ParseDuration("12h")
+	const (
+		day   = 24 * time.Hour
+		hours = 12 * time.Hour
+		hm    = hours + 30*time.Minute
+		hms   = hm + 15*time.Second
+	)
 	tests := []struct {
-		timeStr  string
-		duration time.Duration
+		name  string
+		input string
+		want  time.Duration
 	}{
-		{"100", time.Duration(100) * time.Second},
-		{"12:30", hm},
-		{"12:30:15", hms},
-		{"1d12h30m15s", time.Duration(24)*time.Hour + hms},
-		{"1d12h30m", time.Duration(24)*time.Hour + hm},
-		{"1d12h", time.Duration(24)*time.Hour + h},
-		{"1d", time.Duration(24) * time.Hour},
+		{name: "bare seconds", input: "100", want: 100 * time.Second},
+		{name: "colon hours and minutes", input: "12:30", want: hm},
+		{name: "colon hours minutes and seconds", input: "12:30:15", want: hms},
+		{name: "day with hours minutes and seconds", input: "1d12h30m15s", want: day + hms},
+		{name: "day with hours and minutes", input: "1d12h30m", want: day + hm},
+		{name: "day with hours", input: "1d12h", want: day + hours},
+		{name: "day only", input: "1d", want: day},
 	}
 	for _, test := range tests {
-		d, err := parseDuration(test.timeStr)
-		if err != nil {
-			t.Errorf("error parsing %s: %v", test.timeStr, err)
-		}
-		assert.Equal(t, test.duration, d, "Duration not as expected for: "+test.timeStr)
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 
+			got, err := parseDuration(test.input)
+			require.NoError(t, err)
+			assert.Equal(t, test.want, got)
+		})
 	}
 }
 
