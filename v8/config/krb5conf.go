@@ -56,19 +56,25 @@ func New() *Config {
 	}
 }
 
-// NewFromString creates a new Config struct from a string.
+// NewFromString parses Kerberos configuration text.
+// It returns warnings and fatal errors as described by [NewFromScanner].
 func NewFromString(s string) (*Config, error) {
 	reader := strings.NewReader(s)
 	return NewFromReader(reader)
 }
 
-// NewFromReader creates a new Config struct from an io.Reader.
+// NewFromReader parses Kerberos configuration from r without closing it.
+// It returns warnings and fatal errors as described by [NewFromScanner].
 func NewFromReader(r io.Reader) (*Config, error) {
 	scanner := bufio.NewScanner(r)
 	return NewFromScanner(scanner)
 }
 
-// NewFromScanner creates a new Config struct from a bufio.Scanner.
+// NewFromScanner parses Kerberos configuration from a scanner that yields one
+// line per token. It returns a config and a nil error if parsing succeeds
+// without warnings. If parsing succeeds with [UnsupportedDirective] warnings,
+// it returns the config and the last warning. A scanner failure or fatal
+// parse error returns a nil config.
 func NewFromScanner(scanner *bufio.Scanner) (*Config, error) {
 	c := New()
 	scanned := scanConfigSections(scanner)
@@ -460,7 +466,12 @@ func (c *Config) ResolveRealm(domainName string) string {
 	return ""
 }
 
-// Load the KRB5 configuration from the specified file path.
+// Load parses Kerberos configuration from cfgPath and closes the file.
+// It returns the config, if any, from [NewFromScanner]. A file-open error
+// returns a nil config. Parse warnings and errors are joined with any
+// file-close error, so use [errors.AsType] to check for [UnsupportedDirective]
+// rather than a direct type assertion. A close error can accompany a non-nil
+// config even if parsing succeeded without a warning.
 func Load(cfgPath string) (*Config, error) {
 	fh, err := os.Open(cfgPath) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
 	if err != nil {
