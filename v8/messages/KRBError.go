@@ -38,15 +38,22 @@ type KRBError struct {
 // NewKRBError creates a new KRBError.
 func NewKRBError(sname types.PrincipalName, realm string, code int32, etext string) KRBError {
 	t := time.Now().UTC()
+	const microsecondsPerSecond = int64(time.Second / time.Microsecond)
+	var client types.PrincipalName
 	return KRBError{
 		PVNO:      iana.PVNO,
 		MsgType:   msgtype.KRB_ERROR,
+		CTime:     time.Time{},
+		Cusec:     0,
 		STime:     t,
-		Susec:     int((t.UnixNano() / int64(time.Microsecond)) - (t.Unix() * 1e6)),
+		Susec:     int(t.UnixNano()/int64(time.Microsecond) - t.Unix()*microsecondsPerSecond),
 		ErrorCode: code,
+		CRealm:    "",
+		CName:     client,
 		SName:     sname,
 		Realm:     realm,
 		EText:     etext,
+		EData:     nil,
 	}
 }
 
@@ -58,7 +65,10 @@ func (k *KRBError) Unmarshal(b []byte) error {
 	}
 	expectedMsgType := msgtype.KRB_ERROR
 	if k.MsgType != expectedMsgType {
-		return krberror.NewErrorf(krberror.KRBMsgError, "message ID does not indicate a KRB_ERROR. Expected: %v; Actual: %v", expectedMsgType, k.MsgType)
+		return krberror.NewErrorf(
+			krberror.KRBMsgError, "message ID does not indicate a KRB_ERROR. Expected: %v; Actual: %v",
+			expectedMsgType, k.MsgType,
+		)
 	}
 	return nil
 }
@@ -75,7 +85,7 @@ func (k *KRBError) Marshal() ([]byte, error) {
 
 // Error method implementing error interface on KRBError struct.
 func (k KRBError) Error() string {
-	etxt := fmt.Sprintf("KRB Error: %s", errorcode.Lookup(k.ErrorCode))
+	etxt := "KRB Error: " + errorcode.Lookup(k.ErrorCode)
 	if k.EText != "" {
 		etxt = fmt.Sprintf("%s - %s", etxt, k.EText)
 	}

@@ -1,6 +1,7 @@
 package messages
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -60,14 +61,22 @@ type KrbCredInfo struct {
 // NewKRBCred creates and encrypts a KRB_CRED message.
 func NewKRBCred(tickets []Ticket, ticketInfo []KrbCredInfo, key types.EncryptionKey) (KRBCred, error) {
 	if len(tickets) == 0 || len(tickets) != len(ticketInfo) {
-		return KRBCred{}, fmt.Errorf("KRB_CRED requires one ticket-info entry per ticket")
+		return KRBCred{}, errors.New("KRB_CRED requires one ticket-info entry per ticket")
 	}
+	var encrypted types.EncryptedData
+	var address types.HostAddress
 	k := KRBCred{
 		PVNO:    iana.PVNO,
 		MsgType: msgtype.KRB_CRED,
 		Tickets: append([]Ticket(nil), tickets...),
+		EncPart: encrypted,
 		DecryptedEncPart: EncKrbCredPart{
 			TicketInfo: append([]KrbCredInfo(nil), ticketInfo...),
+			Nouce:      0,
+			Timestamp:  time.Time{},
+			Usec:       0,
+			SAddress:   address,
+			RAddress:   address,
 		},
 	}
 	if err := k.EncryptEncPart(key); err != nil {
@@ -85,7 +94,10 @@ func (k *KRBCred) Unmarshal(b []byte) error {
 	}
 	expectedMsgType := msgtype.KRB_CRED
 	if m.MsgType != expectedMsgType {
-		return krberror.NewErrorf(krberror.KRBMsgError, "message ID does not indicate a KRB_CRED. Expected: %v; Actual: %v", expectedMsgType, m.MsgType)
+		return krberror.NewErrorf(
+			krberror.KRBMsgError, "message ID does not indicate a KRB_CRED. Expected: %v; Actual: %v",
+			expectedMsgType, m.MsgType,
+		)
 	}
 	k.PVNO = m.PVNO
 	k.MsgType = m.MsgType

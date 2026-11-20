@@ -78,10 +78,7 @@ func TestAPRepRoundTripAndVerify(t *testing.T) {
 		KeyType:  etypeID.AES256_CTS_HMAC_SHA1_96,
 		KeyValue: []byte("0123456789abcdef0123456789abcdef"),
 	}
-	auth := types.Authenticator{
-		CTime: time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC),
-		Cusec: 123456,
-	}
+	auth := apRepTestAuthenticator()
 	subkey := types.EncryptionKey{
 		KeyType:  etypeID.AES128_CTS_HMAC_SHA1_96,
 		KeyValue: []byte("0123456789abcdef"),
@@ -105,11 +102,9 @@ func TestAPRepVerifyRejectsTimestampMismatch(t *testing.T) {
 		KeyType:  etypeID.AES128_CTS_HMAC_SHA1_96,
 		KeyValue: []byte("0123456789abcdef"),
 	}
-	auth := types.Authenticator{
-		CTime: time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC),
-		Cusec: 123456,
-	}
-	rep, err := NewAPRepFromAuthenticator(auth, key, types.EncryptionKey{}, 0)
+	auth := apRepTestAuthenticator()
+	var subkey types.EncryptionKey
+	rep, err := NewAPRepFromAuthenticator(auth, key, subkey, 0)
 	require.NoError(t, err)
 
 	auth.Cusec++
@@ -122,11 +117,9 @@ func TestAPRepVerifyRejectsTamperedCiphertext(t *testing.T) {
 		KeyType:  etypeID.AES128_CTS_HMAC_SHA1_96,
 		KeyValue: []byte("0123456789abcdef"),
 	}
-	auth := types.Authenticator{
-		CTime: time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC),
-		Cusec: 123456,
-	}
-	rep, err := NewAPRepFromAuthenticator(auth, key, types.EncryptionKey{}, 0)
+	auth := apRepTestAuthenticator()
+	var subkey types.EncryptionKey
+	rep, err := NewAPRepFromAuthenticator(auth, key, subkey, 0)
 	require.NoError(t, err)
 	rep.EncPart.Cipher[len(rep.EncPart.Cipher)-1] ^= 0xff
 
@@ -137,10 +130,21 @@ func TestAPRepVerifyDCE(t *testing.T) {
 	t.Parallel()
 	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
 	now := time.Now().UTC()
+	var subkey types.EncryptionKey
 	rep, err := NewAPRep(EncAPRepPart{
-		CTime: now, Cusec: int((now.UnixNano() / int64(time.Microsecond)) - now.Unix()*1e6), SequenceNumber: 42,
+		CTime:          now,
+		Cusec:          int((now.UnixNano() / int64(time.Microsecond)) - now.Unix()*1e6),
+		Subkey:         subkey,
+		SequenceNumber: 42,
 	}, key)
 	require.NoError(t, err)
 	require.NoError(t, rep.VerifyDCE(key, 42, true, time.Minute))
 	require.Error(t, rep.VerifyDCE(key, 43, true, time.Minute))
+}
+
+func apRepTestAuthenticator() types.Authenticator {
+	var auth types.Authenticator
+	auth.CTime = time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)
+	auth.Cusec = 123456
+	return auth
 }

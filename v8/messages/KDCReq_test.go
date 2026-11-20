@@ -24,6 +24,12 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+const (
+	kdcTestRealm      = "EXAMPLE.ORG"
+	kdcTestRealmCOM   = "EXAMPLE.COM"
+	kdcTestTGTService = "krbtgt"
+)
+
 func TestKDCRequestNonceErrors(t *testing.T) {
 	// rand.Reader is process-wide; restore it before parallel tests run.
 	cause := errors.New("test nonce reader failure")
@@ -57,18 +63,22 @@ func TestKDCRequestNonceErrors(t *testing.T) {
 }
 
 func TestNewASReqRenewLifetimeHonoured(t *testing.T) {
+	var emptyPrincipal types.PrincipalName
 	cfg := config.New()
 	cfg.LibDefaults.TicketLifetime = time.Hour
 	cfg.LibDefaults.RenewLifetime = 7 * 24 * time.Hour
-	req, err := NewASReq("EXAMPLE.ORG", cfg, types.PrincipalName{}, types.PrincipalName{})
+	req, err := NewASReq(kdcTestRealm, cfg, emptyPrincipal, emptyPrincipal)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.WithinDuration(t, req.ReqBody.Till.Add(cfg.LibDefaults.RenewLifetime-cfg.LibDefaults.TicketLifetime), req.ReqBody.RTime, time.Millisecond)
+	assert.WithinDuration(t, req.ReqBody.Till.Add(cfg.LibDefaults.RenewLifetime-cfg.LibDefaults.TicketLifetime),
+		req.ReqBody.RTime, time.Millisecond)
 	assert.True(t, types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Renewable))
 
 	zero := time.Duration(0)
-	req, err = NewASReqWithOptions("EXAMPLE.ORG", cfg, types.PrincipalName{}, types.PrincipalName{}, ASReqOptions{RenewLifetime: &zero})
+	var options ASReqOptions
+	options.RenewLifetime = &zero
+	req, err = NewASReqWithOptions(kdcTestRealm, cfg, emptyPrincipal, emptyPrincipal, options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,6 +87,7 @@ func TestNewASReqRenewLifetimeHonoured(t *testing.T) {
 }
 
 func TestNewASReqOptionsOverrideConfig(t *testing.T) {
+	var emptyPrincipal types.PrincipalName
 	cfg := config.New()
 	cfg.LibDefaults.Forwardable = true
 	cfg.LibDefaults.Proxiable = true
@@ -86,16 +97,16 @@ func TestNewASReqOptionsOverrideConfig(t *testing.T) {
 	start := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
 	service := types.PrincipalName{NameType: nametype.KRB_NT_SRV_INST, NameString: []string{"custom", "host"}}
 	addresses := []types.HostAddress{{AddrType: addrtype.IPv4, Address: []byte{127, 0, 0, 1}}}
-	req, err := NewASReqWithOptions("EXAMPLE.ORG", cfg, types.PrincipalName{}, types.PrincipalName{}, ASReqOptions{
-		Lifetime:         &lifetime,
-		Forwardable:      &no,
-		Proxiable:        &no,
-		Canonicalize:     &no,
-		Addresses:        addresses,
-		Enterprise:       boolPointer(true),
-		ServicePrincipal: &service,
-		StartTime:        &start,
-	})
+	var options ASReqOptions
+	options.Lifetime = &lifetime
+	options.Forwardable = &no
+	options.Proxiable = &no
+	options.Canonicalize = &no
+	options.Addresses = addresses
+	options.Enterprise = new(true)
+	options.ServicePrincipal = &service
+	options.StartTime = &start
+	req, err := NewASReqWithOptions(kdcTestRealm, cfg, emptyPrincipal, emptyPrincipal, options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,8 +121,9 @@ func TestNewASReqOptionsOverrideConfig(t *testing.T) {
 }
 
 func TestNewASReqIncludesPACRequest(t *testing.T) {
+	var emptyPrincipal types.PrincipalName
 	cfg := config.New()
-	req, err := NewASReq("EXAMPLE.ORG", cfg, types.PrincipalName{}, types.PrincipalName{})
+	req, err := NewASReq(kdcTestRealm, cfg, emptyPrincipal, emptyPrincipal)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +138,9 @@ func TestNewASReqIncludesPACRequest(t *testing.T) {
 
 	cfg.LibDefaults.RequestPAC = false
 	yes := true
-	req, err = NewASReqWithOptions("EXAMPLE.ORG", cfg, types.PrincipalName{}, types.PrincipalName{}, ASReqOptions{IncludePAC: &yes})
+	var includePAC ASReqOptions
+	includePAC.IncludePAC = &yes
+	req, err = NewASReqWithOptions(kdcTestRealm, cfg, emptyPrincipal, emptyPrincipal, includePAC)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +151,9 @@ func TestNewASReqIncludesPACRequest(t *testing.T) {
 	assert.True(t, pacRequest.IncludePAC)
 
 	no := false
-	req, err = NewASReqWithOptions("EXAMPLE.ORG", config.New(), types.PrincipalName{}, types.PrincipalName{}, ASReqOptions{IncludePAC: &no})
+	var omitPAC ASReqOptions
+	omitPAC.IncludePAC = &no
+	req, err = NewASReqWithOptions(kdcTestRealm, config.New(), emptyPrincipal, emptyPrincipal, omitPAC)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,15 +169,18 @@ func TestASRequestConvenienceConstructors(t *testing.T) {
 	cfg.LibDefaults.NoAddresses = true
 	cname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
 
-	tgt, err := NewASReqForTGT("EXAMPLE.COM", cfg, cname)
+	tgt, err := NewASReqForTGT(kdcTestRealmCOM, cfg, cname)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tgt.ReqBody.SName.NameType != nametype.KRB_NT_SRV_INST || !assert.ObjectsAreEqual(tgt.ReqBody.SName.NameString, []string{"krbtgt", "EXAMPLE.COM"}) {
+	if tgt.ReqBody.SName.NameType != nametype.KRB_NT_SRV_INST ||
+		!assert.ObjectsAreEqual(tgt.ReqBody.SName.NameString, []string{kdcTestTGTService, kdcTestRealmCOM}) {
 		t.Fatalf("TGT service principal = %+v", tgt.ReqBody.SName)
 	}
 	lifetime := 30 * time.Minute
-	tgt, err = NewASReqForTGTWithOptions("EXAMPLE.COM", cfg, cname, ASReqOptions{Lifetime: &lifetime})
+	var options ASReqOptions
+	options.Lifetime = &lifetime
+	tgt, err = NewASReqForTGTWithOptions(kdcTestRealmCOM, cfg, cname, options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +188,7 @@ func TestASRequestConvenienceConstructors(t *testing.T) {
 		t.Fatalf("TGT lifetime exceeds requested value: %v", time.Until(tgt.ReqBody.Till))
 	}
 
-	changePassword, err := NewASReqForChgPasswd("EXAMPLE.COM", cfg, cname)
+	changePassword, err := NewASReqForChgPasswd(kdcTestRealmCOM, cfg, cname)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +207,7 @@ func TestKDCRequestsAdvertiseConfiguredEnctypes(t *testing.T) {
 		body string
 		want []int32
 	}{
-		{name: "defaults", want: []int32{etypeID.AES256_CTS_HMAC_SHA1_96, etypeID.AES128_CTS_HMAC_SHA1_96}},
+		{name: "defaults", body: "", want: []int32{etypeID.AES256_CTS_HMAC_SHA1_96, etypeID.AES128_CTS_HMAC_SHA1_96}},
 		{name: "legacy filtered", body: explicitLists, want: []int32{etypeID.AES128_CTS_HMAC_SHA1_96}},
 		{
 			name: "legacy opted in", body: explicitLists + "allow_weak_crypto=true\n",
@@ -197,66 +216,32 @@ func TestKDCRequestsAdvertiseConfiguredEnctypes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			cfg, err := config.NewFromString("[libdefaults]\n" + tc.body)
-			if err != nil {
-				t.Fatal(err)
-			}
-			cname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
-			as, err := NewASReqForTGT("EXAMPLE.COM", cfg, cname)
-			if err != nil {
-				t.Fatal(err)
-			}
-			sname := types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "HTTP/server.example.org")
-			key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
-			tgs, err := NewTGSReq(
-				cname,
-				"EXAMPLE.COM",
-				cfg,
-				s4uTestTicket(),
-				key,
-				sname,
-				false,
-			)
-			if err != nil {
-				t.Fatal(err)
-			}
-			asDER, err := as.Marshal()
-			if err != nil {
-				t.Fatal(err)
-			}
-			tgsDER, err := tgs.Marshal()
-			if err != nil {
-				t.Fatal(err)
-			}
-			var decodedAS ASReq
-			if err := decodedAS.Unmarshal(asDER); err != nil {
-				t.Fatal(err)
-			}
-			var decodedTGS TGSReq
-			if err := decodedTGS.Unmarshal(tgsDER); err != nil {
-				t.Fatal(err)
-			}
-			assert.Equal(t, tc.want, decodedAS.ReqBody.EType, "AS-REQ enctype offer")
-			assert.Equal(t, tc.want, decodedTGS.ReqBody.EType, "TGS-REQ enctype offer")
+			checkKDCRequestEnctypeOffers(t, tc.body, tc.want)
 		})
 	}
 }
 
 func TestTGSReqMSKILEOptions(t *testing.T) {
+	var emptyPrincipal types.PrincipalName
 	cfg := config.New()
 	cfg.LibDefaults.NoAddresses = true
-	cfg.LibDefaults.DefaultTGSEnctypeIDs = []int32{etypeID.RC4_HMAC, etypeID.AES256_CTS_HMAC_SHA1_96, etypeID.AES128_CTS_HMAC_SHA1_96}
+	cfg.LibDefaults.DefaultTGSEnctypeIDs = []int32{
+		etypeID.RC4_HMAC, etypeID.AES256_CTS_HMAC_SHA1_96, etypeID.AES128_CTS_HMAC_SHA1_96,
+	}
 	original := append([]int32(nil), cfg.LibDefaults.DefaultTGSEnctypeIDs...)
-	req, err := tgsReq(types.PrincipalName{}, types.PrincipalName{}, "EXAMPLE.ORG", false, cfg, TGSReqOptions{
-		SupportedEncTypes: msflags.SupportedEncTypeAES256CTSHMACSHA196SK | msflags.SupportedEncTypeClaims,
-	})
+	var reqOptions TGSReqOptions
+	reqOptions.SupportedEncTypes = msflags.SupportedEncTypeAES256CTSHMACSHA196SK | msflags.SupportedEncTypeClaims
+	req, err := tgsReq(emptyPrincipal, emptyPrincipal, kdcTestRealm, false, cfg, reqOptions)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ierr := req.addMSKILEPAData(cfg, TGSReqOptions{SupportedEncTypes: msflags.SupportedEncTypeClaims}); ierr != nil {
+	var claimsOnly TGSReqOptions
+	claimsOnly.SupportedEncTypes = msflags.SupportedEncTypeClaims
+	if ierr := req.addMSKILEPAData(cfg, claimsOnly); ierr != nil {
 		t.Fatal(ierr)
 	}
-	assert.Equal(t, []int32{etypeID.AES256_CTS_HMAC_SHA1_96, etypeID.RC4_HMAC, etypeID.AES128_CTS_HMAC_SHA1_96}, req.ReqBody.EType)
+	assert.Equal(t, []int32{etypeID.AES256_CTS_HMAC_SHA1_96, etypeID.RC4_HMAC, etypeID.AES128_CTS_HMAC_SHA1_96},
+		req.ReqBody.EType)
 	assert.Equal(t, original, cfg.LibDefaults.DefaultTGSEnctypeIDs)
 
 	var options types.PAPACOptions
@@ -273,16 +258,17 @@ func TestTGSReqMSKILEOptions(t *testing.T) {
 }
 
 func TestTGSReqForwardedOptions(t *testing.T) {
+	var emptyPrincipal types.PrincipalName
 	cfg := config.New()
 	cfg.LibDefaults.Forwardable = false
 	cfg.LibDefaults.NoAddresses = false
 	yes := true
 	addresses := types.HostAddresses{}
-	req, err := tgsReq(types.PrincipalName{}, types.PrincipalName{}, "EXAMPLE.ORG", false, cfg, TGSReqOptions{
-		Forwardable: &yes,
-		Forwarded:   &yes,
-		Addresses:   &addresses,
-	})
+	var options TGSReqOptions
+	options.Forwardable = &yes
+	options.Forwarded = &yes
+	options.Addresses = &addresses
+	req, err := tgsReq(emptyPrincipal, emptyPrincipal, kdcTestRealm, false, cfg, options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,24 +278,32 @@ func TestTGSReqForwardedOptions(t *testing.T) {
 }
 
 func TestTGSReqFalseOverridesAndHelpers(t *testing.T) {
+	var emptyPrincipal types.PrincipalName
 	cfg := config.New()
 	cfg.LibDefaults.NoAddresses = true
 	cfg.LibDefaults.Forwardable = true
 	no := false
-	req, err := tgsReq(types.PrincipalName{}, types.PrincipalName{}, "EXAMPLE.ORG", true, cfg, TGSReqOptions{
-		Forwardable: &no,
-		Forwarded:   &no,
-	})
+	var options TGSReqOptions
+	options.Forwardable = &no
+	options.Forwarded = &no
+	req, err := tgsReq(emptyPrincipal, emptyPrincipal, kdcTestRealm, true, cfg, options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Forwardable) || types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Forwarded) {
+	if types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Forwardable) ||
+		types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Forwarded) {
 		t.Fatal("false flag overrides were not honored")
 	}
-	if !types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Renew) || !types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Renewable) {
+	if !types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Renew) ||
+		!types.IsFlagSet(&req.ReqBody.KDCOptions, flags.Renewable) {
 		t.Fatal("renewal flags were not set")
 	}
 
+	checkTGSReqHelpers(t)
+}
+
+func checkTGSReqHelpers(t *testing.T) {
+	t.Helper()
 	for _, keyType := range []int32{etypeID.DES_CBC_CRC, etypeID.DES_CBC_MD4, etypeID.DES_CBC_MD5, etypeID.RC4_HMAC} {
 		if supportsS4UX509(keyType) {
 			t.Fatalf("legacy enctype %d supports S4U X509", keyType)
@@ -328,13 +322,16 @@ func TestTGSReqFalseOverridesAndHelpers(t *testing.T) {
 }
 
 func TestSetPADataWithSubkeyRejectsUnsupportedEType(t *testing.T) {
+	var defaultOptions TGSReqOptions
+	var emptyPrincipal types.PrincipalName
+	var emptyTicket Ticket
 	cfg := config.New()
 	cfg.LibDefaults.NoAddresses = true
-	req, err := tgsReq(types.PrincipalName{}, types.PrincipalName{}, "EXAMPLE.ORG", false, cfg, TGSReqOptions{})
+	req, err := tgsReq(emptyPrincipal, emptyPrincipal, kdcTestRealm, false, cfg, defaultOptions)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := req.SetPADataWithSubkey(Ticket{}, types.EncryptionKey{KeyType: -1}); err == nil {
+	if _, _, err := req.SetPADataWithSubkey(emptyTicket, types.EncryptionKey{KeyType: -1, KeyValue: nil}); err == nil {
 		t.Fatal("unsupported session-key enctype accepted")
 	}
 }
@@ -346,7 +343,7 @@ func TestTGSRequestConvenienceConstructors(t *testing.T) {
 	tgt := s4uTestTicket()
 	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
 
-	request, err := NewTGSReq(cname, "EXAMPLE.COM", cfg, tgt, key, sname, false)
+	request, err := NewTGSReq(cname, kdcTestRealmCOM, cfg, tgt, key, sname, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,14 +352,28 @@ func TestTGSRequestConvenienceConstructors(t *testing.T) {
 	}
 
 	forwarded := true
-	request, err = NewTGSReqWithOptions(cname, "EXAMPLE.COM", cfg, tgt, key, sname, false, TGSReqOptions{Forwarded: &forwarded})
+	var options TGSReqOptions
+	options.Forwarded = &forwarded
+	request, err = NewTGSReqWithOptions(cname, kdcTestRealmCOM, cfg, tgt, key, sname, false, options)
 	if err != nil || !types.IsFlagSet(&request.ReqBody.KDCOptions, flags.Forwarded) {
 		t.Fatalf("TGS options request = %+v, %v", request.ReqBody, err)
 	}
 
+	checkUser2UserTGSConstructors(t, cfg, cname, sname, tgt, key, options)
+}
+
+func checkUser2UserTGSConstructors(
+	t *testing.T,
+	cfg *config.Config,
+	cname, sname types.PrincipalName,
+	tgt Ticket,
+	key types.EncryptionKey,
+	options TGSReqOptions,
+) {
+	t.Helper()
 	verifyingTGT := s4uTestTicket()
 	verifyingTGT.SName = types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/OTHER.COM")
-	request, err = NewUser2UserTGSReq(cname, "EXAMPLE.COM", cfg, tgt, key, sname, false, verifyingTGT)
+	request, err := NewUser2UserTGSReq(cname, kdcTestRealmCOM, cfg, tgt, key, sname, false, verifyingTGT)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,13 +382,11 @@ func TestTGSRequestConvenienceConstructors(t *testing.T) {
 		t.Fatalf("user-to-user request = %+v", request.ReqBody)
 	}
 
-	request, err = NewUser2UserTGSReqWithOptions(cname, "EXAMPLE.COM", cfg, tgt, key, sname, true, verifyingTGT, TGSReqOptions{Forwarded: &forwarded})
+	request, err = NewUser2UserTGSReqWithOptions(cname, kdcTestRealmCOM, cfg, tgt, key, sname, true, verifyingTGT, options)
 	if err != nil || !request.Renewal || !types.IsFlagSet(&request.ReqBody.KDCOptions, flags.Forwarded) {
 		t.Fatalf("user-to-user options request = %+v, %v", request.ReqBody, err)
 	}
 }
-
-func boolPointer(value bool) *bool { return &value }
 
 func TestUnmarshalKDCReqBody(t *testing.T) {
 	t.Parallel()
@@ -395,12 +404,16 @@ func TestUnmarshalKDCReqBody(t *testing.T) {
 
 	assert.Equal(t, "fedcba90", hex.EncodeToString(a.KDCOptions.Bytes), "Request body flags not as expected")
 	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, a.CName.NameType, "Request body CName NameType not as expected")
-	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.CName.NameString), "Request body CName does not have the expected number of NameStrings")
-	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.CName.NameString, "Request body CName entries not as expected")
+	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.CName.NameString),
+		"Request body CName does not have the expected number of NameStrings")
+	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.CName.NameString,
+		"Request body CName entries not as expected")
 	assert.Equal(t, testdata.TEST_REALM, a.Realm, "Request body Realm not as expected")
 	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, a.SName.NameType, "Request body SName nametype not as expected")
-	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.SName.NameString), "Request body SName does not have the expected number of NameStrings")
-	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.SName.NameString, "Request body SName entries not as expected")
+	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.SName.NameString),
+		"Request body SName does not have the expected number of NameStrings")
+	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.SName.NameString,
+		"Request body SName entries not as expected")
 	assert.Equal(t, tt, a.From, "Request body From time not as expected")
 	assert.Equal(t, tt, a.Till, "Request body Till time not as expected")
 	assert.Equal(t, tt, a.RTime, "Request body RTime time not as expected")
@@ -408,22 +421,31 @@ func TestUnmarshalKDCReqBody(t *testing.T) {
 	assert.Equal(t, []int32{0, 1}, a.EType, "Etype list not as expected")
 	assert.Equal(t, 2, len(a.Addresses), "Number of client addresses not as expected")
 	for i, addr := range a.Addresses {
-		assert.Equal(t, addrtype.IPv4, addr.AddrType, fmt.Sprintf("Host address type not as expected for address item %d", i+1))
-		assert.Equal(t, "12d00023", hex.EncodeToString(addr.Address), fmt.Sprintf("Host address not as expected for address item %d", i+1))
+		assert.Equal(t, addrtype.IPv4, addr.AddrType,
+			fmt.Sprintf("Host address type not as expected for address item %d", i+1))
+		assert.Equal(t, "12d00023", hex.EncodeToString(addr.Address),
+			fmt.Sprintf("Host address not as expected for address item %d", i+1))
 	}
-	assert.Equal(t, testdata.TEST_ETYPE, a.EncAuthData.EType, "Etype of request body encrypted authorization data not as expected")
+	assert.Equal(t, testdata.TEST_ETYPE, a.EncAuthData.EType,
+		"Etype of request body encrypted authorization data not as expected")
 	assert.Equal(t, iana.PVNO, a.EncAuthData.KVNO, "KVNO of request body encrypted authorization data not as expected")
-	assert.Equal(t, []byte(testdata.TEST_CIPHERTEXT), a.EncAuthData.Cipher, "Ciphertext of request body encrypted authorization data not as expected")
+	assert.Equal(t, []byte(testdata.TEST_CIPHERTEXT), a.EncAuthData.Cipher,
+		"Ciphertext of request body encrypted authorization data not as expected")
 	assert.Equal(t, 2, len(a.AdditionalTickets), "Number of additional tickets not as expected")
 	for i, tkt := range a.AdditionalTickets {
 		assert.Equal(t, iana.PVNO, tkt.TktVNO, fmt.Sprintf("Additional ticket (%v) ticket-vno not as expected", i+1))
 		assert.Equal(t, testdata.TEST_REALM, tkt.Realm, fmt.Sprintf("Additional ticket (%v) realm not as expected", i+1))
-		assert.Equal(t, nametype.KRB_NT_PRINCIPAL, tkt.SName.NameType, fmt.Sprintf("Additional ticket (%v) SName NameType not as expected", i+1))
-		assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(tkt.SName.NameString), fmt.Sprintf("Additional ticket (%v) SName does not have the expected number of NameStrings", i+1))
-		assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, tkt.SName.NameString, fmt.Sprintf("Additional ticket (%v) SName name string entries not as expected", i+1))
-		assert.Equal(t, testdata.TEST_ETYPE, tkt.EncPart.EType, fmt.Sprintf("Additional ticket (%v) encPart etype not as expected", i+1))
+		assert.Equal(t, nametype.KRB_NT_PRINCIPAL, tkt.SName.NameType,
+			fmt.Sprintf("Additional ticket (%v) SName NameType not as expected", i+1))
+		assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(tkt.SName.NameString),
+			fmt.Sprintf("Additional ticket (%v) SName does not have the expected number of NameStrings", i+1))
+		assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, tkt.SName.NameString,
+			fmt.Sprintf("Additional ticket (%v) SName name string entries not as expected", i+1))
+		assert.Equal(t, testdata.TEST_ETYPE, tkt.EncPart.EType,
+			fmt.Sprintf("Additional ticket (%v) encPart etype not as expected", i+1))
 		assert.Equal(t, iana.PVNO, tkt.EncPart.KVNO, fmt.Sprintf("Additional ticket (%v) encPart KVNO not as expected", i+1))
-		assert.Equal(t, []byte(testdata.TEST_CIPHERTEXT), tkt.EncPart.Cipher, fmt.Sprintf("Additional ticket (%v) encPart cipher not as expected", i+1))
+		assert.Equal(t, []byte(testdata.TEST_CIPHERTEXT), tkt.EncPart.Cipher,
+			fmt.Sprintf("Additional ticket (%v) encPart cipher not as expected", i+1))
 	}
 }
 
@@ -452,12 +474,17 @@ func TestUnmarshalKDCReqBody_optionalsNULLexceptsecond_ticket(t *testing.T) {
 	for i, tkt := range a.AdditionalTickets {
 		assert.Equal(t, iana.PVNO, tkt.TktVNO, fmt.Sprintf("Additional ticket (%v) ticket-vno not as expected", i+1))
 		assert.Equal(t, testdata.TEST_REALM, tkt.Realm, fmt.Sprintf("Additional ticket (%v) realm not as expected", i+1))
-		assert.Equal(t, nametype.KRB_NT_PRINCIPAL, tkt.SName.NameType, fmt.Sprintf("Additional ticket (%v) SName NameType not as expected", i+1))
-		assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(tkt.SName.NameString), fmt.Sprintf("Additional ticket (%v) SName does not have the expected number of NameStrings", i+1))
-		assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, tkt.SName.NameString, fmt.Sprintf("Additional ticket (%v) SName name string entries not as expected", i+1))
-		assert.Equal(t, testdata.TEST_ETYPE, tkt.EncPart.EType, fmt.Sprintf("Additional ticket (%v) encPart etype not as expected", i+1))
+		assert.Equal(t, nametype.KRB_NT_PRINCIPAL, tkt.SName.NameType,
+			fmt.Sprintf("Additional ticket (%v) SName NameType not as expected", i+1))
+		assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(tkt.SName.NameString),
+			fmt.Sprintf("Additional ticket (%v) SName does not have the expected number of NameStrings", i+1))
+		assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, tkt.SName.NameString,
+			fmt.Sprintf("Additional ticket (%v) SName name string entries not as expected", i+1))
+		assert.Equal(t, testdata.TEST_ETYPE, tkt.EncPart.EType,
+			fmt.Sprintf("Additional ticket (%v) encPart etype not as expected", i+1))
 		assert.Equal(t, iana.PVNO, tkt.EncPart.KVNO, fmt.Sprintf("Additional ticket (%v) encPart KVNO not as expected", i+1))
-		assert.Equal(t, []byte(testdata.TEST_CIPHERTEXT), tkt.EncPart.Cipher, fmt.Sprintf("Additional ticket (%v) encPart cipher not as expected", i+1))
+		assert.Equal(t, []byte(testdata.TEST_CIPHERTEXT), tkt.EncPart.Cipher,
+			fmt.Sprintf("Additional ticket (%v) encPart cipher not as expected", i+1))
 	}
 }
 
@@ -478,8 +505,10 @@ func TestUnmarshalKDCReqBody_optionalsNULLexceptserver(t *testing.T) {
 	assert.Equal(t, "fedcba90", hex.EncodeToString(a.KDCOptions.Bytes), "Request body flags not as expected")
 	assert.Equal(t, testdata.TEST_REALM, a.Realm, "Request body Realm not as expected")
 	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, a.SName.NameType, "Request body SName nametype not as expected")
-	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.SName.NameString), "Request body SName does not have the expected number of NameStrings")
-	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.SName.NameString, "Request body SName entries not as expected")
+	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.SName.NameString),
+		"Request body SName does not have the expected number of NameStrings")
+	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.SName.NameString,
+		"Request body SName entries not as expected")
 	assert.Equal(t, tt, a.Till, "Request body Till time not as expected")
 	assert.Equal(t, testdata.TEST_NONCE, a.Nonce, "Request body nounce not as expected")
 	assert.Equal(t, []int32{0, 1}, a.EType, "Etype list not as expected")
@@ -507,40 +536,10 @@ func TestUnmarshalASReq(t *testing.T) {
 	assert.Equal(t, 2, len(a.PAData), "Number of PAData items in the sequence not as expected")
 	for i, pa := range a.PAData {
 		assert.Equal(t, patype.PA_SAM_RESPONSE, pa.PADataType, fmt.Sprintf("PAData type for entry %d not as expected", i+1))
-		assert.Equal(t, []byte(testdata.TEST_PADATA_VALUE), pa.PADataValue, fmt.Sprintf("PAData valye for entry %d not as expected", i+1))
+		assert.Equal(t, []byte(testdata.TEST_PADATA_VALUE), pa.PADataValue,
+			fmt.Sprintf("PAData valye for entry %d not as expected", i+1))
 	}
-	assert.Equal(t, "fedcba90", hex.EncodeToString(a.ReqBody.KDCOptions.Bytes), "Request body flags not as expected")
-	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, a.ReqBody.CName.NameType, "Request body CName NameType not as expected")
-	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.ReqBody.CName.NameString), "Request body CName does not have the expected number of NameStrings")
-	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.ReqBody.CName.NameString, "Request body CName entries not as expected")
-	assert.Equal(t, testdata.TEST_REALM, a.ReqBody.Realm, "Request body Realm not as expected")
-	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, a.ReqBody.SName.NameType, "Request body SName nametype not as expected")
-	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.ReqBody.SName.NameString), "Request body SName does not have the expected number of NameStrings")
-	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.ReqBody.SName.NameString, "Request body SName entries not as expected")
-	assert.Equal(t, tt, a.ReqBody.From, "Request body From time not as expected")
-	assert.Equal(t, tt, a.ReqBody.Till, "Request body Till time not as expected")
-	assert.Equal(t, tt, a.ReqBody.RTime, "Request body RTime time not as expected")
-	assert.Equal(t, testdata.TEST_NONCE, a.ReqBody.Nonce, "Request body nounce not as expected")
-	assert.Equal(t, []int32{0, 1}, a.ReqBody.EType, "Etype list not as expected")
-	assert.Equal(t, 2, len(a.ReqBody.Addresses), "Number of client addresses not as expected")
-	for i, addr := range a.ReqBody.Addresses {
-		assert.Equal(t, addrtype.IPv4, addr.AddrType, fmt.Sprintf("Host address type not as expected for address item %d", i+1))
-		assert.Equal(t, "12d00023", hex.EncodeToString(addr.Address), fmt.Sprintf("Host address not as expected for address item %d", i+1))
-	}
-	assert.Equal(t, testdata.TEST_ETYPE, a.ReqBody.EncAuthData.EType, "Etype of request body encrypted authorization data not as expected")
-	assert.Equal(t, iana.PVNO, a.ReqBody.EncAuthData.KVNO, "KVNO of request body encrypted authorization data not as expected")
-	assert.Equal(t, []byte(testdata.TEST_CIPHERTEXT), a.ReqBody.EncAuthData.Cipher, "Ciphertext of request body encrypted authorization data not as expected")
-	assert.Equal(t, 2, len(a.ReqBody.AdditionalTickets), "Number of additional tickets not as expected")
-	for i, tkt := range a.ReqBody.AdditionalTickets {
-		assert.Equal(t, iana.PVNO, tkt.TktVNO, fmt.Sprintf("Additional ticket (%v) ticket-vno not as expected", i+1))
-		assert.Equal(t, testdata.TEST_REALM, tkt.Realm, fmt.Sprintf("Additional ticket (%v) realm not as expected", i+1))
-		assert.Equal(t, nametype.KRB_NT_PRINCIPAL, tkt.SName.NameType, fmt.Sprintf("Additional ticket (%v) SName NameType not as expected", i+1))
-		assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(tkt.SName.NameString), fmt.Sprintf("Additional ticket (%v) SName does not have the expected number of NameStrings", i+1))
-		assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, tkt.SName.NameString, fmt.Sprintf("Additional ticket (%v) SName name string entries not as expected", i+1))
-		assert.Equal(t, testdata.TEST_ETYPE, tkt.EncPart.EType, fmt.Sprintf("Additional ticket (%v) encPart etype not as expected", i+1))
-		assert.Equal(t, iana.PVNO, tkt.EncPart.KVNO, fmt.Sprintf("Additional ticket (%v) encPart KVNO not as expected", i+1))
-		assert.Equal(t, []byte(testdata.TEST_CIPHERTEXT), tkt.EncPart.Cipher, fmt.Sprintf("Additional ticket (%v) encPart cipher not as expected", i+1))
-	}
+	checkFullKDCReqBody(t, a.ReqBody, tt)
 }
 
 func TestUnmarshalASReq_optionalsNULLexceptsecond_ticket(t *testing.T) {
@@ -566,17 +565,23 @@ func TestUnmarshalASReq_optionalsNULLexceptsecond_ticket(t *testing.T) {
 	assert.Equal(t, testdata.TEST_NONCE, a.ReqBody.Nonce, "Request body nounce not as expected")
 	assert.Equal(t, []int32{0, 1}, a.ReqBody.EType, "Etype list not as expected")
 	assert.Equal(t, 0, len(a.ReqBody.Addresses), "Number of client addresses not empty")
-	assert.Equal(t, 0, len(a.ReqBody.EncAuthData.Cipher), "Ciphertext of request body encrypted authorization data not empty")
+	assert.Equal(t, 0, len(a.ReqBody.EncAuthData.Cipher),
+		"Ciphertext of request body encrypted authorization data not empty")
 	assert.Equal(t, 2, len(a.ReqBody.AdditionalTickets), "Number of additional tickets not as expected")
 	for i, tkt := range a.ReqBody.AdditionalTickets {
 		assert.Equal(t, iana.PVNO, tkt.TktVNO, fmt.Sprintf("Additional ticket (%v) ticket-vno not as expected", i+1))
 		assert.Equal(t, testdata.TEST_REALM, tkt.Realm, fmt.Sprintf("Additional ticket (%v) realm not as expected", i+1))
-		assert.Equal(t, nametype.KRB_NT_PRINCIPAL, tkt.SName.NameType, fmt.Sprintf("Additional ticket (%v) SName NameType not as expected", i+1))
-		assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(tkt.SName.NameString), fmt.Sprintf("Additional ticket (%v) SName does not have the expected number of NameStrings", i+1))
-		assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, tkt.SName.NameString, fmt.Sprintf("Additional ticket (%v) SName name string entries not as expected", i+1))
-		assert.Equal(t, testdata.TEST_ETYPE, tkt.EncPart.EType, fmt.Sprintf("Additional ticket (%v) encPart etype not as expected", i+1))
+		assert.Equal(t, nametype.KRB_NT_PRINCIPAL, tkt.SName.NameType,
+			fmt.Sprintf("Additional ticket (%v) SName NameType not as expected", i+1))
+		assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(tkt.SName.NameString),
+			fmt.Sprintf("Additional ticket (%v) SName does not have the expected number of NameStrings", i+1))
+		assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, tkt.SName.NameString,
+			fmt.Sprintf("Additional ticket (%v) SName name string entries not as expected", i+1))
+		assert.Equal(t, testdata.TEST_ETYPE, tkt.EncPart.EType,
+			fmt.Sprintf("Additional ticket (%v) encPart etype not as expected", i+1))
 		assert.Equal(t, iana.PVNO, tkt.EncPart.KVNO, fmt.Sprintf("Additional ticket (%v) encPart KVNO not as expected", i+1))
-		assert.Equal(t, []byte(testdata.TEST_CIPHERTEXT), tkt.EncPart.Cipher, fmt.Sprintf("Additional ticket (%v) encPart cipher not as expected", i+1))
+		assert.Equal(t, []byte(testdata.TEST_CIPHERTEXT), tkt.EncPart.Cipher,
+			fmt.Sprintf("Additional ticket (%v) encPart cipher not as expected", i+1))
 	}
 }
 
@@ -600,13 +605,16 @@ func TestUnmarshalASReq_optionalsNULLexceptserver(t *testing.T) {
 	assert.Equal(t, "fedcba90", hex.EncodeToString(a.ReqBody.KDCOptions.Bytes), "Request body flags not as expected")
 	assert.Equal(t, testdata.TEST_REALM, a.ReqBody.Realm, "Request body Realm not as expected")
 	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, a.ReqBody.SName.NameType, "Request body SName nametype not as expected")
-	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.ReqBody.SName.NameString), "Request body SName does not have the expected number of NameStrings")
-	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.ReqBody.SName.NameString, "Request body SName entries not as expected")
+	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.ReqBody.SName.NameString),
+		"Request body SName does not have the expected number of NameStrings")
+	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.ReqBody.SName.NameString,
+		"Request body SName entries not as expected")
 	assert.Equal(t, tt, a.ReqBody.Till, "Request body Till time not as expected")
 	assert.Equal(t, testdata.TEST_NONCE, a.ReqBody.Nonce, "Request body nounce not as expected")
 	assert.Equal(t, []int32{0, 1}, a.ReqBody.EType, "Etype list not as expected")
 	assert.Equal(t, 0, len(a.ReqBody.Addresses), "Number of client addresses not empty")
-	assert.Equal(t, 0, len(a.ReqBody.EncAuthData.Cipher), "Ciphertext of request body encrypted authorization data not empty")
+	assert.Equal(t, 0, len(a.ReqBody.EncAuthData.Cipher),
+		"Ciphertext of request body encrypted authorization data not empty")
 	assert.Equal(t, 0, len(a.ReqBody.AdditionalTickets), "Number of additional tickets not empty")
 }
 
@@ -629,40 +637,10 @@ func TestUnmarshalTGSReq(t *testing.T) {
 	assert.Equal(t, 2, len(a.PAData), "Number of PAData items in the sequence not as expected")
 	for i, pa := range a.PAData {
 		assert.Equal(t, patype.PA_SAM_RESPONSE, pa.PADataType, fmt.Sprintf("PAData type for entry %d not as expected", i+1))
-		assert.Equal(t, []byte(testdata.TEST_PADATA_VALUE), pa.PADataValue, fmt.Sprintf("PAData valye for entry %d not as expected", i+1))
+		assert.Equal(t, []byte(testdata.TEST_PADATA_VALUE), pa.PADataValue,
+			fmt.Sprintf("PAData valye for entry %d not as expected", i+1))
 	}
-	assert.Equal(t, "fedcba90", hex.EncodeToString(a.ReqBody.KDCOptions.Bytes), "Request body flags not as expected")
-	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, a.ReqBody.CName.NameType, "Request body CName NameType not as expected")
-	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.ReqBody.CName.NameString), "Request body CName does not have the expected number of NameStrings")
-	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.ReqBody.CName.NameString, "Request body CName entries not as expected")
-	assert.Equal(t, testdata.TEST_REALM, a.ReqBody.Realm, "Request body Realm not as expected")
-	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, a.ReqBody.SName.NameType, "Request body SName nametype not as expected")
-	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.ReqBody.SName.NameString), "Request body SName does not have the expected number of NameStrings")
-	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.ReqBody.SName.NameString, "Request body SName entries not as expected")
-	assert.Equal(t, tt, a.ReqBody.From, "Request body From time not as expected")
-	assert.Equal(t, tt, a.ReqBody.Till, "Request body Till time not as expected")
-	assert.Equal(t, tt, a.ReqBody.RTime, "Request body RTime time not as expected")
-	assert.Equal(t, testdata.TEST_NONCE, a.ReqBody.Nonce, "Request body nounce not as expected")
-	assert.Equal(t, []int32{0, 1}, a.ReqBody.EType, "Etype list not as expected")
-	assert.Equal(t, 2, len(a.ReqBody.Addresses), "Number of client addresses not as expected")
-	for i, addr := range a.ReqBody.Addresses {
-		assert.Equal(t, addrtype.IPv4, addr.AddrType, fmt.Sprintf("Host address type not as expected for address item %d", i+1))
-		assert.Equal(t, "12d00023", hex.EncodeToString(addr.Address), fmt.Sprintf("Host address not as expected for address item %d", i+1))
-	}
-	assert.Equal(t, testdata.TEST_ETYPE, a.ReqBody.EncAuthData.EType, "Etype of request body encrypted authorization data not as expected")
-	assert.Equal(t, iana.PVNO, a.ReqBody.EncAuthData.KVNO, "KVNO of request body encrypted authorization data not as expected")
-	assert.Equal(t, []byte(testdata.TEST_CIPHERTEXT), a.ReqBody.EncAuthData.Cipher, "Ciphertext of request body encrypted authorization data not as expected")
-	assert.Equal(t, 2, len(a.ReqBody.AdditionalTickets), "Number of additional tickets not as expected")
-	for i, tkt := range a.ReqBody.AdditionalTickets {
-		assert.Equal(t, iana.PVNO, tkt.TktVNO, fmt.Sprintf("Additional ticket (%v) ticket-vno not as expected", i+1))
-		assert.Equal(t, testdata.TEST_REALM, tkt.Realm, fmt.Sprintf("Additional ticket (%v) realm not as expected", i+1))
-		assert.Equal(t, nametype.KRB_NT_PRINCIPAL, tkt.SName.NameType, fmt.Sprintf("Additional ticket (%v) SName NameType not as expected", i+1))
-		assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(tkt.SName.NameString), fmt.Sprintf("Additional ticket (%v) SName does not have the expected number of NameStrings", i+1))
-		assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, tkt.SName.NameString, fmt.Sprintf("Additional ticket (%v) SName name string entries not as expected", i+1))
-		assert.Equal(t, testdata.TEST_ETYPE, tkt.EncPart.EType, fmt.Sprintf("Additional ticket (%v) encPart etype not as expected", i+1))
-		assert.Equal(t, iana.PVNO, tkt.EncPart.KVNO, fmt.Sprintf("Additional ticket (%v) encPart KVNO not as expected", i+1))
-		assert.Equal(t, []byte(testdata.TEST_CIPHERTEXT), tkt.EncPart.Cipher, fmt.Sprintf("Additional ticket (%v) encPart cipher not as expected", i+1))
-	}
+	checkFullKDCReqBody(t, a.ReqBody, tt)
 }
 
 func TestUnmarshalTGSReq_optionalsNULLexceptsecond_ticket(t *testing.T) {
@@ -688,17 +666,23 @@ func TestUnmarshalTGSReq_optionalsNULLexceptsecond_ticket(t *testing.T) {
 	assert.Equal(t, testdata.TEST_NONCE, a.ReqBody.Nonce, "Request body nounce not as expected")
 	assert.Equal(t, []int32{0, 1}, a.ReqBody.EType, "Etype list not as expected")
 	assert.Equal(t, 0, len(a.ReqBody.Addresses), "Number of client addresses not empty")
-	assert.Equal(t, 0, len(a.ReqBody.EncAuthData.Cipher), "Ciphertext of request body encrypted authorization data not empty")
+	assert.Equal(t, 0, len(a.ReqBody.EncAuthData.Cipher),
+		"Ciphertext of request body encrypted authorization data not empty")
 	assert.Equal(t, 2, len(a.ReqBody.AdditionalTickets), "Number of additional tickets not as expected")
 	for i, tkt := range a.ReqBody.AdditionalTickets {
 		assert.Equal(t, iana.PVNO, tkt.TktVNO, fmt.Sprintf("Additional ticket (%v) ticket-vno not as expected", i+1))
 		assert.Equal(t, testdata.TEST_REALM, tkt.Realm, fmt.Sprintf("Additional ticket (%v) realm not as expected", i+1))
-		assert.Equal(t, nametype.KRB_NT_PRINCIPAL, tkt.SName.NameType, fmt.Sprintf("Additional ticket (%v) SName NameType not as expected", i+1))
-		assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(tkt.SName.NameString), fmt.Sprintf("Additional ticket (%v) SName does not have the expected number of NameStrings", i+1))
-		assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, tkt.SName.NameString, fmt.Sprintf("Additional ticket (%v) SName name string entries not as expected", i+1))
-		assert.Equal(t, testdata.TEST_ETYPE, tkt.EncPart.EType, fmt.Sprintf("Additional ticket (%v) encPart etype not as expected", i+1))
+		assert.Equal(t, nametype.KRB_NT_PRINCIPAL, tkt.SName.NameType,
+			fmt.Sprintf("Additional ticket (%v) SName NameType not as expected", i+1))
+		assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(tkt.SName.NameString),
+			fmt.Sprintf("Additional ticket (%v) SName does not have the expected number of NameStrings", i+1))
+		assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, tkt.SName.NameString,
+			fmt.Sprintf("Additional ticket (%v) SName name string entries not as expected", i+1))
+		assert.Equal(t, testdata.TEST_ETYPE, tkt.EncPart.EType,
+			fmt.Sprintf("Additional ticket (%v) encPart etype not as expected", i+1))
 		assert.Equal(t, iana.PVNO, tkt.EncPart.KVNO, fmt.Sprintf("Additional ticket (%v) encPart KVNO not as expected", i+1))
-		assert.Equal(t, []byte(testdata.TEST_CIPHERTEXT), tkt.EncPart.Cipher, fmt.Sprintf("Additional ticket (%v) encPart cipher not as expected", i+1))
+		assert.Equal(t, []byte(testdata.TEST_CIPHERTEXT), tkt.EncPart.Cipher,
+			fmt.Sprintf("Additional ticket (%v) encPart cipher not as expected", i+1))
 	}
 }
 
@@ -722,13 +706,16 @@ func TestUnmarshalTGSReq_optionalsNULLexceptserver(t *testing.T) {
 	assert.Equal(t, "fedcba90", hex.EncodeToString(a.ReqBody.KDCOptions.Bytes), "Request body flags not as expected")
 	assert.Equal(t, testdata.TEST_REALM, a.ReqBody.Realm, "Request body Realm not as expected")
 	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, a.ReqBody.SName.NameType, "Request body SName nametype not as expected")
-	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.ReqBody.SName.NameString), "Request body SName does not have the expected number of NameStrings")
-	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.ReqBody.SName.NameString, "Request body SName entries not as expected")
+	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.ReqBody.SName.NameString),
+		"Request body SName does not have the expected number of NameStrings")
+	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.ReqBody.SName.NameString,
+		"Request body SName entries not as expected")
 	assert.Equal(t, tt, a.ReqBody.Till, "Request body Till time not as expected")
 	assert.Equal(t, testdata.TEST_NONCE, a.ReqBody.Nonce, "Request body nounce not as expected")
 	assert.Equal(t, []int32{0, 1}, a.ReqBody.EType, "Etype list not as expected")
 	assert.Equal(t, 0, len(a.ReqBody.Addresses), "Number of client addresses not empty")
-	assert.Equal(t, 0, len(a.ReqBody.EncAuthData.Cipher), "Ciphertext of request body encrypted authorization data not empty")
+	assert.Equal(t, 0, len(a.ReqBody.EncAuthData.Cipher),
+		"Ciphertext of request body encrypted authorization data not empty")
 	assert.Equal(t, 0, len(a.ReqBody.AdditionalTickets), "Number of additional tickets not empty")
 }
 
@@ -787,4 +774,103 @@ func TestMarshalTGSReq(t *testing.T) {
 		t.Fatalf("Marshal of ticket errored: %v", err)
 	}
 	assert.Equal(t, b, mb, "Marshal bytes of TGSReq not as expected")
+}
+
+func checkFullKDCReqBody(t *testing.T, body KDCReqBody, tt time.Time) {
+	t.Helper()
+	assert.Equal(t, "fedcba90", hex.EncodeToString(body.KDCOptions.Bytes), "Request body flags not as expected")
+	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, body.CName.NameType, "Request body CName NameType not as expected")
+	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(body.CName.NameString),
+		"Request body CName does not have the expected number of NameStrings")
+	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, body.CName.NameString,
+		"Request body CName entries not as expected")
+	assert.Equal(t, testdata.TEST_REALM, body.Realm, "Request body Realm not as expected")
+	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, body.SName.NameType, "Request body SName nametype not as expected")
+	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(body.SName.NameString),
+		"Request body SName does not have the expected number of NameStrings")
+	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, body.SName.NameString,
+		"Request body SName entries not as expected")
+	assert.Equal(t, tt, body.From, "Request body From time not as expected")
+	assert.Equal(t, tt, body.Till, "Request body Till time not as expected")
+	assert.Equal(t, tt, body.RTime, "Request body RTime time not as expected")
+	assert.Equal(t, testdata.TEST_NONCE, body.Nonce, "Request body nounce not as expected")
+	assert.Equal(t, []int32{0, 1}, body.EType, "Etype list not as expected")
+	assert.Equal(t, 2, len(body.Addresses), "Number of client addresses not as expected")
+	for i, addr := range body.Addresses {
+		assert.Equal(t, addrtype.IPv4, addr.AddrType,
+			fmt.Sprintf("Host address type not as expected for address item %d", i+1))
+		assert.Equal(t, "12d00023", hex.EncodeToString(addr.Address),
+			fmt.Sprintf("Host address not as expected for address item %d", i+1))
+	}
+	assert.Equal(t, testdata.TEST_ETYPE, body.EncAuthData.EType,
+		"Etype of request body encrypted authorization data not as expected")
+	assert.Equal(t, iana.PVNO, body.EncAuthData.KVNO, "KVNO of request body encrypted authorization data not as expected")
+	assert.Equal(t, []byte(testdata.TEST_CIPHERTEXT), body.EncAuthData.Cipher,
+		"Ciphertext of request body encrypted authorization data not as expected")
+	checkKDCReqAdditionalTickets(t, body.AdditionalTickets)
+}
+
+func checkKDCReqAdditionalTickets(t *testing.T, tickets []Ticket) {
+	t.Helper()
+	assert.Equal(t, 2, len(tickets), "Number of additional tickets not as expected")
+	for i, tkt := range tickets {
+		assert.Equal(t, iana.PVNO, tkt.TktVNO, fmt.Sprintf("Additional ticket (%v) ticket-vno not as expected", i+1))
+		assert.Equal(t, testdata.TEST_REALM, tkt.Realm, fmt.Sprintf("Additional ticket (%v) realm not as expected", i+1))
+		assert.Equal(t, nametype.KRB_NT_PRINCIPAL, tkt.SName.NameType,
+			fmt.Sprintf("Additional ticket (%v) SName NameType not as expected", i+1))
+		assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(tkt.SName.NameString),
+			fmt.Sprintf("Additional ticket (%v) SName does not have the expected number of NameStrings", i+1))
+		assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, tkt.SName.NameString,
+			fmt.Sprintf("Additional ticket (%v) SName name string entries not as expected", i+1))
+		assert.Equal(t, testdata.TEST_ETYPE, tkt.EncPart.EType,
+			fmt.Sprintf("Additional ticket (%v) encPart etype not as expected", i+1))
+		assert.Equal(t, iana.PVNO, tkt.EncPart.KVNO, fmt.Sprintf("Additional ticket (%v) encPart KVNO not as expected", i+1))
+		assert.Equal(t, []byte(testdata.TEST_CIPHERTEXT), tkt.EncPart.Cipher,
+			fmt.Sprintf("Additional ticket (%v) encPart cipher not as expected", i+1))
+	}
+}
+
+func checkKDCRequestEnctypeOffers(t *testing.T, body string, want []int32) {
+	t.Helper()
+	cfg, err := config.NewFromString("[libdefaults]\n" + body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
+	as, err := NewASReqForTGT(kdcTestRealmCOM, cfg, cname)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sname := types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "HTTP/server.example.org")
+	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
+	tgs, err := NewTGSReq(
+		cname,
+		kdcTestRealmCOM,
+		cfg,
+		s4uTestTicket(),
+		key,
+		sname,
+		false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asDER, err := as.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tgsDER, err := tgs.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decodedAS ASReq
+	if err := decodedAS.Unmarshal(asDER); err != nil {
+		t.Fatal(err)
+	}
+	var decodedTGS TGSReq
+	if err := decodedTGS.Unmarshal(tgsDER); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, want, decodedAS.ReqBody.EType, "AS-REQ enctype offer")
+	assert.Equal(t, want, decodedTGS.ReqBody.EType, "TGS-REQ enctype offer")
 }

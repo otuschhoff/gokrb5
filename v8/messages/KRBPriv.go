@@ -18,10 +18,11 @@ import (
 
 // KRBPriv implements RFC 4120 type: https://tools.ietf.org/html/rfc4120#section-5.7.1.
 type KRBPriv struct {
-	PVNO             int                 `asn1:"explicit,tag:0"`
-	MsgType          int                 `asn1:"explicit,tag:1"`
-	EncPart          types.EncryptedData `asn1:"explicit,tag:3"`
-	DecryptedEncPart EncKrbPrivPart      `asn1:"optional,omitempty"` // Not part of ASN1 bytes so marked as optional so unmarshalling works
+	PVNO    int                 `asn1:"explicit,tag:0"`
+	MsgType int                 `asn1:"explicit,tag:1"`
+	EncPart types.EncryptedData `asn1:"explicit,tag:3"`
+	// DecryptedEncPart is local state and is not required on the wire.
+	DecryptedEncPart EncKrbPrivPart `asn1:"optional,omitempty"`
 }
 
 // EncKrbPrivPart is the encrypted part of KRB_PRIV.
@@ -36,9 +37,11 @@ type EncKrbPrivPart struct {
 
 // NewKRBPriv returns a new KRBPriv type.
 func NewKRBPriv(part EncKrbPrivPart) KRBPriv {
+	var encrypted types.EncryptedData
 	return KRBPriv{
 		PVNO:             iana.PVNO,
 		MsgType:          msgtype.KRB_PRIV,
+		EncPart:          encrypted,
 		DecryptedEncPart: part,
 	}
 }
@@ -51,7 +54,10 @@ func (k *KRBPriv) Unmarshal(b []byte) error {
 	}
 	expectedMsgType := msgtype.KRB_PRIV
 	if k.MsgType != expectedMsgType {
-		return krberror.NewErrorf(krberror.KRBMsgError, "message ID does not indicate a KRB_PRIV. Expected: %v; Actual: %v", expectedMsgType, k.MsgType)
+		return krberror.NewErrorf(
+			krberror.KRBMsgError, "message ID does not indicate a KRB_PRIV. Expected: %v; Actual: %v",
+			expectedMsgType, k.MsgType,
+		)
 	}
 	return nil
 }
@@ -67,10 +73,12 @@ func (k *EncKrbPrivPart) Unmarshal(b []byte) error {
 
 // Marshal the KRBPriv.
 func (k *KRBPriv) Marshal() ([]byte, error) {
+	var decrypted EncKrbPrivPart
 	tk := KRBPriv{
-		PVNO:    k.PVNO,
-		MsgType: k.MsgType,
-		EncPart: k.EncPart,
+		PVNO:             k.PVNO,
+		MsgType:          k.MsgType,
+		EncPart:          k.EncPart,
+		DecryptedEncPart: decrypted,
 	}
 	b, err := asn1.Marshal(tk)
 	if err != nil {

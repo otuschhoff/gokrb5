@@ -24,7 +24,12 @@ import (
 )
 
 func TestProcessUnmarshalReplyErrorRetainsClassificationAndCause(t *testing.T) {
-	kdcError := NewKRBError(types.NewPrincipalName(2, "krbtgt/EXAMPLE.COM"), "EXAMPLE.COM", errorcode.KDC_ERR_PREAUTH_REQUIRED, "challenge")
+	kdcError := NewKRBError(
+		types.NewPrincipalName(2, "krbtgt/EXAMPLE.COM"),
+		"EXAMPLE.COM",
+		errorcode.KDC_ERR_PREAUTH_REQUIRED,
+		"challenge",
+	)
 	wire, err := kdcError.Marshal()
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +62,9 @@ func TestKRBErrorMethodData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	k := KRBError{ErrorCode: errorcode.KDC_ERR_PREAUTH_REQUIRED, EData: b}
+	var k KRBError
+	k.ErrorCode = errorcode.KDC_ERR_PREAUTH_REQUIRED
+	k.EData = b
 	got, err := k.MethodData()
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +89,7 @@ func TestKRBErrorMethodData(t *testing.T) {
 }
 
 func TestKRBErrorNTStatus(t *testing.T) {
-	k := KRBError{ErrorCode: errorcode.KDC_ERR_CLIENT_REVOKED, EData: mustDecodeHex(t, testdata.MSKILEKerbErrorDataAccountDisabled)}
+	k := accountDisabledKRBError(t)
 	status, ok := k.NTStatus()
 	if !ok || status != ntstatus.STATUS_ACCOUNT_DISABLED {
 		t.Fatalf("NTStatus = %v, %v", status, ok)
@@ -97,10 +104,9 @@ func TestKRBErrorNTStatus(t *testing.T) {
 }
 
 func TestWrappedKRBErrorExposesNTStatus(t *testing.T) {
-	want := KRBError{ErrorCode: errorcode.KDC_ERR_CLIENT_REVOKED, EData: mustDecodeHex(t, testdata.MSKILEKerbErrorDataAccountDisabled)}
+	want := accountDisabledKRBError(t)
 	wrapped := krberror.Errorf(want, krberror.KDCError, "KDC rejected request")
-	var got KRBError
-	if !errors.As(wrapped, &got) {
+	if _, ok := errors.AsType[KRBError](wrapped); !ok {
 		t.Fatal("wrapped KRBError was not discoverable with errors.As")
 	}
 	status, ok := wrapped.NTStatus()
@@ -110,6 +116,14 @@ func TestWrappedKRBErrorExposesNTStatus(t *testing.T) {
 	if !bytes.Contains([]byte(wrapped.Error()), []byte("STATUS_ACCOUNT_DISABLED")) {
 		t.Fatalf("wrapped error text does not include NTSTATUS: %s", wrapped.Error())
 	}
+}
+
+func accountDisabledKRBError(t *testing.T) KRBError {
+	t.Helper()
+	var k KRBError
+	k.ErrorCode = errorcode.KDC_ERR_CLIENT_REVOKED
+	k.EData = mustDecodeHex(t, testdata.MSKILEKerbErrorDataAccountDisabled)
+	return k
 }
 
 func mustDecodeHex(t *testing.T, value string) []byte {
@@ -144,12 +158,15 @@ func TestUnmarshalMarshalKRBError(t *testing.T) {
 	assert.Equal(t, errorcode.KRB_ERR_GENERIC, a.ErrorCode, "Error code not as expected")
 	assert.Equal(t, testdata.TEST_REALM, a.CRealm, "CRealm not as expected")
 	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, a.CName.NameType, "CName NameType not as expected")
-	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.CName.NameString), "CName does not have the expected number of NameStrings")
+	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.CName.NameString),
+		"CName does not have the expected number of NameStrings")
 	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.CName.NameString, "CName entries not as expected")
 	assert.Equal(t, testdata.TEST_REALM, a.Realm, "Realm not as expected")
 	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, a.SName.NameType, "Ticket SName NameType not as expected")
-	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.SName.NameString), "Ticket SName does not have the expected number of NameStrings")
-	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.SName.NameString, "Ticket SName name string entries not as expected")
+	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.SName.NameString),
+		"Ticket SName does not have the expected number of NameStrings")
+	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.SName.NameString,
+		"Ticket SName name string entries not as expected")
 	assert.Equal(t, "krb5data", a.EText, "EText not as expected")
 	assert.Equal(t, []byte("krb5data"), a.EData, "EData not as expected")
 
@@ -182,8 +199,10 @@ func TestUnmarshalMarshalKRBError_optionalsNULL(t *testing.T) {
 	assert.Equal(t, errorcode.KRB_ERR_GENERIC, a.ErrorCode, "Error code not as expected")
 	assert.Equal(t, testdata.TEST_REALM, a.Realm, "Realm not as expected")
 	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, a.SName.NameType, "Ticket SName NameType not as expected")
-	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.SName.NameString), "Ticket SName does not have the expected number of NameStrings")
-	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.SName.NameString, "Ticket SName name string entries not as expected")
+	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.SName.NameString),
+		"Ticket SName does not have the expected number of NameStrings")
+	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.SName.NameString,
+		"Ticket SName name string entries not as expected")
 
 	b2, err := a.Marshal()
 	if err != nil {

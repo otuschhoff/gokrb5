@@ -44,24 +44,30 @@ func NewAPReq(tkt Ticket, sessionKey types.EncryptionKey, auth types.Authenticat
 
 // NewAPReqWithKeyUsage generates a new KRB_AP_REQ using the specified
 // authenticator key usage.
-func NewAPReqWithKeyUsage(tkt Ticket, sessionKey types.EncryptionKey, auth types.Authenticator, usage uint32) (APReq, error) {
+func NewAPReqWithKeyUsage(
+	tkt Ticket, sessionKey types.EncryptionKey, auth types.Authenticator, usage uint32,
+) (APReq, error) {
 	var a APReq
 	ed, err := encryptAuthenticator(auth, sessionKey, tkt, usage)
 	if err != nil {
 		return a, krberror.Errorf(err, krberror.KRBMsgError, "error creating Authenticator for AP_REQ")
 	}
+	var authenticator types.Authenticator
 	a = APReq{
 		PVNO:                   iana.PVNO,
 		MsgType:                msgtype.KRB_AP_REQ,
 		APOptions:              types.NewKrbFlags(),
 		Ticket:                 tkt,
 		EncryptedAuthenticator: ed,
+		Authenticator:          authenticator,
 	}
 	return a, nil
 }
 
 // Encrypt Authenticator
-func encryptAuthenticator(a types.Authenticator, sessionKey types.EncryptionKey, tkt Ticket, usage uint32) (types.EncryptedData, error) {
+func encryptAuthenticator(
+	a types.Authenticator, sessionKey types.EncryptionKey, tkt Ticket, usage uint32,
+) (types.EncryptedData, error) {
 	var ed types.EncryptedData
 	m, err := a.Marshal()
 	if err != nil {
@@ -95,7 +101,7 @@ func (a *APReq) DecryptAuthenticatorWithKeyUsage(sessionKey types.EncryptionKey,
 }
 
 func authenticatorKeyUsage(pn types.PrincipalName) uint32 {
-	if pn.NameString[0] == "krbtgt" {
+	if pn.NameString[0] == ticketGrantingService {
 		return keyusage.TGS_REQ_PA_TGS_REQ_AP_REQ_AUTHENTICATOR
 	}
 	return keyusage.AP_REQ_AUTHENTICATOR
@@ -109,7 +115,8 @@ func (a *APReq) Unmarshal(b []byte) error {
 		return krberror.Errorf(err, krberror.EncodingError, "unmarshal error of AP_REQ")
 	}
 	if m.MsgType != msgtype.KRB_AP_REQ {
-		return NewKRBError(types.PrincipalName{}, "", errorcode.KRB_AP_ERR_MSG_TYPE, errorcode.Lookup(errorcode.KRB_AP_ERR_MSG_TYPE))
+		var principal types.PrincipalName
+		return NewKRBError(principal, "", errorcode.KRB_AP_ERR_MSG_TYPE, errorcode.Lookup(errorcode.KRB_AP_ERR_MSG_TYPE))
 	}
 	a.PVNO = m.PVNO
 	a.MsgType = m.MsgType
@@ -124,22 +131,23 @@ func (a *APReq) Unmarshal(b []byte) error {
 
 // Marshal APReq struct.
 func (a *APReq) Marshal() ([]byte, error) {
-	m := marshalAPReq{
-		PVNO:                   a.PVNO,
-		MsgType:                a.MsgType,
-		APOptions:              a.APOptions,
-		EncryptedAuthenticator: a.EncryptedAuthenticator,
-	}
-	var b []byte
 	b, err := a.Ticket.Marshal()
 	if err != nil {
 		return b, err
 	}
-	m.Ticket = asn1.RawValue{
-		Class:      asn1.ClassContextSpecific,
-		IsCompound: true,
-		Tag:        3,
-		Bytes:      b,
+	const ticketTag = 3
+	m := marshalAPReq{
+		PVNO:      a.PVNO,
+		MsgType:   a.MsgType,
+		APOptions: a.APOptions,
+		Ticket: asn1.RawValue{
+			Class:      asn1.ClassContextSpecific,
+			IsCompound: true,
+			Tag:        ticketTag,
+			Bytes:      b,
+			FullBytes:  nil,
+		},
+		EncryptedAuthenticator: a.EncryptedAuthenticator,
 	}
 	mk, err := asn1.Marshal(m)
 	if err != nil {
@@ -151,13 +159,16 @@ func (a *APReq) Marshal() ([]byte, error) {
 
 // Verify an AP_REQ using service's keytab, spn and max acceptable clock skew duration.
 // The service ticket encrypted part and authenticator will be decrypted as part of this operation.
-func (a *APReq) Verify(kt *keytab.Keytab, d time.Duration, cAddr types.HostAddress, snameOverride *types.PrincipalName) (bool, error) {
+func (a *APReq) Verify(
+	kt *keytab.Keytab, d time.Duration, cAddr types.HostAddress, snameOverride *types.PrincipalName,
+) (bool, error) {
 	// Decrypt ticket's encrypted part with service key
 	// TODO decrypt with service's session key from its TGT is use-to-user. Need to figure out how to get TGT.
 	// if types.IsFlagSet(&a.APOptions, flags.APOptionUseSessionKey) {
 	//	err := a.Ticket.Decrypt(tgt.DecryptedEncPart.Key)
 	//	if err != nil {
-	//		return false, krberror.Errorf(err, krberror.DecryptingError, "error decrypting encpart of ticket provided using session key")
+	//		return false, krberror.Errorf(err, krberror.DecryptingError,
+	//			"error decrypting encpart of ticket provided using session key")
 	//	}
 	// } else {
 	//	err := a.Ticket.DecryptEncPart(*kt, &a.Ticket.SName)
@@ -180,31 +191,45 @@ func (a *APReq) Verify(kt *keytab.Keytab, d time.Duration, cAddr types.HostAddre
 		return ok, err
 	}
 
-	// Check client's address is listed in the client addresses in the ticket
-	if len(a.Ticket.DecryptedEncPart.CAddr) > 0 {
-		// If client addresses are present check if any of them match the source IP that sent the APReq
-		// If there is no match return KRB_AP_ERR_BADADDR error.
-		if !types.HostAddressesContains(a.Ticket.DecryptedEncPart.CAddr, cAddr) {
-			return false, NewKRBError(a.Ticket.SName, a.Ticket.Realm, errorcode.KRB_AP_ERR_BADADDR, "client address not within the list contained in the service ticket")
-		}
+	if err = a.verifyClientAddress(cAddr); err != nil {
+		return false, err
 	}
 
 	// Decrypt authenticator with session key from ticket's encrypted part
 	err = a.DecryptAuthenticator(a.Ticket.DecryptedEncPart.Key)
 	if err != nil {
-		return false, NewKRBError(a.Ticket.SName, a.Ticket.Realm, errorcode.KRB_AP_ERR_BAD_INTEGRITY, "could not decrypt authenticator")
+		return false, NewKRBError(
+			a.Ticket.SName, a.Ticket.Realm, errorcode.KRB_AP_ERR_BAD_INTEGRITY, "could not decrypt authenticator",
+		)
 	}
 
 	// Check CName in authenticator is the same as that in the ticket
 	if !a.Authenticator.CName.Equal(a.Ticket.DecryptedEncPart.CName) {
-		return false, NewKRBError(a.Ticket.SName, a.Ticket.Realm, errorcode.KRB_AP_ERR_BADMATCH, "CName in Authenticator does not match that in service ticket")
+		return false, NewKRBError(
+			a.Ticket.SName, a.Ticket.Realm, errorcode.KRB_AP_ERR_BADMATCH,
+			"CName in Authenticator does not match that in service ticket",
+		)
 	}
 
 	// Check the clock skew between the client and the service server
 	ct := a.Authenticator.CTime.Add(time.Duration(a.Authenticator.Cusec) * time.Microsecond)
 	t := time.Now().UTC()
 	if t.Sub(ct) > d || ct.Sub(t) > d {
-		return false, NewKRBError(a.Ticket.SName, a.Ticket.Realm, errorcode.KRB_AP_ERR_SKEW, fmt.Sprintf("clock skew with client too large. greater than %v seconds", d))
+		return false, NewKRBError(
+			a.Ticket.SName, a.Ticket.Realm, errorcode.KRB_AP_ERR_SKEW,
+			fmt.Sprintf("clock skew with client too large. greater than %v seconds", d),
+		)
 	}
 	return true, nil
+}
+
+func (a *APReq) verifyClientAddress(address types.HostAddress) error {
+	addresses := a.Ticket.DecryptedEncPart.CAddr
+	if len(addresses) == 0 || types.HostAddressesContains(addresses, address) {
+		return nil
+	}
+	return NewKRBError(
+		a.Ticket.SName, a.Ticket.Realm, errorcode.KRB_AP_ERR_BADADDR,
+		"client address not within the list contained in the service ticket",
+	)
 }

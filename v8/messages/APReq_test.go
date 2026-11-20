@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/iana"
 	"github.com/otuschhoff/gokrb5/v8/iana/addrtype"
@@ -35,8 +36,10 @@ func TestUnmarshalAPReq(t *testing.T) {
 	assert.Equal(t, iana.PVNO, a.Ticket.TktVNO, "Ticket VNO not as expected")
 	assert.Equal(t, testdata.TEST_REALM, a.Ticket.Realm, "Ticket realm not as expected")
 	assert.Equal(t, nametype.KRB_NT_PRINCIPAL, a.Ticket.SName.NameType, "Ticket SName NameType not as expected")
-	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.Ticket.SName.NameString), "Ticket SName does not have the expected number of NameStrings")
-	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.Ticket.SName.NameString, "Ticket SName name string entries not as expected")
+	assert.Equal(t, len(testdata.TEST_PRINCIPALNAME_NAMESTRING), len(a.Ticket.SName.NameString),
+		"Ticket SName does not have the expected number of NameStrings")
+	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, a.Ticket.SName.NameString,
+		"Ticket SName name string entries not as expected")
 	assert.Equal(t, testdata.TEST_ETYPE, a.Ticket.EncPart.EType, "Ticket encPart etype not as expected")
 	assert.Equal(t, iana.PVNO, a.Ticket.EncPart.KVNO, "Ticket encPart KVNO not as expected")
 	assert.Equal(t, []byte(testdata.TEST_CIPHERTEXT), a.Ticket.EncPart.Cipher, "Ticket encPart cipher not as expected")
@@ -66,26 +69,20 @@ func TestAPReqDecryptAndVerify(t *testing.T) {
 	sname := types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "HTTP/server.example.org")
 	address := types.HostAddress{AddrType: addrtype.IPv4, Address: []byte{127, 0, 0, 1}}
 	kt := keytab.New()
-	if err := kt.AddEntry("HTTP/server.example.org", "EXAMPLE.ORG", "password", now, 2, etypeID.AES256_CTS_HMAC_SHA1_96); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, kt.AddEntry(
+		"HTTP/server.example.org", ticketTestRealm, "password", now, 2, etypeID.AES256_CTS_HMAC_SHA1_96,
+	))
 
 	newRequest := func(t *testing.T, authName types.PrincipalName, authTime time.Time) APReq {
 		t.Helper()
-		ticket, sessionKey, err := NewTicket(cname, "EXAMPLE.ORG", sname, "EXAMPLE.ORG", types.NewKrbFlags(), kt,
+		ticket, sessionKey, err := NewTicket(cname, ticketTestRealm, sname, ticketTestRealm, types.NewKrbFlags(), kt,
 			etypeID.AES256_CTS_HMAC_SHA1_96, 2, now, now, now.Add(time.Hour), now.Add(2*time.Hour))
-		if err != nil {
-			t.Fatal(err)
-		}
-		authenticator, err := types.NewAuthenticator("EXAMPLE.ORG", authName)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
+		authenticator, err := types.NewAuthenticator(ticketTestRealm, authName)
+		require.NoError(t, err)
 		authenticator.CTime = authTime
 		request, err := NewAPReq(ticket, sessionKey, authenticator)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		return request
 	}
 

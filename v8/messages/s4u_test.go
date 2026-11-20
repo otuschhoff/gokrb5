@@ -10,6 +10,7 @@ import (
 
 	"github.com/otuschhoff/gokrb5/v8/config"
 	"github.com/otuschhoff/gokrb5/v8/crypto"
+	"github.com/otuschhoff/gokrb5/v8/crypto/etype"
 	"github.com/otuschhoff/gokrb5/v8/crypto/rfc4757"
 	"github.com/otuschhoff/gokrb5/v8/iana/chksumtype"
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
@@ -19,6 +20,8 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/patype"
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
+
+const s4uTestRealm = "EXAMPLE.COM"
 
 func TestFindS4UX509UserDecodeError(t *testing.T) {
 	t.Parallel()
@@ -43,10 +46,9 @@ func mustNonceUint32(t *testing.T, value int) uint32 {
 
 func TestNewPAForUserPAData(t *testing.T) {
 	user := types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: []string{"alice", "admin"}}
-	realm := "EXAMPLE.COM"
-	key := types.EncryptionKey{KeyValue: []byte("0123456789abcdef")}
+	key := types.EncryptionKey{KeyType: 0, KeyValue: []byte("0123456789abcdef")}
 
-	pa, err := NewPAForUserPAData(user, realm, key)
+	pa, err := NewPAForUserPAData(user, s4uTestRealm, key)
 	if err != nil {
 		t.Fatalf("NewPAForUserPAData() error = %v", err)
 	}
@@ -83,7 +85,10 @@ func TestNewS4U2SelfTGSReq(t *testing.T) {
 	service := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "HTTP/service.example.com")
 	user := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
 	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
-	req, err := NewS4U2SelfTGSReq(service, "EXAMPLE.COM", config, s4uTestTicket(), key, service, user, "EXAMPLE.COM", S4U2SelfReqOptions{})
+	var options S4U2SelfReqOptions
+	req, err := NewS4U2SelfTGSReq(
+		service, s4uTestRealm, config, s4uTestTicket(), key, service, user, s4uTestRealm, options,
+	)
 	if err != nil {
 		t.Fatalf("NewS4U2SelfTGSReq() error = %v", err)
 	}
@@ -102,7 +107,8 @@ func TestNewS4U2SelfTGSReq(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetUserID() error = %v", err)
 	}
-	if userID.Nonce != mustNonceUint32(t, req.ReqBody.Nonce) || !types.IsFlagSet(&userID.Options, flags.S4UOptionUseReplyKeyUsage) {
+	if userID.Nonce != mustNonceUint32(t, req.ReqBody.Nonce) ||
+		!types.IsFlagSet(&userID.Options, flags.S4UOptionUseReplyKeyUsage) {
 		t.Errorf("S4UUserID = %+v, want matching nonce and reply-key-usage option", userID)
 	}
 }
@@ -112,7 +118,11 @@ func TestNewS4U2SelfTGSReqRejectsInvalidCertificate(t *testing.T) {
 	service := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "HTTP/service.example.com")
 	user := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
 	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
-	_, err := NewS4U2SelfTGSReq(service, "EXAMPLE.COM", config, s4uTestTicket(), key, service, user, "EXAMPLE.COM", S4U2SelfReqOptions{SubjectCertificate: []byte("not DER")})
+	var options S4U2SelfReqOptions
+	options.SubjectCertificate = []byte("not DER")
+	_, err := NewS4U2SelfTGSReq(
+		service, s4uTestRealm, config, s4uTestTicket(), key, service, user, s4uTestRealm, options,
+	)
 	if err == nil {
 		t.Fatal("NewS4U2SelfTGSReq() accepted an invalid certificate")
 	}
@@ -124,12 +134,14 @@ func TestNewS4U2ProxyTGSReq(t *testing.T) {
 	target := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "HTTP/target.example.com")
 	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
 	evidence := s4uTestTicket()
-	options := TGSReqOptions{PACOptions: []int{flags.PACOptionResourceBasedConstrainedDelegation}}
-	req, err := NewS4U2ProxyTGSReq(service, "EXAMPLE.COM", config, s4uTestTicket(), key, target, evidence, options)
+	var options TGSReqOptions
+	options.PACOptions = []int{flags.PACOptionResourceBasedConstrainedDelegation}
+	req, err := NewS4U2ProxyTGSReq(service, s4uTestRealm, config, s4uTestTicket(), key, target, evidence, options)
 	if err != nil {
 		t.Fatalf("NewS4U2ProxyTGSReq() error = %v", err)
 	}
-	if !types.IsFlagSet(&req.ReqBody.KDCOptions, flags.CNameInAddlTkt) || types.IsFlagSet(&req.ReqBody.KDCOptions, flags.EncTktInSkey) {
+	if !types.IsFlagSet(&req.ReqBody.KDCOptions, flags.CNameInAddlTkt) ||
+		types.IsFlagSet(&req.ReqBody.KDCOptions, flags.EncTktInSkey) {
 		t.Errorf("KDC options = %08b, want cname-in-addl-tkt only", req.ReqBody.KDCOptions.Bytes)
 	}
 	if len(req.ReqBody.AdditionalTickets) != 1 || !req.ReqBody.AdditionalTickets[0].SName.Equal(evidence.SName) {
@@ -149,7 +161,10 @@ func TestPAS4UX509UserRequestAndReplyChecksums(t *testing.T) {
 	service := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "HTTP/service.example.com")
 	user := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
 	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
-	request, err := NewS4U2SelfTGSReq(service, "EXAMPLE.COM", config, s4uTestTicket(), key, service, user, "EXAMPLE.COM", S4U2SelfReqOptions{})
+	var options S4U2SelfReqOptions
+	request, err := NewS4U2SelfTGSReq(
+		service, s4uTestRealm, config, s4uTestTicket(), key, service, user, s4uTestRealm, options,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,25 +180,35 @@ func TestPAS4UX509UserRequestAndReplyChecksums(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	etype, err := crypto.GetEtype(key.KeyType)
+	enctype, err := crypto.GetEtype(key.KeyType)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !etype.VerifyChecksum(key.KeyValue, requestBytes, requestValue.Checksum.Checksum, keyusage.PA_S4U_X509_USER_REQUEST) {
+	if !enctype.VerifyChecksum(
+		key.KeyValue, requestBytes, requestValue.Checksum.Checksum, keyusage.PA_S4U_X509_USER_REQUEST,
+	) {
 		t.Fatal("request checksum does not verify with usage 26")
 	}
+	checkS4UX509ReplyChecksum(t, request, requestUserID, key, enctype)
+}
 
+func checkS4UX509ReplyChecksum(
+	t *testing.T, request TGSReq, requestUserID types.S4UUserID, key types.EncryptionKey, enctype etype.EType,
+) {
+	t.Helper()
 	replyUserID := requestUserID
 	replyUserID.CName = types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "Alice.Normalized")
 	replyBytes, err := replyUserID.Marshal()
 	if err != nil {
 		t.Fatal(err)
 	}
-	replyChecksum, err := etype.GetChecksumHash(key.KeyValue, replyBytes, keyusage.PA_S4U_X509_USER_REPLY)
+	replyChecksum, err := enctype.GetChecksumHash(key.KeyValue, replyBytes, keyusage.PA_S4U_X509_USER_REPLY)
 	if err != nil {
 		t.Fatal(err)
 	}
-	replyValue, err := types.NewPAS4UX509User(replyUserID, types.Checksum{CksumType: etype.GetHashID(), Checksum: replyChecksum})
+	replyValue, err := types.NewPAS4UX509User(
+		replyUserID, types.Checksum{CksumType: enctype.GetHashID(), Checksum: replyChecksum},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +216,8 @@ func TestPAS4UX509UserRequestAndReplyChecksums(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reply := TGSRep{KDCRepFields: KDCRepFields{PAData: types.PADataSequence{replyPA}}}
+	var reply TGSRep
+	reply.PAData = types.PADataSequence{replyPA}
 	got, err := reply.VerifyS4UX509UserReply(request, key)
 	if err != nil {
 		t.Fatalf("VerifyS4UX509UserReply() error = %v", err)
@@ -211,11 +237,20 @@ func TestVerifyS4UX509UserReplyRequiresUsageAcknowledgement(t *testing.T) {
 	service := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "HTTP/service.example.com")
 	user := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
 	key := types.EncryptionKey{KeyType: etypeID.AES128_CTS_HMAC_SHA1_96, KeyValue: []byte("0123456789abcdef")}
-	request, err := NewS4U2SelfTGSReq(service, "EXAMPLE.COM", config, s4uTestTicket(), key, service, user, "EXAMPLE.COM", S4U2SelfReqOptions{})
+	var options S4U2SelfReqOptions
+	request, err := NewS4U2SelfTGSReq(
+		service, s4uTestRealm, config, s4uTestTicket(), key, service, user, s4uTestRealm, options,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	userID := types.S4UUserID{Nonce: mustNonceUint32(t, request.ReqBody.Nonce), CName: user, CRealm: "EXAMPLE.COM"}
+	userID := types.S4UUserID{
+		Nonce:              mustNonceUint32(t, request.ReqBody.Nonce),
+		CName:              user,
+		CRealm:             s4uTestRealm,
+		SubjectCertificate: nil,
+		Options:            asn1.BitString{Bytes: nil, BitLength: 0},
+	}
 	userIDBytes, err := userID.Marshal()
 	if err != nil {
 		t.Fatal(err)
@@ -236,7 +271,8 @@ func TestVerifyS4UX509UserReplyRequiresUsageAcknowledgement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reply := TGSRep{KDCRepFields: KDCRepFields{PAData: types.PADataSequence{pa}}}
+	var reply TGSRep
+	reply.PAData = types.PADataSequence{pa}
 	if _, err := reply.VerifyS4UX509UserReply(request, key); err == nil {
 		t.Fatal("VerifyS4UX509UserReply() accepted a reply without usage-27 acknowledgement")
 	}
@@ -250,15 +286,16 @@ func s4uTestConfig() *config.Config {
 }
 
 func s4uTestTicket() Ticket {
-	return Ticket{
-		TktVNO: 5,
-		Realm:  "EXAMPLE.COM",
-		SName:  types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/EXAMPLE.COM"),
-		EncPart: types.EncryptedData{
-			EType:  etypeID.AES128_CTS_HMAC_SHA1_96,
-			Cipher: []byte("ticket"),
-		},
+	var ticket Ticket
+	ticket.TktVNO = 5
+	ticket.Realm = s4uTestRealm
+	ticket.SName = types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/EXAMPLE.COM")
+	ticket.EncPart = types.EncryptedData{
+		EType:  etypeID.AES128_CTS_HMAC_SHA1_96,
+		KVNO:   0,
+		Cipher: []byte("ticket"),
 	}
+	return ticket
 }
 
 func findTestPAData(t *testing.T, paData types.PADataSequence, paType int32) *types.PAData {

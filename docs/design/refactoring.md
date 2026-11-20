@@ -820,6 +820,26 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 144 (2026-11-20, complete v8 messages lint cleanup; Q-10):
+Separate KDC request defaults, flags, times, addresses, and authenticator
+encoding from request assembly. Split KDC reply binding and validation,
+and simplify AP request address checks, S4U reply verification, and
+optional ASN.1 field handling. Preserve public signatures, wire formats,
+validation order, and error behavior. Restructure test fixtures and
+assertions without adding lint suppressions.
+
+Uncapped whole-v8 scans report zero messages findings, down from 3
+canonical and 566 supplemental. Diagnostics outside messages are
+unchanged; whole-v8 totals are 373 canonical and 993 supplemental. All
+119 test and fuzz entry points were retained. Statement coverage is 91.1%
+(previously 91.2%); the original tests also measure 91.1% against the
+refactored code. Messages pass 100 shuffled race-enabled runs and
+15 seconds of decoder fuzzing (318,053 executions). Linux/386 messages,
+client, service, and SPNEGO tests pass. Messages tests cross-compile for
+Windows/amd64. The full v8 build, vet, and race suite pass, as does
+changed-line lint from both baselines. Interop-tagged tests compile;
+live interoperability and native Windows were not run.
+
 Slice 143 (2026-11-20, complete v8 credentials lint cleanup; Q-10):
 Separate FILE cache version, header field, key, timestamp and flag, and
 typed-data decoding. Share wire-format constants with the encoder and

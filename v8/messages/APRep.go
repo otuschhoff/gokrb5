@@ -34,9 +34,11 @@ type EncAPRepPart struct {
 
 // NewAPRep creates and encrypts a KRB_AP_REP from its encrypted part.
 func NewAPRep(part EncAPRepPart, key types.EncryptionKey) (APRep, error) {
+	var encrypted types.EncryptedData
 	a := APRep{
 		PVNO:             iana.PVNO,
 		MsgType:          msgtype.KRB_AP_REP,
+		EncPart:          encrypted,
 		DecryptedEncPart: part,
 	}
 	if err := a.EncryptEncPart(key); err != nil {
@@ -46,7 +48,11 @@ func NewAPRep(part EncAPRepPart, key types.EncryptionKey) (APRep, error) {
 }
 
 // NewAPRepFromAuthenticator creates the normal acceptor reply to an AP_REQ.
-func NewAPRepFromAuthenticator(auth types.Authenticator, key, subkey types.EncryptionKey, sequenceNumber int64) (APRep, error) {
+func NewAPRepFromAuthenticator(
+	auth types.Authenticator,
+	key, subkey types.EncryptionKey,
+	sequenceNumber int64,
+) (APRep, error) {
 	return NewAPRep(EncAPRepPart{
 		CTime:          auth.CTime,
 		Cusec:          auth.Cusec,
@@ -63,17 +69,22 @@ func (a *APRep) Unmarshal(b []byte) error {
 	}
 	expectedMsgType := msgtype.KRB_AP_REP
 	if a.MsgType != expectedMsgType {
-		return krberror.NewErrorf(krberror.KRBMsgError, "message ID does not indicate a KRB_AP_REP. Expected: %v; Actual: %v", expectedMsgType, a.MsgType)
+		return krberror.NewErrorf(
+			krberror.KRBMsgError, "message ID does not indicate a KRB_AP_REP. Expected: %v; Actual: %v",
+			expectedMsgType, a.MsgType,
+		)
 	}
 	return nil
 }
 
 // Marshal the APRep.
 func (a *APRep) Marshal() ([]byte, error) {
+	var decrypted EncAPRepPart
 	wire := APRep{
-		PVNO:    a.PVNO,
-		MsgType: a.MsgType,
-		EncPart: a.EncPart,
+		PVNO:             a.PVNO,
+		MsgType:          a.MsgType,
+		EncPart:          a.EncPart,
+		DecryptedEncPart: decrypted,
 	}
 	b, err := asn1.Marshal(wire)
 	if err != nil {
@@ -139,7 +150,9 @@ func (a *APRep) Verify(auth types.Authenticator, key types.EncryptionKey) error 
 // VerifyDCE decrypts and verifies a DCE-style AP-REP. A negative expected
 // sequence accepts the peer-selected sequence. The final initiator reply must
 // set requireNoSubkey.
-func (a *APRep) VerifyDCE(key types.EncryptionKey, expectedSequence int64, requireNoSubkey bool, maxClockSkew time.Duration) error {
+func (a *APRep) VerifyDCE(
+	key types.EncryptionKey, expectedSequence int64, requireNoSubkey bool, maxClockSkew time.Duration,
+) error {
 	if err := a.DecryptEncPart(key); err != nil {
 		return err
 	}

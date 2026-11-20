@@ -26,11 +26,12 @@ import (
 
 // Ticket implements the Kerberos ticket.
 type Ticket struct {
-	TktVNO           int                 `asn1:"explicit,tag:0"`
-	Realm            string              `asn1:"generalstring,explicit,tag:1"`
-	SName            types.PrincipalName `asn1:"explicit,tag:2"`
-	EncPart          types.EncryptedData `asn1:"explicit,tag:3"`
-	DecryptedEncPart EncTicketPart       `asn1:"optional"` // Not part of ASN1 bytes so marked as optional so unmarshalling works
+	TktVNO  int                 `asn1:"explicit,tag:0"`
+	Realm   string              `asn1:"generalstring,explicit,tag:1"`
+	SName   types.PrincipalName `asn1:"explicit,tag:2"`
+	EncPart types.EncryptedData `asn1:"explicit,tag:3"`
+	// DecryptedEncPart is local state and is not required on the wire.
+	DecryptedEncPart EncTicketPart `asn1:"optional"`
 }
 
 // EncTicketPart is the encrypted part of the Ticket.
@@ -55,10 +56,15 @@ type TransitedEncoding struct {
 }
 
 // NewTicket creates a new Ticket instance.
-func NewTicket(cname types.PrincipalName, crealm string, sname types.PrincipalName, srealm string, flags asn1.BitString, sktab *keytab.Keytab, eTypeID int32, kvno int, authTime, startTime, endTime, renewTill time.Time) (Ticket, types.EncryptionKey, error) {
+func NewTicket(
+	cname types.PrincipalName, crealm string, sname types.PrincipalName, srealm string,
+	flags asn1.BitString, sktab *keytab.Keytab, eTypeID int32, kvno int,
+	authTime, startTime, endTime, renewTill time.Time,
+) (Ticket, types.EncryptionKey, error) {
 	skey, _, err := sktab.GetEncryptionKey(sname, srealm, kvno, eTypeID)
 	if err != nil {
-		return Ticket{}, types.EncryptionKey{}, krberror.Errorf(err, krberror.EncryptingError, "error getting encryption key for new ticket")
+		return Ticket{}, types.EncryptionKey{},
+			krberror.Errorf(err, krberror.EncryptingError, "error getting encryption key for new ticket")
 	}
 	return NewTicketWithKey(cname, crealm, sname, srealm, flags, skey, kvno, authTime, startTime, endTime, renewTill)
 }
@@ -66,42 +72,54 @@ func NewTicket(cname types.PrincipalName, crealm string, sname types.PrincipalNa
 // NewTicketWithKey creates a ticket encrypted by an explicitly supplied
 // service key. It is used by KDC-less protocols that retain an ephemeral
 // service key for the lifetime of a conversation.
-func NewTicketWithKey(cname types.PrincipalName, crealm string, sname types.PrincipalName, srealm string, flags asn1.BitString, serviceKey types.EncryptionKey, kvno int, authTime, startTime, endTime, renewTill time.Time) (Ticket, types.EncryptionKey, error) {
+func NewTicketWithKey(
+	cname types.PrincipalName, crealm string, sname types.PrincipalName, srealm string,
+	flags asn1.BitString, serviceKey types.EncryptionKey, kvno int,
+	authTime, startTime, endTime, renewTill time.Time,
+) (Ticket, types.EncryptionKey, error) {
 	eTypeID := serviceKey.KeyType
 	etype, err := crypto.GetEtype(eTypeID)
 	if err != nil {
-		return Ticket{}, types.EncryptionKey{}, krberror.Errorf(err, krberror.EncryptingError, "error getting etype for new ticket")
+		return Ticket{}, types.EncryptionKey{},
+			krberror.Errorf(err, krberror.EncryptingError, "error getting etype for new ticket")
 	}
 	sessionKey, err := types.GenerateEncryptionKey(etype)
 	if err != nil {
 		return Ticket{}, types.EncryptionKey{}, krberror.Errorf(err, krberror.EncryptingError, "error generating session key")
 	}
 
+	var transited TransitedEncoding
 	etp := EncTicketPart{
-		Flags:     flags,
-		Key:       sessionKey,
-		CRealm:    crealm,
-		CName:     cname,
-		Transited: TransitedEncoding{},
-		AuthTime:  authTime,
-		StartTime: startTime,
-		EndTime:   endTime,
-		RenewTill: renewTill,
+		Flags:             flags,
+		Key:               sessionKey,
+		CRealm:            crealm,
+		CName:             cname,
+		Transited:         transited,
+		AuthTime:          authTime,
+		StartTime:         startTime,
+		EndTime:           endTime,
+		RenewTill:         renewTill,
+		CAddr:             nil,
+		AuthorizationData: nil,
 	}
 	b, err := asn1.Marshal(etp)
 	if err != nil {
-		return Ticket{}, types.EncryptionKey{}, krberror.Errorf(err, krberror.EncodingError, "error marshalling ticket encpart")
+		return Ticket{}, types.EncryptionKey{},
+			krberror.Errorf(err, krberror.EncodingError, "error marshalling ticket encpart")
 	}
 	b = asn1tools.AddASNAppTag(b, asnAppTag.EncTicketPart)
 	ed, err := crypto.GetEncryptedData(b, serviceKey, keyusage.KDC_REP_TICKET, kvno)
 	if err != nil {
-		return Ticket{}, types.EncryptionKey{}, krberror.Errorf(err, krberror.EncryptingError, "error encrypting ticket encpart")
+		return Ticket{}, types.EncryptionKey{},
+			krberror.Errorf(err, krberror.EncryptingError, "error encrypting ticket encpart")
 	}
+	var decrypted EncTicketPart
 	tkt := Ticket{
-		TktVNO:  iana.PVNO,
-		Realm:   srealm,
-		SName:   sname,
-		EncPart: ed,
+		TktVNO:           iana.PVNO,
+		Realm:            srealm,
+		SName:            sname,
+		EncPart:          ed,
+		DecryptedEncPart: decrypted,
 	}
 	return tkt, sessionKey, nil
 }

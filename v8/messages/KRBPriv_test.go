@@ -154,6 +154,7 @@ func TestKRBPrivEncryptedRoundTrip(t *testing.T) {
 		Usec:           123,
 		SequenceNumber: 9,
 		SAddress:       types.HostAddress{AddrType: addrtype.IPv4, Address: []byte{127, 0, 0, 1}},
+		RAddress:       types.HostAddress{AddrType: 0, Address: nil},
 	}
 	message := NewKRBPriv(part)
 	if message.PVNO != iana.PVNO || message.MsgType != msgtype.KRB_PRIV {
@@ -174,7 +175,8 @@ func TestKRBPrivEncryptedRoundTrip(t *testing.T) {
 	if err := decoded.DecryptEncPart(key); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(decoded.DecryptedEncPart.UserData, part.UserData) || decoded.DecryptedEncPart.SequenceNumber != part.SequenceNumber {
+	if !bytes.Equal(decoded.DecryptedEncPart.UserData, part.UserData) ||
+		decoded.DecryptedEncPart.SequenceNumber != part.SequenceNumber {
 		t.Fatalf("decrypted part = %+v", decoded.DecryptedEncPart)
 	}
 	wrongKey := key
