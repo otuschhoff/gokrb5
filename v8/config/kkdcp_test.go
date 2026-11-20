@@ -37,7 +37,7 @@ func TestKKDCPURLsInRealmConfig(t *testing.T) {
 func TestServerOrderingDoesNotMutateConfig(t *testing.T) {
 	configured := []string{"https://one.example.org/KdcProxy", "kdc.example.org:88"}
 	want := append([]string(nil), configured...)
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		ordered := randServOrder(configured)
 		if len(ordered) != len(configured) {
 			t.Fatalf("ordered server count = %d", len(ordered))

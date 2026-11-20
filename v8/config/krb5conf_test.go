@@ -657,8 +657,7 @@ func TestLoadWithV4Lines(t *testing.T) {
 	if err == nil {
 		t.Fatalf("error should not be nil for config that includes v4 lines")
 	}
-	var ud UnsupportedDirective
-	if !errors.As(err, &ud) {
+	if _, ok := errors.AsType[UnsupportedDirective](err); !ok {
 		t.Fatalf("error should be of type UnsupportedDirective: %v", err)
 	}
 	if c == nil {
@@ -868,7 +867,7 @@ func TestJSON(t *testing.T) {
 	if err != nil {
 		t.Errorf("error marshaling krb config to JSON: %v", err)
 	}
-	var expected, actual interface{}
+	var expected, actual any
 	if err := json.Unmarshal([]byte(krb5ConfJSON), &expected); err != nil {
 		t.Fatal(err)
 	}
