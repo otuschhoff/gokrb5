@@ -487,26 +487,12 @@ func parseETypes(names []string, allowWeak bool) []int32 {
 	return eti
 }
 
-// Parse a time duration string in the configuration to a golang time.Duration.
+// parseDuration reads the duration formats accepted by krb5.conf.
 func parseDuration(s string) (time.Duration, error) {
 	s = strings.ReplaceAll(strings.TrimSpace(s), " ", "")
 
-	// handle Nd[NmNs]
-	if strings.Contains(s, "d") {
-		ds := strings.SplitN(s, "d", 2)
-		dn, err := strconv.ParseUint(ds[0], 10, 32)
-		if err != nil {
-			return time.Duration(0), errors.New("invalid time duration")
-		}
-		d := time.Duration(dn*24) * time.Hour
-		if ds[1] != "" {
-			dp, err := time.ParseDuration(ds[1])
-			if err != nil {
-				return time.Duration(0), errors.New("invalid time duration")
-			}
-			d += dp
-		}
-		return d, nil
+	if days, suffix, ok := strings.Cut(s, "d"); ok {
+		return parseDayDuration(days, suffix)
 	}
 
 	// handle Nm[Ns]
@@ -521,27 +507,49 @@ func parseDuration(s string) (time.Duration, error) {
 		return time.Duration(v) * time.Second, nil
 	}
 
-	// handle h:m[:s]
 	if strings.Contains(s, ":") {
-		t := strings.Split(s, ":")
-		if 2 > len(t) || len(t) > 3 {
-			return time.Duration(0), errors.New("invalid time duration value")
-		}
-		i := make([]int, len(t))
-		for index, n := range t {
-			j, err := strconv.ParseInt(n, 10, 16)
-			if err != nil {
-				return time.Duration(0), errors.New("invalid time duration value")
-			}
-			i[index] = int(j)
-		}
-		d := time.Duration(i[0])*time.Hour + time.Duration(i[1])*time.Minute
-		if len(i) == 3 {
-			d += time.Duration(i[2]) * time.Second
-		}
+		return parseColonDuration(s)
+	}
+	return 0, errors.New("invalid time duration value")
+}
+
+func parseDayDuration(days, suffix string) (time.Duration, error) {
+	const hoursPerDay = 24
+	n, err := strconv.ParseUint(days, 10, 32)
+	if err != nil {
+		return 0, errors.New("invalid time duration")
+	}
+	d := time.Duration(n*hoursPerDay) * time.Hour
+	if suffix == "" {
 		return d, nil
 	}
-	return time.Duration(0), errors.New("invalid time duration value")
+	extra, err := time.ParseDuration(suffix)
+	if err != nil {
+		return 0, errors.New("invalid time duration")
+	}
+	return d + extra, nil
+}
+
+func parseColonDuration(s string) (time.Duration, error) {
+	const (
+		hoursAndMinutes = 2
+		withSeconds     = 3
+	)
+	parts := strings.Split(s, ":")
+	if len(parts) != hoursAndMinutes && len(parts) != withSeconds {
+		return 0, errors.New("invalid time duration value")
+	}
+	var values [withSeconds]int64
+	for i, part := range parts {
+		n, err := strconv.ParseInt(part, 10, 16)
+		if err != nil {
+			return 0, errors.New("invalid time duration value")
+		}
+		values[i] = n
+	}
+	return time.Duration(values[0])*time.Hour +
+		time.Duration(values[1])*time.Minute +
+		time.Duration(values[2])*time.Second, nil
 }
 
 // Parse possible boolean values to golang bool.

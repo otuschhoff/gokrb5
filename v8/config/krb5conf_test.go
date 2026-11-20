@@ -670,6 +670,44 @@ func TestParseDuration(t *testing.T) {
 	}
 }
 
+func TestParseDurationCompatibility(t *testing.T) {
+	t.Parallel()
+
+	const (
+		invalidDay   = "invalid time duration"
+		invalidValue = "invalid time duration value"
+	)
+	for _, test := range []struct {
+		input   string
+		want    time.Duration
+		wantErr string
+	}{
+		{input: " \t1d -2h \n", want: 22 * time.Hour, wantErr: ""},
+		{input: "-1:2:-3", want: -time.Hour + 2*time.Minute - 3*time.Second, wantErr: ""},
+		{input: "0", want: 0, wantErr: ""},
+		{input: "1d2:03", want: 0, wantErr: invalidDay},
+		{input: "1d2d", want: 0, wantErr: invalidDay},
+		{input: "-1d", want: 0, wantErr: invalidDay},
+		{input: "32768:0", want: 0, wantErr: invalidValue},
+		{input: "1:2:", want: 0, wantErr: invalidValue},
+		{input: "1:2:3:4", want: 0, wantErr: invalidValue},
+	} {
+		t.Run(test.input, func(t *testing.T) {
+			got, err := parseDuration(test.input)
+			if got != test.want {
+				t.Errorf("duration = %v, want %v", got, test.want)
+			}
+			var message string
+			if err != nil {
+				message = err.Error()
+			}
+			if message != test.wantErr {
+				t.Errorf("error message = %q, want %q", message, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestResolveRealm(t *testing.T) {
 	t.Parallel()
 	c, err := NewFromString(krb5Conf)
