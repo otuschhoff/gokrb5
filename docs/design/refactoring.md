@@ -2,8 +2,8 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-83 done. The latest v8
-inventories contain 529 canonical and 3,527 supplemental findings. Most
+(floor raised to 86.0%), and Phase 5 slices 1-84 done. The latest v8
+inventories contain 529 canonical and 3,521 supplemental findings. Most
 remaining canonical findings are from `revive`, complexity and nesting
 checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
 Phase 3/4 interoperability and Windows exit evidence remains an external CI
@@ -30,7 +30,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.2% cross-package statement coverage; 529 canonical lint findings after Slice 83 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.2% cross-package statement coverage; 529 canonical lint findings after Slice 84 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -819,6 +819,28 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 84 (2026-11-20, v8 PKU2U trusted-certifier metadata; Q-10):
+Use plain errors for fixed diagnostics and explicitly leave the other
+identifier fields absent when constructing subject-name entries. Preserve
+DER encoding, validation order, receiver updates, and certificate selection.
+Retain the existing `CertPool.Subjects` call and its canonical deprecation
+finding to preserve the pool-based API; document that pools obtained from
+`SystemCertPool` may omit system-root subjects from the metadata.
+
+Characterization passed before and after the change. It pins the DER tags
+for all three identifier forms, exact validation errors and unchanged
+receiver state on failure, and independence of metadata from the pool.
+The metadata tests and NEGOEX handshake passed 100 shuffled runs under the
+race detector. The metadata fuzzer passed 337,457 executions in 15 seconds.
+Both module suites, v8 build and vet, Linux/386 tests, and a Windows/amd64
+test cross-build passed. Live Windows interoperability was not run.
+
+Both modules passed changed-line lint against `866c3ff` and `origin/main`.
+V8 cross-package statement coverage stayed at 88.2%. The canonical
+inventory stayed at 529, and the supplemental inventory fell from 3,527
+to 3,521: three `exhaustruct_v5`, two `perfsprint`, and one `lll` findings
+were removed. Neither inventory gained findings.
 
 Slice 83 (2026-11-20, v8 PKU2U certificate trust helpers; Q-10):
 Use plain errors for fixed messages and separate hostname selection from

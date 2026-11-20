@@ -1,14 +1,15 @@
 package pku2u
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"math/big"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,13 +17,20 @@ import (
 )
 
 func TestTrustedCertifiersRoundTrip(t *testing.T) {
+	t.Parallel()
+
 	want := TrustedCertifiers{
-		{SubjectName: []byte{1, 2, 3}},
-		{SubjectKeyIdentifier: []byte{4, 5, 6}},
+		{SubjectName: []byte{1}, IssuerAndSerial: nil, SubjectKeyIdentifier: nil},
+		{SubjectName: nil, IssuerAndSerial: []byte{2}, SubjectKeyIdentifier: nil},
+		{SubjectName: nil, IssuerAndSerial: nil, SubjectKeyIdentifier: []byte{3}},
 	}
 	data, err := want.Marshal()
 	if err != nil {
 		t.Fatal(err)
+	}
+	const wantDER = "300f300380010130038101023003820103"
+	if gotDER := hex.EncodeToString(data); gotDER != wantDER {
+		t.Fatalf("metadata DER = %s, want %s", gotDER, wantDER)
 	}
 	var got TrustedCertifiers
 	if err := got.Unmarshal(data); err != nil {
@@ -31,19 +39,60 @@ func TestTrustedCertifiersRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("metadata = %#v, want %#v", got, want)
 	}
-	if err := got.Unmarshal(append(data, 0)); err == nil {
-		t.Fatal("accepted trailing metadata")
-	}
 }
 
 func TestTrustedCertifiersUnmarshalRejectsNilDestination(t *testing.T) {
+	t.Parallel()
+
 	data, err := (TrustedCertifiers{}).Marshal()
 	if err != nil {
 		t.Fatal(err)
 	}
 	var metadata *TrustedCertifiers
-	if err := metadata.Unmarshal(data); err == nil || !strings.Contains(err.Error(), "destination is nil") {
-		t.Fatalf("nil destination error = %v", err)
+	const want = "PKU2U trusted-certifier destination is nil"
+	if err := metadata.Unmarshal(data); err == nil || err.Error() != want {
+		t.Fatalf("nil destination error = %v, want %q", err, want)
+	}
+}
+
+func TestTrustedCertifiersUnmarshalPreservesReceiverOnError(t *testing.T) {
+	t.Parallel()
+
+	const identifierError = "PKU2U trusted certifier must contain exactly one identifier"
+	for _, tt := range []struct {
+		name        string
+		encoded     string
+		expectedErr string
+	}{
+		{name: "missing identifier after valid entry", encoded: "300730038001013000", expectedErr: identifierError},
+		{name: "multiple identifiers", encoded: "30083006800101810102", expectedErr: identifierError},
+		{
+			name:        "trailing byte",
+			encoded:     "3005300380010100",
+			expectedErr: "PKU2U trusted certifiers contain 1 trailing bytes",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			data, err := hex.DecodeString(tt.encoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			metadata := TrustedCertifiers{{SubjectName: []byte{9}, IssuerAndSerial: nil, SubjectKeyIdentifier: nil}}
+			err = metadata.Unmarshal(data)
+			if err == nil || err.Error() != tt.expectedErr {
+				t.Fatalf("Unmarshal = %v, want %q", err, tt.expectedErr)
+			}
+			const originalDER = "30053003800109"
+			got, err := metadata.Marshal()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if gotDER := hex.EncodeToString(got); gotDER != originalDER {
+				t.Fatalf("receiver DER = %s, want %s", gotDER, originalDER)
+			}
+		})
 	}
 }
 
@@ -56,12 +105,20 @@ func TestTrustedCertifiersSelectIdentity(t *testing.T) {
 	pool := x509.NewCertPool()
 	pool.AddCert(root)
 	metadata := TrustedCertifiersFromPool(pool)
+	if len(metadata) != 1 || !bytes.Equal(metadata[0].SubjectName, root.RawSubject) ||
+		metadata[0].IssuerAndSerial != nil || metadata[0].SubjectKeyIdentifier != nil {
+		t.Fatalf("pool metadata did not contain exactly the root subject: %#v", metadata)
+	}
 	if !metadata.Accepts(identity) {
 		t.Fatal("trusted issuer did not select identity")
 	}
 	metadata[0].SubjectName[0] ^= 1
 	if metadata.Accepts(identity) {
 		t.Fatal("untrusted issuer selected identity")
+	}
+	fresh := TrustedCertifiersFromPool(pool)
+	if !fresh.Accepts(identity) {
+		t.Fatal("mutating old metadata affected the pool subjects")
 	}
 }
 

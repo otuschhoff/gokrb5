@@ -3,6 +3,7 @@ package pku2u
 import (
 	"bytes"
 	"crypto/x509"
+	"errors"
 	"fmt"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
@@ -27,7 +28,7 @@ func (m TrustedCertifiers) Marshal() ([]byte, error) {
 // entries which do not identify a certifier.
 func (m *TrustedCertifiers) Unmarshal(data []byte) error {
 	if m == nil {
-		return fmt.Errorf("PKU2U trusted-certifier destination is nil")
+		return errors.New("PKU2U trusted-certifier destination is nil")
 	}
 	var decoded []pkinit.ExternalPrincipalIdentifier
 	rest, err := asn1.Unmarshal(data, &decoded)
@@ -49,7 +50,7 @@ func (m *TrustedCertifiers) Unmarshal(data []byte) error {
 			fields++
 		}
 		if fields != 1 {
-			return fmt.Errorf("PKU2U trusted certifier must contain exactly one identifier")
+			return errors.New("PKU2U trusted certifier must contain exactly one identifier")
 		}
 	}
 	*m = append((*m)[:0], decoded...)
@@ -57,7 +58,8 @@ func (m *TrustedCertifiers) Unmarshal(data []byte) error {
 }
 
 // TrustedCertifiersFromPool creates metadata entries from a pool's trusted
-// subject names.
+// subject names. Pools from [x509.SystemCertPool] may not expose system root
+// subjects for inclusion in the metadata.
 func TrustedCertifiersFromPool(pool *x509.CertPool) TrustedCertifiers {
 	if pool == nil {
 		return nil
@@ -65,7 +67,11 @@ func TrustedCertifiersFromPool(pool *x509.CertPool) TrustedCertifiers {
 	subjects := pool.Subjects()
 	certifiers := make(TrustedCertifiers, 0, len(subjects))
 	for _, subject := range subjects {
-		certifiers = append(certifiers, pkinit.ExternalPrincipalIdentifier{SubjectName: append([]byte(nil), subject...)})
+		certifiers = append(certifiers, pkinit.ExternalPrincipalIdentifier{
+			SubjectName:          append([]byte(nil), subject...),
+			IssuerAndSerial:      nil,
+			SubjectKeyIdentifier: nil,
+		})
 	}
 	return certifiers
 }
@@ -85,7 +91,8 @@ func (m TrustedCertifiers) Accepts(identity *pkinit.Identity) bool {
 			if len(certifier.SubjectName) > 0 && bytes.Equal(certifier.SubjectName, certificate.RawIssuer) {
 				return true
 			}
-			if len(certifier.SubjectKeyIdentifier) > 0 && bytes.Equal(certifier.SubjectKeyIdentifier, certificate.AuthorityKeyId) {
+			if len(certifier.SubjectKeyIdentifier) > 0 &&
+				bytes.Equal(certifier.SubjectKeyIdentifier, certificate.AuthorityKeyId) {
 				return true
 			}
 		}
