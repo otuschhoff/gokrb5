@@ -20,6 +20,8 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+const maxAPSequence = 1<<30 - 1
+
 // Acceptor establishes a PKU2U context and acts as the KDC for its self-ticket.
 type Acceptor struct {
 	settings        settings
@@ -209,14 +211,14 @@ func (acceptor *Acceptor) replyToAPRequest(request *messages.APReq) ([]byte, *se
 }
 
 func pku2uSequenceInt64(sequence uint64) (int64, error) {
-	if sequence > 0x3fffffff {
+	if sequence > maxAPSequence {
 		return 0, fmt.Errorf("PKU2U sequence number %d exceeds 30-bit range", sequence)
 	}
 	return int64(sequence), nil
 }
 
 func pku2uSequenceUint64(sequence int64) (uint64, error) {
-	if sequence < 0 || sequence > 0x3fffffff {
+	if sequence < 0 || sequence > maxAPSequence {
 		return 0, fmt.Errorf("PKU2U sequence number %d exceeds 30-bit range", sequence)
 	}
 	return uint64(sequence), nil
@@ -243,7 +245,7 @@ func randomSequence() (uint64, error) {
 	if _, err := rand.Read(encoded[:]); err != nil {
 		return 0, fmt.Errorf("generate PKU2U acceptor sequence number: %w", err)
 	}
-	return binary.BigEndian.Uint64(encoded[:]) & 0x3fffffff, nil
+	return binary.BigEndian.Uint64(encoded[:]) & maxAPSequence, nil
 }
 
 func credentialsFromCertificate(certificate *x509.Certificate, chain []*x509.Certificate) (*credentials.Credentials, error) {

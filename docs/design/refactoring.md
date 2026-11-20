@@ -2,8 +2,8 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-80 done. The latest v8
-inventories contain 529 canonical and 3,539 supplemental findings. Most
+(floor raised to 86.0%), and Phase 5 slices 1-81 done. The latest v8
+inventories contain 529 canonical and 3,537 supplemental findings. Most
 remaining canonical findings are from `revive`, complexity and nesting
 checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
 Phase 3/4 interoperability and Windows exit evidence remains an external CI
@@ -30,7 +30,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.1% cross-package statement coverage; 529 canonical lint findings after Slice 80 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.1% cross-package statement coverage; 529 canonical lint findings after Slice 81 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -819,6 +819,26 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 81 (2026-11-20, v8 PKU2U AP sequence limit; Q-10):
+Use one named 30-bit limit for both AP sequence conversions and acceptor
+sequence generation. Keep the inclusive range, cryptographic randomness
+source, error text, and wire behavior unchanged. The shared Kerberos
+authenticator generator outside PKU2U is unchanged.
+
+Boundary tests passed before and after the change. They verify zero and
+the inclusive upper bound, rejection of negative signed input and values
+above the limit, exact error text, and the range of generated sequences.
+The focused tests and end-to-end handshake passed 100 shuffled runs
+under the race detector. Both module suites, v8 build and vet, Linux/386
+tests, and a Windows/amd64 test cross-build passed. Live Windows
+interoperability was not run.
+
+Both modules passed changed-line lint against `cd00b85` and `origin/main`.
+V8 cross-package statement coverage remained 88.1%. The canonical
+inventory stayed at 529, and the supplemental inventory fell from 3,539
+to 3,537 by removing both `mnd` findings in scope. Neither inventory
+gained findings.
 
 Slice 80 (2026-11-20, v8 PKU2U acceptor AP exchange; Q-10):
 Separate ticket validation, authenticator validation, and reply/context
