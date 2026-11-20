@@ -2,7 +2,7 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-111 done. The latest v8
+(floor raised to 86.0%), and Phase 5 slices 1-112 done. The latest v8
 inventories contain 518 canonical and 3,405 supplemental findings. Most
 remaining canonical findings are from `revive`, complexity and nesting
 checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
@@ -30,7 +30,7 @@ This roadmap covers only the active v8 development module:
 
 | Module | Role | Declared minimum Go | Assessment |
 | --- | --- | --- | --- |
-| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.3% cross-package statement coverage (Slice 102); 518 canonical lint findings after Slice 111 |
+| `v8`: `github.com/otuschhoff/gokrb5/v8` | Active development line | 1.26.0 | 88.3% cross-package statement coverage (Slice 102); 518 canonical lint findings after Slice 112 |
 
 The active module has substantial implementation and test coverage for keytab
 and ccache management, Kerberos authentication, FAST, S4U, PKINIT, GSS, SPNEGO,
@@ -819,6 +819,18 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 112 (2026-11-20, v8 config file fixture isolation; Q-10):
+Write the fixtures for `TestLoad`, `TestLoadWithV4Lines`, and `TestLoadTabs`
+through a shared helper. Each test owns its temporary directory, setup
+errors fail the calling test, and the fixture is closed before `Load` runs.
+Fixture contents, parser calls, and assertions are preserved. PKINIT and
+PKU2U cleanup remain deferred.
+
+Config vet and 100 shuffled race-enabled config runs passed, and the
+config tests cross-compiled for Windows/amd64. Changed-line lint passed
+against `e0cb3a2` and `origin/main` for both modules. All canonical and
+supplemental lint inventories were unchanged.
 
 Slice 111 (2026-11-20, v8 config enctype expectations; Q-10):
 Name the repeated expected enctype strings in the libdefaults finalization

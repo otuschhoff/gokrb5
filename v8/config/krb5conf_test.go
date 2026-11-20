@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -461,13 +462,8 @@ const (
 
 func TestLoad(t *testing.T) {
 	t.Parallel()
-	cf, _ := os.CreateTemp(os.TempDir(), "TEST-gokrb5-krb5.conf")
-	t.Cleanup(func() { _ = os.Remove(cf.Name()) })
-	if _, err := cf.WriteString(krb5Conf); err != nil {
-		t.Fatal(err)
-	}
 
-	c, err := Load(cf.Name())
+	c, err := Load(writeConfigFixture(t, krb5Conf))
 	if err != nil {
 		t.Fatalf("Error loading config: %v", err)
 	}
@@ -647,13 +643,8 @@ func TestConfigFatalSectionErrorAfterWarning(t *testing.T) {
 
 func TestLoadWithV4Lines(t *testing.T) {
 	t.Parallel()
-	cf, _ := os.CreateTemp(os.TempDir(), "TEST-gokrb5-krb5.conf")
-	t.Cleanup(func() { _ = os.Remove(cf.Name()) })
-	if _, err := cf.WriteString(krb5ConfV4Lines); err != nil {
-		t.Fatal(err)
-	}
 
-	c, err := Load(cf.Name())
+	c, err := Load(writeConfigFixture(t, krb5ConfV4Lines))
 	if err == nil {
 		t.Fatalf("error should not be nil for config that includes v4 lines")
 	}
@@ -696,13 +687,8 @@ func TestLoadNoBlankLines(t *testing.T) {
 
 func TestLoadTabs(t *testing.T) {
 	t.Parallel()
-	cf, _ := os.CreateTemp(os.TempDir(), "TEST-gokrb5-krb5.conf")
-	t.Cleanup(func() { _ = os.Remove(cf.Name()) })
-	if _, err := cf.WriteString(krb5ConfTabs); err != nil {
-		t.Fatal(err)
-	}
 
-	c, err := Load(cf.Name())
+	c, err := Load(writeConfigFixture(t, krb5ConfTabs))
 	if err != nil {
 		t.Fatalf("Error loading config: %v", err)
 	}
@@ -711,6 +697,17 @@ func TestLoadTabs(t *testing.T) {
 	}
 
 	assertLoadedConfig(t, c, 2)
+}
+
+func writeConfigFixture(t *testing.T, contents string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "krb5.conf")
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("write config fixture: %v", err)
+	}
+
+	return path
 }
 
 func assertLoadedConfig(t *testing.T, c *Config, wantRealms int) {
