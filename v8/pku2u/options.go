@@ -8,6 +8,12 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/pkinit"
 )
 
+const (
+	defaultClockSkew      = 5 * time.Minute
+	defaultTicketLifetime = 10 * time.Hour
+	defaultMinimumDHBits  = 2048
+)
+
 // Identity is a certificate, chain, and private signing key used by PKU2U. Its
 // certificate must contain a UPN SAN or a non-empty subject for principal
 // mapping; PKINIT KDC EKU requirements do not apply to peer identities.
@@ -60,9 +66,15 @@ func WithMinimumDHBits(bits int) Option {
 
 func newSettings(identity *Identity, roots *x509.CertPool, options []Option) settings {
 	s := settings{
-		identity: identity, roots: roots, clockSkew: 5 * time.Minute,
-		ticketLifetime: 10 * time.Hour, minimumDHBits: 2048,
-		currentTime: func() time.Time { return time.Now().UTC() },
+		identity:          identity,
+		roots:             roots,
+		intermediates:     nil,
+		requireRevocation: false,
+		httpClient:        nil,
+		clockSkew:         defaultClockSkew,
+		ticketLifetime:    defaultTicketLifetime,
+		minimumDHBits:     defaultMinimumDHBits,
+		currentTime:       func() time.Time { return time.Now().UTC() },
 	}
 	for _, option := range options {
 		if option != nil {
