@@ -9,6 +9,7 @@ import (
 )
 
 const (
+	bitsPerByte           = 8
 	maxCCacheType         = 4
 	maxUDPPreferenceLimit = 32700
 )
@@ -182,7 +183,7 @@ func (l *LibDefaults) parseKDCDefaultOptions(value, line string) error {
 		return InvalidErrorf("libdefaults section line (%s): %v", line, err)
 	}
 	l.KDCDefaultOptions.Bytes = b
-	l.KDCDefaultOptions.BitLength = len(b) * 8
+	l.KDCDefaultOptions.BitLength = len(b) * bitsPerByte
 	return nil
 }
 

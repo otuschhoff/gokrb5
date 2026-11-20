@@ -16,6 +16,19 @@ import (
 
 type failingConfigReader struct{ err error }
 
+func TestNewKDCDefaultOptions(t *testing.T) {
+	t.Parallel()
+
+	first := New().LibDefaults.KDCDefaultOptions
+	second := New().LibDefaults.KDCDefaultOptions
+	want := []byte{0x00, 0x00, 0x00, 0x10}
+
+	require.Equal(t, want, first.Bytes)
+	assert.Equal(t, 32, first.BitLength)
+	first.Bytes[0] = 0xff
+	assert.Equal(t, want, second.Bytes, "default option bytes must not be shared")
+}
+
 func TestConfigJSONError(t *testing.T) {
 	t.Parallel()
 

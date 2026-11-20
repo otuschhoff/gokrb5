@@ -4,7 +4,6 @@ package config
 
 import (
 	"bufio"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -153,9 +152,11 @@ func newLibDefaults() LibDefaults {
 	if usr != nil {
 		hdir = usr.HomeDir
 	}
-	opts := asn1.BitString{}
-	opts.Bytes, _ = hex.DecodeString("00000010")
-	opts.BitLength = len(opts.Bytes) * 8
+	optionBytes := []byte{0x00, 0x00, 0x00, 0x10}
+	opts := asn1.BitString{
+		Bytes:     optionBytes,
+		BitLength: len(optionBytes) * bitsPerByte,
+	}
 	l := LibDefaults{
 		CCacheType:              defaultCCacheType,
 		Clockskew:               defaultClockskew,
