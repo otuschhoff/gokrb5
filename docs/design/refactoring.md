@@ -2,7 +2,7 @@
 
 Status: active, authoritative remediation backlog; Phases 0-2 complete, all
 Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-123 done. The latest measured
+(floor raised to 86.0%), and Phase 5 slices 1-124 done. The latest measured
 v8 inventories (Slice 116) contain 518 canonical and 3,392 supplemental
 findings. Most remaining canonical findings are from `revive`, complexity and
 nesting checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
@@ -819,6 +819,17 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 124 (2026-11-20, v8 config realm lookup contract; Q-10):
+Document `ResolveRealm` matching order, trailing-dot handling, case
+sensitivity, and the empty result on a miss. Test exact and suffix mappings
+with overlapping keys, including label boundaries and the distinction between
+a bare domain and a dot-prefixed suffix. Lookup behavior is unchanged;
+PKINIT and PKU2U remain deferred.
+
+Config vet and 100 shuffled runs of the config suite with the race detector
+passed. Changed-line lint passed for both modules against `562e39c` and
+`origin/main`.
 
 Slice 123 (2026-11-20, v8 config scanner buffer contract; Q-10):
 Document how callers can set the scanner's token size limit. With the same

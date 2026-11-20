@@ -448,8 +448,10 @@ func (d *DomainRealm) addMapping(domain, realm string) {
 	(*d)[domain] = realm
 }
 
-// ResolveRealm resolves the kerberos realm for the specified domain name from the domain to realm mapping.
-// The most specific mapping is returned.
+// ResolveRealm looks up domainName in the [DomainRealm] map. It removes one
+// trailing dot before checking for an exact match, then checks dot-prefixed
+// domain suffixes from most to least specific. Matching is case-sensitive.
+// If no mapping matches, ResolveRealm returns "" rather than the default realm.
 func (c *Config) ResolveRealm(domainName string) string {
 	domainName = strings.TrimSuffix(domainName, ".")
 

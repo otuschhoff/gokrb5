@@ -888,6 +888,42 @@ func TestResolveRealm(t *testing.T) {
 	}
 }
 
+func TestResolveRealmMappingRules(t *testing.T) {
+	t.Parallel()
+
+	cfg := New()
+	cfg.LibDefaults.DefaultRealm = "DEFAULT.EXAMPLE"
+	cfg.DomainRealm = DomainRealm{
+		"host.sub.example.com": "HOST.EXAMPLE",
+		".sub.example.com":     "SUB.EXAMPLE",
+		".example.com":         "PARENT.EXAMPLE",
+		"example.net":          "EXACT.EXAMPLE",
+	}
+
+	tests := []struct {
+		name       string
+		domainName string
+		want       string
+	}{
+		{name: "exact before suffix", domainName: "host.sub.example.com", want: "HOST.EXAMPLE"},
+		{name: "longest suffix first", domainName: "other.sub.example.com", want: "SUB.EXAMPLE"},
+		{name: "parent suffix fallback", domainName: "other.example.com", want: "PARENT.EXAMPLE"},
+		{name: "trailing dot removed", domainName: "host.sub.example.com.", want: "HOST.EXAMPLE"},
+		{name: "only one trailing dot removed", domainName: "host.sub.example.com..", want: ""},
+		{name: "case is preserved", domainName: "host.sub.EXAMPLE.COM", want: ""},
+		{name: "bare domain matches exactly", domainName: "example.net", want: "EXACT.EXAMPLE"},
+		{name: "bare domain is not a suffix rule", domainName: "host.example.net", want: ""},
+		{name: "suffix starts at a label boundary", domainName: "host.notexample.com", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, cfg.ResolveRealm(tt.domainName))
+		})
+	}
+}
+
 func TestDefaultCCacheName(t *testing.T) {
 	c, err := NewFromString("[libdefaults]\ndefault_ccache_name = FILE:/var/tmp/krb5cc_%{euid}\n")
 	if err != nil {
