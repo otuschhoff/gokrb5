@@ -33,7 +33,13 @@ type Acceptor struct {
 
 // NewAcceptor creates a single-use PKU2U acceptor mechanism.
 func NewAcceptor(identity *Identity, anchors *x509.CertPool, options ...Option) *Acceptor {
-	return &Acceptor{settings: newSettings(identity, anchors, options)}
+	return &Acceptor{
+		settings:        newSettings(identity, anchors, options),
+		metadata:        nil,
+		metadataPresent: false,
+		step:            0,
+		asResult:        nil,
+	}
 }
 
 // OID returns the PKU2U GSS mechanism OID.
@@ -51,7 +57,7 @@ func (acceptor *Acceptor) ExchangeMetadata(encoded []byte, _ bool) error {
 		return err
 	}
 	if !metadata.Accepts(acceptor.settings.identity) {
-		return fmt.Errorf("PKU2U acceptor certificate is not accepted by peer metadata")
+		return errors.New("PKU2U acceptor certificate is not accepted by peer metadata")
 	}
 	acceptor.metadata, acceptor.metadataPresent = metadata, true
 	return nil
@@ -248,7 +254,10 @@ func randomSequence() (uint64, error) {
 	return binary.BigEndian.Uint64(encoded[:]) & maxAPSequence, nil
 }
 
-func credentialsFromCertificate(certificate *x509.Certificate, chain []*x509.Certificate) (*credentials.Credentials, error) {
+func credentialsFromCertificate(
+	certificate *x509.Certificate,
+	chain []*x509.Certificate,
+) (*credentials.Credentials, error) {
 	principal, err := PrincipalFromCertificate(certificate)
 	if err != nil {
 		return nil, err

@@ -820,6 +820,26 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 86 (2026-11-20, v8 PKU2U acceptor cleanup; Q-10):
+Make the acceptor's initial state explicit without changing its zero values.
+Use a plain error for the fixed peer-metadata rejection message and wrap the
+shared certificate credentials helper's signature without changing its body.
+Certificate selection, handshake transitions, and error reporting are unchanged.
+
+Characterization passed before and after the change: metadata that does not
+match the acceptor's issuer returns the exact rejection diagnostic and leaves
+both the previously accepted metadata and its presence flag intact. That test
+and the direct and NEGOEX handshakes passed 100 shuffled runs under the race
+detector. Both module suites, v8 build and vet, Linux/386 PKU2U tests, and a
+Windows/amd64 PKU2U test cross-build passed. Live Windows interoperability was
+not run.
+
+Both modules passed changed-line lint against `7f5c344` and `origin/main`.
+V8 cross-package statement coverage stayed at 88.2%. The canonical inventory
+stayed at 529, and the supplemental inventory fell from 3,518 to 3,515 after
+removing one finding each from `exhaustruct_v5`, `perfsprint`, and `lll`.
+Neither inventory gained findings.
+
 Slice 85 (2026-11-20, v8 PKU2U certificate principal mapping; Q-10):
 Render the fallback subject once with a local nil guard and use a plain
 error for the missing-identity diagnostic. Preserve UPN precedence, X.500
