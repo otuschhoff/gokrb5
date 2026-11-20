@@ -392,84 +392,95 @@ func NewFromReader(r io.Reader) (*Config, error) {
 // NewFromScanner creates a new Config struct from a bufio.Scanner.
 func NewFromScanner(scanner *bufio.Scanner) (*Config, error) {
 	c := New()
-	var e error
-	sections := make(map[int]string)
-	var sectionLineNum []int
-	lines := make([]string, 0)
+	scanned := scanConfigSections(scanner)
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error reading Kerberos configuration: %w", err)
+	}
+
+	var warning error
+	for i, start := range scanned.starts {
+		end := len(scanned.lines)
+		if i+1 < len(scanned.starts) {
+			end = scanned.starts[i+1]
+		}
+		sectionWarning, err := parseConfigSection(c, scanned.names[start], scanned.lines[start:end])
+		if err != nil {
+			return nil, err
+		}
+		if sectionWarning != nil {
+			warning = sectionWarning
+		}
+	}
+	return c, warning
+}
+
+const realmsSectionName = "realms"
+
+type scannedConfigSections struct {
+	lines  []string
+	starts []int
+	names  map[int]string
+}
+
+func scanConfigSections(scanner *bufio.Scanner) scannedConfigSections {
+	scanned := scannedConfigSections{
+		lines:  []string{},
+		starts: []int{},
+		names:  make(map[int]string),
+	}
 	commentLine := regexp.MustCompile(`^\s*(#|;|\n)`)
 	libdefaultsSection := regexp.MustCompile(`^\s*\[libdefaults\]\s*`)
 	realmsSection := regexp.MustCompile(`^\s*\[realms\]\s*`)
 	domainRealmSection := regexp.MustCompile(`^\s*\[domain_realm\]\s*`)
 	unknownSection := regexp.MustCompile(`^\s*\[.*\]\s*`)
 	for scanner.Scan() {
-		// Skip comments and blank lines
-		if commentLine.MatchString(scanner.Text()) {
+		line := scanner.Text()
+		var section string
+		switch {
+		case commentLine.MatchString(line):
+			continue
+		case libdefaultsSection.MatchString(line):
+			section = "libdefaults"
+		case realmsSection.MatchString(line):
+			section = realmsSectionName
+		case domainRealmSection.MatchString(line):
+			section = "domain_realm"
+		case unknownSection.MatchString(line):
+			section = "unknown_section"
+		default:
+			scanned.lines = append(scanned.lines, line)
 			continue
 		}
-		if libdefaultsSection.MatchString(scanner.Text()) {
-			sections[len(lines)] = "libdefaults"
-			sectionLineNum = append(sectionLineNum, len(lines))
-			continue
-		}
-		if realmsSection.MatchString(scanner.Text()) {
-			sections[len(lines)] = "realms"
-			sectionLineNum = append(sectionLineNum, len(lines))
-			continue
-		}
-		if domainRealmSection.MatchString(scanner.Text()) {
-			sections[len(lines)] = "domain_realm"
-			sectionLineNum = append(sectionLineNum, len(lines))
-			continue
-		}
-		if unknownSection.MatchString(scanner.Text()) {
-			sections[len(lines)] = "unknown_section"
-			sectionLineNum = append(sectionLineNum, len(lines))
-			continue
-		}
-		lines = append(lines, scanner.Text())
+		// Headers at the same offset use the last header's name.
+		start := len(scanned.lines)
+		scanned.names[start] = section
+		scanned.starts = append(scanned.starts, start)
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading Kerberos configuration: %w", err)
+	return scanned
+}
+
+// parseConfigSection returns an unsupported-directive warning separately from a fatal error.
+func parseConfigSection(c *Config, section string, lines []string) (error, error) {
+	var err error
+	var realms []Realm
+	switch section {
+	case "libdefaults":
+		err = c.LibDefaults.parseLines(lines)
+	case realmsSectionName:
+		realms, err = parseRealms(lines)
+	case "domain_realm":
+		err = c.DomainRealm.parseLines(lines)
+		section = "domaain_realm" // Preserve the existing diagnostic spelling.
 	}
-	for i, start := range sectionLineNum {
-		var end int
-		if i+1 >= len(sectionLineNum) {
-			end = len(lines)
-		} else {
-			end = sectionLineNum[i+1]
-		}
-		switch section := sections[start]; section {
-		case "libdefaults":
-			err := c.LibDefaults.parseLines(lines[start:end])
-			if err != nil {
-				var ud UnsupportedDirective
-				if !errors.As(err, &ud) {
-					return nil, fmt.Errorf("error processing libdefaults section: %w", err)
-				}
-				e = err
-			}
-		case "realms":
-			realms, err := parseRealms(lines[start:end])
-			if err != nil {
-				var ud UnsupportedDirective
-				if !errors.As(err, &ud) {
-					return nil, fmt.Errorf("error processing realms section: %w", err)
-				}
-				e = err
-			}
-			c.Realms = realms
-		case "domain_realm":
-			err := c.DomainRealm.parseLines(lines[start:end])
-			if err != nil {
-				var ud UnsupportedDirective
-				if !errors.As(err, &ud) {
-					return nil, fmt.Errorf("error processing domaain_realm section: %w", err)
-				}
-				e = err
-			}
+	if err != nil {
+		if _, ok := errors.AsType[UnsupportedDirective](err); !ok {
+			return nil, fmt.Errorf("error processing %s section: %w", section, err)
 		}
 	}
-	return c, e
+	if section == realmsSectionName {
+		c.Realms = realms
+	}
+	return err, nil
 }
 
 // parseETypes resolves supported names before applying policy so aliases cannot bypass it.

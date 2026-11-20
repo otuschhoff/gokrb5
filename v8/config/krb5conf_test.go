@@ -497,6 +497,35 @@ func TestLoad(t *testing.T) {
 	assert.Equal(t, "TEST.GOKRB5", c.DomainRealm["test.gokrb5"], "Domain to realm mapping not as expected")
 }
 
+func TestConfigAdjacentSectionHeaders(t *testing.T) {
+	t.Parallel()
+
+	const input = `[realms]
+EXAMPLE.COM = {
+	kdc = kdc.example.com
+}
+[realms]
+[domain_realm] # comment
+.example.com = EXAMPLE.COM
+`
+	cfg, err := NewFromString(input)
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	require.Len(t, cfg.Realms, 1)
+	assert.Equal(t, "EXAMPLE.COM", cfg.Realms[0].Realm)
+	assert.Equal(t, "EXAMPLE.COM", cfg.DomainRealm[".example.com"])
+}
+
+func TestConfigFatalSectionErrorAfterWarning(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := NewFromString(krb5ConfV4Lines + "\n[domain_realm]\nmissing assignment\n")
+	require.ErrorContains(t, err, "error processing domaain_realm section:")
+	assert.Nil(t, cfg)
+	_, ok := errors.AsType[Invalid](err)
+	assert.True(t, ok, "expected wrapped Invalid error, got %v", err)
+}
+
 func TestLoadWithV4Lines(t *testing.T) {
 	t.Parallel()
 	cf, _ := os.CreateTemp(os.TempDir(), "TEST-gokrb5-krb5.conf")
