@@ -16,10 +16,22 @@ import (
 )
 
 const (
+	ccacheMagic             = 5
+	ccacheVersion1          = 1
+	ccacheVersion2          = 2
+	ccacheVersion3          = 3
+	ccacheVersion4          = 4
+	ccacheVersionSize       = 2
+	ccacheUint16Size        = 2
+	ccacheInt32Size         = 4
+	ccacheTicketFlagsSize   = 4
+	ccacheTypedDataMinSize  = ccacheUint16Size + ccacheInt32Size
 	headerFieldTagKDCOffset = 1
+	headerKDCOffsetSize     = 2 * ccacheInt32Size
 )
 
-// CCache is the file credentials cache as define here: https://web.mit.edu/kerberos/krb5-latest/doc/formats/ccache_file_format.html
+// CCache is a FILE credentials cache.
+// See https://web.mit.edu/kerberos/krb5-latest/doc/formats/ccache_file_format.html.
 type CCache struct {
 	Version          uint8
 	Header           header
@@ -85,34 +97,19 @@ func LoadCCache(cpath string) (*CCache, error) {
 
 // Unmarshal a byte slice of credential cache data into CCache type.
 func (c *CCache) Unmarshal(b []byte) error {
-	c.Header = header{}
-	c.DefaultPrincipal = Principal{}
+	var emptyHeader header
+	var emptyPrincipal Principal
+	c.Header = emptyHeader
+	c.DefaultPrincipal = emptyPrincipal
 	c.Credentials = nil
-	if len(b) < 2 {
-		return fmt.Errorf("credential cache is shorter than the 2-byte version header: %d", len(b))
+	endian, err := c.parseVersion(b)
+	if err != nil {
+		return err
 	}
-	p := 0
-	// The first byte of the file always has the value 5
-	if b[p] != 5 {
-		return errors.New("Invalid credential cache data. First byte does not equal 5")
-	}
-	p++
-	// Get credential cache version
-	// The second byte contains the version number (1 to 4)
-	c.Version = b[p]
-	if c.Version < 1 || c.Version > 4 {
-		return errors.New("Invalid credential cache data. Keytab version is not within 1 to 4")
-	}
-	p++
-	// Versions 1 and 2 use native byte order; versions 3 and 4 use big endian.
-	var endian binary.ByteOrder = binary.BigEndian
-	if c.Version <= 2 {
-		endian = binary.NativeEndian
-	}
-	if c.Version == 4 {
-		err := parseHeader(b, &p, c, &endian)
-		if err != nil {
-			return err
+	p := ccacheVersionSize
+	if c.Version == ccacheVersion4 {
+		if headerErr := parseHeader(b, &p, c, &endian); headerErr != nil {
+			return headerErr
 		}
 	}
 	defaultPrincipal, err := parsePrincipal(b, &p, c, &endian)
@@ -131,35 +128,23 @@ func (c *CCache) Unmarshal(b []byte) error {
 }
 
 func parseHeader(b []byte, p *int, c *CCache, e *binary.ByteOrder) error {
-	if c.Version != 4 {
+	if c.Version != ccacheVersion4 {
+		//nolint:revive,staticcheck // Preserve the established error text.
 		return errors.New("Credentials cache version is not 4 so there is no header to parse.")
 	}
-	h := header{}
 	length, err := readUint16(b, p, *e)
 	if err != nil {
 		return err
 	}
-	h.length = length
-	end := *p + int(h.length)
+	end := *p + int(length)
 	if end < *p || end > len(b) {
-		return fmt.Errorf("credential cache header length %d exceeds remaining input", h.length)
+		return fmt.Errorf("credential cache header length %d exceeds remaining input", length)
 	}
+	h := header{length: length, fields: nil}
 	for *p < end {
-		f := headerField{}
-		f.tag, err = readUint16(b, p, *e)
+		f, err := readHeaderField(b, p, end, *e)
 		if err != nil {
 			return err
-		}
-		f.length, err = readUint16(b, p, *e)
-		if err != nil {
-			return err
-		}
-		f.value, err = readBytes(b, p, int(f.length))
-		if err != nil || *p > end {
-			return errors.New("invalid credential cache header field length")
-		}
-		if f.tag == headerFieldTagKDCOffset && !f.valid() {
-			return errors.New("invalid credential cache KDC offset header")
 		}
 		h.fields = append(h.fields, f)
 	}
@@ -167,11 +152,31 @@ func parseHeader(b []byte, p *int, c *CCache, e *binary.ByteOrder) error {
 	return nil
 }
 
-// Parse the Keytab bytes of a principal into a Keytab entry's principal.
+func readHeaderField(b []byte, p *int, end int, e binary.ByteOrder) (headerField, error) {
+	var f headerField
+	tag, err := readUint16(b, p, e)
+	if err != nil {
+		return f, err
+	}
+	length, err := readUint16(b, p, e)
+	if err != nil {
+		return f, err
+	}
+	value, err := readBytes(b, p, int(length))
+	if err != nil || *p > end {
+		return f, errors.New("invalid credential cache header field length")
+	}
+	f = headerField{tag: tag, length: length, value: value}
+	if f.tag == headerFieldTagKDCOffset && !f.valid() {
+		return f, errors.New("invalid credential cache KDC offset header")
+	}
+	return f, nil
+}
+
 func parsePrincipal(b []byte, p *int, c *CCache, e *binary.ByteOrder) (Principal, error) {
 	var princ Principal
 	var err error
-	if c.Version != 1 {
+	if c.Version != ccacheVersion1 {
 		// Name Type is omitted in version 1
 		princ.PrincipalName.NameType, err = readInt32(b, p, *e)
 		if err != nil {
@@ -183,11 +188,11 @@ func parsePrincipal(b []byte, p *int, c *CCache, e *binary.ByteOrder) (Principal
 		return Principal{}, err
 	}
 	nc := int(componentCount)
-	if c.Version == 1 {
+	if c.Version == ccacheVersion1 {
 		// In version 1 the number of components includes the realm. Minus 1 to make consistent with version 2
 		nc--
 	}
-	if nc < 0 || nc > (len(b)-*p)/4 {
+	if nc < 0 || nc > (len(b)-*p)/ccacheInt32Size {
 		return Principal{}, fmt.Errorf("invalid principal component count %d", nc)
 	}
 	realm, err := readData(b, p, *e)
@@ -206,9 +211,8 @@ func parsePrincipal(b []byte, p *int, c *CCache, e *binary.ByteOrder) (Principal
 }
 
 func parseCredential(b []byte, p *int, c *CCache, e *binary.ByteOrder) (*Credential, error) {
-	var cred *Credential
+	cred := new(Credential)
 	var err error
-	cred = new(Credential)
 	cred.Client, err = parsePrincipal(b, p, c, e)
 	if err != nil {
 		return nil, err
@@ -217,92 +221,100 @@ func parseCredential(b []byte, p *int, c *CCache, e *binary.ByteOrder) (*Credent
 	if err != nil {
 		return nil, err
 	}
-	key := types.EncryptionKey{}
-	keyType, err := readUint16(b, p, *e)
-	if err != nil {
+	if cred.Key, err = readCredentialKey(b, p, c.Version, *e); err != nil {
 		return nil, err
 	}
-	key.KeyType = int32(keyType)
-	if c.Version == 3 {
-		// repeated twice in version 3
-		repeatedKeyType, kerr := readUint16(b, p, *e)
-		if kerr != nil {
-			return nil, kerr
+	if err = readCredentialTimesAndFlags(b, p, *e, cred); err != nil {
+		return nil, err
+	}
+	if cred.Addresses, err = readAddresses(b, p, *e); err != nil {
+		return nil, err
+	}
+	if cred.AuthData, err = readAuthorizationData(b, p, *e); err != nil {
+		return nil, err
+	}
+	if cred.Ticket, err = readData(b, p, *e); err != nil {
+		return nil, err
+	}
+	if cred.SecondTicket, err = readData(b, p, *e); err != nil {
+		return nil, err
+	}
+	return cred, nil
+}
+
+func readCredentialKey(b []byte, p *int, version uint8, e binary.ByteOrder) (types.EncryptionKey, error) {
+	var key types.EncryptionKey
+	keyType, err := readUint16(b, p, e)
+	if err != nil {
+		return key, err
+	}
+	if version == ccacheVersion3 {
+		repeatedKeyType, repeatErr := readUint16(b, p, e)
+		if repeatErr != nil {
+			return key, repeatErr
 		}
 		if repeatedKeyType != keyType {
-			return nil, errors.New("invalid version 3 credential cache key type")
+			return key, errors.New("invalid version 3 credential cache key type")
 		}
 	}
-	key.KeyValue, err = readData(b, p, *e)
+	key.KeyType = int32(keyType)
+	key.KeyValue, err = readData(b, p, e)
+	return key, err
+}
+
+func readCredentialTimesAndFlags(b []byte, p *int, e binary.ByteOrder, cred *Credential) error {
+	for _, timestamp := range []*time.Time{&cred.AuthTime, &cred.StartTime, &cred.EndTime, &cred.RenewTill} {
+		value, err := readTimestamp(b, p, e)
+		if err != nil {
+			return err
+		}
+		*timestamp = value
+	}
+	isSKey, err := readUint8(b, p)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	cred.Key = key
-	if cred.AuthTime, err = readTimestamp(b, p, *e); err != nil {
-		return nil, err
-	}
-	if cred.StartTime, err = readTimestamp(b, p, *e); err != nil {
-		return nil, err
-	}
-	if cred.EndTime, err = readTimestamp(b, p, *e); err != nil {
-		return nil, err
-	}
-	if cred.RenewTill, err = readTimestamp(b, p, *e); err != nil {
-		return nil, err
-	}
-	ik, err := readUint8(b, p)
-	if err != nil {
-		return nil, err
-	}
-	if ik == 0 {
-		cred.IsSKey = false
-	} else {
-		cred.IsSKey = true
-	}
+	cred.IsSKey = isSKey != 0
 	cred.TicketFlags = types.NewKrbFlags()
-	cred.TicketFlags.Bytes, err = readBytes(b, p, 4)
-	if err != nil {
-		return nil, err
-	}
-	count, err := readInt32(b, p, *e)
-	if err != nil || count < 0 || int64(count) > int64(len(b)-*p)/6 {
+	cred.TicketFlags.Bytes, err = readBytes(b, p, ccacheTicketFlagsSize)
+	return err
+}
+
+func readAddresses(b []byte, p *int, e binary.ByteOrder) ([]types.HostAddress, error) {
+	count, err := readInt32(b, p, e)
+	if err != nil || count < 0 || int64(count) > int64(len(b)-*p)/ccacheTypedDataMinSize {
 		return nil, errors.New("invalid address count")
 	}
-	l := int(count)
-	cred.Addresses = make([]types.HostAddress, l)
-	for i := range cred.Addresses {
-		cred.Addresses[i], err = readAddress(b, p, *e)
+	addresses := make([]types.HostAddress, int(count))
+	for i := range addresses {
+		addresses[i], err = readAddress(b, p, e)
 		if err != nil {
 			return nil, err
 		}
 	}
-	count, err = readInt32(b, p, *e)
-	if err != nil || count < 0 || int64(count) > int64(len(b)-*p)/6 {
+	return addresses, nil
+}
+
+func readAuthorizationData(b []byte, p *int, e binary.ByteOrder) ([]types.AuthorizationDataEntry, error) {
+	count, err := readInt32(b, p, e)
+	if err != nil || count < 0 || int64(count) > int64(len(b)-*p)/ccacheTypedDataMinSize {
 		return nil, errors.New("invalid authorization data count")
 	}
-	l = int(count)
-	cred.AuthData = make([]types.AuthorizationDataEntry, l)
-	for i := range cred.AuthData {
-		cred.AuthData[i], err = readAuthDataEntry(b, p, *e)
+	authData := make([]types.AuthorizationDataEntry, int(count))
+	for i := range authData {
+		authData[i], err = readAuthDataEntry(b, p, e)
 		if err != nil {
 			return nil, err
 		}
 	}
-	cred.Ticket, err = readData(b, p, *e)
-	if err != nil {
-		return nil, err
-	}
-	cred.SecondTicket, err = readData(b, p, *e)
-	if err != nil {
-		return nil, err
-	}
-	return cred, err
+	return authData, nil
 }
 
 // GetClientPrincipalName returns a PrincipalName type for the client the credentials cache is for.
 func (c *CCache) GetClientPrincipalName() types.PrincipalName {
 	if c == nil {
-		return types.PrincipalName{}
+		var name types.PrincipalName
+		return name
 	}
 	return c.DefaultPrincipal.PrincipalName
 }
@@ -317,14 +329,13 @@ func (c *CCache) GetClientRealm() string {
 
 // GetClientCredentials returns a Credentials object representing the client of the credentials cache.
 func (c *CCache) GetClientCredentials() *Credentials {
-	if c == nil {
-		return new(Credentials)
+	creds := new(Credentials)
+	if c != nil {
+		creds.username = c.DefaultPrincipal.PrincipalName.PrincipalNameString()
+		creds.realm = c.GetClientRealm()
+		creds.cname = c.DefaultPrincipal.PrincipalName
 	}
-	return &Credentials{
-		username: c.DefaultPrincipal.PrincipalName.PrincipalNameString(),
-		realm:    c.GetClientRealm(),
-		cname:    c.DefaultPrincipal.PrincipalName,
-	}
+	return creds
 }
 
 // Contains tests if the cache contains a credential for the provided server PrincipalName
@@ -379,12 +390,32 @@ func (c *CCache) GetEntries() []*Credential {
 	return creds
 }
 
+func (c *CCache) parseVersion(b []byte) (binary.ByteOrder, error) {
+	if len(b) < ccacheVersionSize {
+		return nil, fmt.Errorf("credential cache is shorter than the 2-byte version header: %d", len(b))
+	}
+	if b[0] != ccacheMagic {
+		//nolint:staticcheck // Preserve the established error text.
+		return nil, errors.New("Invalid credential cache data. First byte does not equal 5")
+	}
+	c.Version = b[1]
+	switch c.Version {
+	case ccacheVersion1, ccacheVersion2:
+		return binary.NativeEndian, nil
+	case ccacheVersion3, ccacheVersion4:
+		return binary.BigEndian, nil
+	default:
+		//nolint:staticcheck // Preserve the established error text, including "Keytab".
+		return nil, errors.New("Invalid credential cache data. Keytab version is not within 1 to 4")
+	}
+}
+
 func (h *headerField) valid() bool {
 	// See https://web.mit.edu/kerberos/krb5-latest/doc/formats/ccache_file_format.html - Header format
 	if h.tag != headerFieldTagKDCOffset {
 		return false
 	}
-	return h.length == 8 && len(h.value) == 8
+	return h.length == headerKDCOffsetSize && len(h.value) == headerKDCOffsetSize
 }
 
 func readData(b []byte, p *int, e binary.ByteOrder) ([]byte, error) {
@@ -396,7 +427,7 @@ func readData(b []byte, p *int, e binary.ByteOrder) ([]byte, error) {
 }
 
 func readAddress(b []byte, p *int, e binary.ByteOrder) (types.HostAddress, error) {
-	a := types.HostAddress{}
+	var a types.HostAddress
 	t, err := readUint16(b, p, e)
 	if err != nil {
 		return a, err
@@ -407,7 +438,7 @@ func readAddress(b []byte, p *int, e binary.ByteOrder) (types.HostAddress, error
 }
 
 func readAuthDataEntry(b []byte, p *int, e binary.ByteOrder) (types.AuthorizationDataEntry, error) {
-	a := types.AuthorizationDataEntry{}
+	var a types.AuthorizationDataEntry
 	t, err := readUint16(b, p, e)
 	if err != nil {
 		return a, err
@@ -435,24 +466,24 @@ func readUint8(b []byte, p *int) (uint8, error) {
 
 // Read bytes representing a sixteen bit integer.
 func readUint16(b []byte, p *int, e binary.ByteOrder) (uint16, error) {
-	if *p < 0 || len(b)-*p < 2 {
+	if *p < 0 || len(b)-*p < ccacheUint16Size {
 		return 0, io.ErrUnexpectedEOF
 	}
-	v := e.Uint16(b[*p : *p+2])
-	*p += 2
+	v := e.Uint16(b[*p : *p+ccacheUint16Size])
+	*p += ccacheUint16Size
 	return v, nil
 }
 
 // Read bytes representing a thirty two bit integer.
 func readInt32(b []byte, p *int, e binary.ByteOrder) (int32, error) {
-	if *p < 0 || len(b)-*p < 4 {
+	if *p < 0 || len(b)-*p < ccacheInt32Size {
 		return 0, io.ErrUnexpectedEOF
 	}
 	var value int32
-	if err := binary.Read(bytes.NewReader(b[*p:*p+4]), e, &value); err != nil {
+	if err := binary.Read(bytes.NewReader(b[*p:*p+ccacheInt32Size]), e, &value); err != nil {
 		return 0, fmt.Errorf("read credential cache int32: %w", err)
 	}
-	*p += 4
+	*p += ccacheInt32Size
 	return value, nil
 }
 

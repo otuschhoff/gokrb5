@@ -18,11 +18,14 @@ const configRealm = "X-CACHECONF:"
 // NewCCache creates an empty version 4 credential cache.
 func NewCCache(defaultPrincipal types.PrincipalName, realm string) *CCache {
 	c := &CCache{
-		Version: 4,
+		Version: ccacheVersion4,
+		Header:  header{length: 0, fields: nil},
 		DefaultPrincipal: Principal{
 			Realm:         realm,
 			PrincipalName: clonePrincipalName(defaultPrincipal),
 		},
+		Credentials: nil,
+		Path:        "",
 	}
 	c.SetKDCTimeOffset(0)
 	return c
@@ -61,17 +64,14 @@ func (c *CCache) SetConfig(key, principalName, value string) error {
 			return nil
 		}
 	}
-	flags := types.NewKrbFlags()
-	c.Credentials = append(c.Credentials, &Credential{
-		Client:      clonePrincipal(c.DefaultPrincipal),
-		Server:      server,
-		TicketFlags: flags,
-		AuthTime:    time.Unix(0, 0),
-		StartTime:   time.Unix(0, 0),
-		EndTime:     time.Unix(0, 0),
-		RenewTill:   time.Unix(0, 0),
-		Ticket:      []byte(value),
-	})
+	epoch := time.Unix(0, 0)
+	cred := new(Credential)
+	cred.Client = clonePrincipal(c.DefaultPrincipal)
+	cred.Server = server
+	cred.TicketFlags = types.NewKrbFlags()
+	cred.AuthTime, cred.StartTime, cred.EndTime, cred.RenewTill = epoch, epoch, epoch, epoch
+	cred.Ticket = []byte(value)
+	c.Credentials = append(c.Credentials, cred)
 	return nil
 }
 
@@ -81,7 +81,10 @@ func (c *CCache) GetConfig(key, principalName string) (string, bool) {
 	if principalName != "" {
 		components = append(components, principalName)
 	}
-	server := Principal{Realm: configRealm, PrincipalName: types.PrincipalName{NameString: components}}
+	server := Principal{
+		Realm:         configRealm,
+		PrincipalName: types.PrincipalName{NameType: nametype.KRB_NT_UNKNOWN, NameString: components},
+	}
 	for _, cred := range c.Credentials {
 		if configPrincipalEqual(cred.Server, server) {
 			return string(cred.Ticket), true
@@ -105,12 +108,12 @@ func configPrincipalEqual(a, b Principal) bool {
 // KDCTimeOffset returns the KDC time offset recorded in the cache header.
 func (c *CCache) KDCTimeOffset() (time.Duration, bool) {
 	for _, field := range c.Header.fields {
-		if field.tag == headerFieldTagKDCOffset && len(field.value) == 8 {
+		if field.tag == headerFieldTagKDCOffset && len(field.value) == headerKDCOffsetSize {
 			var seconds, microseconds int32
-			if err := binary.Read(bytes.NewReader(field.value[:4]), binary.BigEndian, &seconds); err != nil {
+			if err := binary.Read(bytes.NewReader(field.value[:ccacheInt32Size]), binary.BigEndian, &seconds); err != nil {
 				return 0, false
 			}
-			if err := binary.Read(bytes.NewReader(field.value[4:]), binary.BigEndian, &microseconds); err != nil {
+			if err := binary.Read(bytes.NewReader(field.value[ccacheInt32Size:]), binary.BigEndian, &microseconds); err != nil {
 				return 0, false
 			}
 			return time.Duration(seconds)*time.Second + time.Duration(microseconds)*time.Microsecond, true
@@ -124,7 +127,7 @@ func (c *CCache) KDCTimeOffset() (time.Duration, bool) {
 func (c *CCache) SetKDCTimeOffset(offset time.Duration) {
 	seconds := offset / time.Second
 	microseconds := (offset % time.Second) / time.Microsecond
-	value := make([]byte, 8)
+	value := make([]byte, headerKDCOffsetSize)
 	encodedSeconds, err := ccacheInt32("KDC offset seconds", int64(seconds))
 	if err != nil {
 		if seconds < 0 {
@@ -139,32 +142,36 @@ func (c *CCache) SetKDCTimeOffset(offset time.Duration) {
 	}
 	var encoded bytes.Buffer
 	_ = binary.Write(&encoded, binary.BigEndian, encodedSeconds)
-	copy(value[:4], encoded.Bytes())
+	copy(value[:ccacheInt32Size], encoded.Bytes())
 	encoded.Reset()
 	_ = binary.Write(&encoded, binary.BigEndian, encodedMicroseconds)
-	copy(value[4:], encoded.Bytes())
+	copy(value[ccacheInt32Size:], encoded.Bytes())
 	for i := range c.Header.fields {
 		if c.Header.fields[i].tag == headerFieldTagKDCOffset {
-			c.Header.fields[i].length = 8
+			c.Header.fields[i].length = headerKDCOffsetSize
 			c.Header.fields[i].value = value
 			return
 		}
 	}
-	c.Header.fields = append(c.Header.fields, headerField{tag: headerFieldTagKDCOffset, length: 8, value: value})
+	c.Header.fields = append(c.Header.fields, headerField{
+		tag:    headerFieldTagKDCOffset,
+		length: headerKDCOffsetSize,
+		value:  value,
+	})
 }
 
 // Marshal returns c encoded as a version 3 or version 4 FILE credential cache.
 func (c *CCache) Marshal() ([]byte, error) {
 	version := c.Version
 	if version == 0 {
-		version = 4
+		version = ccacheVersion4
 	}
-	if version != 3 && version != 4 {
+	if version != ccacheVersion3 && version != ccacheVersion4 {
 		return nil, fmt.Errorf("credential cache marshaling supports versions 3 and 4, not %d", version)
 	}
 	var out bytes.Buffer
-	out.Write([]byte{5, version})
-	if version == 4 {
+	out.Write([]byte{ccacheMagic, version})
+	if version == ccacheVersion4 {
 		if err := marshalVersion4Header(&out, c.Header); err != nil {
 			return nil, err
 		}
@@ -299,7 +306,7 @@ func marshalCredentialKey(out *bytes.Buffer, cred *Credential, version uint8) er
 		return err
 	}
 	_ = binary.Write(out, binary.BigEndian, keyType)
-	if version == 3 {
+	if version == ccacheVersion3 {
 		_ = binary.Write(out, binary.BigEndian, keyType)
 	}
 	return marshalData(out, cred.Key.KeyValue)
@@ -325,9 +332,9 @@ func marshalCredentialTimes(out *bytes.Buffer, cred *Credential) error {
 
 func marshalTicketFlags(out *bytes.Buffer, flags []byte) error {
 	if len(flags) == 0 {
-		flags = make([]byte, 4)
+		flags = make([]byte, ccacheTicketFlagsSize)
 	}
-	if len(flags) != 4 {
+	if len(flags) != ccacheTicketFlagsSize {
 		return errors.New("credential ticket flags must contain 4 bytes")
 	}
 	out.Write(flags)

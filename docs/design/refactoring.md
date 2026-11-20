@@ -820,6 +820,25 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 143 (2026-11-20, complete v8 credentials lint cleanup; Q-10):
+Separate FILE cache version, header field, key, timestamp and flag, and
+typed-data decoding. Share wire-format constants with the encoder and
+make credential defaults explicit without changing the public API, wire
+bytes, metadata serialization, or validation order. Three narrow lint
+exceptions retain the exact wording of existing cache validation errors.
+
+Uncapped whole-v8 scans report zero credentials findings, down from 5
+canonical and 124 supplemental. Diagnostics outside credentials are
+unchanged; whole-v8 totals are 376 canonical and 1,559 supplemental. All
+52 test and fuzz entry points were retained. Statement coverage is 93.0%
+(previously 93.3%); the original tests also measure 93.0% against the
+refactored code. Credentials pass 100 shuffled race-enabled runs and
+15 seconds of cache decoder fuzzing (654,135 executions). Linux/386
+credentials, client, service, and SPNEGO tests pass. The credentials
+tests cross-compile for Windows/amd64. The full v8 build, vet, and race
+suite pass, as does changed-line lint from both baselines. Interop-tagged
+tests compile; live interoperability and native Windows were not run.
+
 Slice 142 (2026-11-20, complete v8 service lint cleanup; Q-10):
 Separate channel-binding enforcement from authenticator checksum parsing,
 reuse keytab principal matching, and simplify Basic credential parsing

@@ -3,12 +3,19 @@ package credentials
 import (
 	"crypto/x509"
 	"encoding/json"
-	"sort"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/otuschhoff/gokrb5/v8/iana/nametype"
 	"github.com/otuschhoff/gokrb5/v8/types"
+)
+
+const (
+	stateTestRealm = "EXAMPLE.COM"
+	stateTestUser  = "user"
 )
 
 func TestCredentialsIdentityAndAuthorizationLifecycle(t *testing.T) {
@@ -19,141 +26,110 @@ func TestCredentialsIdentityAndAuthorizationLifecycle(t *testing.T) {
 	credentials.SetUserName("effective")
 	credentials.SetDisplayName("Example User")
 	credentials.SetCName(principal)
-	credentials.SetRealm("EXAMPLE.COM")
+	credentials.SetRealm(stateTestRealm)
 	credentials.SetHuman(false)
 	credentials.SetAuthTime(authTime)
 	credentials.SetAuthenticated(true)
 
-	if credentials.UserName() != "effective" || credentials.DisplayName() != "Example User" {
-		t.Fatal("identity names were not retained")
-	}
-	if credentials.CName().PrincipalNameString() != "service/host" {
-		t.Fatalf("principal = %+v", credentials.CName())
-	}
-	if credentials.Domain() != "EXAMPLE.COM" || credentials.Realm() != "EXAMPLE.COM" {
-		t.Fatal("realm was not retained")
-	}
-	if credentials.Human() || !credentials.Authenticated() || !credentials.AuthTime().Equal(authTime) {
-		t.Fatal("authentication state was not retained")
-	}
-	if credentials.SessionID() == "" {
-		t.Fatal("session ID was not generated")
-	}
+	assert.Equal(t, "effective", credentials.UserName())
+	assert.Equal(t, "Example User", credentials.DisplayName())
+	assert.Equal(t, "service/host", credentials.CName().PrincipalNameString())
+	assert.Equal(t, stateTestRealm, credentials.Domain())
+	assert.Equal(t, stateTestRealm, credentials.Realm())
+	assert.False(t, credentials.Human())
+	assert.True(t, credentials.Authenticated())
+	assert.True(t, credentials.AuthTime().Equal(authTime))
+	assert.NotEmpty(t, credentials.SessionID())
 
 	credentials.AddAuthzAttribute("group-a")
 	credentials.AddAuthzAttribute("group-b")
 	credentials.DisableAuthzAttribute("group-a")
 	credentials.DisableAuthzAttribute("missing")
-	if credentials.Authorized("group-a") || !credentials.Authorized("group-b") || credentials.Authorized("missing") {
-		t.Fatal("authorization disable state is incorrect")
-	}
+	assert.False(t, credentials.Authorized("group-a"))
+	assert.True(t, credentials.Authorized("group-b"))
+	assert.False(t, credentials.Authorized("missing"))
 	credentials.EnableAuthzAttribute("group-a")
 	credentials.EnableAuthzAttribute("missing")
-	if !credentials.Authorized("group-a") {
-		t.Fatal("authorization enable state is incorrect")
-	}
+	assert.True(t, credentials.Authorized("group-a"))
 	credentials.RemoveAuthzAttribute("missing")
 	credentials.RemoveAuthzAttribute("group-b")
-	attributes := credentials.AuthzAttributes()
-	sort.Strings(attributes)
-	if len(attributes) != 1 || attributes[0] != "group-a" {
-		t.Fatalf("authorization attributes = %v", attributes)
-	}
+	assert.Equal(t, []string{"group-a"}, credentials.AuthzAttributes())
 }
 
 func TestCredentialsADAndCertificateAttributes(t *testing.T) {
-	credentials := New("initial", "EXAMPLE.COM")
-	ad := ADCredentials{
-		EffectiveName:       "effective",
-		FullName:            "Example User",
-		GroupMembershipSIDs: []string{"S-1-5-21-1", "S-1-5-21-2"},
-		UserSID:             "S-1-5-21-3",
-	}
+	credentials := New("initial", stateTestRealm)
+	var ad ADCredentials
+	ad.EffectiveName = "effective"
+	ad.FullName = "Example User"
+	ad.GroupMembershipSIDs = []string{"S-1-5-21-1", "S-1-5-21-2"}
+	ad.UserSID = "S-1-5-21-3"
 	credentials.SetADCredentials(ad)
-	if got := credentials.GetADCredentials(); got.UserSID != ad.UserSID {
-		t.Fatalf("AD credentials = %+v", got)
-	}
-	if credentials.UserName() != ad.EffectiveName || credentials.DisplayName() != ad.FullName {
-		t.Fatal("AD names were not applied")
-	}
+	assert.Equal(t, ad.UserSID, credentials.GetADCredentials().UserSID)
+	assert.Equal(t, ad.EffectiveName, credentials.UserName())
+	assert.Equal(t, ad.FullName, credentials.DisplayName())
 	for _, sid := range ad.GroupMembershipSIDs {
-		if !credentials.Authorized(sid) {
-			t.Fatalf("AD group %s was not authorized", sid)
-		}
+		assert.True(t, credentials.Authorized(sid), "AD group %s was not authorized", sid)
 	}
 
-	chain := []*x509.Certificate{{SerialNumber: nil}, {SerialNumber: nil}}
-	identity := CertificateIdentity{Chain: chain, SubjectDN: "CN=client", UPN: "user@example.com"}
+	chain := []*x509.Certificate{new(x509.Certificate), new(x509.Certificate)}
+	identity := CertificateIdentity{
+		Certificate: nil,
+		Chain:       chain,
+		SubjectDN:   "CN=client",
+		UPN:         "user@example.com",
+		IssuedBy:    "",
+	}
 	credentials.SetCertificateIdentity(identity)
 	chain[0] = nil
 	got, ok := credentials.GetCertificateIdentity()
-	if !ok || got.SubjectDN != identity.SubjectDN || got.Chain[0] == nil {
-		t.Fatalf("certificate identity = %+v, %v", got, ok)
-	}
+	require.True(t, ok)
+	assert.Equal(t, identity.SubjectDN, got.SubjectDN)
+	require.NotEmpty(t, got.Chain)
+	assert.NotNil(t, got.Chain[0])
 	got.Chain[0] = nil
-	again, _ := credentials.GetCertificateIdentity()
-	if again.Chain[0] == nil {
-		t.Fatal("certificate chain slice was not defensively copied")
-	}
+	again, ok := credentials.GetCertificateIdentity()
+	require.True(t, ok)
+	require.NotEmpty(t, again.Chain)
+	assert.NotNil(t, again.Chain[0], "certificate chain slice was not defensively copied")
 
-	if got := New("user", "EXAMPLE.COM").GetADCredentials(); got.UserSID != "" || len(got.GroupMembershipSIDs) != 0 {
-		t.Fatalf("missing AD credentials = %+v", got)
-	}
-	if _, ok := New("user", "EXAMPLE.COM").GetCertificateIdentity(); ok {
-		t.Fatal("missing certificate identity was reported present")
-	}
+	empty := New(stateTestUser, stateTestRealm)
+	missing := empty.GetADCredentials()
+	assert.Empty(t, missing.UserSID)
+	assert.Empty(t, missing.GroupMembershipSIDs)
+	_, ok = empty.GetCertificateIdentity()
+	assert.False(t, ok)
 }
 
 func TestCredentialsExpiryAttributesAndSerialization(t *testing.T) {
-	credentials := New("user", "EXAMPLE.COM")
-	if credentials.Expired() {
-		t.Fatal("credentials without expiry are expired")
-	}
+	credentials := New(stateTestUser, stateTestRealm)
+	assert.False(t, credentials.Expired(), "credentials without expiry are expired")
 	past := time.Now().UTC().Add(-time.Minute)
 	credentials.SetValidUntil(past)
-	if !credentials.Expired() || !credentials.ValidUntil().Equal(past) {
-		t.Fatal("past expiry was not applied")
-	}
+	assert.True(t, credentials.Expired())
+	assert.True(t, credentials.ValidUntil().Equal(past))
 	future := time.Now().UTC().Add(time.Hour)
 	credentials.SetValidUntil(future)
-	if credentials.Expired() {
-		t.Fatal("future credentials are expired")
-	}
+	assert.False(t, credentials.Expired(), "future credentials are expired")
 
 	credentials.SetAttribute("one", 1)
-	if credentials.Attributes()["one"] != 1 {
-		t.Fatal("attribute was not retained")
-	}
+	assert.Equal(t, 1, credentials.Attributes()["one"])
 	credentials.RemoveAttribute("one")
-	credentials.SetAttributes(map[string]interface{}{"two": "value"})
-	if credentials.Attributes()["two"] != "value" {
-		t.Fatal("attribute map was not replaced")
-	}
+	credentials.SetAttributes(map[string]any{"two": "value"})
+	assert.Equal(t, "value", credentials.Attributes()["two"])
 
 	encoded, err := credentials.Marshal()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	decoded := New("", "")
-	if ierr := decoded.Unmarshal(encoded); ierr != nil {
-		t.Fatal(ierr)
-	}
-	if decoded.UserName() != "user" || decoded.Realm() != "EXAMPLE.COM" || !decoded.ValidUntil().Equal(future) {
-		t.Fatalf("round-tripped credentials = %+v", decoded)
-	}
-	if ierr := decoded.Unmarshal([]byte("not a gob")); ierr == nil {
-		t.Fatal("invalid credential encoding was accepted")
-	}
+	require.NoError(t, decoded.Unmarshal(encoded))
+	assert.Equal(t, stateTestUser, decoded.UserName())
+	assert.Equal(t, stateTestRealm, decoded.Realm())
+	assert.True(t, decoded.ValidUntil().Equal(future))
+	assert.Error(t, decoded.Unmarshal([]byte("not a gob")))
 
 	jsonValue, err := credentials.JSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fields map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonValue), &fields); err != nil {
-		t.Fatal(err)
-	}
-	if fields["Username"] != "user" || fields["Realm"] != "EXAMPLE.COM" {
-		t.Fatalf("JSON fields = %v", fields)
-	}
+	require.NoError(t, err)
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal([]byte(jsonValue), &fields))
+	assert.Equal(t, stateTestUser, fields["Username"])
+	assert.Equal(t, stateTestRealm, fields["Realm"])
 }

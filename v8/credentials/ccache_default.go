@@ -33,8 +33,8 @@ func resolveCCacheName(name string) (string, error) {
 	if name == "" {
 		return "", errors.New("credential cache path is empty")
 	}
-	if strings.HasPrefix(name, "FILE:") {
-		name = strings.TrimPrefix(name, "FILE:")
+	if path, ok := strings.CutPrefix(name, "FILE:"); ok {
+		name = path
 	} else if index := strings.IndexByte(name, ':'); index >= 0 && !isWindowsDriveName(name, index) {
 		return "", fmt.Errorf("unsupported credential cache type %q", name[:index])
 	}
@@ -59,5 +59,10 @@ func resolveCCacheName(name string) (string, error) {
 }
 
 func isWindowsDriveName(name string, colon int) bool {
-	return colon == 1 && len(name) > 2 && ((name[0] >= 'A' && name[0] <= 'Z') || (name[0] >= 'a' && name[0] <= 'z')) && (name[2] == '\\' || name[2] == '/')
+	if colon != 1 || len(name) <= 2 {
+		return false
+	}
+	drive := name[0]
+	isLetter := (drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z')
+	return isLetter && (name[2] == '\\' || name[2] == '/')
 }

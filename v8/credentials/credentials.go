@@ -35,7 +35,7 @@ type Credentials struct {
 	cname           types.PrincipalName
 	keytab          *keytab.Keytab
 	password        string
-	attributes      map[string]interface{}
+	attributes      map[string]any
 	validUntil      time.Time
 	authenticated   bool
 	human           bool
@@ -54,7 +54,7 @@ type marshalCredentials struct {
 	CName           types.PrincipalName `json:"-"`
 	Keytab          bool
 	Password        bool
-	Attributes      map[string]interface{} `json:"-"`
+	Attributes      map[string]any `json:"-"`
 	ValidUntil      time.Time
 	Authenticated   bool
 	Human           bool
@@ -134,10 +134,15 @@ func New(username string, realm string) *Credentials {
 		realm:           realm,
 		cname:           types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, username),
 		keytab:          keytab.New(),
-		attributes:      make(map[string]interface{}),
+		password:        "",
+		attributes:      make(map[string]any),
+		validUntil:      time.Time{},
+		authenticated:   false,
+		human:           true,
+		authTime:        time.Time{},
 		groupMembership: make(map[string]bool),
 		sessionID:       uid,
-		human:           true,
+		delegated:       nil,
 	}
 }
 
@@ -243,10 +248,8 @@ func cloneDelegatedCredentials(credentials []*Credential) []*Credential {
 
 // GetADCredentials returns ADCredentials attributes sorted in the credential
 func (c *Credentials) GetADCredentials() ADCredentials {
-	if a, ok := c.attributes[AttributeKeyADCredentials].(ADCredentials); ok {
-		return a
-	}
-	return ADCredentials{}
+	a, _ := c.attributes[AttributeKeyADCredentials].(ADCredentials)
+	return a
 }
 
 // SetCertificateIdentity stores certificate authentication details.
@@ -409,17 +412,17 @@ func (c *Credentials) ValidUntil() time.Time {
 }
 
 // Attributes returns the Credentials' attributes map.
-func (c *Credentials) Attributes() map[string]interface{} {
+func (c *Credentials) Attributes() map[string]any {
 	return c.attributes
 }
 
 // SetAttribute sets the value of an attribute.
-func (c *Credentials) SetAttribute(k string, v interface{}) {
+func (c *Credentials) SetAttribute(k string, v any) {
 	c.attributes[k] = v
 }
 
 // SetAttributes replaces the attributes map with the one provided.
-func (c *Credentials) SetAttributes(a map[string]interface{}) {
+func (c *Credentials) SetAttributes(a map[string]any) {
 	c.attributes = a
 }
 
@@ -428,12 +431,17 @@ func (c *Credentials) RemoveAttribute(k string) {
 	delete(c.attributes, k)
 }
 
+func registerCredentialGobTypes() {
+	var ad ADCredentials
+	gob.Register(map[string]any{})
+	gob.Register(ad)
+}
+
 // Marshal encodes credential metadata as gob. It records whether a password or
 // keytab is configured without encoding either one. Attributes are included,
 // so the output may contain sensitive information.
 func (c *Credentials) Marshal() ([]byte, error) {
-	gob.Register(map[string]interface{}{})
-	gob.Register(ADCredentials{})
+	registerCredentialGobTypes()
 	buf := new(bytes.Buffer)
 	enc := gob.NewEncoder(buf)
 	mc := marshalCredentials{
@@ -460,8 +468,7 @@ func (c *Credentials) Marshal() ([]byte, error) {
 // Unmarshal restores credential metadata from a trusted gob payload. A decode
 // failure leaves the receiver unchanged. Passwords and keytabs are not restored.
 func (c *Credentials) Unmarshal(b []byte) error {
-	gob.Register(map[string]interface{}{})
-	gob.Register(ADCredentials{})
+	registerCredentialGobTypes()
 	mc := new(marshalCredentials)
 	buf := bytes.NewBuffer(b)
 	dec := gob.NewDecoder(buf)
@@ -486,17 +493,19 @@ func (c *Credentials) Unmarshal(b []byte) error {
 // or attributes.
 func (c *Credentials) JSON() (string, error) {
 	mc := marshalCredentials{
-		Username:      c.username,
-		DisplayName:   c.displayName,
-		Realm:         c.realm,
-		CName:         c.cname,
-		Keytab:        c.HasKeytab(),
-		Password:      c.HasPassword(),
-		ValidUntil:    c.validUntil,
-		Authenticated: c.authenticated,
-		Human:         c.human,
-		AuthTime:      c.authTime,
-		SessionID:     c.sessionID,
+		Username:        c.username,
+		DisplayName:     c.displayName,
+		Realm:           c.realm,
+		CName:           c.cname,
+		Keytab:          c.HasKeytab(),
+		Password:        c.HasPassword(),
+		Attributes:      nil,
+		ValidUntil:      c.validUntil,
+		Authenticated:   c.authenticated,
+		Human:           c.human,
+		AuthTime:        c.authTime,
+		GroupMembership: nil,
+		SessionID:       c.sessionID,
 	}
 	b, err := json.MarshalIndent(mc, "", "  ")
 	if err != nil {

@@ -40,7 +40,7 @@ func TestCCacheUnmarshalFullTruncationSweep(t *testing.T) {
 			full := new(CCache)
 			require.NoError(t, full.Unmarshal(data))
 			want := len(full.Credentials)
-			for length := 0; length < len(data); length++ {
+			for length := range len(data) {
 				cache := new(CCache)
 				if err := cache.Unmarshal(data[:length]); err == nil {
 					assert.LessOrEqual(t, len(cache.Credentials), want,
@@ -125,7 +125,8 @@ func TestCCacheV4HeaderFieldRejections(t *testing.T) {
 		require.EqualError(t, err, "invalid credential cache KDC offset header")
 	})
 	t.Run("wrong version rejected", func(t *testing.T) {
-		cache := &CCache{Version: 3}
+		cache := new(CCache)
+		cache.Version = 3
 		p := 0
 		endian := binary.ByteOrder(binary.BigEndian)
 		err := parseHeader(v3, &p, cache, &endian)
@@ -154,7 +155,8 @@ func TestCCacheV1V2NativeByteOrder(t *testing.T) {
 		return b
 	}
 	principalV2 := func(realm string, components ...string) []byte {
-		b := append(uint32Bytes(uint32(nametype.KRB_NT_PRINCIPAL)), uint32Bytes(mustCCacheUint32(t, "principal component count", int64(len(components))))...)
+		componentCount := mustCCacheUint32(t, "principal component count", int64(len(components)))
+		b := append(uint32Bytes(uint32(nametype.KRB_NT_PRINCIPAL)), uint32Bytes(componentCount)...)
 		b = append(b, dataField(realm)...)
 		for _, c := range components {
 			b = append(b, dataField(c)...)
@@ -162,24 +164,24 @@ func TestCCacheV1V2NativeByteOrder(t *testing.T) {
 		return b
 	}
 	t.Run("version 1", func(t *testing.T) {
-		data := append([]byte{5, 1}, principalV1("TEST.GOKRB5", "testuser1")...)
+		data := append([]byte{5, 1}, principalV1(ccacheTestRealm, ccacheTestUser)...)
 		cache := new(CCache)
 		require.NoError(t, cache.Unmarshal(data))
 		assert.Equal(t, uint8(1), cache.Version)
-		assert.Equal(t, "TEST.GOKRB5", cache.DefaultPrincipal.Realm)
-		assert.Equal(t, []string{"testuser1"}, cache.DefaultPrincipal.PrincipalName.NameString)
+		assert.Equal(t, ccacheTestRealm, cache.DefaultPrincipal.Realm)
+		assert.Equal(t, []string{ccacheTestUser}, cache.DefaultPrincipal.PrincipalName.NameString)
 		assert.Zero(t, cache.DefaultPrincipal.PrincipalName.NameType)
 	})
 	t.Run("version 2", func(t *testing.T) {
-		data := append([]byte{5, 2}, principalV2("TEST.GOKRB5", "testuser1")...)
+		data := append([]byte{5, 2}, principalV2(ccacheTestRealm, ccacheTestUser)...)
 		cache := new(CCache)
 		require.NoError(t, cache.Unmarshal(data))
 		assert.Equal(t, uint8(2), cache.Version)
-		assert.Equal(t, "TEST.GOKRB5", cache.DefaultPrincipal.Realm)
+		assert.Equal(t, ccacheTestRealm, cache.DefaultPrincipal.Realm)
 		assert.Equal(t, nametype.KRB_NT_PRINCIPAL, cache.DefaultPrincipal.PrincipalName.NameType)
 	})
 	t.Run("version 2 truncated", func(t *testing.T) {
-		data := append([]byte{5, 2}, principalV2("TEST.GOKRB5", "testuser1")...)
+		data := append([]byte{5, 2}, principalV2(ccacheTestRealm, ccacheTestUser)...)
 		for length := 2; length < len(data); length++ {
 			if err := new(CCache).Unmarshal(data[:length]); err == nil {
 				t.Fatalf("version 2 prefix of length %d was accepted", length)
@@ -191,7 +193,8 @@ func TestCCacheV1V2NativeByteOrder(t *testing.T) {
 // TestCCacheInvalidPrincipalComponentCount covers the component-count guard.
 func TestCCacheInvalidPrincipalComponentCount(t *testing.T) {
 	t.Run("negative count", func(t *testing.T) {
-		data := []byte{5, 4, 0, 0}
+		data := make([]byte, 0, 12)
+		data = append(data, 5, 4, 0, 0)
 		data = append(data, 0, 0, 0, 1)             // name type
 		data = append(data, 0xFF, 0xFF, 0xFF, 0xFF) // component count -1
 		err := new(CCache).Unmarshal(data)
@@ -199,7 +202,8 @@ func TestCCacheInvalidPrincipalComponentCount(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid principal component count -1")
 	})
 	t.Run("count exceeds remaining input", func(t *testing.T) {
-		data := []byte{5, 4, 0, 0}
+		data := make([]byte, 0, 12)
+		data = append(data, 5, 4, 0, 0)
 		data = append(data, 0, 0, 0, 1) // name type
 		data = append(data, 0, 0, 0, 9) // component count 9 with no data
 		err := new(CCache).Unmarshal(data)
@@ -229,7 +233,7 @@ func TestCCacheHeaderFieldValid(t *testing.T) {
 	assert.False(t, short.valid())
 	lengthValueMismatch := headerField{tag: headerFieldTagKDCOffset, length: 8, value: make([]byte, 4)}
 	assert.False(t, lengthValueMismatch.valid())
-	unknown := headerField{tag: 99}
+	unknown := headerField{tag: 99, length: 0, value: nil}
 	assert.False(t, unknown.valid())
 }
 
@@ -272,41 +276,32 @@ func TestResolveCCacheNameRejections(t *testing.T) {
 
 // TestCCacheMarshalRejections covers marshal-time state validation.
 func TestCCacheMarshalRejections(t *testing.T) {
-	validCredential := func() *Credential {
-		return &Credential{
-			Client:      Principal{Realm: "TEST.GOKRB5", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "testuser1")},
-			Server:      Principal{Realm: "TEST.GOKRB5", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/TEST.GOKRB5")},
-			Key:         types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)},
-			AuthTime:    time.Unix(1700000000, 0),
-			StartTime:   time.Unix(1700000000, 0),
-			EndTime:     time.Unix(1700000000, 0),
-			RenewTill:   time.Unix(1700000000, 0),
-			TicketFlags: types.NewKrbFlags(),
-			Ticket:      []byte{1, 2, 3},
-		}
-	}
 	t.Run("unsupported version", func(t *testing.T) {
 		for _, version := range []uint8{1, 2, 5} {
-			cache := &CCache{Version: version}
+			cache := new(CCache)
+			cache.Version = version
 			_, err := cache.Marshal()
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "supports versions 3 and 4")
 		}
 	})
 	t.Run("invalid KDC offset header", func(t *testing.T) {
-		cache := &CCache{Version: 4}
-		cache.Header.fields = append(cache.Header.fields, headerField{tag: headerFieldTagKDCOffset, value: make([]byte, 4)})
+		cache := new(CCache)
+		cache.Version = 4
+		cache.Header.fields = []headerField{{tag: headerFieldTagKDCOffset, length: 0, value: make([]byte, 4)}}
 		_, err := cache.Marshal()
 		require.EqualError(t, err, "invalid credential cache KDC offset header")
 	})
 	t.Run("nil credential", func(t *testing.T) {
-		cache := &CCache{Version: 4, Credentials: []*Credential{nil}}
+		cache := new(CCache)
+		cache.Version = 4
+		cache.Credentials = []*Credential{nil}
 		_, err := cache.Marshal()
 		require.EqualError(t, err, "credential 0 is nil")
 	})
 	t.Run("enctype outside uint16", func(t *testing.T) {
 		for _, keyType := range []int32{-1, 65536} {
-			cache := &CCache{Version: 4, Credentials: []*Credential{validCredential()}}
+			cache := marshalTestCCache()
 			cache.Credentials[0].Key.KeyType = keyType
 			_, err := cache.Marshal()
 			require.Error(t, err)
@@ -314,28 +309,28 @@ func TestCCacheMarshalRejections(t *testing.T) {
 		}
 	})
 	t.Run("timestamp outside int32", func(t *testing.T) {
-		cache := &CCache{Version: 4, Credentials: []*Credential{validCredential()}}
+		cache := marshalTestCCache()
 		cache.Credentials[0].EndTime = time.Unix(1<<31, 0)
 		_, err := cache.Marshal()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "timestamp is outside int32 range")
 	})
 	t.Run("ticket flags not four bytes", func(t *testing.T) {
-		cache := &CCache{Version: 4, Credentials: []*Credential{validCredential()}}
+		cache := marshalTestCCache()
 		cache.Credentials[0].TicketFlags.Bytes = []byte{1, 2, 3}
 		_, err := cache.Marshal()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "ticket flags must contain 4 bytes")
 	})
 	t.Run("address type outside uint16", func(t *testing.T) {
-		cache := &CCache{Version: 4, Credentials: []*Credential{validCredential()}}
+		cache := marshalTestCCache()
 		cache.Credentials[0].Addresses = []types.HostAddress{{AddrType: 65536, Address: []byte{1}}}
 		_, err := cache.Marshal()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "address type is outside uint16 range")
 	})
 	t.Run("authdata type outside uint16", func(t *testing.T) {
-		cache := &CCache{Version: 4, Credentials: []*Credential{validCredential()}}
+		cache := marshalTestCCache()
 		cache.Credentials[0].AuthData = []types.AuthorizationDataEntry{{ADType: -1, ADData: []byte{1}}}
 		_, err := cache.Marshal()
 		require.Error(t, err)
@@ -343,9 +338,38 @@ func TestCCacheMarshalRejections(t *testing.T) {
 	})
 }
 
+func marshalTestCCache() *CCache {
+	stamp := time.Unix(1700000000, 0)
+	cache := new(CCache)
+	cache.Version = 4
+	cache.Credentials = []*Credential{{
+		Client: Principal{
+			Realm:         ccacheTestRealm,
+			PrincipalName: types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, ccacheTestUser),
+		},
+		Server: Principal{
+			Realm:         ccacheTestRealm,
+			PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/"+ccacheTestRealm),
+		},
+		Key:          types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)},
+		AuthTime:     stamp,
+		StartTime:    stamp,
+		EndTime:      stamp,
+		RenewTill:    stamp,
+		IsSKey:       false,
+		TicketFlags:  types.NewKrbFlags(),
+		Addresses:    nil,
+		AuthData:     nil,
+		Ticket:       []byte{1, 2, 3},
+		SecondTicket: nil,
+	}}
+	return cache
+}
+
 // TestCCacheKDCTimeOffsetRoundTrip covers offset storage, update, and read.
 func TestCCacheKDCTimeOffsetRoundTrip(t *testing.T) {
-	cache := &CCache{Version: 4}
+	cache := new(CCache)
+	cache.Version = 4
 	if _, ok := cache.KDCTimeOffset(); ok {
 		t.Fatal("offset reported without a header field")
 	}
@@ -362,17 +386,29 @@ func TestCCacheKDCTimeOffsetRoundTrip(t *testing.T) {
 
 // TestDelegatedCredentialsCloning covers deep-copy and nil filtering.
 func TestDelegatedCredentialsCloning(t *testing.T) {
-	c := New("testuser1", "TEST.GOKRB5")
+	c := New(ccacheTestUser, ccacheTestRealm)
 	c.delegated = []*Credential{
 		nil,
 		{
-			Client:      Principal{Realm: "TEST.GOKRB5", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user")},
-			Server:      Principal{Realm: "TEST.GOKRB5", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "service")},
-			Key:         types.EncryptionKey{KeyType: 18, KeyValue: []byte{1, 2}},
-			TicketFlags: types.NewKrbFlags(),
-			Addresses:   []types.HostAddress{{AddrType: 2, Address: []byte{127, 0, 0, 1}}},
-			AuthData:    []types.AuthorizationDataEntry{{ADType: 1, ADData: []byte{9}}},
-			Ticket:      []byte{5},
+			Client: Principal{
+				Realm:         ccacheTestRealm,
+				PrincipalName: types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, phase4CCacheUser),
+			},
+			Server: Principal{
+				Realm:         ccacheTestRealm,
+				PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "service"),
+			},
+			Key:          types.EncryptionKey{KeyType: 18, KeyValue: []byte{1, 2}},
+			AuthTime:     time.Time{},
+			StartTime:    time.Time{},
+			EndTime:      time.Time{},
+			RenewTill:    time.Time{},
+			IsSKey:       false,
+			TicketFlags:  types.NewKrbFlags(),
+			Addresses:    []types.HostAddress{{AddrType: 2, Address: []byte{127, 0, 0, 1}}},
+			AuthData:     []types.AuthorizationDataEntry{{ADType: 1, ADData: []byte{9}}},
+			Ticket:       []byte{5},
+			SecondTicket: nil,
 		},
 	}
 	cloned := c.DelegatedCredentials()
@@ -389,7 +425,7 @@ func TestDelegatedCredentialsCloning(t *testing.T) {
 
 // TestCredentialsMarshalUnregisteredAttribute covers the gob encode failure.
 func TestCredentialsMarshalUnregisteredAttribute(t *testing.T) {
-	c := New("testuser1", "TEST.GOKRB5")
+	c := New(ccacheTestUser, ccacheTestRealm)
 	c.SetAttribute("channel", make(chan int))
 	if _, err := c.Marshal(); err == nil {
 		t.Fatal("marshal succeeded with an unregistered attribute type")

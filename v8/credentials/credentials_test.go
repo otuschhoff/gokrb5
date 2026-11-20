@@ -16,6 +16,8 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+const credentialTestRealm = "EXAMPLE.ORG"
+
 func TestImplementsInterface(t *testing.T) {
 	t.Parallel()
 	u := new(Credentials)
@@ -24,11 +26,10 @@ func TestImplementsInterface(t *testing.T) {
 }
 
 func TestDelegatedCredentialsDefensiveCopy(t *testing.T) {
-	source := &Credential{
-		Key:      types.EncryptionKey{KeyValue: []byte{1}},
-		AuthData: []types.AuthorizationDataEntry{{ADData: []byte{2}}},
-		Ticket:   []byte{3},
-	}
+	source := new(Credential)
+	source.Key.KeyValue = []byte{1}
+	source.AuthData = []types.AuthorizationDataEntry{{ADType: 0, ADData: []byte{2}}}
+	source.Ticket = []byte{3}
 	credentials := New("testuser", "TEST.REALM")
 	credentials.SetDelegatedCredentials([]*Credential{source})
 	source.Key.KeyValue[0] = 9
@@ -44,8 +45,10 @@ func TestDelegatedCredentialsDefensiveCopy(t *testing.T) {
 func TestCredentials_Marshal(t *testing.T) {
 	t.Parallel()
 
-	cred := New("testuser", "EXAMPLE.ORG").WithPassword("fixture-password")
-	ad := ADCredentials{EffectiveName: "testuser", FullName: "Test User"}
+	cred := New("testuser", credentialTestRealm).WithPassword("fixture-password")
+	var ad ADCredentials
+	ad.EffectiveName = "testuser"
+	ad.FullName = "Test User"
 	cred.SetADCredentials(ad)
 	cred.SetAttribute("metadata", map[string]any{"source": "fixture"})
 	b, err := cred.Marshal()
@@ -61,7 +64,7 @@ func TestCredentials_Marshal(t *testing.T) {
 func TestCredentialsMarshalError(t *testing.T) {
 	t.Parallel()
 
-	cred := New("testuser", "EXAMPLE.ORG")
+	cred := New("testuser", credentialTestRealm)
 	cred.SetAttribute("unsupported", make(chan int))
 	b, err := cred.Marshal()
 	assert.Empty(t, b)
@@ -72,7 +75,7 @@ func TestCredentialsMarshalError(t *testing.T) {
 func TestCredentialsUnmarshalError(t *testing.T) {
 	t.Parallel()
 
-	cred := New("testuser", "EXAMPLE.ORG")
+	cred := New("testuser", credentialTestRealm)
 	cred.SetAttribute("metadata", "original")
 	err := cred.Unmarshal(nil)
 	require.ErrorContains(t, err, "decode credentials gob:")
@@ -84,7 +87,7 @@ func TestCredentialsUnmarshalError(t *testing.T) {
 func TestCredentialsJSON(t *testing.T) {
 	t.Parallel()
 
-	cred := New("testuser", "EXAMPLE.ORG").WithPassword("fixture-password")
+	cred := New("testuser", credentialTestRealm).WithPassword("fixture-password")
 	cred.SetAttribute("metadata", "not-for-json")
 	output, err := cred.JSON()
 	require.NoError(t, err)
@@ -105,21 +108,22 @@ func TestCredentialsJSON(t *testing.T) {
 
 func TestCredentialsPrincipalAndKeySources(t *testing.T) {
 	principal := types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "HTTP/server.example.org")
-	credential := NewFromPrincipalName(principal, "EXAMPLE.ORG")
-	if !credential.CName().Equal(principal) || credential.Domain() != "EXAMPLE.ORG" {
-		t.Fatalf("principal credential = %q@%q", credential.CName().PrincipalNameString(), credential.Domain())
-	}
+	credential := NewFromPrincipalName(principal, credentialTestRealm)
+	assert.True(t, credential.CName().Equal(principal), "client principal was not retained")
+	assert.Equal(t, credentialTestRealm, credential.Domain())
 
 	kt := keytab.New()
-	kt.Entries = append(kt.Entries, keytab.Entry{})
-	if credential.WithKeytab(kt) != credential || credential.Keytab() != kt || !credential.HasKeytab() || credential.HasPassword() {
-		t.Fatal("keytab credential state was not retained")
-	}
-	if credential.WithPassword("secret") != credential || credential.Password() != "secret" || !credential.HasPassword() || credential.HasKeytab() {
-		t.Fatal("password credential state was not retained")
-	}
+	var entry keytab.Entry
+	kt.Entries = append(kt.Entries, entry)
+	assert.Same(t, credential, credential.WithKeytab(kt))
+	assert.Same(t, kt, credential.Keytab())
+	assert.True(t, credential.HasKeytab())
+	assert.False(t, credential.HasPassword())
+
+	assert.Same(t, credential, credential.WithPassword("secret"))
+	assert.Equal(t, "secret", credential.Password())
+	assert.True(t, credential.HasPassword())
+	assert.False(t, credential.HasKeytab())
 	credential.WithPassword("")
-	if credential.HasPassword() {
-		t.Fatal("empty password reported as configured")
-	}
+	assert.False(t, credential.HasPassword(), "empty password reported as configured")
 }

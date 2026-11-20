@@ -11,6 +11,11 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+const (
+	ccacheTestRealm = "TEST.GOKRB5"
+	ccacheTestUser  = "testuser1"
+)
+
 func TestParse(t *testing.T) {
 	t.Parallel()
 	b, err := hex.DecodeString(testdata.CCACHE_TEST)
@@ -26,12 +31,17 @@ func TestParse(t *testing.T) {
 	assert.Equal(t, 1, len(c.Header.fields), "Number of header fields not as expected")
 	assert.Equal(t, uint16(1), c.Header.fields[0].tag, "Header tag not as expected")
 	assert.Equal(t, uint16(8), c.Header.fields[0].length, "Length of header not as expected")
-	assert.Equal(t, "TEST.GOKRB5", c.DefaultPrincipal.Realm, "Default client principal realm not as expected")
-	assert.Equal(t, "testuser1", c.DefaultPrincipal.PrincipalName.PrincipalNameString(), "Default client principaal name not as expected")
+	assert.Equal(t, ccacheTestRealm, c.DefaultPrincipal.Realm, "Default client principal realm not as expected")
+	assert.Equal(
+		t,
+		ccacheTestUser,
+		c.DefaultPrincipal.PrincipalName.PrincipalNameString(),
+		"Default client principal name not as expected",
+	)
 	assert.Equal(t, 3, len(c.Credentials), "Number of credentials not as expected")
 	tgtpn := types.PrincipalName{
 		NameType:   nametype.KRB_NT_SRV_INST,
-		NameString: []string{"krbtgt", "TEST.GOKRB5"},
+		NameString: []string{"krbtgt", ccacheTestRealm},
 	}
 	assert.True(t, c.Contains(tgtpn), "Cache does not contain TGT credential")
 	httppn := types.PrincipalName{
@@ -54,7 +64,7 @@ func TestCCache_GetClientPrincipalName(t *testing.T) {
 	}
 	pn := types.PrincipalName{
 		NameType:   nametype.KRB_NT_PRINCIPAL,
-		NameString: []string{"testuser1"},
+		NameString: []string{ccacheTestUser},
 	}
 	assert.Equal(t, pn, c.GetClientPrincipalName(), "Client PrincipalName not as expected")
 }

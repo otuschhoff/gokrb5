@@ -20,6 +20,11 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+const (
+	phase4CCacheRealm = "EXAMPLE.ORG"
+	phase4CCacheUser  = "user"
+)
+
 func ccacheFixtures() map[string]string {
 	return map[string]string{
 		"v4 password":       testdata.CCACHE_V4_KINIT_PASSWORD,
@@ -43,8 +48,14 @@ func TestCCacheReadHelpersBoundsAndValues(t *testing.T) {
 	if _, err := readUint8(data, &position); err == nil {
 		t.Fatal("readUint8 accepted EOF")
 	}
+	checkCCacheInvalidReadBounds(t, data)
+	checkCCacheTruncatedReadFields(t)
+}
+
+func checkCCacheInvalidReadBounds(t *testing.T, data []byte) {
+	t.Helper()
 	for _, invalid := range []int{-1, len(data)} {
-		position = invalid
+		position := invalid
 		if _, err := readUint16(data, &position, binary.BigEndian); err == nil {
 			t.Fatalf("readUint16 accepted position %d", invalid)
 		}
@@ -57,7 +68,7 @@ func TestCCacheReadHelpersBoundsAndValues(t *testing.T) {
 			t.Fatalf("readBytes accepted position %d", invalid)
 		}
 	}
-	position = 0
+	position := 0
 	if _, err := readBytes(data, &position, -1); err == nil {
 		t.Fatal("readBytes accepted a negative size")
 	}
@@ -65,7 +76,10 @@ func TestCCacheReadHelpersBoundsAndValues(t *testing.T) {
 	if _, err := readBytes(data, &position, len(data)+1); err == nil {
 		t.Fatal("readBytes accepted an oversized field")
 	}
+}
 
+func checkCCacheTruncatedReadFields(t *testing.T) {
+	t.Helper()
 	for name, read := range map[string]func([]byte, *int) error{
 		"data header": func(value []byte, offset *int) error {
 			_, err := readData(value, offset, binary.BigEndian)
@@ -91,7 +105,7 @@ func TestCCacheReadHelpersBoundsAndValues(t *testing.T) {
 			}
 		})
 	}
-	position = 0
+	position := 0
 	if _, err := readData([]byte{0xff, 0xff, 0xff, 0xff}, &position, binary.BigEndian); err == nil {
 		t.Fatal("negative data length was accepted")
 	}
@@ -123,7 +137,7 @@ func TestCCacheUnmarshalTruncatedInputsReturnError(t *testing.T) {
 		t.Fatal(err)
 	}
 	lengths := make([]int, 0, 53)
-	for length := 0; length < 52; length++ {
+	for length := range 52 {
 		lengths = append(lengths, length)
 	}
 	lengths = append(lengths, len(data)-1)
@@ -156,7 +170,8 @@ func TestCCacheUnknownHeaderTagPreserved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := []byte{5, 4, 0, 7, 0, 99, 0, 3, 'a', 'b', 'c'}
+	data := make([]byte, 0, 11+len(v3)-2)
+	data = append(data, 5, 4, 0, 7, 0, 99, 0, 3, 'a', 'b', 'c')
 	data = append(data, v3[2:]...)
 	cache := new(CCache)
 	if ierr := cache.Unmarshal(data); ierr != nil {
@@ -210,8 +225,8 @@ func TestCCacheCapturedKinitPasswordHasNoConfigEntries(t *testing.T) {
 }
 
 func TestCCacheConfigEntriesAndOffset(t *testing.T) {
-	client := types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: []string{"user"}}
-	cache := NewCCache(client, "EXAMPLE.ORG")
+	client := types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: []string{phase4CCacheUser}}
+	cache := NewCCache(client, phase4CCacheRealm)
 	cache.SetKDCTimeOffset(-1500*time.Millisecond - 25*time.Microsecond)
 	offset, ok := cache.KDCTimeOffset()
 	assert.True(t, ok)
@@ -250,12 +265,18 @@ func TestCCacheConfigEntriesAndOffset(t *testing.T) {
 }
 
 func TestCCacheCrossRealmTGTRecordsStartRealm(t *testing.T) {
-	client := Principal{Realm: "CLIENT.EXAMPLE", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user")}
+	client := Principal{
+		Realm:         "CLIENT.EXAMPLE",
+		PrincipalName: types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, phase4CCacheUser),
+	}
 	cache := NewCCache(client.PrincipalName, client.Realm)
-	cache.AddCredential(&Credential{
-		Client: client,
-		Server: Principal{Realm: "CLIENT.EXAMPLE", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/SOURCE.EXAMPLE")},
-	})
+	tgt := new(Credential)
+	tgt.Client = client
+	tgt.Server = Principal{
+		Realm:         client.Realm,
+		PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/SOURCE.EXAMPLE"),
+	}
+	cache.AddCredential(tgt)
 
 	value, found := cache.GetConfig("start_realm", "")
 	assert.True(t, found)
@@ -269,29 +290,44 @@ func TestCCacheCrossRealmTGTRecordsStartRealm(t *testing.T) {
 }
 
 func TestCCacheSameRealmTGTOmitsStartRealm(t *testing.T) {
-	client := Principal{Realm: "EXAMPLE.ORG", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user")}
+	client := Principal{
+		Realm:         phase4CCacheRealm,
+		PrincipalName: types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, phase4CCacheUser),
+	}
 	cache := NewCCache(client.PrincipalName, client.Realm)
-	cache.AddCredential(&Credential{
-		Client: client,
-		Server: Principal{Realm: client.Realm, PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/EXAMPLE.ORG")},
-	})
+	tgt := new(Credential)
+	tgt.Client = client
+	tgt.Server = phase4CCacheTGT()
+	cache.AddCredential(tgt)
 
 	_, found := cache.GetConfig("start_realm", "")
 	assert.False(t, found)
 }
 
+func phase4CCacheTGT() Principal {
+	return Principal{
+		Realm:         phase4CCacheRealm,
+		PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/"+phase4CCacheRealm),
+	}
+}
+
 func TestCCacheV3WritesRepeatedEnctype(t *testing.T) {
-	cache := NewCCache(types.PrincipalName{NameType: 1, NameString: []string{"user"}}, "EXAMPLE.ORG")
+	cache := NewCCache(types.PrincipalName{NameType: 1, NameString: []string{phase4CCacheUser}}, phase4CCacheRealm)
 	cache.Version = 3
 	cache.Credentials = []*Credential{{
-		Client:      clonePrincipal(cache.DefaultPrincipal),
-		Server:      Principal{Realm: "EXAMPLE.ORG", PrincipalName: types.PrincipalName{NameType: 2, NameString: []string{"krbtgt", "EXAMPLE.ORG"}}},
-		Key:         types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)},
-		AuthTime:    time.Unix(1, 0),
-		StartTime:   time.Unix(2, 0),
-		EndTime:     time.Unix(3, 0),
-		RenewTill:   time.Unix(4, 0),
-		TicketFlags: types.NewKrbFlags(),
+		Client:       clonePrincipal(cache.DefaultPrincipal),
+		Server:       phase4CCacheTGT(),
+		Key:          types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)},
+		AuthTime:     time.Unix(1, 0),
+		StartTime:    time.Unix(2, 0),
+		EndTime:      time.Unix(3, 0),
+		RenewTill:    time.Unix(4, 0),
+		IsSKey:       false,
+		TicketFlags:  types.NewKrbFlags(),
+		Addresses:    nil,
+		AuthData:     nil,
+		Ticket:       nil,
+		SecondTicket: nil,
 	}}
 	data, err := cache.Marshal()
 	if err != nil {
@@ -313,13 +349,21 @@ func TestCCacheV3WritesRepeatedEnctype(t *testing.T) {
 }
 
 func TestCCacheMarshalWritesZeroTimeAsUnixEpoch(t *testing.T) {
-	cache := NewCCache(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user"), "EXAMPLE.ORG")
+	cache := NewCCache(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, phase4CCacheUser), phase4CCacheRealm)
 	cache.Credentials = []*Credential{{
-		Client:      clonePrincipal(cache.DefaultPrincipal),
-		Server:      Principal{Realm: "EXAMPLE.ORG", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/EXAMPLE.ORG")},
-		Key:         types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)},
-		EndTime:     time.Unix(3, 0),
-		TicketFlags: types.NewKrbFlags(),
+		Client:       clonePrincipal(cache.DefaultPrincipal),
+		Server:       phase4CCacheTGT(),
+		Key:          types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)},
+		AuthTime:     time.Time{},
+		StartTime:    time.Time{},
+		EndTime:      time.Unix(3, 0),
+		RenewTill:    time.Time{},
+		IsSKey:       false,
+		TicketFlags:  types.NewKrbFlags(),
+		Addresses:    nil,
+		AuthData:     nil,
+		Ticket:       nil,
+		SecondTicket: nil,
 	}}
 
 	data, err := cache.Marshal()
@@ -337,15 +381,19 @@ func TestCCacheMarshalWritesZeroTimeAsUnixEpoch(t *testing.T) {
 }
 
 func TestCCacheAddressAndAuthDataRoundTrip(t *testing.T) {
-	cache := NewCCache(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user"), "EXAMPLE.ORG")
+	cache := NewCCache(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, phase4CCacheUser), phase4CCacheRealm)
 	credential := &Credential{
-		Client:       clonePrincipal(cache.DefaultPrincipal),
-		Server:       Principal{Realm: "EXAMPLE.ORG", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_HST, "host/server.example.org")},
+		Client: clonePrincipal(cache.DefaultPrincipal),
+		Server: Principal{
+			Realm:         phase4CCacheRealm,
+			PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_HST, "host/server.example.org"),
+		},
 		Key:          types.EncryptionKey{KeyType: 18, KeyValue: bytes.Repeat([]byte{1}, 32)},
 		AuthTime:     time.Unix(1, 0),
 		StartTime:    time.Unix(2, 0),
 		EndTime:      time.Unix(3, 0),
 		RenewTill:    time.Unix(4, 0),
+		IsSKey:       false,
 		TicketFlags:  types.NewKrbFlags(),
 		Addresses:    []types.HostAddress{{AddrType: 2, Address: []byte{127, 0, 0, 1}}},
 		AuthData:     []types.AuthorizationDataEntry{{ADType: 1, ADData: []byte("authorization-data")}},
@@ -401,7 +449,8 @@ func TestCCacheAddressAndAuthDataRejectMalformedLengths(t *testing.T) {
 }
 
 func TestCCacheMarshalRejectsInvalidState(t *testing.T) {
-	cache := NewCCache(types.PrincipalName{NameString: []string{"user"}}, "EXAMPLE.ORG")
+	client := types.PrincipalName{NameType: nametype.KRB_NT_UNKNOWN, NameString: []string{phase4CCacheUser}}
+	cache := NewCCache(client, phase4CCacheRealm)
 	cache.Version = 2
 	_, err := cache.Marshal()
 	assert.Error(t, err)
@@ -410,39 +459,34 @@ func TestCCacheMarshalRejectsInvalidState(t *testing.T) {
 	_, err = cache.Marshal()
 	assert.Error(t, err)
 
-	invalidHeader := NewCCache(types.PrincipalName{NameString: []string{"user"}}, "EXAMPLE.ORG")
+	invalidHeader := NewCCache(client, phase4CCacheRealm)
 	invalidHeader.Header.fields[0].value = []byte{1}
 	_, err = invalidHeader.Marshal()
 	assert.ErrorContains(t, err, "KDC offset")
 
-	newCredential := func() *Credential {
-		return &Credential{
-			Client:      Principal{Realm: "EXAMPLE.ORG", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user")},
-			Server:      Principal{Realm: "EXAMPLE.ORG", PrincipalName: types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "krbtgt/EXAMPLE.ORG")},
-			Key:         types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)},
-			EndTime:     time.Unix(1, 0),
-			TicketFlags: types.NewKrbFlags(),
-		}
-	}
 	tests := map[string]func(*Credential){
 		"negative enctype": func(credential *Credential) { credential.Key.KeyType = -1 },
 		"large enctype":    func(credential *Credential) { credential.Key.KeyType = 1 << 16 },
 		"early timestamp":  func(credential *Credential) { credential.AuthTime = time.Unix(-1<<31-1, 0) },
 		"late timestamp":   func(credential *Credential) { credential.AuthTime = time.Unix(1<<31, 0) },
 		"ticket flags":     func(credential *Credential) { credential.TicketFlags.Bytes = []byte{1} },
-		"negative address": func(credential *Credential) { credential.Addresses = []types.HostAddress{{AddrType: -1}} },
-		"large address":    func(credential *Credential) { credential.Addresses = []types.HostAddress{{AddrType: 1 << 16}} },
+		"negative address": func(credential *Credential) {
+			credential.Addresses = []types.HostAddress{{AddrType: -1, Address: nil}}
+		},
+		"large address": func(credential *Credential) {
+			credential.Addresses = []types.HostAddress{{AddrType: 1 << 16, Address: nil}}
+		},
 		"negative authdata": func(credential *Credential) {
-			credential.AuthData = []types.AuthorizationDataEntry{{ADType: -1}}
+			credential.AuthData = []types.AuthorizationDataEntry{{ADType: -1, ADData: nil}}
 		},
 		"large authdata": func(credential *Credential) {
-			credential.AuthData = []types.AuthorizationDataEntry{{ADType: 1 << 16}}
+			credential.AuthData = []types.AuthorizationDataEntry{{ADType: 1 << 16, ADData: nil}}
 		},
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
-			value := NewCCache(types.PrincipalName{NameString: []string{"user"}}, "EXAMPLE.ORG")
-			credential := newCredential()
+			value := NewCCache(client, phase4CCacheRealm)
+			credential := phase4MarshalTestCredential()
 			mutate(credential)
 			value.Credentials = []*Credential{credential}
 			if _, err := value.Marshal(); err == nil {
@@ -452,9 +496,30 @@ func TestCCacheMarshalRejectsInvalidState(t *testing.T) {
 	}
 }
 
+func phase4MarshalTestCredential() *Credential {
+	return &Credential{
+		Client: Principal{
+			Realm:         phase4CCacheRealm,
+			PrincipalName: types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, phase4CCacheUser),
+		},
+		Server:       phase4CCacheTGT(),
+		Key:          types.EncryptionKey{KeyType: 18, KeyValue: make([]byte, 32)},
+		AuthTime:     time.Time{},
+		StartTime:    time.Time{},
+		EndTime:      time.Unix(1, 0),
+		RenewTill:    time.Time{},
+		IsSKey:       false,
+		TicketFlags:  types.NewKrbFlags(),
+		Addresses:    nil,
+		AuthData:     nil,
+		Ticket:       nil,
+		SecondTicket: nil,
+	}
+}
+
 func TestCCacheWriteFileAtomicAndMode0600(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache")
-	cache := NewCCache(types.PrincipalName{NameType: 1, NameString: []string{"user"}}, "EXAMPLE.ORG")
+	cache := NewCCache(types.PrincipalName{NameType: 1, NameString: []string{phase4CCacheUser}}, phase4CCacheRealm)
 	if err := cache.WriteFile("FILE:" + path); err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +544,7 @@ func TestCCacheWriteFileAtomicAndMode0600(t *testing.T) {
 	}
 	cache.Credentials = append(cache.Credentials, nil)
 	assert.Error(t, cache.WriteFile(path))
-	written, err := os.ReadFile(path) // #nosec G304 -- path is an explicit API/test/config input, not request-derived traversal.
+	written, err := os.ReadFile(path) // #nosec G304 -- path is a test fixture, not request-derived input.
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -523,16 +588,18 @@ func TestNilCCacheAccessors(t *testing.T) {
 	assert.Empty(t, cache.GetClientPrincipalName().NameString)
 	assert.Empty(t, cache.GetClientRealm())
 	assert.NotNil(t, cache.GetClientCredentials())
-	assert.False(t, cache.Contains(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user")))
-	entry, ok := cache.GetEntry(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user"))
+	assert.False(t, cache.Contains(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, phase4CCacheUser)))
+	entry, ok := cache.GetEntry(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, phase4CCacheUser))
 	assert.NotNil(t, entry)
 	assert.False(t, ok)
 	assert.Empty(t, cache.GetEntries())
 
 	cache = new(CCache)
-	cache.Credentials = []*Credential{nil, {Server: Principal{Realm: "X-CACHECONF:test"}}}
+	configEntry := new(Credential)
+	configEntry.Server.Realm = "X-CACHECONF:test"
+	cache.Credentials = []*Credential{nil, configEntry}
 	assert.Empty(t, cache.GetEntries())
-	assert.False(t, cache.Contains(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "user")))
+	assert.False(t, cache.Contains(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, phase4CCacheUser)))
 }
 
 func FuzzCCacheUnmarshal(f *testing.F) {
@@ -566,7 +633,7 @@ func FuzzCCacheUnmarshal(f *testing.F) {
 }
 
 func TestKDCTimeOffsetWireEncoding(t *testing.T) {
-	cache := NewCCache(types.PrincipalName{NameType: 1, NameString: []string{"user"}}, "EXAMPLE.ORG")
+	cache := NewCCache(types.PrincipalName{NameType: 1, NameString: []string{phase4CCacheUser}}, phase4CCacheRealm)
 	cache.SetKDCTimeOffset(6*time.Second + 25*time.Microsecond)
 	if assert.Len(t, cache.Header.fields, 1) {
 		assert.Equal(t, uint32(6), binary.BigEndian.Uint32(cache.Header.fields[0].value[:4]))
