@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+const (
+	maxCCacheType         = 4
+	maxUDPPreferenceLimit = 32700
+)
+
 func (l *LibDefaults) parseOption(key, value, line string) error {
 	if target := l.booleanOption(key); target != nil {
 		v, err := parseBoolean(value)
@@ -184,9 +189,9 @@ func (l *LibDefaults) parseKDCDefaultOptions(value, line string) error {
 func (l *LibDefaults) parseConstrainedOption(key, value, line string) error {
 	switch key {
 	case "ccache_type":
-		return parseLibDefaultsUint(&l.CCacheType, value, line, 4)
+		return parseLibDefaultsUint(&l.CCacheType, value, line, maxCCacheType)
 	case "udp_preference_limit":
-		return parseLibDefaultsUint(&l.UDPPreferenceLimit, value, line, 32700)
+		return parseLibDefaultsUint(&l.UDPPreferenceLimit, value, line, maxUDPPreferenceLimit)
 	case "kdc_timesync":
 		return parseLibDefaultsInt(&l.KDCTimeSync, value, line, 0)
 	case "safe_checksum_type":

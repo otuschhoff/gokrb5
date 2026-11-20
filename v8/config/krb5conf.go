@@ -39,6 +39,13 @@ const WeakETypeList = "des-cbc-crc des-cbc-md4 des-cbc-md5 des-cbc-raw des3-cbc-
 
 const defaultEnctypes = "aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96"
 
+const (
+	defaultCCacheType         = 4
+	defaultClockskew          = 5 * time.Minute
+	defaultTicketLifetime     = 24 * time.Hour
+	defaultUDPPreferenceLimit = 1465
+)
+
 // New creates a new config struct instance.
 func New() *Config {
 	d := make(DomainRealm)
@@ -150,8 +157,8 @@ func newLibDefaults() LibDefaults {
 	opts.Bytes, _ = hex.DecodeString("00000010")
 	opts.BitLength = len(opts.Bytes) * 8
 	l := LibDefaults{
-		CCacheType:              4,
-		Clockskew:               time.Duration(300) * time.Second,
+		CCacheType:              defaultCCacheType,
+		Clockskew:               defaultClockskew,
 		DefaultCCacheName:       "FILE:/tmp/krb5cc_%{uid}",
 		DefaultClientKeytabName: "FILE:/var/kerberos/krb5/user/%{euid}/client.keytab",
 		DefaultKeytabName:       "/etc/krb5.keytab",
@@ -169,8 +176,8 @@ func newLibDefaults() LibDefaults {
 		RealmTryDomains:         -1,
 		RequestPAC:              true,
 		SafeChecksumType:        8,
-		TicketLifetime:          time.Duration(24) * time.Hour,
-		UDPPreferenceLimit:      1465,
+		TicketLifetime:          defaultTicketLifetime,
+		UDPPreferenceLimit:      defaultUDPPreferenceLimit,
 		PreferredPreauthTypes:   []int{17, 16, 15, 14},
 	}
 	l.DefaultTGSEnctypeIDs = parseETypes(l.DefaultTGSEnctypes, l.AllowWeakCrypto)
