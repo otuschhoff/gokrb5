@@ -56,11 +56,15 @@ func (acceptor *Acceptor) ExchangeMetadata(encoded []byte, _ bool) error {
 }
 
 // AcceptSecContext advances the acceptor side of PKU2U.
-func (acceptor *Acceptor) AcceptSecContext(input []byte, _ ...gssapi.MechanismOption) ([]byte, gssapi.Context, bool, error) {
+//
+//nolint:ireturn // Implements gssapi.ContextMechanism.
+func (acceptor *Acceptor) AcceptSecContext(
+	input []byte, _ ...gssapi.MechanismOption,
+) ([]byte, gssapi.Context, bool, error) {
 	switch acceptor.step {
 	case 0:
 		if acceptor.metadataPresent && !acceptor.metadata.Accepts(acceptor.settings.identity) {
-			return nil, nil, false, fmt.Errorf("PKU2U acceptor certificate is not accepted by peer")
+			return nil, nil, false, errors.New("PKU2U acceptor certificate is not accepted by peer")
 		}
 		output, result, err := acceptASExchange(input, acceptor.settings)
 		if err != nil {
@@ -76,62 +80,103 @@ func (acceptor *Acceptor) AcceptSecContext(input []byte, _ ...gssapi.MechanismOp
 		acceptor.step = 2
 		return output, context, true, nil
 	default:
-		return nil, nil, false, fmt.Errorf("PKU2U acceptor context is already established")
+		return nil, nil, false, errors.New("PKU2U acceptor context is already established")
 	}
 }
 
-func (acceptor *Acceptor) acceptAPRequest(encoded []byte) ([]byte, gssapi.Context, error) {
+// InitSecContext rejects use of an acceptor as an initiator.
+//
+//nolint:ireturn // Implements gssapi.ContextMechanism.
+func (*Acceptor) InitSecContext(string, []byte, ...gssapi.MechanismOption) ([]byte, gssapi.Context, bool, error) {
+	return nil, nil, false, errors.New("PKU2U acceptor cannot initiate a security context")
+}
+
+func (acceptor *Acceptor) acceptAPRequest(encoded []byte) ([]byte, *securityContext, error) {
 	var request messages.APReq
 	if err := request.Unmarshal(encoded); err != nil {
 		return nil, nil, fmt.Errorf("decode PKU2U AP request: %w", err)
 	}
 	if !types.IsFlagSet(&request.APOptions, flags.APOptionMutualRequired) {
-		return nil, nil, fmt.Errorf("PKU2U requires mutual AP authentication")
+		return nil, nil, errors.New("PKU2U requires mutual AP authentication")
 	}
-	if request.Ticket.Realm != Realm || !request.Ticket.SName.Equal(acceptor.asResult.ticket.SName) {
-		return nil, nil, fmt.Errorf("PKU2U AP request ticket is for the wrong service")
+	if err := acceptor.validateAPTicket(&request.Ticket); err != nil {
+		return nil, nil, err
 	}
-	if err := request.Ticket.Decrypt(acceptor.asResult.ticketKey); err != nil {
-		return nil, nil, fmt.Errorf("decrypt PKU2U ticket: %w", err)
+	if err := acceptor.validateAPAuthenticator(&request); err != nil {
+		return nil, nil, err
 	}
-	valid, err := request.Ticket.ValidAt(acceptor.settings.currentTime(), acceptor.settings.clockSkew)
+	return acceptor.replyToAPRequest(&request)
+}
+
+func (acceptor *Acceptor) validateAPTicket(ticket *messages.Ticket) error {
+	if ticket.Realm != Realm || !ticket.SName.Equal(acceptor.asResult.ticket.SName) {
+		return errors.New("PKU2U AP request ticket is for the wrong service")
+	}
+	if err := ticket.Decrypt(acceptor.asResult.ticketKey); err != nil {
+		return fmt.Errorf("decrypt PKU2U ticket: %w", err)
+	}
+	valid, err := ticket.ValidAt(acceptor.settings.currentTime(), acceptor.settings.clockSkew)
 	if err != nil {
-		return nil, nil, fmt.Errorf("validate PKU2U ticket: %w", err)
+		return fmt.Errorf("validate PKU2U ticket: %w", err)
 	}
 	if !valid {
-		return nil, nil, errors.New("PKU2U ticket is not valid")
+		return errors.New("PKU2U ticket is not valid")
 	}
-	if ierr := request.DecryptAuthenticator(request.Ticket.DecryptedEncPart.Key); ierr != nil {
-		return nil, nil, fmt.Errorf("decrypt PKU2U authenticator: %w", ierr)
+	return nil
+}
+
+func (acceptor *Acceptor) validateAPAuthenticator(request *messages.APReq) error {
+	if err := request.DecryptAuthenticator(request.Ticket.DecryptedEncPart.Key); err != nil {
+		return fmt.Errorf("decrypt PKU2U authenticator: %w", err)
 	}
-	if request.Authenticator.CRealm != Realm || !request.Authenticator.CName.Equal(request.Ticket.DecryptedEncPart.CName) {
-		return nil, nil, fmt.Errorf("PKU2U authenticator identity does not match ticket")
+	authenticator := &request.Authenticator
+	if authenticator.CRealm != Realm || !authenticator.CName.Equal(request.Ticket.DecryptedEncPart.CName) {
+		return errors.New("PKU2U authenticator identity does not match ticket")
 	}
-	if request.Authenticator.Cusec < 0 || request.Authenticator.Cusec > 999999 {
-		return nil, nil, fmt.Errorf("PKU2U authenticator microseconds are invalid")
+	if err := acceptor.validateAPAuthenticatorTime(authenticator); err != nil {
+		return err
 	}
-	authenticatorTime := request.Authenticator.CTime.Add(time.Duration(request.Authenticator.Cusec) * time.Microsecond)
+	if err := validateAPChecksum(authenticator.Cksum); err != nil {
+		return err
+	}
+	if len(authenticator.SubKey.KeyValue) == 0 {
+		return errors.New("PKU2U authenticator subkey is missing")
+	}
+	if !isPKU2UEType(authenticator.SubKey.KeyType) {
+		return errors.New("PKU2U authenticator subkey must use AES")
+	}
+	return nil
+}
+
+func (acceptor *Acceptor) validateAPAuthenticatorTime(authenticator *types.Authenticator) error {
+	if authenticator.Cusec < 0 || authenticator.Cusec > 999999 {
+		return errors.New("PKU2U authenticator microseconds are invalid")
+	}
+	authenticatorTime := authenticator.CTime.Add(time.Duration(authenticator.Cusec) * time.Microsecond)
 	now := acceptor.settings.currentTime()
-	if now.Sub(authenticatorTime) > acceptor.settings.clockSkew || authenticatorTime.Sub(now) > acceptor.settings.clockSkew {
-		return nil, nil, fmt.Errorf("PKU2U authenticator exceeds permitted clock skew")
+	skew := acceptor.settings.clockSkew
+	if now.Sub(authenticatorTime) > skew || authenticatorTime.Sub(now) > skew {
+		return errors.New("PKU2U authenticator exceeds permitted clock skew")
 	}
-	if request.Authenticator.Cksum.CksumType != chksumtype.GSSAPI {
-		return nil, nil, fmt.Errorf("PKU2U authenticator lacks an RFC 4121 checksum")
+	return nil
+}
+
+func validateAPChecksum(checksum types.Checksum) error {
+	if checksum.CksumType != chksumtype.GSSAPI {
+		return errors.New("PKU2U authenticator lacks an RFC 4121 checksum")
 	}
-	var checksum gssapi.AuthenticatorChecksum
-	if ierr := checksum.Unmarshal(request.Authenticator.Cksum.Checksum); ierr != nil {
-		return nil, nil, fmt.Errorf("decode PKU2U authenticator checksum: %w", ierr)
+	var decoded gssapi.AuthenticatorChecksum
+	if err := decoded.Unmarshal(checksum.Checksum); err != nil {
+		return fmt.Errorf("decode PKU2U authenticator checksum: %w", err)
 	}
 	required := uint32(gssapi.ContextFlagMutual | gssapi.ContextFlagInteg)
-	if checksum.Flags&required != required {
-		return nil, nil, fmt.Errorf("PKU2U authenticator does not request mutual integrity protection")
+	if decoded.Flags&required != required {
+		return errors.New("PKU2U authenticator does not request mutual integrity protection")
 	}
-	if len(request.Authenticator.SubKey.KeyValue) == 0 {
-		return nil, nil, fmt.Errorf("PKU2U authenticator subkey is missing")
-	}
-	if !isPKU2UEType(request.Authenticator.SubKey.KeyType) {
-		return nil, nil, fmt.Errorf("PKU2U authenticator subkey must use AES")
-	}
+	return nil
+}
+
+func (acceptor *Acceptor) replyToAPRequest(request *messages.APReq) ([]byte, *securityContext, error) {
 	etype, err := crypto.GetEtype(request.Authenticator.SubKey.KeyType)
 	if err != nil {
 		return nil, nil, fmt.Errorf("select PKU2U acceptor subkey enctype: %w", err)
@@ -144,7 +189,7 @@ func (acceptor *Acceptor) acceptAPRequest(encoded []byte) ([]byte, gssapi.Contex
 	if err != nil {
 		return nil, nil, err
 	}
-	output, err := marshalPKU2UReply(&request, acceptorSubkey, sequence)
+	output, err := marshalPKU2UReply(request, acceptorSubkey, sequence)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -161,11 +206,6 @@ func (acceptor *Acceptor) acceptAPRequest(encoded []byte) ([]byte, gssapi.Contex
 		return nil, nil, err
 	}
 	return output, &securityContext{SecurityContext: context, credentials: peerCredentials}, nil
-}
-
-// InitSecContext rejects use of an acceptor as an initiator.
-func (*Acceptor) InitSecContext(string, []byte, ...gssapi.MechanismOption) ([]byte, gssapi.Context, bool, error) {
-	return nil, nil, false, fmt.Errorf("PKU2U acceptor cannot initiate a security context")
 }
 
 func pku2uSequenceInt64(sequence uint64) (int64, error) {

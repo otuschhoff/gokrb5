@@ -275,37 +275,19 @@ func TestEndToEndContext(t *testing.T) {
 		t.Fatal(ierr)
 	}
 
-	asRequest, _, done, err := initiator.InitSecContext("host/server.example.com", nil)
-	if err != nil || done {
-		t.Fatalf("init AS request: done=%t err=%v", done, err)
-	}
-	_, _, _, decodeErr := acceptor.AcceptSecContext([]byte{0x6a})
-	requirePKU2UError[asn1.SyntaxError](t, decodeErr, "decode PKU2U AS request:")
-	asReply, _, done, err := acceptor.AcceptSecContext(asRequest)
-	if err != nil || done {
-		t.Fatalf("accept AS request: done=%t err=%v", done, err)
-	}
-	_, _, _, decodeErr = initiator.InitSecContext("host/server.example.com", []byte{0x6b})
-	requirePKU2UError[asn1.SyntaxError](t, decodeErr, "decode PKU2U AS reply:")
-	apRequest, _, done, err := initiator.InitSecContext("host/server.example.com", asReply)
-	if err != nil || done {
-		t.Fatalf("init AP request: done=%t err=%v", done, err)
-	}
-	_, _, _, decodeErr = acceptor.AcceptSecContext([]byte{0x6e})
-	requirePKU2UError[asn1.SyntaxError](t, decodeErr, "decode PKU2U AP request:")
-	apReply, acceptorContext, done, err := acceptor.AcceptSecContext(apRequest)
-	if err != nil || !done || acceptorContext == nil {
-		t.Fatalf("accept AP request: done=%t err=%v", done, err)
-	}
-	_, _, _, decodeErr = initiator.InitSecContext("host/server.example.com", []byte{0x6f})
-	requirePKU2UError[asn1.SyntaxError](t, decodeErr, "decode PKU2U AP reply:")
-	output, initiatorContext, done, err := initiator.InitSecContext("host/server.example.com", apReply)
-	if err != nil || !done || initiatorContext == nil || len(output) != 0 {
-		t.Fatalf("init AP reply: output=%x done=%t err=%v", output, done, err)
-	}
+	asReply := exchangeTestASMessages(t, initiator, acceptor)
+	exchangeTestAPMessages(t, initiator, acceptor, asReply, clientCertificate)
+}
+
+func assertEstablishedContexts(
+	t *testing.T, initiatorContext, acceptorContext gssapi.Context, clientCertificate *x509.Certificate,
+) {
+	t.Helper()
+
 	initiatorKey, initiatorHasKey := initiatorContext.NegoExKey()
 	acceptorKey, acceptorHasKey := acceptorContext.NegoExVerifyKey()
-	if !initiatorHasKey || !acceptorHasKey || initiatorKey.KeyType != acceptorKey.KeyType || string(initiatorKey.KeyValue) != string(acceptorKey.KeyValue) {
+	if !initiatorHasKey || !acceptorHasKey || initiatorKey.KeyType != acceptorKey.KeyType ||
+		string(initiatorKey.KeyValue) != string(acceptorKey.KeyValue) {
 		t.Fatal("established contexts have different NEGOEX keys")
 	}
 	assertProtectedMessage(t, initiatorContext, acceptorContext, []byte("initiator secret"), true)
@@ -314,9 +296,15 @@ func TestEndToEndContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := acceptorContext.VerifyMIC([]byte("bound message"), mic); err != nil {
-		t.Fatal(err)
+	if ierr := acceptorContext.VerifyMIC([]byte("bound message"), mic); ierr != nil {
+		t.Fatal(ierr)
 	}
+	assertAcceptorCredential(t, acceptorContext, clientCertificate)
+}
+
+func assertAcceptorCredential(t *testing.T, acceptorContext gssapi.Context, clientCertificate *x509.Certificate) {
+	t.Helper()
+
 	credentialContext, ok := acceptorContext.(interface {
 		Credentials() *credentials.Credentials
 	})
@@ -326,6 +314,68 @@ func TestEndToEndContext(t *testing.T) {
 	identity, ok := credentialContext.Credentials().GetCertificateIdentity()
 	if !ok || identity.UPN != "alice@example.com" || !identity.Certificate.Equal(clientCertificate) {
 		t.Fatalf("certificate identity = %#v, %t", identity, ok)
+	}
+}
+
+func exchangeTestASMessages(t *testing.T, initiator *Initiator, acceptor *Acceptor) []byte {
+	t.Helper()
+
+	asRequest, _, done, err := initiator.InitSecContext("host/server.example.com", nil)
+	if err != nil || done {
+		t.Fatalf("init AS request: done=%t err=%v", done, err)
+	}
+	requirePKU2UError[asn1.SyntaxError](t,
+		requireAcceptorRejection(t, acceptor, []byte{0x6a}), "decode PKU2U AS request:")
+	asReply, _, done, err := acceptor.AcceptSecContext(asRequest)
+	if err != nil || done {
+		t.Fatalf("accept AS request: done=%t err=%v", done, err)
+	}
+	return asReply
+}
+
+func exchangeTestAPMessages(
+	t *testing.T, initiator *Initiator, acceptor *Acceptor, asReply []byte, clientCertificate *x509.Certificate,
+) {
+	t.Helper()
+
+	_, _, _, decodeErr := initiator.InitSecContext("host/server.example.com", []byte{0x6b})
+	requirePKU2UError[asn1.SyntaxError](t, decodeErr, "decode PKU2U AS reply:")
+	apRequest, _, done, err := initiator.InitSecContext("host/server.example.com", asReply)
+	if err != nil || done {
+		t.Fatalf("init AP request: done=%t err=%v", done, err)
+	}
+	requirePKU2UError[asn1.SyntaxError](t,
+		requireAcceptorRejection(t, acceptor, []byte{0x6e}), "decode PKU2U AP request:")
+	apReply, acceptorContext, done, err := acceptor.AcceptSecContext(apRequest)
+	if err != nil || !done || acceptorContext == nil {
+		t.Fatalf("accept AP request: done=%t err=%v", done, err)
+	}
+	requireAcceptorEstablished(t, acceptor, apRequest)
+	_, _, _, decodeErr = initiator.InitSecContext("host/server.example.com", []byte{0x6f})
+	requirePKU2UError[asn1.SyntaxError](t, decodeErr, "decode PKU2U AP reply:")
+	output, initiatorContext, done, err := initiator.InitSecContext("host/server.example.com", apReply)
+	if err != nil || !done || initiatorContext == nil || len(output) != 0 {
+		t.Fatalf("init AP reply: output=%x done=%t err=%v", output, done, err)
+	}
+	assertEstablishedContexts(t, initiatorContext, acceptorContext, clientCertificate)
+}
+
+func requireAcceptorRejection(t *testing.T, acceptor *Acceptor, input []byte) error {
+	t.Helper()
+
+	output, context, done, err := acceptor.AcceptSecContext(input)
+	if output != nil || context != nil || done {
+		t.Fatal("acceptor rejection returned output, a context, or completion")
+	}
+	return err
+}
+
+func requireAcceptorEstablished(t *testing.T, acceptor *Acceptor, input []byte) {
+	t.Helper()
+
+	err := requireAcceptorRejection(t, acceptor, input)
+	if err == nil || err.Error() != "PKU2U acceptor context is already established" {
+		t.Fatalf("want already established error, got %v", err)
 	}
 }
 
