@@ -8,24 +8,24 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jcmturner/dnsutils/v2"
-
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
-type srvLookup func(service, proto, name string) (int, map[int]*net.SRV, error)
+type srvLookup func(service, proto, name string) (string, []*net.SRV, error)
 
 // GetKDCs returns the count and available KDCs keyed by preference order,
 // with the most preferred host at index 1. Configured hosts take precedence over DNS.
+// DNS results follow [net.LookupSRV] ordering.
 func (c *Config) GetKDCs(realm string, tcp bool) (int, map[int]string, error) {
-	return c.getKDCs(realm, tcp, dnsutils.OrderedSRV)
+	return c.getKDCs(realm, tcp, net.LookupSRV)
 }
 
 // GetKpasswdServers returns the count and password-change servers keyed by preference order,
 // with the most preferred host at index 1. Configured kpasswd servers take
 // precedence. If DNS lookup is disabled, the admin servers supply the hosts.
+// DNS results follow [net.LookupSRV] ordering.
 func (c *Config) GetKpasswdServers(realm string, tcp bool) (int, map[int]string, error) {
-	return c.getKpasswdServers(realm, tcp, dnsutils.OrderedSRV)
+	return c.getKpasswdServers(realm, tcp, net.LookupSRV)
 }
 
 func (c *Config) getKDCs(realm string, tcp bool, lookup srvLookup) (int, map[int]string, error) {
@@ -51,8 +51,9 @@ func (c *Config) getKDCs(realm string, tcp bool, lookup srvLookup) (int, map[int
 		names = []string{c.LibDefaults.ADSite + "._sites." + domainController, domainController, realm}
 	}
 	proto := srvProtocol(tcp)
-	count, hosts, err := firstSRVHosts(names, func(name string) (int, map[int]*net.SRV, error) {
-		return lookup("kerberos", proto, name)
+	count, hosts, err := firstSRVHosts(names, func(name string) ([]*net.SRV, error) {
+		_, records, err := lookup("kerberos", proto, name)
+		return records, err
 	})
 	if err == nil && len(hosts) == 0 {
 		err = fmt.Errorf("no KDC SRV records found for realm %s", realm)
@@ -78,8 +79,9 @@ func (c *Config) getKpasswdServers(realm string, tcp bool, lookup srvLookup) (in
 
 	proto := srvProtocol(tcp)
 	services := []string{"kpasswd", "kerberos-adm"}
-	count, hosts, err := firstSRVHosts(services, func(service string) (int, map[int]*net.SRV, error) {
-		return lookup(service, proto, realm)
+	count, hosts, err := firstSRVHosts(services, func(service string) ([]*net.SRV, error) {
+		_, records, err := lookup(service, proto, realm)
+		return records, err
 	})
 	if err == nil && len(hosts) == 0 {
 		err = fmt.Errorf("no kpasswd or kadmin SRV records found for realm %s", realm)
@@ -110,11 +112,11 @@ func srvProtocol(tcp bool) string {
 
 func firstSRVHosts(
 	candidates []string,
-	query func(string) (int, map[int]*net.SRV, error),
+	query func(string) ([]*net.SRV, error),
 ) (int, map[int]string, error) {
 	var lastErr error
 	for _, candidate := range candidates {
-		count, addrs, err := query(candidate)
+		addrs, err := query(candidate)
 		if err != nil {
 			lastErr = err
 			continue
@@ -123,10 +125,11 @@ func firstSRVHosts(
 			continue
 		}
 		hosts := make(map[int]string, len(addrs))
+		// LookupSRV has already ordered the records by priority and weight.
 		for i, addr := range addrs {
-			hosts[i] = strings.TrimRight(addr.Target, ".") + ":" + strconv.Itoa(int(addr.Port))
+			hosts[i+1] = strings.TrimRight(addr.Target, ".") + ":" + strconv.Itoa(int(addr.Port))
 		}
-		return count, hosts, nil
+		return len(addrs), hosts, nil
 	}
 	// Empty answers do not erase an earlier resolver failure.
 	return 0, map[int]string{}, lastErr

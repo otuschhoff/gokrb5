@@ -8,7 +8,6 @@ require (
 	github.com/gorilla/sessions v1.4.0
 	github.com/hashicorp/go-uuid v1.0.3
 	github.com/jcmturner/aescts/v2 v2.0.0
-	github.com/jcmturner/dnsutils/v2 v2.0.0
 	github.com/jcmturner/gofork v1.7.6
 	github.com/jcmturner/goidentity/v6 v6.0.1
 	github.com/jcmturner/rpc/v2 v2.0.3
