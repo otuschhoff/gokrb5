@@ -1,6 +1,7 @@
 package types
 
 import (
+	stdasn1 "encoding/asn1"
 	"errors"
 	"fmt"
 	"time"
@@ -149,8 +150,8 @@ func (v *PAFXFastRequest) Marshal() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	wrapped, err := asn1.Marshal(asn1.RawValue{
-		Class:      asn1.ClassContextSpecific,
+	wrapped, err := stdasn1.Marshal(stdasn1.RawValue{
+		Class:      stdasn1.ClassContextSpecific,
 		IsCompound: true,
 		Tag:        0,
 		Bytes:      b,
@@ -184,8 +185,8 @@ func (v *PAFXFastReply) Marshal() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	wrapped, err := asn1.Marshal(asn1.RawValue{
-		Class:      asn1.ClassContextSpecific,
+	wrapped, err := stdasn1.Marshal(stdasn1.RawValue{
+		Class:      stdasn1.ClassContextSpecific,
 		IsCompound: true,
 		Tag:        0,
 		Bytes:      b,

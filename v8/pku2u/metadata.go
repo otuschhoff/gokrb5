@@ -3,6 +3,7 @@ package pku2u
 import (
 	"bytes"
 	"crypto/x509"
+	stdasn1 "encoding/asn1"
 	"errors"
 	"fmt"
 
@@ -17,7 +18,7 @@ type TrustedCertifiers []pkinit.ExternalPrincipalIdentifier
 
 // Marshal encodes trusted-certifier metadata as DER.
 func (m TrustedCertifiers) Marshal() ([]byte, error) {
-	encoded, err := asn1.Marshal([]pkinit.ExternalPrincipalIdentifier(m))
+	encoded, err := stdasn1.Marshal([]pkinit.ExternalPrincipalIdentifier(m))
 	if err != nil {
 		return nil, fmt.Errorf("marshal PKU2U trusted certifiers: %w", err)
 	}

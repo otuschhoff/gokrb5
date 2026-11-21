@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
+
 	"github.com/otuschhoff/gokrb5/v8/pkinit"
 )
 
@@ -37,6 +39,37 @@ func TestTrustedCertifiersRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("metadata = %#v, want %#v", got, want)
+	}
+}
+
+func TestTrustedCertifiersMarshalDERCompatibility(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name     string
+		metadata TrustedCertifiers
+	}{
+		{name: "nil list", metadata: nil},
+		{name: "empty list", metadata: TrustedCertifiers{}},
+		{name: "nil identifier", metadata: TrustedCertifiers{
+			{SubjectName: nil, IssuerAndSerial: nil, SubjectKeyIdentifier: nil},
+		}},
+		{name: "empty and long identifiers", metadata: TrustedCertifiers{
+			{SubjectName: []byte{}, IssuerAndSerial: make([]byte, 256), SubjectKeyIdentifier: []byte{1}},
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			want, err := asn1.Marshal([]pkinit.ExternalPrincipalIdentifier(tt.metadata))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := tt.metadata.Marshal()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(want, got) {
+				t.Fatalf("metadata DER = %x, fork DER = %x", got, want)
+			}
+		})
 	}
 }
 

@@ -2,9 +2,8 @@ package types
 
 import (
 	"crypto/rand"
+	"encoding/asn1"
 	"fmt"
-
-	"github.com/jcmturner/gofork/encoding/asn1"
 
 	"github.com/otuschhoff/gokrb5/v8/crypto/etype"
 )

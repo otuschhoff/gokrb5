@@ -442,6 +442,13 @@ func TestNewAPREQKRB5TokenMutualAndCBTOptions(t *testing.T) {
 	options, err := entries[0].GetADAuthDataAPOptions()
 	require.NoError(t, err)
 	assert.Equal(t, msflags.KERB_AP_OPTIONS_CBT, msflags.APOptions(options))
+
+	wantDER, err := asn1.Marshal(types.AuthorizationData{entries[0]})
+	require.NoError(t, err)
+	require.Contains(t, mt.APReq.Authenticator.AuthorizationData, types.AuthorizationDataEntry{
+		ADType: adtype.ADIfRelevant,
+		ADData: wantDER,
+	})
 }
 
 func TestNewAPREQKRB5TokenRejectsDelegationWithoutFlag(t *testing.T) {

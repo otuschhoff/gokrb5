@@ -1,6 +1,7 @@
 package client
 
 import (
+	stdasn1 "encoding/asn1"
 	"errors"
 	"math"
 	"strings"
@@ -191,6 +192,31 @@ func TestFASTASPreAuthRejectsMalformedMethodData(t *testing.T) {
 	}
 }
 
+func TestFASTMethodDataDERCompatibility(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		data types.PADataSequence
+	}{
+		{name: "nil", data: nil},
+		{name: "empty", data: types.PADataSequence{}},
+		{name: "signed types and long value", data: types.PADataSequence{
+			{PADataType: patype.PA_FX_COOKIE, PADataValue: make([]byte, 128)},
+			{PADataType: math.MinInt32, PADataValue: nil},
+			{PADataType: math.MaxInt32, PADataValue: []byte{}},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			want, err := asn1.Marshal(tt.data)
+			require.NoError(t, err)
+			got, err := stdasn1.Marshal(tt.data)
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+	}
+}
+
 func TestFASTUnwrapAuthenticatedError(t *testing.T) {
 	var emptyPrincipal types.PrincipalName
 
@@ -213,6 +239,9 @@ func TestFASTUnwrapAuthenticatedError(t *testing.T) {
 	if got.ErrorCode != errorcode.KDC_ERR_PREAUTH_FAILED {
 		t.Fatalf("inner error code = %d", got.ErrorCode)
 	}
+	wantDER, err := asn1.Marshal(types.PADataSequence{cookie})
+	require.NoError(t, err)
+	require.Equal(t, wantDER, got.EData)
 	methodData, err := got.MethodData()
 	if err != nil {
 		t.Fatal(err)

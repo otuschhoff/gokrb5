@@ -2,6 +2,7 @@ package spnego
 
 import (
 	"context"
+	stdasn1 "encoding/asn1"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -158,7 +159,7 @@ func addChannelBindingAuthData(auth *types.Authenticator) error {
 	if err != nil {
 		return fmt.Errorf("create channel-binding authorization data: %w", err)
 	}
-	encoded, err := asn1.Marshal(types.AuthorizationData{entry})
+	encoded, err := stdasn1.Marshal(types.AuthorizationData{entry})
 	if err != nil {
 		return fmt.Errorf("marshal channel-binding authorization data: %w", err)
 	}

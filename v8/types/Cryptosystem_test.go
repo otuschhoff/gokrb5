@@ -2,10 +2,12 @@ package types
 
 import (
 	"encoding/hex"
+	"math"
 	"testing"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/iana"
 	"github.com/otuschhoff/gokrb5/v8/test/testdata"
@@ -90,6 +92,26 @@ func TestMarshalEncryptedData(t *testing.T) {
 		t.Fatalf("Marshal of ticket errored: %v", err)
 	}
 	assert.Equal(t, b, mb, "Marshal bytes of Encrypted Data not as expected")
+}
+
+func TestMarshalEncryptedDataDERCompatibility(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		data EncryptedData
+	}{
+		{name: "omitted KVNO and nil cipher", data: EncryptedData{EType: 18, KVNO: 0, Cipher: nil}},
+		{name: "negative KVNO and empty cipher", data: EncryptedData{EType: -1, KVNO: -1, Cipher: []byte{}}},
+		{name: "large KVNO and long cipher", data: EncryptedData{EType: 18, KVNO: math.MaxInt, Cipher: make([]byte, 256)}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			want, err := asn1.Marshal(tt.data)
+			require.NoError(t, err)
+			got, err := tt.data.Marshal()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+	}
 }
 
 func TestChecksumUnmarshal(t *testing.T) {

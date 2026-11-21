@@ -116,10 +116,13 @@ Thank you for your interest in contributing to gokrb5 please read the
 
 ## Why v8 still uses gofork
 
-PKINIT uses Go's `encoding/asn1` to encode DH parameters, the DH public
-integer, and the RFC 8636 supplemental KDF data. Other paths still use
-the fork; its ASN.1 types also appear in the public Go API and are not
-interchangeable with the standard library types.
+Go's `encoding/asn1` encodes PKINIT DH parameters, the DH public integer,
+RFC 8636 supplemental KDF data, FAST error METHOD-DATA and armored
+request/reply wrappers, the SPNEGO channel-binding authorization-data
+wrapper, Kerberos encrypted-data containers, and PKU2U trusted-certifier
+metadata. These encoder changes leave decoding unchanged. The fork's
+ASN.1 types still appear in the public Go API and are not interchangeable
+with standard library types. Callers can also inspect wrapped fork errors.
 
 On Go 1.26 and 1.27, the standard library can decode a sequence into
 `[]asn1.RawValue` and marshal an explicit application tag with
