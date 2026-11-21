@@ -128,6 +128,12 @@ tag for Kerberos realms or principal-name components from `generalstring`
 struct tags ([golang/go#18832](https://github.com/golang/go/issues/18832),
 [golang/go#18834](https://github.com/golang/go/issues/18834)).
 
+The [test-only GeneralString prototype](pkinit/generalstring_test.go)
+uses `asn1.RawValue` to reproduce the fork's DER for these fields. Its
+decoder requires GeneralString, while the fork also accepts legacy inputs
+such as PrintableString principal components. Production decoding still
+uses the fork.
+
 The RFC 3962 key derivation uses the fork's `pbkdf2.Key64` to pass a
 64-bit iteration count on all architectures. The standard library's
 `crypto/pbkdf2.Key` takes an `int`, which cannot represent every count
