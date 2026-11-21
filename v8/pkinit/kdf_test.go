@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"math"
+	"strings"
 	"testing"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/stretchr/testify/require"
 
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
@@ -27,7 +29,55 @@ func TestDeriveReplyKeyRFC8636SHA256(t *testing.T) {
 		etypeID.AES256_CTS_HMAC_SHA1_96,
 	)
 	require.NoError(t, err)
+	require.Equal(t, etypeID.AES256_CTS_HMAC_SHA1_96, key.KeyType)
 	require.Equal(t, "77ef4e48c420ae3fec75109d7981697eed5d295c90c62564f7bfd101fa9bc1d5", hex.EncodeToString(key.KeyValue))
+}
+
+func TestMarshalKDFPrincipalMatchesFork(t *testing.T) {
+	t.Parallel()
+
+	var zero KRB5PrincipalName
+	for _, tt := range []struct {
+		name  string
+		input KRB5PrincipalName
+	}{
+		{name: "service", input: principal("EXAMPLE.COM", nametype.KRB_NT_SRV_HST, "host", "server.example.com")},
+		{name: "zero value", input: zero},
+		{name: "empty component list", input: principal("R", 0, []string{}...)},
+		{name: "empty component", input: principal("", 0, "")},
+		{name: "opaque octets", input: principal("R\x00\xff", -1, "\xff", "caf\xc3\xa9")},
+		{
+			name: "long form lengths and max name type",
+			input: principal(
+				strings.Repeat("R", 128),
+				math.MaxInt32,
+				strings.Repeat("a", 127),
+				strings.Repeat("b", 128),
+				strings.Repeat("c", 256),
+			),
+		},
+		{name: "min name type", input: principal("R", math.MinInt32, "name")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			expected, err := asn1.Marshal(tt.input)
+			require.NoError(t, err)
+			got, err := marshalKDFPrincipal(tt.input)
+			require.NoError(t, err)
+			require.Equal(t, expected, got)
+		})
+	}
+}
+
+func TestKRB5PrincipalNameDecodesLegacyPrintableString(t *testing.T) {
+	t.Parallel()
+
+	const der = "\x30\x16\xa0\x03\x1b\x01R\xa1\x0f" +
+		"\x30\x0d\xa0\x03\x02\x01\x01\xa1\x06\x30\x04\x13\x02ab"
+	var got KRB5PrincipalName
+	require.NoError(t, strictUnmarshal([]byte(der), &got))
+	require.Equal(t, principal("R", nametype.KRB_NT_PRINCIPAL, "ab"), got)
 }
 
 func TestDeriveLegacyReplyKeyRFC4556Set1(t *testing.T) {

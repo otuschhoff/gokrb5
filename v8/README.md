@@ -117,8 +117,8 @@ Thank you for your interest in contributing to gokrb5 please read the
 ## Why v8 still uses gofork
 
 Go's `encoding/asn1` encodes PKINIT DH parameters, the DH public integer,
-RFC 8636 supplemental KDF data, FAST error METHOD-DATA and armored
-request/reply wrappers, the SPNEGO channel-binding authorization-data
+RFC 8636 supplemental KDF data and KDF principals, FAST error METHOD-DATA
+and armored request/reply wrappers, the SPNEGO channel-binding authorization-data
 wrapper, Kerberos encrypted-data containers, and PKU2U trusted-certifier
 metadata. These encoder changes leave decoding unchanged. The fork's
 ASN.1 types still appear in the public Go API and are not interchangeable
@@ -131,11 +131,11 @@ tag for Kerberos realms or principal-name components from `generalstring`
 struct tags ([golang/go#18832](https://github.com/golang/go/issues/18832),
 [golang/go#18834](https://github.com/golang/go/issues/18834)).
 
-The [test-only GeneralString prototype](pkinit/generalstring_test.go)
-uses `asn1.RawValue` to reproduce the fork's DER for these fields. Its
-decoder requires GeneralString, while the fork also accepts legacy inputs
-such as PrintableString principal components. Production decoding still
-uses the fork.
+The [PKINIT KDF principal encoder](pkinit/kdf.go) uses `asn1.RawValue`
+to emit GeneralString without changing the string octets. It is used only
+to encode the client and server principals for RFC 8636. Production decoding
+still uses the fork, which also accepts legacy inputs such as PrintableString
+principal components.
 
 The RFC 3962 key derivation uses the fork's `pbkdf2.Key64` to pass a
 64-bit iteration count on all architectures. The standard library's

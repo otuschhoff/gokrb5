@@ -106,4 +106,24 @@ TESTAD_DISABLED_PASSWORD=${disabled_password}
 EOF
 chmod 0644 "${artifact_dir}/krb5.keytab" "${artifact_dir}/user" "${artifact_dir}/pw" "${artifact_dir}/environment"
 
+if [[ -n "${SAMBA_PKINIT_DIR:-}" ]]; then
+    for file in ca.pem kdc.pem kdc.key; do
+        test -s "${SAMBA_PKINIT_DIR}/${file}"
+    done
+    profile=/var/lib/samba/private/kdc.conf
+    export KRB5_KDC_PROFILE
+    KRB5_KDC_PROFILE=$(mktemp /var/lib/samba/private/kdc-pkinit.XXXXXX)
+    awk -v realm="${realm}" -v path="${SAMBA_PKINIT_DIR}" '
+        /^\[/ { in_realms = ($0 == "[realms]") }
+        { print }
+        in_realms && $1 == realm && $2 == "=" && $3 == "{" {
+            print "        pkinit_identity = FILE:" path "/kdc.pem," path "/kdc.key"
+            print "        pkinit_anchors = FILE:" path "/ca.pem"
+            print "        pkinit_allow_upn = true"
+            configured = 1
+        }
+        END { if (!configured) exit 1 }
+    ' "${profile}" >"${KRB5_KDC_PROFILE}"
+fi
+
 exec samba --foreground --no-process-group
