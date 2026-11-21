@@ -32,10 +32,10 @@ type Config struct {
 	// Plugins
 }
 
-// WeakETypeList is a list of encryption types that have been deemed weak.
+// WeakETypeList is the historical list of weak enctype names, retained for
+// compatibility. The configuration parser applies its policy to enctype IDs.
 const WeakETypeList = "des-cbc-crc des-cbc-md4 des-cbc-md5 des-cbc-raw des3-cbc-raw des-hmac-sha1 " +
-	"arcfour-hmac-exp rc4-hmac-exp arcfour-hmac-md5-exp des " +
-	"des3-cbc-md5 des3-cbc-sha1 des3-cbc-sha1-kd arcfour-hmac rc4-hmac arcfour-hmac-md5"
+	"arcfour-hmac-exp rc4-hmac-exp arcfour-hmac-md5-exp des"
 
 const defaultEnctypes = "aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96"
 

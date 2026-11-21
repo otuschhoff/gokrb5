@@ -10,6 +10,16 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/iana/etypeID"
 )
 
+func TestWeakETypeListCompatibility(t *testing.T) {
+	t.Parallel()
+
+	const want = "des-cbc-crc des-cbc-md4 des-cbc-md5 des-cbc-raw des3-cbc-raw des-hmac-sha1 " +
+		"arcfour-hmac-exp rc4-hmac-exp arcfour-hmac-md5-exp des"
+	if got := WeakETypeList; got != want {
+		t.Fatalf("WeakETypeList = %q, want the v8.5.4 value %q", got, want)
+	}
+}
+
 func TestLibDefaultsLegacyEnctypePolicy(t *testing.T) {
 	t.Parallel()
 
