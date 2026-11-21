@@ -5,7 +5,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"math/big"
 	"testing"
 	"time"
@@ -43,21 +42,25 @@ func testSigningIdentity(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey) {
 	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	now := time.Now().UTC()
-	rootTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "PKINIT test root"},
-		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour), IsCA: true,
-		BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
-	}
-	rootDER, err := x509.CreateCertificate(rand.Reader, rootTemplate, rootTemplate, &rootKey.PublicKey, rootKey)
+	var rootTemplate x509.Certificate
+	rootTemplate.SerialNumber = big.NewInt(1)
+	rootTemplate.Subject.CommonName = "PKINIT test root"
+	rootTemplate.NotBefore = now.Add(-time.Hour)
+	rootTemplate.NotAfter = now.Add(time.Hour)
+	rootTemplate.IsCA = true
+	rootTemplate.BasicConstraintsValid = true
+	rootTemplate.KeyUsage = x509.KeyUsageCertSign
+	rootDER, err := x509.CreateCertificate(rand.Reader, &rootTemplate, &rootTemplate, &rootKey.PublicKey, rootKey)
 	require.NoError(t, err)
 	root, err := x509.ParseCertificate(rootDER)
 	require.NoError(t, err)
-	leafTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "PKINIT test signer"},
-		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature,
-	}
-	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, root, &leafKey.PublicKey, rootKey)
+	var leafTemplate x509.Certificate
+	leafTemplate.SerialNumber = big.NewInt(2)
+	leafTemplate.Subject.CommonName = "PKINIT test signer"
+	leafTemplate.NotBefore = now.Add(-time.Hour)
+	leafTemplate.NotAfter = now.Add(time.Hour)
+	leafTemplate.KeyUsage = x509.KeyUsageDigitalSignature
+	leafDER, err := x509.CreateCertificate(rand.Reader, &leafTemplate, root, &leafKey.PublicKey, rootKey)
 	require.NoError(t, err)
 	leaf, err := x509.ParseCertificate(leafDER)
 	require.NoError(t, err)

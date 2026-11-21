@@ -21,6 +21,8 @@ import (
 	"golang.org/x/crypto/ocsp"
 )
 
+const kdcTestRealm = "EXAMPLE.COM"
+
 type closeErrorReader struct {
 	io.Reader
 }
@@ -52,13 +54,13 @@ func TestReadRevocationBodyOwnsClose(t *testing.T) {
 		closeErr error
 		wantErr  error
 	}{
-		{name: "success", reader: strings.NewReader("data")},
+		{name: "success", reader: strings.NewReader("data"), closeErr: nil, wantErr: nil},
 		{name: "close failure", reader: strings.NewReader("data"), closeErr: closeErr, wantErr: closeErr},
 		{name: "read before close failure", reader: iotest.ErrReader(readErr), closeErr: closeErr, wantErr: readErr},
-		{name: "oversized", reader: strings.NewReader("12345")},
+		{name: "oversized", reader: strings.NewReader("12345"), closeErr: nil, wantErr: nil},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			body := &countedRevocationBody{Reader: tt.reader, closeErr: tt.closeErr}
+			body := &countedRevocationBody{Reader: tt.reader, closeErr: tt.closeErr, closes: 0}
 			data, err := readRevocationBody(body, 4)
 			if body.closes != 1 {
 				t.Fatalf("Close called %d times, want 1", body.closes)
@@ -81,21 +83,30 @@ func TestValidateKDCCertificate(t *testing.T) {
 	root, signer, _ := testKDCChain(t, asn1.ObjectIdentifier(OIDPKINITKDC), "example.com", time.Now().Add(time.Hour))
 	anchors := x509.NewCertPool()
 	anchors.AddCert(root)
-	chain, err := ValidateKDCCertificate(&VerifiedSignedData{Signer: signer, Certificates: []*x509.Certificate{signer}}, KDCCertificatePolicy{
-		Roots: anchors, Realm: "EXAMPLE.COM", CurrentTime: time.Now(),
-	})
+	verified := &VerifiedSignedData{Content: nil, Signer: signer, Certificates: []*x509.Certificate{signer}}
+	var policy KDCCertificatePolicy
+	policy.Roots = anchors
+	policy.Realm = kdcTestRealm
+	policy.CurrentTime = time.Now()
+	chain, err := ValidateKDCCertificate(verified, policy)
 	require.NoError(t, err)
 	require.Len(t, chain, 2)
 }
 
 func TestValidateKDCCertificateRejectsPolicyViolations(t *testing.T) {
-	root, signer, _ := testKDCChain(t, oidServerAuth, "dc.example.com", time.Now().Add(time.Hour))
+	root, signer, _ := testKDCChain(t, serverAuthOID(), "dc.example.com", time.Now().Add(time.Hour))
 	anchors := x509.NewCertPool()
 	anchors.AddCert(root)
-	verified := &VerifiedSignedData{Signer: signer, Certificates: []*x509.Certificate{signer}}
-	_, err := ValidateKDCCertificate(verified, KDCCertificatePolicy{Roots: anchors, Realm: "EXAMPLE.COM", Hostname: "dc.example.com"})
+	verified := &VerifiedSignedData{Content: nil, Signer: signer, Certificates: []*x509.Certificate{signer}}
+	var policy KDCCertificatePolicy
+	policy.Roots = anchors
+	policy.Realm = kdcTestRealm
+	policy.Hostname = "dc.example.com"
+	_, err := ValidateKDCCertificate(verified, policy)
 	require.ErrorContains(t, err, "lacks KDC Authentication")
-	_, err = ValidateKDCCertificate(verified, KDCCertificatePolicy{Roots: anchors, Realm: "EXAMPLE.COM", Hostname: "other.example.com", EKUChecking: KDCEKUServerAuth})
+	policy.Hostname = "other.example.com"
+	policy.EKUChecking = KDCEKUServerAuth
+	_, err = ValidateKDCCertificate(verified, policy)
 	require.ErrorContains(t, err, "does not identify")
 }
 
@@ -150,10 +161,32 @@ func TestCheckCRLs(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, checked)
 
-	responseDER = mustCRL(t, root, rootKey, now, []pkix.RevokedCertificate{{SerialNumber: signer.SerialNumber, RevocationTime: now.Add(-time.Minute)}})
+	var entry x509.RevocationListEntry
+	entry.SerialNumber = signer.SerialNumber
+	entry.RevocationTime = now.Add(-time.Minute)
+	responseDER = mustCRL(t, root, rootKey, now, []x509.RevocationListEntry{entry})
 	checked, err = checkCRLs(server.Client(), signer, root, now)
 	require.ErrorContains(t, err, "revoked")
 	require.False(t, checked)
+}
+
+func TestCheckCRLsLegacyPolicy(t *testing.T) {
+	root, signer, rootKey := testRevocationChain(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	der := mustCRL(t, root, rootKey, now, nil)
+	body := encodeIdentityPEM("X509 CRL", der)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = writer.Write(body)
+	}))
+	defer server.Close()
+	signer.CRLDistributionPoints = []string{server.URL}
+
+	// Validation historically checks the signature without imposing CRL-signing key usage.
+	issuer := *root
+	issuer.KeyUsage = x509.KeyUsageCertSign
+	checked, err := checkCRLs(server.Client(), signer, &issuer, now)
+	require.NoError(t, err)
+	require.True(t, checked)
 }
 
 func TestRevocationTimeValid(t *testing.T) {
@@ -171,19 +204,25 @@ func testRevocationChain(t *testing.T) (*x509.Certificate, *x509.Certificate, *e
 	signerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	now := time.Now()
-	rootTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(200), Subject: pkix.Name{CommonName: "root"}, SubjectKeyId: []byte{1, 2, 3, 4},
-		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(2 * time.Hour), IsCA: true, BasicConstraintsValid: true,
-		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
-	}
+	rootTemplate := new(x509.Certificate)
+	rootTemplate.SerialNumber = big.NewInt(200)
+	rootTemplate.Subject.CommonName = "root"
+	rootTemplate.SubjectKeyId = []byte{1, 2, 3, 4}
+	rootTemplate.NotBefore = now.Add(-time.Hour)
+	rootTemplate.NotAfter = now.Add(2 * time.Hour)
+	rootTemplate.IsCA = true
+	rootTemplate.BasicConstraintsValid = true
+	rootTemplate.KeyUsage = x509.KeyUsageCertSign | x509.KeyUsageCRLSign
 	rootDER, err := x509.CreateCertificate(rand.Reader, rootTemplate, rootTemplate, &rootKey.PublicKey, rootKey)
 	require.NoError(t, err)
 	root, err := x509.ParseCertificate(rootDER)
 	require.NoError(t, err)
-	signerTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(201), Subject: pkix.Name{CommonName: "KDC"}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature,
-	}
+	signerTemplate := new(x509.Certificate)
+	signerTemplate.SerialNumber = big.NewInt(201)
+	signerTemplate.Subject.CommonName = "KDC"
+	signerTemplate.NotBefore = now.Add(-time.Hour)
+	signerTemplate.NotAfter = now.Add(time.Hour)
+	signerTemplate.KeyUsage = x509.KeyUsageDigitalSignature
 	signerDER, err := x509.CreateCertificate(rand.Reader, signerTemplate, root, &signerKey.PublicKey, rootKey)
 	require.NoError(t, err)
 	signer, err := x509.ParseCertificate(signerDER)
@@ -191,40 +230,76 @@ func testRevocationChain(t *testing.T) (*x509.Certificate, *x509.Certificate, *e
 	return root, signer, rootKey
 }
 
-func mustOCSPResponse(t *testing.T, issuer, certificate *x509.Certificate, issuerKey *ecdsa.PrivateKey, status int, now time.Time) []byte {
+func mustOCSPResponse(
+	t *testing.T,
+	issuer, certificate *x509.Certificate,
+	issuerKey *ecdsa.PrivateKey,
+	status int,
+	now time.Time,
+) []byte {
 	t.Helper()
-	response, err := ocsp.CreateResponse(issuer, issuer, ocsp.Response{
-		Status: status, SerialNumber: certificate.SerialNumber, ThisUpdate: now.Add(-time.Minute), NextUpdate: now.Add(time.Minute), RevokedAt: now.Add(-time.Minute),
-	}, issuerKey)
+	var template ocsp.Response
+	template.Status = status
+	template.SerialNumber = certificate.SerialNumber
+	template.ThisUpdate = now.Add(-time.Minute)
+	template.NextUpdate = now.Add(time.Minute)
+	template.RevokedAt = now.Add(-time.Minute)
+	response, err := ocsp.CreateResponse(issuer, issuer, template, issuerKey)
 	require.NoError(t, err)
 	return response
 }
 
-func mustCRL(t *testing.T, issuer *x509.Certificate, issuerKey *ecdsa.PrivateKey, now time.Time, entries []pkix.RevokedCertificate) []byte {
+func mustCRL(
+	t *testing.T,
+	issuer *x509.Certificate,
+	issuerKey *ecdsa.PrivateKey,
+	now time.Time,
+	entries []x509.RevocationListEntry,
+) []byte {
 	t.Helper()
-	list, err := x509.CreateRevocationList(rand.Reader, &x509.RevocationList{
-		Number: big.NewInt(1), ThisUpdate: now.Add(-time.Minute), NextUpdate: now.Add(time.Minute), RevokedCertificates: entries,
-	}, issuer, issuerKey)
+	template := new(x509.RevocationList)
+	template.Number = big.NewInt(1)
+	template.ThisUpdate = now.Add(-time.Minute)
+	template.NextUpdate = now.Add(time.Minute)
+	template.RevokedCertificateEntries = entries
+	list, err := x509.CreateRevocationList(rand.Reader, template, issuer, issuerKey)
 	require.NoError(t, err)
 	return list
 }
 
-func testKDCChain(t *testing.T, eku asn1.ObjectIdentifier, dnsName string, notAfter time.Time) (*x509.Certificate, *x509.Certificate, *ecdsa.PrivateKey) {
+func testKDCChain(
+	t *testing.T,
+	eku asn1.ObjectIdentifier,
+	dnsName string,
+	notAfter time.Time,
+) (*x509.Certificate, *x509.Certificate, *ecdsa.PrivateKey) {
 	t.Helper()
 	rootKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	signerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	now := time.Now()
-	rootTemplate := &x509.Certificate{SerialNumber: big.NewInt(100), Subject: pkix.Name{CommonName: "root"}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(2 * time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	rootTemplate := new(x509.Certificate)
+	rootTemplate.SerialNumber = big.NewInt(100)
+	rootTemplate.Subject.CommonName = "root"
+	rootTemplate.NotBefore = now.Add(-time.Hour)
+	rootTemplate.NotAfter = now.Add(2 * time.Hour)
+	rootTemplate.IsCA = true
+	rootTemplate.BasicConstraintsValid = true
+	rootTemplate.KeyUsage = x509.KeyUsageCertSign
 	rootDER, err := x509.CreateCertificate(rand.Reader, rootTemplate, rootTemplate, &rootKey.PublicKey, rootKey)
 	require.NoError(t, err)
 	root, err := x509.ParseCertificate(rootDER)
 	require.NoError(t, err)
-	signerTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(101), Subject: pkix.Name{CommonName: "KDC"}, DNSNames: []string{dnsName},
-		NotBefore: now.Add(-time.Hour), NotAfter: notAfter, KeyUsage: x509.KeyUsageDigitalSignature,
-		ExtraExtensions: []pkix.Extension{{Id: oidExtendedKeyUsage, Value: mustMarshal(t, []asn1.ObjectIdentifier{eku})}},
+	signerTemplate := new(x509.Certificate)
+	signerTemplate.SerialNumber = big.NewInt(101)
+	signerTemplate.Subject.CommonName = "KDC"
+	signerTemplate.DNSNames = []string{dnsName}
+	signerTemplate.NotBefore = now.Add(-time.Hour)
+	signerTemplate.NotAfter = notAfter
+	signerTemplate.KeyUsage = x509.KeyUsageDigitalSignature
+	signerTemplate.ExtraExtensions = []pkix.Extension{
+		{Id: oidExtendedKeyUsage, Critical: false, Value: mustMarshal(t, []asn1.ObjectIdentifier{eku})},
 	}
 	signerDER, err := x509.CreateCertificate(rand.Reader, signerTemplate, root, &signerKey.PublicKey, rootKey)
 	require.NoError(t, err)

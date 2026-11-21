@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash"
 	"math"
@@ -16,7 +17,13 @@ import (
 )
 
 // DeriveReplyKey applies the negotiated RFC 8636 KDF to a padded DH shared secret.
-func DeriveReplyKey(kdf KDFAlgorithmID, sharedSecret []byte, client, server KRB5PrincipalName, asReq, pkAsRep []byte, etypeID int32) (types.EncryptionKey, error) {
+func DeriveReplyKey(
+	kdf KDFAlgorithmID,
+	sharedSecret []byte,
+	client, server KRB5PrincipalName,
+	asReq, pkAsRep []byte,
+	etypeID int32,
+) (types.EncryptionKey, error) {
 	hashFunc, err := kdfHash(kdf.ID)
 	if err != nil {
 		return types.EncryptionKey{}, err
@@ -26,7 +33,7 @@ func DeriveReplyKey(kdf KDFAlgorithmID, sharedSecret []byte, client, server KRB5
 		return types.EncryptionKey{}, fmt.Errorf("PKINIT reply key enctype: %w", err)
 	}
 	seedBits := et.GetKeySeedBitLength()
-	if seedBits <= 0 || seedBits%8 != 0 {
+	if seedBits <= 0 || seedBits%bitsPerByte != 0 {
 		return types.EncryptionKey{}, fmt.Errorf("PKINIT enctype %d has invalid key seed length %d", etypeID, seedBits)
 	}
 	partyUInfo, err := asn1.Marshal(client)
@@ -42,17 +49,19 @@ func DeriveReplyKey(kdf KDFAlgorithmID, sharedSecret []byte, client, server KRB5
 	if err != nil {
 		return types.EncryptionKey{}, fmt.Errorf("marshal PKINIT KDF supplemental public info: %w", err)
 	}
+	var parameters asn1.RawValue
 	otherInfo, err := asn1.Marshal(OtherInfo{
-		AlgorithmID: AlgorithmIdentifier{Algorithm: kdf.ID},
-		PartyUInfo:  partyUInfo,
-		PartyVInfo:  partyVInfo,
-		SuppPubInfo: suppPubInfo,
+		AlgorithmID:  AlgorithmIdentifier{Algorithm: kdf.ID, Parameters: parameters},
+		PartyUInfo:   partyUInfo,
+		PartyVInfo:   partyVInfo,
+		SuppPubInfo:  suppPubInfo,
+		SuppPrivInfo: nil,
 	})
 	if err != nil {
 		return types.EncryptionKey{}, fmt.Errorf("marshal PKINIT KDF other info: %w", err)
 	}
 
-	seed, err := counterKDF(hashFunc, sharedSecret, otherInfo, seedBits/8)
+	seed, err := counterKDF(hashFunc, sharedSecret, otherInfo, seedBits/bitsPerByte)
 	if err != nil {
 		return types.EncryptionKey{}, err
 	}
@@ -66,18 +75,18 @@ func DeriveLegacyReplyKey(sharedSecret, clientNonce, serverNonce []byte, etypeID
 		return types.EncryptionKey{}, fmt.Errorf("PKINIT reply key enctype: %w", err)
 	}
 	seedBits := et.GetKeySeedBitLength()
-	if seedBits <= 0 || seedBits%8 != 0 {
+	if seedBits <= 0 || seedBits%bitsPerByte != 0 {
 		return types.EncryptionKey{}, fmt.Errorf("PKINIT enctype %d has invalid key seed length %d", etypeID, seedBits)
 	}
 	input := make([]byte, 0, len(sharedSecret)+len(clientNonce)+len(serverNonce))
 	input = append(input, sharedSecret...)
 	input = append(input, clientNonce...)
 	input = append(input, serverNonce...)
-	seedBytes := seedBits / 8
+	seedBytes := seedBits / bitsPerByte
 	seed := make([]byte, 0, seedBytes)
 	for counter := 0; len(seed) < seedBytes; counter++ {
 		if counter > math.MaxUint8 {
-			return types.EncryptionKey{}, fmt.Errorf("PKINIT legacy KDF output is too long")
+			return types.EncryptionKey{}, errors.New("PKINIT legacy KDF output is too long")
 		}
 		digest := sha1.Sum(append([]byte{byte(counter)}, input...)) // #nosec G401 -- RFC 4556 octetstring2key.
 		seed = append(seed, digest[:]...)
@@ -110,7 +119,7 @@ func pkinitUint32(name string, value int) (uint32, error) {
 
 func counterKDF(hashFunc func() hash.Hash, secret, otherInfo []byte, outputBytes int) ([]byte, error) {
 	if outputBytes < 0 {
-		return nil, fmt.Errorf("PKINIT KDF output length cannot be negative")
+		return nil, errors.New("PKINIT KDF output length cannot be negative")
 	}
 	hashSize := hashFunc().Size()
 	blocks := outputBytes / hashSize
@@ -118,7 +127,7 @@ func counterKDF(hashFunc func() hash.Hash, secret, otherInfo []byte, outputBytes
 		blocks++
 	}
 	if int64(blocks) > math.MaxUint32 || blocks > math.MaxInt/hashSize {
-		return nil, fmt.Errorf("PKINIT KDF output is too long")
+		return nil, errors.New("PKINIT KDF output is too long")
 	}
 	output := make([]byte, 0, blocks*hashSize)
 	var counter [4]byte

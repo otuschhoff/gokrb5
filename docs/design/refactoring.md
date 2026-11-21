@@ -1,12 +1,11 @@
 # v8 Code Quality and Refactoring Roadmap
 
-Status: active, authoritative remediation backlog; Phases 0-2 complete, all
-Phase 3 decomposition slices implemented, Phase 4's local coverage items done
-(floor raised to 86.0%), and Phase 5 slices 1-135 done. The latest measured
-v8 inventories (Slice 135) contain 513 canonical and 3,176 supplemental
-findings. Most remaining canonical findings are from `revive`, complexity and
-nesting checks, `ireturn`, and `gochecknoglobals`; the full backlog is not closed.
-Phase 3/4 interoperability and Windows exit evidence remains an external CI
+Status: authoritative remediation record. Phases 0-2 are complete, all Phase 3
+decomposition slices are implemented, and Phase 4's local coverage items are
+done (floor raised to 86.0%). Phase 5 slices 1-156 cleared the measured v8 lint
+backlog: both pinned whole-v8 profiles report zero findings. Switching the
+full canonical scan to a required gate is a separate automation decision.
+Phase 3/4 interoperability and Windows runtime evidence remains an external CI
 obligation.
 Assessment date: 2026-11-17.
 Scope: `v8` module (`github.com/otuschhoff/gokrb5/v8`) only. Root-module v7
@@ -819,6 +818,26 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 156 (2026-11-21, complete v8 PKINIT and PKU2U lint cleanup; Q-10):
+Separate PKINIT DER and CMS processing, exchange validation, and certificate
+revocation into smaller stages. Name protocol constants and split PKU2U AS
+and AP rejection tests by policy. Preserve exported APIs, mutable exported
+OIDs, wire encodings, and existing validation and error contracts. Keep
+declaration- or call-scoped lint exceptions for published names and OIDs,
+legacy RSA CMS transport and encrypted PEM, legacy CRL parsing and signature
+policy, and caller-supplied certificate-pool subjects. Update the CRL test
+fixture to use `RevokedCertificateEntries` and verify legacy PEM CRL handling
+without a CRL-signing key-usage requirement. No profile or dependency changes.
+
+PKINIT falls from 45 canonical and 341 supplemental findings to zero;
+PKU2U falls from 1 canonical and 13 supplemental to zero. Both uncapped
+whole-v8 profiles now report zero findings. A compiled API comparison found
+no differences. Revised tests pass against baseline and final production
+code; statement coverage moves from 77.2% to 79.0% in PKINIT and stays at
+87.0% in PKU2U. The full v8 build, vet, offline race suite, 25 shuffled race
+runs for both packages, Linux/386 tests, and both changed-line gates pass.
+Windows/amd64 and interop-tagged tests compile but were not run.
 
 Slice 155 (2026-11-21, complete v8 IANA lint cleanup; Q-10):
 Preserve the published protocol identifiers and exported encryption-type

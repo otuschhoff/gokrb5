@@ -21,17 +21,19 @@ func TestPKINITDEREncodings(t *testing.T) {
 	}{
 		{
 			name:    "request",
-			marshal: PAPKAsReq{SignedAuthPack: []byte("signed")}.Marshal,
+			marshal: PAPKAsReq{SignedAuthPack: []byte("signed"), TrustedCertifiers: nil, KDCPkID: nil}.Marshal,
 			wantHex: "300880067369676e6564",
 		},
 		{
-			name:    "dh reply",
-			marshal: PAPKAsRep{DHInfo: &DHRepInfo{DHSignedData: []byte("signed")}}.Marshal,
+			name: "dh reply",
+			marshal: PAPKAsRep{
+				DHInfo: &DHRepInfo{DHSignedData: []byte("signed"), ServerDHNonce: nil, KDF: nil}, EncKeyPack: nil,
+			}.Marshal,
 			wantHex: "a00a300880067369676e6564",
 		},
 		{
 			name:    "rsa reply",
-			marshal: PAPKAsRep{EncKeyPack: []byte("key")}.Marshal,
+			marshal: PAPKAsRep{DHInfo: nil, EncKeyPack: []byte("key")}.Marshal,
 			wantHex: "81036b6579",
 		},
 	}
@@ -88,12 +90,16 @@ func TestPKINITDERMarshalErrors(t *testing.T) {
 
 	pack := AuthPack{
 		PKAuthenticator: PKAuthenticator{
-			CTime:      time.Date(2026, 9, 6, 12, 34, 56, 0, time.UTC),
-			PAChecksum: []byte{1},
+			CUSec: 0, CTime: time.Date(2026, 9, 6, 12, 34, 56, 0, time.UTC), Nonce: 0,
+			PAChecksum: []byte{1}, FreshnessToken: nil,
 		},
-		SupportedKDFs: []KDFAlgorithmID{{ID: asn1.ObjectIdentifier{1}}},
+		ClientPublicValue: nil,
+		SupportedCMSTypes: nil,
+		ClientDHNonce:     nil,
+		SupportedKDFs:     []KDFAlgorithmID{{ID: asn1.ObjectIdentifier{1}}},
 	}
-	keyInfo := KDCDHKeyInfo{DHKeyExpiration: time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)}
+	var keyInfo KDCDHKeyInfo
+	keyInfo.DHKeyExpiration = time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)
 	tests := []struct {
 		name, context string
 		marshal       func() ([]byte, error)
@@ -116,17 +122,21 @@ func TestPKINITDERMarshalErrors(t *testing.T) {
 
 func TestAuthPackRoundTrip(t *testing.T) {
 	now := time.Date(2026, 9, 6, 12, 34, 56, 0, time.UTC)
+	var parameters asn1.RawValue
 	want := AuthPack{
 		PKAuthenticator: PKAuthenticator{
 			CUSec: 123456, CTime: now, Nonce: 0xfedcba98,
 			PAChecksum: []byte("checksum"), FreshnessToken: []byte("fresh"),
 		},
 		ClientPublicValue: &SubjectPublicKeyInfo{
-			Algorithm:        AlgorithmIdentifier{Algorithm: asn1.ObjectIdentifier{1, 2, 840, 10046, 2, 1}},
+			Algorithm: AlgorithmIdentifier{
+				Algorithm: asn1.ObjectIdentifier{1, 2, 840, 10046, 2, 1}, Parameters: parameters,
+			},
 			SubjectPublicKey: asn1.BitString{Bytes: []byte{1, 2, 3}, BitLength: 24},
 		},
-		ClientDHNonce: []byte("client nonce"),
-		SupportedKDFs: []KDFAlgorithmID{{ID: OIDKDFSHA512}, {ID: OIDKDFSHA384}, {ID: OIDKDFSHA256}},
+		SupportedCMSTypes: nil,
+		ClientDHNonce:     []byte("client nonce"),
+		SupportedKDFs:     []KDFAlgorithmID{{ID: OIDKDFSHA512}, {ID: OIDKDFSHA384}, {ID: OIDKDFSHA256}},
 	}
 	encoded, err := want.Marshal()
 	if err != nil {
@@ -150,8 +160,11 @@ func TestAuthPackRoundTrip(t *testing.T) {
 
 func TestPAPKAsRepChoices(t *testing.T) {
 	tests := []PAPKAsRep{
-		{DHInfo: &DHRepInfo{DHSignedData: []byte("signed"), ServerDHNonce: []byte("server")}},
-		{EncKeyPack: []byte("enveloped")},
+		{
+			DHInfo:     &DHRepInfo{DHSignedData: []byte("signed"), ServerDHNonce: []byte("server"), KDF: nil},
+			EncKeyPack: nil,
+		},
+		{DHInfo: nil, EncKeyPack: []byte("enveloped")},
 	}
 	for _, want := range tests {
 		encoded, err := want.Marshal()
@@ -173,20 +186,24 @@ func TestPAPKAsRepChoices(t *testing.T) {
 }
 
 func TestPAPKAsRepRejectsInvalidChoice(t *testing.T) {
-	if _, err := (PAPKAsRep{}).Marshal(); err == nil {
+	var reply PAPKAsRep
+	if _, err := reply.Marshal(); err == nil {
 		t.Fatal("accepted empty PA-PK-AS-REP")
 	}
-	if _, err := (PAPKAsRep{DHInfo: &DHRepInfo{}, EncKeyPack: []byte{1}}).Marshal(); err == nil {
+	var dhInfo DHRepInfo
+	if _, err := (PAPKAsRep{DHInfo: &dhInfo, EncKeyPack: []byte{1}}).Marshal(); err == nil {
 		t.Fatal("accepted PA-PK-AS-REP with both choices")
 	}
-	var reply PAPKAsRep
 	if err := reply.Unmarshal([]byte{0xa2, 0x00}); err == nil {
 		t.Fatal("accepted unknown PA-PK-AS-REP choice")
 	}
 }
 
 func TestPKINITRejectsInvalidConstraintsAndTrailingData(t *testing.T) {
-	pack := AuthPack{PKAuthenticator: PKAuthenticator{CUSec: 1000000, CTime: time.Now().UTC(), Nonce: 1, PAChecksum: []byte{1}}}
+	var pack AuthPack
+	pack.PKAuthenticator = PKAuthenticator{
+		CUSec: 1000000, CTime: time.Now().UTC(), Nonce: 1, PAChecksum: []byte{1}, FreshnessToken: nil,
+	}
 	if _, err := pack.Marshal(); err == nil {
 		t.Fatal("marshaled invalid microseconds")
 	}
@@ -202,7 +219,11 @@ func TestPKINITRejectsInvalidConstraintsAndTrailingData(t *testing.T) {
 }
 
 func FuzzPKASRep(f *testing.F) {
-	for _, seed := range []PAPKAsRep{{DHInfo: &DHRepInfo{DHSignedData: []byte("signed")}}, {EncKeyPack: []byte("enveloped")}} {
+	seeds := []PAPKAsRep{
+		{DHInfo: &DHRepInfo{DHSignedData: []byte("signed"), ServerDHNonce: nil, KDF: nil}, EncKeyPack: nil},
+		{DHInfo: nil, EncKeyPack: []byte("enveloped")},
+	}
+	for _, seed := range seeds {
 		encoded, err := seed.Marshal()
 		if err != nil {
 			f.Fatal(err)

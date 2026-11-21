@@ -5,8 +5,12 @@ import (
 	"crypto"
 	"crypto/x509"
 	"encoding/asn1"
+	"encoding/binary"
 	"encoding/pem"
+	"errors"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,15 +19,20 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+//nolint:gochecknoglobals // Fixed OIDs shared with the client certificate fixtures; never mutated.
 var (
 	oidExtendedKeyUsage       = asn1.ObjectIdentifier{2, 5, 29, 37}
 	oidSubjectAlternativeName = asn1.ObjectIdentifier{2, 5, 29, 17}
 	oidClientAuth             = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 2}
-	oidSmartCardLogon         = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 311, 20, 2, 2}
-	oidUPN                    = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 311, 20, 2, 3}
-	oidNtdsSecurityExtension  = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 311, 25, 2}
-	oidObjectSID              = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 311, 25, 2, 1}
 )
+
+func upnOID() asn1.ObjectIdentifier {
+	return asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 311, 20, 2, 3}
+}
+
+func smartCardLogonOID() asn1.ObjectIdentifier {
+	return asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 311, 20, 2, 2}
+}
 
 // Identity combines a client certificate with its signing key and intermediates.
 type Identity struct {
@@ -42,9 +51,14 @@ type IdentityPolicy struct {
 }
 
 // NewIdentity validates that signer owns certificate's public key.
-func NewIdentity(certificate *x509.Certificate, chain []*x509.Certificate, signer crypto.Signer, keyTrust bool) (*Identity, error) {
+func NewIdentity(
+	certificate *x509.Certificate,
+	chain []*x509.Certificate,
+	signer crypto.Signer,
+	keyTrust bool,
+) (*Identity, error) {
 	if certificate == nil || signer == nil {
-		return nil, fmt.Errorf("PKINIT certificate and signer are required")
+		return nil, errors.New("PKINIT certificate and signer are required")
 	}
 	certificateKey, err := x509.MarshalPKIXPublicKey(certificate.PublicKey)
 	if err != nil {
@@ -55,11 +69,10 @@ func NewIdentity(certificate *x509.Certificate, chain []*x509.Certificate, signe
 		return nil, err
 	}
 	if !bytes.Equal(certificateKey, signerKey) {
-		return nil, fmt.Errorf("PKINIT signer does not match certificate")
+		return nil, errors.New("PKINIT signer does not match certificate")
 	}
-	identity := &Identity{Certificate: certificate, Chain: chain, Signer: signer, KeyTrust: keyTrust}
-	identity.SID, _ = certificateSID(certificate)
-	return identity, nil
+	sid, _ := certificateSID(certificate) // SID extraction is optional; malformed extensions leave it empty.
+	return &Identity{Certificate: certificate, Chain: chain, Signer: signer, SID: sid, KeyTrust: keyTrust}, nil
 }
 
 // FromPEM loads a certificate chain and private key from PEM data.
@@ -70,11 +83,11 @@ func FromPEM(certificatePEM, keyPEM, password []byte) (*Identity, error) {
 	}
 	block, _ := pem.Decode(keyPEM)
 	if block == nil {
-		return nil, fmt.Errorf("PKINIT private key PEM is missing")
+		return nil, errors.New("PKINIT private key PEM is missing")
 	}
 	keyDER := block.Bytes
-	if x509.IsEncryptedPEMBlock(block) {
-		keyDER, err = x509.DecryptPEMBlock(block, password)
+	if x509.IsEncryptedPEMBlock(block) { //nolint:staticcheck // Preserve detection of legacy RFC 1423 PEM imports.
+		keyDER, err = x509.DecryptPEMBlock(block, password) //nolint:staticcheck // Import-only RFC 1423 compatibility.
 		if err != nil {
 			return nil, fmt.Errorf("decrypt PKINIT private key: %w", err)
 		}
@@ -121,7 +134,19 @@ func (identity *Identity) CertificateChain() []*x509.Certificate {
 }
 
 // ValidateForPrincipal applies the MS-PKCA client certificate selection rules.
-func (identity *Identity) ValidateForPrincipal(principal types.PrincipalName, realm string, policy IdentityPolicy) error {
+func (identity *Identity) ValidateForPrincipal(
+	principal types.PrincipalName,
+	realm string,
+	policy IdentityPolicy,
+) error {
+	if err := identity.validateCertificate(policy); err != nil {
+		return err
+	}
+	principalName := principal.PrincipalNameString()
+	return matchCertificatePrincipal(identity.Certificate, principalName, realm, policy.AllowSubjectName)
+}
+
+func (identity *Identity) validateCertificate(policy IdentityPolicy) error {
 	now := policy.CurrentTime
 	if now.IsZero() {
 		now = time.Now()
@@ -130,13 +155,17 @@ func (identity *Identity) ValidateForPrincipal(principal types.PrincipalName, re
 	if now.Before(certificate.NotBefore) || now.After(certificate.NotAfter) {
 		return fmt.Errorf("PKINIT client certificate is not valid at %s", now.UTC().Format(time.RFC3339))
 	}
-	if !policy.DisableEKUCheck && !certificateHasEKU(certificate, oidClientAuth, oidSmartCardLogon) {
-		return fmt.Errorf("PKINIT client certificate lacks Client Authentication or Smart Card Logon EKU")
+	if !policy.DisableEKUCheck && !certificateHasEKU(certificate, oidClientAuth, smartCardLogonOID()) {
+		return errors.New("PKINIT client certificate lacks Client Authentication or Smart Card Logon EKU")
 	}
 	if isSelfSigned(certificate) && !identity.KeyTrust {
-		return fmt.Errorf("self-signed PKINIT client certificate requires key-trust mode")
+		return errors.New("self-signed PKINIT client certificate requires key-trust mode")
 	}
-	want := principal.PrincipalNameString() + "@" + realm
+	return nil
+}
+
+func matchCertificatePrincipal(certificate *x509.Certificate, principal, realm string, allowSubjectName bool) error {
+	want := principal + "@" + realm
 	names, err := certificatePrincipalNames(certificate)
 	if err != nil {
 		return err
@@ -146,7 +175,8 @@ func (identity *Identity) ValidateForPrincipal(principal types.PrincipalName, re
 			return nil
 		}
 	}
-	if policy.AllowSubjectName && (strings.EqualFold(certificate.Subject.CommonName, want) || strings.EqualFold(certificate.Subject.CommonName, principal.PrincipalNameString())) {
+	commonName := certificate.Subject.CommonName
+	if allowSubjectName && (strings.EqualFold(commonName, want) || strings.EqualFold(commonName, principal)) {
 		return nil
 	}
 	return fmt.Errorf("PKINIT client certificate does not identify principal %s", want)
@@ -156,7 +186,7 @@ func (identity *Identity) ValidateForPrincipal(principal types.PrincipalName, re
 // the certificate's subject alternative name extension.
 func CertificatePrincipalNames(certificate *x509.Certificate) ([]string, error) {
 	if certificate == nil {
-		return nil, fmt.Errorf("PKINIT certificate is required")
+		return nil, errors.New("PKINIT certificate is required")
 	}
 	return certificatePrincipalNames(certificate)
 }
@@ -179,25 +209,30 @@ func parsePEMCertificates(data []byte) ([]*x509.Certificate, error) {
 		certificates = append(certificates, certificate)
 	}
 	if len(certificates) == 0 {
-		return nil, fmt.Errorf("PKINIT certificate PEM is missing")
+		return nil, errors.New("PKINIT certificate PEM is missing")
 	}
 	return certificates, nil
 }
 
 func parsePrivateKey(der []byte) (crypto.Signer, error) {
-	keys := []func([]byte) (interface{}, error){x509.ParsePKCS8PrivateKey, func(b []byte) (interface{}, error) { return x509.ParsePKCS1PrivateKey(b) }, func(b []byte) (interface{}, error) { return x509.ParseECPrivateKey(b) }}
-	for _, parse := range keys {
-		key, err := parse(der)
-		if err == nil {
-			if signer, ok := key.(crypto.Signer); ok {
-				return signer, nil
-			}
+	if key, err := x509.ParsePKCS8PrivateKey(der); err == nil {
+		if signer, ok := key.(crypto.Signer); ok {
+			return signer, nil
 		}
 	}
-	return nil, fmt.Errorf("unsupported PKINIT private key")
+	if key, err := x509.ParsePKCS1PrivateKey(der); err == nil {
+		return key, nil
+	}
+	if key, err := x509.ParseECPrivateKey(der); err == nil {
+		return key, nil
+	}
+	return nil, errors.New("unsupported PKINIT private key")
 }
 
-func selectSigningCertificate(certificates []*x509.Certificate, signer crypto.Signer) (*x509.Certificate, []*x509.Certificate, error) {
+func selectSigningCertificate(
+	certificates []*x509.Certificate,
+	signer crypto.Signer,
+) (*x509.Certificate, []*x509.Certificate, error) {
 	want, err := marshalSignerPublicKey(signer)
 	if err != nil {
 		return nil, nil, err
@@ -210,7 +245,7 @@ func selectSigningCertificate(certificates []*x509.Certificate, signer crypto.Si
 			return certificate, chain, nil
 		}
 	}
-	return nil, nil, fmt.Errorf("PKINIT certificate matching private key was not found")
+	return nil, nil, errors.New("PKINIT certificate matching private key was not found")
 }
 
 func marshalSignerPublicKey(signer crypto.Signer) ([]byte, error) {
@@ -231,10 +266,8 @@ func certificateHasEKU(certificate *x509.Certificate, accepted ...asn1.ObjectIde
 			return false
 		}
 		for _, usage := range usages {
-			for _, allowed := range accepted {
-				if usage.Equal(allowed) {
-					return true
-				}
+			if slices.ContainsFunc(accepted, usage.Equal) {
+				return true
 			}
 		}
 	}
@@ -247,28 +280,37 @@ func certificatePrincipalNames(certificate *x509.Certificate) ([]string, error) 
 		if !extension.Id.Equal(oidSubjectAlternativeName) {
 			continue
 		}
-		var generalNames asn1.RawValue
-		if err := strictStdUnmarshal(extension.Value, &generalNames); err != nil || generalNames.Tag != asn1.TagSequence {
-			return nil, fmt.Errorf("decode PKINIT client certificate SAN")
+		var err error
+		names, err = appendSANPrincipalNames(names, extension.Value)
+		if err != nil {
+			return nil, err
 		}
-		remaining := generalNames.Bytes
-		for len(remaining) > 0 {
-			var generalName asn1.RawValue
-			var err error
-			remaining, err = asn1.Unmarshal(remaining, &generalName)
-			if err != nil {
-				return nil, fmt.Errorf("decode PKINIT client certificate SAN: %w", err)
-			}
-			if generalName.Class != asn1.ClassContextSpecific || generalName.Tag != 0 {
-				continue
-			}
-			name, recognized, err := parsePrincipalOtherName(generalName.Bytes)
-			if err != nil {
-				return nil, err
-			}
-			if recognized {
-				names = append(names, name)
-			}
+	}
+	return names, nil
+}
+
+func appendSANPrincipalNames(names []string, der []byte) ([]string, error) {
+	var generalNames asn1.RawValue
+	if err := strictStdUnmarshal(der, &generalNames); err != nil || generalNames.Tag != asn1.TagSequence {
+		return nil, errors.New("decode PKINIT client certificate SAN")
+	}
+	remaining := generalNames.Bytes
+	for len(remaining) > 0 {
+		var generalName asn1.RawValue
+		var err error
+		remaining, err = asn1.Unmarshal(remaining, &generalName)
+		if err != nil {
+			return nil, fmt.Errorf("decode PKINIT client certificate SAN: %w", err)
+		}
+		if generalName.Class != asn1.ClassContextSpecific || generalName.Tag != 0 {
+			continue
+		}
+		name, recognized, err := parsePrincipalOtherName(generalName.Bytes)
+		if err != nil {
+			return nil, err
+		}
+		if recognized {
+			names = append(names, name)
 		}
 	}
 	return names, nil
@@ -281,10 +323,11 @@ func parsePrincipalOtherName(der []byte) (string, bool, error) {
 		return "", false, fmt.Errorf("decode PKINIT SAN otherName type: %w", err)
 	}
 	var value asn1.RawValue
-	if rest, err = asn1.Unmarshal(rest, &value); err != nil || len(rest) != 0 || value.Class != asn1.ClassContextSpecific || value.Tag != 0 {
-		return "", false, fmt.Errorf("decode PKINIT SAN otherName value")
+	rest, err = asn1.Unmarshal(rest, &value)
+	if err != nil || len(rest) != 0 || value.Class != asn1.ClassContextSpecific || value.Tag != 0 {
+		return "", false, errors.New("decode PKINIT SAN otherName value")
 	}
-	if typeID.Equal(oidUPN) {
+	if typeID.Equal(upnOID()) {
 		var upn string
 		if err := strictStdUnmarshal(value.Bytes, &upn); err != nil {
 			return "", false, fmt.Errorf("decode PKINIT UPN SAN: %w", err)
@@ -302,6 +345,8 @@ func parsePrincipalOtherName(der []byte) (string, bool, error) {
 }
 
 func certificateSID(certificate *x509.Certificate) (string, error) {
+	oidNtdsSecurityExtension := asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 311, 25, 2}
+	oidObjectSID := asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 311, 25, 2, 1}
 	for _, extension := range certificate.Extensions {
 		if !extension.Id.Equal(oidNtdsSecurityExtension) {
 			continue
@@ -311,7 +356,7 @@ func certificateSID(certificate *x509.Certificate) (string, error) {
 			Value  asn1.RawValue `asn1:"explicit,tag:0"`
 		}
 		if err := strictStdUnmarshal(extension.Value, &sequence); err != nil || !sequence.TypeID.Equal(oidObjectSID) {
-			return "", fmt.Errorf("decode PKINIT SID extension")
+			return "", errors.New("decode PKINIT SID extension")
 		}
 		var sid []byte
 		if err := strictStdUnmarshal(sequence.Value.Bytes, &sid); err != nil {
@@ -322,31 +367,24 @@ func certificateSID(certificate *x509.Certificate) (string, error) {
 	return "", nil
 }
 
-func sidByteLength(subAuthorityCount byte) (int, error) {
-	count := int(subAuthorityCount)
-	if count > (int(^uint(0)>>1)-8)/4 {
-		return 0, fmt.Errorf("SID is too large")
-	}
-	return 8 + 4*count, nil
-}
-
 func formatSID(sid []byte) (string, error) {
-	if len(sid) < 8 {
-		return "", fmt.Errorf("invalid binary SID")
-	}
-	expectedLength, err := sidByteLength(sid[1])
-	if err != nil || len(sid) != expectedLength {
-		return "", fmt.Errorf("invalid binary SID")
+	const (
+		headerSize       = 8
+		subAuthoritySize = 4
+		bitsPerByte      = 8
+	)
+	// The count is a single byte, so the expected length cannot overflow int.
+	if len(sid) < headerSize || len(sid) != headerSize+subAuthoritySize*int(sid[1]) {
+		return "", errors.New("invalid binary SID")
 	}
 	authority := uint64(0)
-	for _, value := range sid[2:8] {
-		authority = authority<<8 | uint64(value)
+	for _, value := range sid[2:headerSize] {
+		authority = authority<<bitsPerByte | uint64(value)
 	}
 	parts := []string{fmt.Sprintf("S-%d-%d", sid[0], authority)}
-	for offset := 8; offset+4 <= len(sid); offset += 4 {
-		field := sid[offset : offset+4]
-		subAuthority := uint32(field[0]) | uint32(field[1])<<8 | uint32(field[2])<<16 | uint32(field[3])<<24
-		parts = append(parts, fmt.Sprintf("%d", subAuthority))
+	for field := range slices.Chunk(sid[headerSize:], subAuthoritySize) {
+		subAuthority := binary.LittleEndian.Uint32(field)
+		parts = append(parts, strconv.FormatUint(uint64(subAuthority), 10))
 	}
 	return strings.Join(parts, "-"), nil
 }

@@ -7,9 +7,8 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
-	"fmt"
+	"errors"
 	"math/big"
-	"strings"
 	"testing"
 	"time"
 
@@ -26,28 +25,32 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+const clientTestRealm = "EXAMPLE.COM"
+
 func TestProcessReplyRejectsNilExchange(t *testing.T) {
-	encoded, err := (PAPKAsRep{DHInfo: &DHRepInfo{DHSignedData: []byte{1}}}).Marshal()
-	if err != nil {
-		t.Fatal(err)
-	}
+	encoded, err := (PAPKAsRep{
+		DHInfo:     &DHRepInfo{DHSignedData: []byte{1}, ServerDHNonce: nil, KDF: nil},
+		EncKeyPack: nil,
+	}).Marshal()
+	require.NoError(t, err)
+
 	var exchange *Exchange
-	if _, err := exchange.ProcessReply(encoded, etypeID.AES256_CTS_HMAC_SHA1_96); err == nil || !strings.Contains(err.Error(), "exchange is nil") {
-		t.Fatalf("nil exchange error = %v", err)
-	}
+	_, err = exchange.ProcessReply(encoded, etypeID.AES256_CTS_HMAC_SHA1_96)
+	require.ErrorContains(t, err, "exchange is nil")
 }
 
 func TestBeginExchangeBuildsBoundAuthPack(t *testing.T) {
 	certificate, key := testClientCertificate(t, "alice@EXAMPLE.COM", oidClientAuth)
 	identity, err := NewIdentity(certificate, nil, key, true)
 	require.NoError(t, err)
-	cfg := config.New()
-	req, err := messages.NewASReqForTGT("EXAMPLE.COM", cfg, types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice"))
-	require.NoError(t, err)
+	req := testASRequest(t)
 	bodyDER, err := req.ReqBody.Marshal()
 	require.NoError(t, err)
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	_, err = BeginExchange(&req, ExchangeOptions{Identity: identity, Mode: ModeDH, CurrentTime: now})
+	var options ExchangeOptions
+	options.Identity = identity
+	options.CurrentTime = now
+	_, err = BeginExchange(&req, options)
 	require.NoError(t, err)
 	require.True(t, req.PAData.Contains(patype.PA_PK_AS_REQ))
 
@@ -68,10 +71,12 @@ func TestBeginExchangeRejectsUntrustedIdentityName(t *testing.T) {
 	certificate, key := testClientCertificate(t, "bob@EXAMPLE.COM", oidClientAuth)
 	identity, err := NewIdentity(certificate, nil, key, true)
 	require.NoError(t, err)
-	req := messages.ASReq{KDCReqFields: messages.KDCReqFields{ReqBody: messages.KDCReqBody{
-		Realm: "EXAMPLE.COM", CName: types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice"),
-	}}}
-	_, err = BeginExchange(&req, ExchangeOptions{Identity: identity})
+	var req messages.ASReq
+	req.ReqBody.Realm = clientTestRealm
+	req.ReqBody.CName = types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
+	var options ExchangeOptions
+	options.Identity = identity
+	_, err = BeginExchange(&req, options)
 	require.ErrorContains(t, err, "does not identify")
 }
 
@@ -79,11 +84,14 @@ func TestProcessDHReply(t *testing.T) {
 	identityCertificate, identityKey := testClientCertificate(t, "alice@EXAMPLE.COM", oidClientAuth)
 	identity, err := NewIdentity(identityCertificate, nil, identityKey, true)
 	require.NoError(t, err)
-	root, kdcCertificate, kdcKey := testKDCChain(t, asn1.ObjectIdentifier(OIDPKINITKDC), "example.com", time.Now().Add(time.Hour))
+	root, kdcCertificate, kdcKey := testKDCChain(
+		t, asn1.ObjectIdentifier(OIDPKINITKDC), "example.com", time.Now().Add(time.Hour),
+	)
 	anchors := x509.NewCertPool()
 	anchors.AddCert(root)
 	req := testASRequest(t)
-	exchange, err := BeginExchange(&req, ExchangeOptions{Identity: identity, Mode: ModeDH, KDCCertificate: KDCCertificatePolicy{Roots: anchors, Realm: "EXAMPLE.COM"}})
+	options := testTrustedKDCOptions(identity, anchors, ModeDH)
+	exchange, err := BeginExchange(&req, options)
 	require.NoError(t, err)
 
 	serverKey, err := GenerateDHKey(MODPGroup14, 2048, rand.Reader)
@@ -91,12 +99,19 @@ func TestProcessDHReply(t *testing.T) {
 	serverPublic, err := serverKey.PublicKey()
 	require.NoError(t, err)
 	expires := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
-	keyInfoDER, err := (KDCDHKeyInfo{SubjectPublicKey: serverPublic.SubjectPublicKey, Nonce: 0, DHKeyExpiration: expires}).Marshal()
+	keyInfoDER, err := (KDCDHKeyInfo{
+		SubjectPublicKey: serverPublic.SubjectPublicKey,
+		Nonce:            0,
+		DHKeyExpiration:  expires,
+	}).Marshal()
 	require.NoError(t, err)
 	signedKeyInfo, err := SignSignedData(OIDPKINITDHKeyData, keyInfoDER, []*x509.Certificate{kdcCertificate}, kdcKey)
 	require.NoError(t, err)
 	serverNonce := []byte("0123456789abcdef0123456789abcdef")
-	replyDER, err := (PAPKAsRep{DHInfo: &DHRepInfo{DHSignedData: signedKeyInfo, ServerDHNonce: serverNonce}}).Marshal()
+	replyDER, err := (PAPKAsRep{
+		DHInfo:     &DHRepInfo{DHSignedData: signedKeyInfo, ServerDHNonce: serverNonce, KDF: nil},
+		EncKeyPack: nil,
+	}).Marshal()
 	require.NoError(t, err)
 	result, err := exchange.ProcessReply(replyDER, etypeID.AES256_CTS_HMAC_SHA1_96)
 	require.NoError(t, err)
@@ -115,26 +130,26 @@ func TestAcceptExchangeAgreesOnDHReplyKey(t *testing.T) {
 	clientCertificate, clientKey := testClientCertificate(t, "alice@EXAMPLE.COM", oidClientAuth)
 	clientIdentity, err := NewIdentity(clientCertificate, nil, clientKey, true)
 	require.NoError(t, err)
-	root, serverCertificate, serverKey := testKDCChain(t, asn1.ObjectIdentifier(OIDPKINITKDC), "example.com", time.Now().Add(time.Hour))
+	root, serverCertificate, serverKey := testKDCChain(
+		t, asn1.ObjectIdentifier(OIDPKINITKDC), "example.com", time.Now().Add(time.Hour),
+	)
 	serverIdentity, err := NewIdentity(serverCertificate, nil, serverKey, false)
 	require.NoError(t, err)
 	anchors := x509.NewCertPool()
 	anchors.AddCert(root)
 	req := testASRequest(t)
-	clientExchange, err := BeginExchange(&req, ExchangeOptions{
-		Identity: clientIdentity, Mode: ModeDH,
-		KDCCertificate: KDCCertificatePolicy{Roots: anchors, Realm: "EXAMPLE.COM"},
-	})
+	clientOptions := testTrustedKDCOptions(clientIdentity, anchors, ModeDH)
+	clientExchange, err := BeginExchange(&req, clientOptions)
 	require.NoError(t, err)
-	acceptor, err := AcceptExchange(&req, AcceptorOptions{
-		Identity: serverIdentity,
-		ValidateSigner: func(signed *VerifiedSignedData) error {
-			if signed.Signer == nil || !signed.Signer.Equal(clientCertificate) {
-				return fmt.Errorf("unexpected client signer")
-			}
-			return nil
-		},
-	})
+	var serverOptions AcceptorOptions
+	serverOptions.Identity = serverIdentity
+	serverOptions.ValidateSigner = func(signed *VerifiedSignedData) error {
+		if signed.Signer == nil || !signed.Signer.Equal(clientCertificate) {
+			return errors.New("unexpected client signer")
+		}
+		return nil
+	}
+	acceptor, err := AcceptExchange(&req, serverOptions)
 	require.NoError(t, err)
 	clientResult, err := clientExchange.ProcessReply(acceptor.ReplyPAData, acceptor.ReplyKey.KeyType)
 	require.NoError(t, err)
@@ -145,55 +160,55 @@ func TestAcceptExchangeRejectsInvalidRequests(t *testing.T) {
 	clientCertificate, clientKey := testClientCertificate(t, "alice@EXAMPLE.COM", oidClientAuth)
 	clientIdentity, err := NewIdentity(clientCertificate, nil, clientKey, true)
 	require.NoError(t, err)
-	_, serverCertificate, serverKey := testKDCChain(t, asn1.ObjectIdentifier(OIDPKINITKDC), "example.com", time.Now().Add(time.Hour))
+	_, serverCertificate, serverKey := testKDCChain(
+		t, asn1.ObjectIdentifier(OIDPKINITKDC), "example.com", time.Now().Add(time.Hour),
+	)
 	serverIdentity, err := NewIdentity(serverCertificate, nil, serverKey, false)
 	require.NoError(t, err)
 	now := time.Now().UTC().Truncate(time.Second)
+	var serverOptions AcceptorOptions
+	serverOptions.Identity = serverIdentity
+	serverOptions.CurrentTime = now
+	serverOptions.ClockSkew = time.Minute
+	serverOptions.ValidateSigner = func(*VerifiedSignedData) error { return nil }
 	accept := func(request *messages.ASReq) error {
-		_, err := AcceptExchange(request, AcceptorOptions{
-			Identity: serverIdentity, CurrentTime: now, ClockSkew: time.Minute,
-			ValidateSigner: func(*VerifiedSignedData) error { return nil },
-		})
+		_, err := AcceptExchange(request, serverOptions)
 		return err
 	}
+	var clientOptions ExchangeOptions
+	clientOptions.Identity = clientIdentity
+	clientOptions.CurrentTime = now
 
 	t.Run("missing PA-PK-AS-REQ", func(t *testing.T) {
 		request := testASRequest(t)
 		require.ErrorContains(t, accept(&request), "missing PA-PK-AS-REQ")
 	})
 	t.Run("duplicate PA-PK-AS-REQ", func(t *testing.T) {
-		request := testASRequest(t)
-		_, err := BeginExchange(&request, ExchangeOptions{Identity: clientIdentity, Mode: ModeDH, CurrentTime: now})
-		require.NoError(t, err)
+		request := beginTestASRequest(t, clientOptions)
 		request.PAData = append(request.PAData, request.PAData[len(request.PAData)-1])
 		require.ErrorContains(t, accept(&request), "duplicate")
 	})
 	t.Run("stale authenticator", func(t *testing.T) {
-		request := testASRequest(t)
-		_, err := BeginExchange(&request, ExchangeOptions{Identity: clientIdentity, Mode: ModeDH, CurrentTime: now.Add(-2 * time.Minute)})
-		require.NoError(t, err)
+		options := clientOptions
+		options.CurrentTime = now.Add(-2 * time.Minute)
+		request := beginTestASRequest(t, options)
 		require.ErrorContains(t, accept(&request), "clock skew")
 	})
 	t.Run("request body changed", func(t *testing.T) {
-		request := testASRequest(t)
-		_, err := BeginExchange(&request, ExchangeOptions{Identity: clientIdentity, Mode: ModeDH, CurrentTime: now})
-		require.NoError(t, err)
+		request := beginTestASRequest(t, clientOptions)
 		request.ReqBody.Nonce++
 		require.ErrorContains(t, accept(&request), "does not bind")
 	})
 	t.Run("unsupported KDF", func(t *testing.T) {
-		request := testASRequest(t)
-		_, err := BeginExchange(&request, ExchangeOptions{
-			Identity: clientIdentity, Mode: ModeDH, CurrentTime: now,
-			SupportedKDFs: []KDFAlgorithmID{{ID: goforkasn1.ObjectIdentifier{1, 2, 3}}},
-		})
-		require.NoError(t, err)
+		options := clientOptions
+		options.SupportedKDFs = []KDFAlgorithmID{{ID: goforkasn1.ObjectIdentifier{1, 2, 3}}}
+		request := beginTestASRequest(t, options)
 		require.ErrorContains(t, accept(&request), "no supported KDF")
 	})
 	t.Run("RC4 only", func(t *testing.T) {
 		request := testASRequest(t)
 		request.ReqBody.EType = []int32{etypeID.RC4_HMAC}
-		_, err := BeginExchange(&request, ExchangeOptions{Identity: clientIdentity, Mode: ModeDH, CurrentTime: now})
+		_, err := BeginExchange(&request, clientOptions)
 		require.NoError(t, err)
 		require.ErrorContains(t, accept(&request), "no supported AES")
 	})
@@ -203,35 +218,61 @@ func TestProcessRSAReply(t *testing.T) {
 	certificate, privateKey := testRSAIdentityCertificate(t)
 	identity, err := NewIdentity(certificate, nil, privateKey, true)
 	require.NoError(t, err)
-	root, kdcCertificate, kdcKey := testKDCChain(t, asn1.ObjectIdentifier(OIDPKINITKDC), "example.com", time.Now().Add(time.Hour))
+	root, kdcCertificate, kdcKey := testKDCChain(
+		t, asn1.ObjectIdentifier(OIDPKINITKDC), "example.com", time.Now().Add(time.Hour),
+	)
 	anchors := x509.NewCertPool()
 	anchors.AddCert(root)
 	req := testASRequest(t)
-	exchange, err := BeginExchange(&req, ExchangeOptions{Identity: identity, Mode: ModeRSA, KDCCertificate: KDCCertificatePolicy{Roots: anchors, Realm: "EXAMPLE.COM"}})
+	options := testTrustedKDCOptions(identity, anchors, ModeRSA)
+	exchange, err := BeginExchange(&req, options)
 	require.NoError(t, err)
 	et, err := krbcrypto.GetEtype(etypeID.AES128_CTS_HMAC_SHA1_96)
 	require.NoError(t, err)
 	replyKey := types.EncryptionKey{KeyType: et.GetETypeID(), KeyValue: make([]byte, et.GetKeyByteSize())}
 	_, err = rand.Read(replyKey.KeyValue)
 	require.NoError(t, err)
-	checksum, err := et.GetChecksumHash(replyKey.KeyValue, exchange.request, keyusage.TGS_REQ_PA_TGS_REQ_AP_REQ_AUTHENTICATOR_CHKSUM)
+	checksum, err := et.GetChecksumHash(
+		replyKey.KeyValue, exchange.request, keyusage.TGS_REQ_PA_TGS_REQ_AP_REQ_AUTHENTICATOR_CHKSUM,
+	)
 	require.NoError(t, err)
-	packDER, err := (ReplyKeyPack{ReplyKey: replyKey, ASChecksum: types.Checksum{CksumType: et.GetHashID(), Checksum: checksum}}).Marshal()
+	packDER, err := (ReplyKeyPack{
+		ReplyKey:   replyKey,
+		ASChecksum: types.Checksum{CksumType: et.GetHashID(), Checksum: checksum},
+	}).Marshal()
 	require.NoError(t, err)
 	signedPack, err := SignSignedData(OIDPKINITRKeyData, packDER, []*x509.Certificate{kdcCertificate}, kdcKey)
 	require.NoError(t, err)
 	encrypted, err := EncryptEnvelopedData(signedPack, certificate, AES256CBC)
 	require.NoError(t, err)
-	replyDER, err := (PAPKAsRep{EncKeyPack: encrypted}).Marshal()
+	replyDER, err := (PAPKAsRep{DHInfo: nil, EncKeyPack: encrypted}).Marshal()
 	require.NoError(t, err)
 	result, err := exchange.ProcessReply(replyDER, replyKey.KeyType)
 	require.NoError(t, err)
 	require.Equal(t, replyKey, result.ReplyKey)
 }
 
+func testTrustedKDCOptions(identity *Identity, roots *x509.CertPool, mode Mode) ExchangeOptions {
+	var options ExchangeOptions
+	options.Identity = identity
+	options.Mode = mode
+	options.KDCCertificate.Roots = roots
+	options.KDCCertificate.Realm = clientTestRealm
+	return options
+}
+
 func testASRequest(t *testing.T) messages.ASReq {
 	t.Helper()
-	req, err := messages.NewASReqForTGT("EXAMPLE.COM", config.New(), types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice"))
+	principal := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
+	req, err := messages.NewASReqForTGT(clientTestRealm, config.New(), principal)
+	require.NoError(t, err)
+	return req
+}
+
+func beginTestASRequest(t *testing.T, options ExchangeOptions) messages.ASReq {
+	t.Helper()
+	req := testASRequest(t)
+	_, err := BeginExchange(&req, options)
 	require.NoError(t, err)
 	return req
 }
@@ -241,15 +282,17 @@ func testRSAIdentityCertificate(t *testing.T) (*x509.Certificate, *rsa.PrivateKe
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 	now := time.Now()
-	template := &x509.Certificate{
-		SerialNumber: big.NewInt(55), Subject: pkix.Name{CommonName: "Alice"}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
-		ExtraExtensions: []pkix.Extension{
-			{Id: oidExtendedKeyUsage, Value: mustMarshal(t, []asn1.ObjectIdentifier{oidClientAuth})},
-			{Id: oidSubjectAlternativeName, Value: testUPNSAN(t, "alice@EXAMPLE.COM")},
-		},
+	var template x509.Certificate
+	template.SerialNumber = big.NewInt(55)
+	template.Subject.CommonName = "Alice"
+	template.NotBefore = now.Add(-time.Hour)
+	template.NotAfter = now.Add(time.Hour)
+	template.KeyUsage = x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment
+	template.ExtraExtensions = []pkix.Extension{
+		{Id: oidExtendedKeyUsage, Critical: false, Value: mustMarshal(t, []asn1.ObjectIdentifier{oidClientAuth})},
+		{Id: oidSubjectAlternativeName, Critical: false, Value: testUPNSAN(t, "alice@EXAMPLE.COM")},
 	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
 	require.NoError(t, err)
 	certificate, err := x509.ParseCertificate(der)
 	require.NoError(t, err)

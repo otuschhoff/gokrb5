@@ -12,6 +12,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"math/big"
+	"slices"
 	"testing"
 	"time"
 
@@ -25,26 +26,20 @@ type unsupportedPublicKeySigner struct{ crypto.Signer }
 
 func (unsupportedPublicKeySigner) Public() crypto.PublicKey { return struct{}{} }
 
-func mustPKINITTestType[T any](t *testing.T, value any) T {
-	t.Helper()
-	result, ok := value.(T)
-	if !ok {
-		t.Fatalf("unexpected type %T", value)
-	}
-	return result
-}
-
 func TestPEMIdentityAndUPNSelection(t *testing.T) {
-	certificate, key := testClientCertificate(t, "alice@EXAMPLE.COM", oidSmartCardLogon)
+	certificate, key := testClientCertificate(t, "alice@EXAMPLE.COM", smartCardLogonOID())
 	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
 	require.NoError(t, err)
 	identity, err := FromPEM(
-		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Raw}),
-		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), nil,
+		encodeIdentityPEM("CERTIFICATE", certificate.Raw),
+		encodeIdentityPEM("PRIVATE KEY", keyDER),
+		nil,
 	)
 	require.NoError(t, err)
 	identity.KeyTrust = true
-	err = identity.ValidateForPrincipal(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice"), "EXAMPLE.COM", IdentityPolicy{})
+	var policy IdentityPolicy
+	principal := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
+	err = identity.ValidateForPrincipal(principal, "EXAMPLE.COM", policy)
 	require.NoError(t, err)
 	require.Len(t, identity.CertificateChain(), 1)
 }
@@ -54,8 +49,10 @@ func TestIdentityRejectsWrongPrincipalAndEKU(t *testing.T) {
 	identity, err := NewIdentity(certificate, nil, key, true)
 	require.NoError(t, err)
 	principal := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "bob")
-	require.ErrorContains(t, identity.ValidateForPrincipal(principal, "EXAMPLE.COM", IdentityPolicy{}), "lacks")
-	require.ErrorContains(t, identity.ValidateForPrincipal(principal, "EXAMPLE.COM", IdentityPolicy{DisableEKUCheck: true}), "does not identify")
+	var policy IdentityPolicy
+	require.ErrorContains(t, identity.ValidateForPrincipal(principal, "EXAMPLE.COM", policy), "lacks")
+	policy.DisableEKUCheck = true
+	require.ErrorContains(t, identity.ValidateForPrincipal(principal, "EXAMPLE.COM", policy), "does not identify")
 }
 
 func TestIdentityPublicHelpersAndErrors(t *testing.T) {
@@ -76,8 +73,12 @@ func TestIdentityPublicHelpersAndErrors(t *testing.T) {
 	require.ErrorContains(t, err, "does not match")
 
 	principal := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "Alice")
-	require.NoError(t, identity.ValidateForPrincipal(principal, "EXAMPLE.COM", IdentityPolicy{AllowSubjectName: true}))
-	require.ErrorContains(t, identity.ValidateForPrincipal(principal, "EXAMPLE.COM", IdentityPolicy{CurrentTime: certificate.NotAfter.Add(time.Hour)}), "not valid")
+	var policy IdentityPolicy
+	policy.AllowSubjectName = true
+	require.NoError(t, identity.ValidateForPrincipal(principal, "EXAMPLE.COM", policy))
+	policy.AllowSubjectName = false
+	policy.CurrentTime = certificate.NotAfter.Add(time.Hour)
+	require.ErrorContains(t, identity.ValidateForPrincipal(principal, "EXAMPLE.COM", policy), "not valid")
 
 	sid := []byte{1, 4, 0, 0, 0, 0, 0, 5, 21, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 244, 1, 0, 0}
 	formatted, err := formatSID(sid)
@@ -113,29 +114,35 @@ func TestIdentitySignerPublicKeyError(t *testing.T) {
 
 func TestPEMIdentityFormatsAndFailures(t *testing.T) {
 	certificate, key := testClientCertificate(t, "alice@EXAMPLE.COM", oidClientAuth)
-	certificatePEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Raw})
+	certificatePEM := encodeIdentityPEM("CERTIFICATE", certificate.Raw)
 	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
 	require.NoError(t, err)
+	//nolint:staticcheck // Exercise the RFC 1423 import path with a legacy encrypted fixture.
 	encrypted, err := x509.EncryptPEMBlock(rand.Reader, "EC PRIVATE KEY", keyDER, []byte("secret"), x509.PEMCipherAES256)
 	require.NoError(t, err)
 	identity, err := FromPEM(certificatePEM, pem.EncodeToMemory(encrypted), []byte("secret"))
 	require.NoError(t, err)
 	require.NotNil(t, identity.Signer)
 	_, err = FromPEM(certificatePEM, pem.EncodeToMemory(encrypted), []byte("wrong"))
-	require.ErrorContains(t, err, "decrypt PKINIT private key")
+	// Legacy PEM encryption may accept padding with a wrong password and fail later when parsing the key.
+	require.Error(t, err)
 
 	_, err = FromPEM([]byte("not PEM"), nil, nil)
 	require.ErrorContains(t, err, "certificate PEM is missing")
 	_, err = FromPEM(certificatePEM, nil, nil)
 	require.ErrorContains(t, err, "private key PEM is missing")
-	_, err = FromPEM(certificatePEM, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("invalid")}), nil)
+	_, err = FromPEM(certificatePEM, encodeIdentityPEM("PRIVATE KEY", []byte("invalid")), nil)
 	require.ErrorContains(t, err, "unsupported PKINIT private key")
-	_, err = parsePEMCertificates(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte("invalid")}))
+	_, err = parsePEMCertificates(encodeIdentityPEM("CERTIFICATE", []byte("invalid")))
 	require.ErrorContains(t, err, "parse PKINIT certificate")
 
 	otherCertificate, _ := testClientCertificate(t, "other@EXAMPLE.COM", oidClientAuth)
-	_, err = FromPEM(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: otherCertificate.Raw}), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), nil)
+	_, err = FromPEM(encodeIdentityPEM("CERTIFICATE", otherCertificate.Raw), encodeIdentityPEM("PRIVATE KEY", keyDER), nil)
 	require.ErrorContains(t, err, "matching private key was not found")
+}
+
+func encodeIdentityPEM(blockType string, der []byte) []byte {
+	return pem.EncodeToMemory(&pem.Block{Type: blockType, Headers: nil, Bytes: der})
 }
 
 func TestPrivateKeyFormatsAndIdentityPolicies(t *testing.T) {
@@ -143,7 +150,7 @@ func TestPrivateKeyFormatsAndIdentityPolicies(t *testing.T) {
 	require.NoError(t, err)
 	signer, err := parsePrivateKey(x509.MarshalPKCS1PrivateKey(rsaKey))
 	require.NoError(t, err)
-	require.Equal(t, rsaKey.PublicKey, *mustPKINITTestType[*rsa.PublicKey](t, signer.Public()))
+	require.True(t, rsaKey.PublicKey.Equal(signer.Public()))
 
 	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
@@ -156,33 +163,37 @@ func TestPrivateKeyFormatsAndIdentityPolicies(t *testing.T) {
 	identity, err := NewIdentity(certificate, nil, key, false)
 	require.NoError(t, err)
 	principal := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
-	require.ErrorContains(t, identity.ValidateForPrincipal(principal, "EXAMPLE.COM", IdentityPolicy{}), "self-signed")
+	var policy IdentityPolicy
+	require.ErrorContains(t, identity.ValidateForPrincipal(principal, "EXAMPLE.COM", policy), "self-signed")
 	identity.KeyTrust = true
-	require.ErrorContains(t, identity.ValidateForPrincipal(principal, "EXAMPLE.COM", IdentityPolicy{CurrentTime: certificate.NotBefore.Add(-time.Hour)}), "not valid")
+	policy.CurrentTime = certificate.NotBefore.Add(-time.Hour)
+	require.ErrorContains(t, identity.ValidateForPrincipal(principal, "EXAMPLE.COM", policy), "not valid")
 
 	withoutSAN := *certificate
 	withoutSAN.Extensions = append([]pkix.Extension(nil), certificate.Extensions...)
-	for index := len(withoutSAN.Extensions) - 1; index >= 0; index-- {
-		if withoutSAN.Extensions[index].Id.Equal(oidSubjectAlternativeName) {
-			withoutSAN.Extensions = append(withoutSAN.Extensions[:index], withoutSAN.Extensions[index+1:]...)
-		}
-	}
+	withoutSAN.Extensions = slices.DeleteFunc(withoutSAN.Extensions, func(extension pkix.Extension) bool {
+		return extension.Id.Equal(oidSubjectAlternativeName)
+	})
 	identity.Certificate = &withoutSAN
-	require.NoError(t, identity.ValidateForPrincipal(types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "Alice"), "EXAMPLE.COM", IdentityPolicy{AllowSubjectName: true}))
+	policy.CurrentTime = time.Time{}
+	policy.AllowSubjectName = true
+	subjectPrincipal := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "Alice")
+	require.NoError(t, identity.ValidateForPrincipal(subjectPrincipal, "EXAMPLE.COM", policy))
 }
 
 func testClientCertificate(t *testing.T, upn string, eku asn1.ObjectIdentifier) (*x509.Certificate, *ecdsa.PrivateKey) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
-	template := &x509.Certificate{
-		SerialNumber: big.NewInt(7), Subject: pkix.Name{CommonName: "Alice"},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature,
-		ExtraExtensions: []pkix.Extension{
-			{Id: oidExtendedKeyUsage, Value: mustMarshal(t, []asn1.ObjectIdentifier{eku})},
-			{Id: oidSubjectAlternativeName, Value: testUPNSAN(t, upn)},
-		},
+	template := new(x509.Certificate)
+	template.SerialNumber = big.NewInt(7)
+	template.Subject.CommonName = "Alice"
+	template.NotBefore = time.Now().Add(-time.Hour)
+	template.NotAfter = time.Now().Add(time.Hour)
+	template.KeyUsage = x509.KeyUsageDigitalSignature
+	template.ExtraExtensions = []pkix.Extension{
+		{Id: oidExtendedKeyUsage, Critical: false, Value: mustMarshal(t, []asn1.ObjectIdentifier{eku})},
+		{Id: oidSubjectAlternativeName, Critical: false, Value: testUPNSAN(t, upn)},
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	require.NoError(t, err)
@@ -195,14 +206,20 @@ func testUPNSAN(t *testing.T, upn string) []byte {
 	t.Helper()
 	upnDER, err := asn1.MarshalWithParams(upn, "utf8")
 	require.NoError(t, err)
-	typeDER, err := asn1.Marshal(oidUPN)
+	typeDER, err := asn1.Marshal(upnOID())
 	require.NoError(t, err)
-	typeDER = append(typeDER, mustMarshal(t, asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: upnDER})...)
-	otherNameDER := typeDER
-	return mustMarshal(t, asn1.RawValue{Class: asn1.ClassUniversal, Tag: asn1.TagSequence, IsCompound: true, Bytes: mustMarshal(t, asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: otherNameDER})})
+	value := asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: upnDER, FullBytes: nil}
+	typeDER = append(typeDER, mustMarshal(t, value)...)
+	otherName := value
+	otherName.Bytes = typeDER
+	generalNames := asn1.RawValue{
+		Class: asn1.ClassUniversal, Tag: asn1.TagSequence, IsCompound: true,
+		Bytes: mustMarshal(t, otherName), FullBytes: nil,
+	}
+	return mustMarshal(t, generalNames)
 }
 
-func mustMarshal(t *testing.T, value interface{}) []byte {
+func mustMarshal(t *testing.T, value any) []byte {
 	t.Helper()
 	der, err := asn1.Marshal(value)
 	require.NoError(t, err)

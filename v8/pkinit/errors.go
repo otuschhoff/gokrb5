@@ -48,7 +48,10 @@ type KRBError struct {
 	HasNTStatus         bool
 }
 
+// Error describes the PKINIT error kind and the original KRB-ERROR.
 func (err *KRBError) Error() string { return fmt.Sprintf("%v: %v", err.Kind, err.Response) }
+
+// Unwrap returns the PKINIT error kind.
 func (err *KRBError) Unwrap() error { return err.Kind }
 
 // DecodeKRBError maps a PKINIT KRB-ERROR and decodes any RFC typed data.
@@ -57,33 +60,41 @@ func DecodeKRBError(response messages.KRBError) (*KRBError, bool) {
 	if kind == nil {
 		return nil, false
 	}
-	result := &KRBError{Kind: kind, Response: response}
+	var result KRBError
+	result.Kind = kind
+	result.Response = response
 	result.NTStatus, result.HasNTStatus = response.NTStatus()
 	if len(response.EData) == 0 {
-		return result, true
+		return &result, true
 	}
 	var typedData types.TypedDataSequence
 	if err := strictUnmarshal(response.EData, &typedData); err != nil {
-		return result, true
+		return &result, true
 	}
 	for _, item := range typedData {
-		switch item.DataType {
-		case patype.TD_TRUSTED_CERTIFIERS:
-			_ = strictUnmarshal(item.DataValue, &result.TrustedCertifiers)
-		case patype.TD_INVALID_CERTIFICATES:
-			_ = strictUnmarshal(item.DataValue, &result.InvalidCertificates)
-		case patype.TD_DH_PARAMETERS:
-			_ = strictUnmarshal(item.DataValue, &result.DHParameters)
-		case patype.TD_CMS_DIGEST_ALGORITHMS:
-			_ = strictUnmarshal(item.DataValue, &result.CMSDigestAlgorithms)
-		case patype.TD_CERT_DIGEST_ALGORITHMS:
-			var algorithms TDCertDigestAlgorithms
-			if strictUnmarshal(item.DataValue, &algorithms) == nil {
-				result.CertificateDigests = &algorithms
-			}
+		result.decodeTypedData(item)
+	}
+	return &result, true
+}
+
+func (err *KRBError) decodeTypedData(item types.TypedData) {
+	// Typed data is best effort. Keep partially decoded values except for
+	// CertificateDigests, which is set only after a complete decode.
+	switch item.DataType {
+	case patype.TD_TRUSTED_CERTIFIERS:
+		_ = strictUnmarshal(item.DataValue, &err.TrustedCertifiers)
+	case patype.TD_INVALID_CERTIFICATES:
+		_ = strictUnmarshal(item.DataValue, &err.InvalidCertificates)
+	case patype.TD_DH_PARAMETERS:
+		_ = strictUnmarshal(item.DataValue, &err.DHParameters)
+	case patype.TD_CMS_DIGEST_ALGORITHMS:
+		_ = strictUnmarshal(item.DataValue, &err.CMSDigestAlgorithms)
+	case patype.TD_CERT_DIGEST_ALGORITHMS:
+		var algorithms TDCertDigestAlgorithms
+		if strictUnmarshal(item.DataValue, &algorithms) == nil {
+			err.CertificateDigests = &algorithms
 		}
 	}
-	return result, true
 }
 
 func pkinitErrorKind(code int32) error {
@@ -94,8 +105,6 @@ func pkinitErrorKind(code int32) error {
 		return ErrKDCNotTrusted
 	case errorcode.KDC_ERROR_INVALID_SIG:
 		return ErrInvalidSignature
-	case errorcode.KDC_ERR_DH_KEY_PARAMETERS_NOT_ACCEPTED:
-		return ErrDHParametersNotAccepted
 	case errorcode.KDC_ERR_CERTIFICATE_MISMATCH:
 		return ErrCertificateMismatch
 	case errorcode.KDC_ERR_CANT_VERIFY_CERTIFICATE:
@@ -108,14 +117,14 @@ func pkinitErrorKind(code int32) error {
 		return ErrRevocationStatusUnknown
 	case errorcode.KDC_ERR_REVOCATION_STATUS_UNAVAILABLE:
 		return ErrRevocationStatusUnavailable
-	case errorcode.KDC_ERR_CLIENT_NAME_MISMATCH:
-		return ErrClientNameMismatch
-	case errorcode.KDC_ERR_KDC_NAME_MISMATCH:
-		return ErrKDCNameMismatch
-	case errorcode.KDC_ERR_INCONSISTENT_KEY_PURPOSE:
-		return ErrInconsistentKeyPurpose
-	case errorcode.KDC_ERR_DIGEST_IN_CERT_NOT_ACCEPTED:
-		return ErrCertificateDigestRejected
+	}
+	return pkinitReplyErrorKind(code)
+}
+
+func pkinitReplyErrorKind(code int32) error {
+	switch code {
+	case errorcode.KDC_ERR_DH_KEY_PARAMETERS_NOT_ACCEPTED:
+		return ErrDHParametersNotAccepted
 	case errorcode.KDC_ERR_PA_CHECKSUM_MUST_BE_INCLUDED:
 		return ErrPAChecksumRequired
 	case errorcode.KDC_ERR_DIGEST_IN_SIGNED_DATA_NOT_ACCEPTED:
@@ -124,7 +133,20 @@ func pkinitErrorKind(code int32) error {
 		return ErrPublicKeyEncryptionUnsupported
 	case errorcode.KDC_ERR_NO_ACCEPTABLE_KDF:
 		return ErrNoAcceptableKDF
-	default:
-		return nil
 	}
+	return pkinitCertificatePolicyErrorKind(code)
+}
+
+func pkinitCertificatePolicyErrorKind(code int32) error {
+	switch code {
+	case errorcode.KDC_ERR_CLIENT_NAME_MISMATCH:
+		return ErrClientNameMismatch
+	case errorcode.KDC_ERR_KDC_NAME_MISMATCH:
+		return ErrKDCNameMismatch
+	case errorcode.KDC_ERR_INCONSISTENT_KEY_PURPOSE:
+		return ErrInconsistentKeyPurpose
+	case errorcode.KDC_ERR_DIGEST_IN_CERT_NOT_ACCEPTED:
+		return ErrCertificateDigestRejected
+	}
+	return nil
 }

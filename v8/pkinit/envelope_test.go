@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/asn1"
 	"fmt"
 	"math/big"
@@ -67,7 +66,13 @@ func TestEnvelopedDataInvalidIV(t *testing.T) {
 		wantCause  bool
 	}{
 		{name: "not an octet string", parameters: asn1.NullRawValue, wantCause: true},
-		{name: "wrong size", parameters: asn1.RawValue{Tag: asn1.TagOctetString, Bytes: []byte{1}}},
+		{
+			name: "wrong size",
+			parameters: asn1.RawValue{
+				Class: asn1.ClassUniversal, Tag: asn1.TagOctetString, IsCompound: false, Bytes: []byte{1}, FullBytes: nil,
+			},
+			wantCause: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -96,12 +101,13 @@ func testRSARecipient(t *testing.T) (*x509.Certificate, *rsa.PrivateKey) {
 	t.Helper()
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
-	template := &x509.Certificate{
-		SerialNumber: big.NewInt(42), Subject: pkix.Name{CommonName: "PKINIT RSA recipient"},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
-		KeyUsage: x509.KeyUsageKeyEncipherment,
-	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	var template x509.Certificate
+	template.SerialNumber = big.NewInt(42)
+	template.Subject.CommonName = "PKINIT RSA recipient"
+	template.NotBefore = time.Now().Add(-time.Hour)
+	template.NotAfter = time.Now().Add(time.Hour)
+	template.KeyUsage = x509.KeyUsageKeyEncipherment
+	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
 	require.NoError(t, err)
 	certificate, err := x509.ParseCertificate(der)
 	require.NoError(t, err)

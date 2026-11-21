@@ -1,7 +1,6 @@
 package pkinit
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
@@ -14,19 +13,26 @@ import (
 )
 
 func TestDecodeKRBErrorWithDHParameters(t *testing.T) {
-	parameters := TDDHParameters{{Algorithm: OIDDHPublicNumber}}
+	var emptyParameters asn1.RawValue
+	parameters := TDDHParameters{{Algorithm: OIDDHPublicNumber, Parameters: emptyParameters}}
 	parameterDER, err := asn1.Marshal(parameters)
 	require.NoError(t, err)
 	typedDER, err := asn1.Marshal(types.TypedDataSequence{{DataType: patype.TD_DH_PARAMETERS, DataValue: parameterDER}})
 	require.NoError(t, err)
-	decoded, ok := DecodeKRBError(messages.KRBError{ErrorCode: errorcode.KDC_ERR_DH_KEY_PARAMETERS_NOT_ACCEPTED, EData: typedDER})
+	var response messages.KRBError
+	response.ErrorCode = errorcode.KDC_ERR_DH_KEY_PARAMETERS_NOT_ACCEPTED
+	response.EData = typedDER
+	decoded, ok := DecodeKRBError(response)
 	require.True(t, ok)
-	require.True(t, errors.Is(decoded, ErrDHParametersNotAccepted))
+	require.ErrorIs(t, decoded, ErrDHParametersNotAccepted)
+	require.Equal(t, response, decoded.Response)
 	require.Equal(t, parameters, decoded.DHParameters)
 }
 
 func TestDecodeKRBErrorIgnoresNonPKINITCode(t *testing.T) {
-	_, ok := DecodeKRBError(messages.KRBError{ErrorCode: errorcode.KDC_ERR_PREAUTH_REQUIRED})
+	var response messages.KRBError
+	response.ErrorCode = errorcode.KDC_ERR_PREAUTH_REQUIRED
+	_, ok := DecodeKRBError(response)
 	require.False(t, ok)
 }
 
@@ -52,7 +58,10 @@ func TestAllPKINITErrorKinds(t *testing.T) {
 		errorcode.KDC_ERR_NO_ACCEPTABLE_KDF:                   ErrNoAcceptableKDF,
 	}
 	for code, want := range tests {
-		decoded, ok := DecodeKRBError(messages.KRBError{ErrorCode: code, EData: []byte("malformed")})
+		var response messages.KRBError
+		response.ErrorCode = code
+		response.EData = []byte("malformed")
+		decoded, ok := DecodeKRBError(response)
 		require.True(t, ok)
 		require.ErrorIs(t, decoded, want)
 		require.Contains(t, decoded.Error(), want.Error())

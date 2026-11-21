@@ -8,6 +8,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha1" // #nosec G505 -- RFC 4556 fixes the PKAuthenticator request-body digest.
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -22,9 +23,11 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
-var (
-	oidSHA256WithRSA   = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 11}
-	oidECDSAWithSHA256 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2}
+const (
+	defaultMinimumDHBits = 2048
+	clientDHNonceSize    = 32
+	defaultAcceptorSkew  = 5 * time.Minute
+	microsecondsInSecond = int(time.Second / time.Microsecond)
 )
 
 // Mode selects the PKINIT reply-key transport.
@@ -96,7 +99,7 @@ type ExchangeResult struct {
 // BeginExchange adds PA-PK-AS-REQ to req and captures its exact DER encoding.
 func BeginExchange(req *messages.ASReq, options ExchangeOptions) (*Exchange, error) {
 	if req == nil || options.Identity == nil {
-		return nil, fmt.Errorf("PKINIT AS request and identity are required")
+		return nil, errors.New("PKINIT AS request and identity are required")
 	}
 	if options.Random == nil {
 		options.Random = rand.Reader
@@ -104,14 +107,8 @@ func BeginExchange(req *messages.ASReq, options ExchangeOptions) (*Exchange, err
 	if options.CurrentTime.IsZero() {
 		options.CurrentTime = time.Now().UTC()
 	}
-	if options.ValidateIdentity != nil {
-		if err := options.ValidateIdentity(options.Identity, req.ReqBody.CName, req.ReqBody.Realm); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := options.Identity.ValidateForPrincipal(req.ReqBody.CName, req.ReqBody.Realm, options.IdentityPolicy); err != nil {
-			return nil, err
-		}
+	if err := validateExchangeIdentity(&req.ReqBody, &options); err != nil {
+		return nil, err
 	}
 	bodyDER, err := req.ReqBody.Marshal()
 	if err != nil {
@@ -119,84 +116,170 @@ func BeginExchange(req *messages.ASReq, options ExchangeOptions) (*Exchange, err
 	}
 	checksum := sha1.Sum(bodyDER) // #nosec G401 -- RFC 4556 paChecksum inside the signed AuthPack.
 	exchange := &Exchange{
-		options: options, requestBody: bodyDER, nonce: int64(req.ReqBody.Nonce),
-		client: KRB5PrincipalName{Realm: req.ReqBody.Realm, PrincipalName: req.ReqBody.CName},
-		server: KRB5PrincipalName{Realm: req.ReqBody.Realm, PrincipalName: req.ReqBody.SName},
+		options:     options,
+		dhKey:       nil,
+		clientNonce: nil,
+		requestBody: bodyDER,
+		request:     nil,
+		client:      KRB5PrincipalName{Realm: req.ReqBody.Realm, PrincipalName: req.ReqBody.CName},
+		server:      KRB5PrincipalName{Realm: req.ReqBody.Realm, PrincipalName: req.ReqBody.SName},
+		nonce:       int64(req.ReqBody.Nonce),
 	}
-	authPack := AuthPack{PKAuthenticator: PKAuthenticator{
+	var authPack AuthPack
+	authPack.PKAuthenticator = PKAuthenticator{
 		CUSec: options.CurrentTime.Nanosecond() / int(time.Microsecond), CTime: options.CurrentTime,
 		Nonce: exchange.nonce, PAChecksum: checksum[:], FreshnessToken: append([]byte(nil), options.FreshnessToken...),
-	}}
+	}
+	if err := exchange.prepareAuthPack(&authPack); err != nil {
+		return nil, err
+	}
+	if err := exchange.addRequestPAData(req, &authPack); err != nil {
+		return nil, err
+	}
+	return exchange, nil
+}
+
+// ProcessReply authenticates PA-PK-AS-REP and derives its AS reply key.
+func (exchange *Exchange) ProcessReply(paValue []byte, replyEType int32) (*ExchangeResult, error) {
+	if exchange == nil {
+		return nil, errors.New("PKINIT exchange is nil")
+	}
+	var reply PAPKAsRep
+	if err := reply.Unmarshal(paValue); err != nil {
+		return nil, fmt.Errorf("decode PA-PK-AS-REP: %w", err)
+	}
+	if reply.DHInfo != nil {
+		return exchange.processDHReply(reply.DHInfo, paValue, replyEType)
+	}
+	return exchange.processRSAReply(reply.EncKeyPack)
+}
+
+func validateExchangeIdentity(body *messages.KDCReqBody, options *ExchangeOptions) error {
+	if options.ValidateIdentity != nil {
+		return options.ValidateIdentity(options.Identity, body.CName, body.Realm)
+	}
+	return options.Identity.ValidateForPrincipal(body.CName, body.Realm, options.IdentityPolicy)
+}
+
+func (exchange *Exchange) prepareAuthPack(authPack *AuthPack) error {
+	options := &exchange.options
 	switch options.Mode {
 	case ModeDH:
-		group := options.DHGroup
-		if group == 0 {
-			group = MODPGroup14
+		if err := exchange.addClientDH(authPack); err != nil {
+			return err
 		}
-		minimumBits := options.MinimumDHBits
-		if minimumBits == 0 {
-			minimumBits = 2048
-		}
-		exchange.dhKey, err = GenerateDHKey(group, minimumBits, options.Random)
-		if err != nil {
-			return nil, err
-		}
-		publicKey, perr := exchange.dhKey.PublicKey()
-		if perr != nil {
-			return nil, perr
-		}
-		exchange.clientNonce = make([]byte, 32)
-		if _, rerr := io.ReadFull(options.Random, exchange.clientNonce); rerr != nil {
-			return nil, fmt.Errorf("generate PKINIT client DH nonce: %w", rerr)
-		}
-		authPack.ClientPublicValue = &publicKey
-		authPack.ClientDHNonce = append([]byte(nil), exchange.clientNonce...)
 	case ModeRSA:
 	default:
-		return nil, fmt.Errorf("unsupported PKINIT mode %d", options.Mode)
+		return fmt.Errorf("unsupported PKINIT mode %d", options.Mode)
 	}
+	var cmsType AlgorithmIdentifier
 	switch options.Identity.Signer.Public().(type) {
 	case *rsa.PublicKey:
-		authPack.SupportedCMSTypes = []AlgorithmIdentifier{{Algorithm: oidSHA256WithRSA}}
+		cmsType.Algorithm = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 11} // sha256WithRSAEncryption
 	case *ecdsa.PublicKey:
-		authPack.SupportedCMSTypes = []AlgorithmIdentifier{{Algorithm: oidECDSAWithSHA256}}
+		cmsType.Algorithm = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2} // ecdsa-with-SHA256
 	default:
-		return nil, fmt.Errorf("unsupported PKINIT signing key type %T", options.Identity.Signer.Public())
+		return fmt.Errorf("unsupported PKINIT signing key type %T", options.Identity.Signer.Public())
 	}
+	authPack.SupportedCMSTypes = []AlgorithmIdentifier{cmsType}
 	if options.SupportedKDFs == nil {
 		authPack.SupportedKDFs = []KDFAlgorithmID{{ID: OIDKDFSHA512}, {ID: OIDKDFSHA384}, {ID: OIDKDFSHA256}}
 	} else {
 		authPack.SupportedKDFs = append([]KDFAlgorithmID(nil), options.SupportedKDFs...)
 	}
+	return nil
+}
+
+func (exchange *Exchange) addClientDH(authPack *AuthPack) error {
+	options := &exchange.options
+	group := options.DHGroup
+	if group == 0 {
+		group = MODPGroup14
+	}
+	minimumBits := options.MinimumDHBits
+	if minimumBits == 0 {
+		minimumBits = defaultMinimumDHBits
+	}
+	dhKey, err := GenerateDHKey(group, minimumBits, options.Random)
+	if err != nil {
+		return err
+	}
+	exchange.dhKey = dhKey
+	publicKey, err := dhKey.PublicKey()
+	if err != nil {
+		return err
+	}
+	exchange.clientNonce = make([]byte, clientDHNonceSize)
+	if _, err := io.ReadFull(options.Random, exchange.clientNonce); err != nil {
+		return fmt.Errorf("generate PKINIT client DH nonce: %w", err)
+	}
+	authPack.ClientPublicValue = &publicKey
+	authPack.ClientDHNonce = append([]byte(nil), exchange.clientNonce...)
+	return nil
+}
+
+func (exchange *Exchange) addRequestPAData(req *messages.ASReq, authPack *AuthPack) error {
+	options := &exchange.options
 	authPackDER, err := authPack.Marshal()
 	if err != nil {
-		return nil, fmt.Errorf("marshal PKINIT AuthPack: %w", err)
+		return fmt.Errorf("marshal PKINIT AuthPack: %w", err)
 	}
-	signedAuthPack, err := SignSignedData(OIDPKINITAuthData, authPackDER, options.Identity.CertificateChain(), options.Identity.Signer)
+	signedAuthPack, err := SignSignedData(
+		OIDPKINITAuthData,
+		authPackDER,
+		options.Identity.CertificateChain(),
+		options.Identity.Signer,
+	)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	pkRequestDER, err := (PAPKAsReq{SignedAuthPack: signedAuthPack}).Marshal()
+	pkRequestDER, err := (PAPKAsReq{SignedAuthPack: signedAuthPack, TrustedCertifiers: nil, KDCPkID: nil}).Marshal()
 	if err != nil {
-		return nil, fmt.Errorf("marshal PA-PK-AS-REQ: %w", err)
+		return fmt.Errorf("marshal PA-PK-AS-REQ: %w", err)
 	}
 	req.PAData = append(req.PAData, types.PAData{PADataType: patype.PA_PK_AS_REQ, PADataValue: pkRequestDER})
 	if len(options.OCSPResponse) > 0 {
-		req.PAData = append(req.PAData, types.PAData{PADataType: patype.PA_PK_OCSP_RESPONSE, PADataValue: append([]byte(nil), options.OCSPResponse...)})
+		req.PAData = append(req.PAData, types.PAData{
+			PADataType:  patype.PA_PK_OCSP_RESPONSE,
+			PADataValue: append([]byte(nil), options.OCSPResponse...),
+		})
 	}
 	exchange.request, err = req.Marshal()
 	if err != nil {
-		return nil, fmt.Errorf("marshal PKINIT AS request: %w", err)
+		return fmt.Errorf("marshal PKINIT AS request: %w", err)
 	}
-	return exchange, nil
+	return nil
 }
 
 // AcceptExchange verifies a DH PA-PK-AS-REQ and creates the corresponding
 // signed PA-PK-AS-REP. Certificate trust is supplied by ValidateSigner.
 func AcceptExchange(req *messages.ASReq, options AcceptorOptions) (*AcceptorResult, error) {
 	if req == nil || options.Identity == nil || options.ValidateSigner == nil {
-		return nil, fmt.Errorf("PKINIT AS request, acceptor identity, and signer validator are required")
+		return nil, errors.New("PKINIT AS request, acceptor identity, and signer validator are required")
 	}
+	options.setDefaults()
+	if options.ClockSkew < 0 {
+		return nil, errors.New("PKINIT clock skew must not be negative")
+	}
+	paValue, err := pkinitRequestPAData(req.PAData)
+	if err != nil {
+		return nil, err
+	}
+	authPack, signed, err := verifyPKINITAuthPack(paValue, options.ValidateSigner)
+	if err != nil {
+		return nil, err
+	}
+	if err = validatePKINITAuthPack(&authPack, &req.ReqBody, &options); err != nil {
+		return nil, err
+	}
+	replyPAData, replyKey, err := buildPKINITDHReply(req, &authPack, &options)
+	if err != nil {
+		return nil, err
+	}
+	return &AcceptorResult{ReplyPAData: replyPAData, ReplyKey: replyKey, Signer: signed.Signer, AuthPack: authPack}, nil
+}
+
+func (options *AcceptorOptions) setDefaults() {
 	if options.Random == nil {
 		options.Random = rand.Reader
 	}
@@ -204,108 +287,143 @@ func AcceptExchange(req *messages.ASReq, options AcceptorOptions) (*AcceptorResu
 		options.CurrentTime = time.Now().UTC()
 	}
 	if options.ClockSkew == 0 {
-		options.ClockSkew = 5 * time.Minute
+		options.ClockSkew = defaultAcceptorSkew
 	}
-	if options.ClockSkew < 0 {
-		return nil, fmt.Errorf("PKINIT clock skew must not be negative")
-	}
+}
+
+func pkinitRequestPAData(paData types.PADataSequence) ([]byte, error) {
 	var paValue []byte
-	for _, pa := range req.PAData {
+	for _, pa := range paData {
 		if pa.PADataType != patype.PA_PK_AS_REQ {
 			continue
 		}
 		if paValue != nil {
-			return nil, fmt.Errorf("PKINIT AS request contains duplicate PA-PK-AS-REQ values")
+			return nil, errors.New("PKINIT AS request contains duplicate PA-PK-AS-REQ values")
 		}
 		paValue = pa.PADataValue
 	}
 	if paValue == nil {
-		return nil, fmt.Errorf("PKINIT AS request is missing PA-PK-AS-REQ")
+		return nil, errors.New("PKINIT AS request is missing PA-PK-AS-REQ")
 	}
+	return paValue, nil
+}
+
+func verifyPKINITAuthPack(
+	paValue []byte,
+	validateSigner func(*VerifiedSignedData) error,
+) (AuthPack, *VerifiedSignedData, error) {
 	var request PAPKAsReq
+	var authPack AuthPack
 	if err := request.Unmarshal(paValue); err != nil {
-		return nil, fmt.Errorf("decode PA-PK-AS-REQ: %w", err)
+		return authPack, nil, fmt.Errorf("decode PA-PK-AS-REQ: %w", err)
 	}
 	signed, err := VerifySignedData(request.SignedAuthPack, OIDPKINITAuthData)
 	if err != nil {
-		return nil, err
+		return authPack, nil, err
 	}
-	if ierr := options.ValidateSigner(signed); ierr != nil {
-		return nil, ierr
+	if err := validateSigner(signed); err != nil {
+		return authPack, nil, err
 	}
-	var authPack AuthPack
-	if ierr := authPack.Unmarshal(signed.Content); ierr != nil {
-		return nil, fmt.Errorf("decode PKINIT AuthPack: %w", ierr)
+	if err := authPack.Unmarshal(signed.Content); err != nil {
+		return authPack, nil, fmt.Errorf("decode PKINIT AuthPack: %w", err)
 	}
+	return authPack, signed, nil
+}
+
+func validatePKINITAuthPack(authPack *AuthPack, body *messages.KDCReqBody, options *AcceptorOptions) error {
 	if authPack.ClientPublicValue == nil {
-		return nil, fmt.Errorf("PKINIT acceptor requires Diffie-Hellman key agreement")
+		return errors.New("PKINIT acceptor requires Diffie-Hellman key agreement")
 	}
-	if authPack.PKAuthenticator.CUSec < 0 || authPack.PKAuthenticator.CUSec >= 1000000 {
-		return nil, fmt.Errorf("PKINIT authenticator microseconds are invalid")
+	auth := &authPack.PKAuthenticator
+	if auth.CUSec < 0 || auth.CUSec >= microsecondsInSecond {
+		return errors.New("PKINIT authenticator microseconds are invalid")
 	}
-	authenticatorTime := authPack.PKAuthenticator.CTime.Add(time.Duration(authPack.PKAuthenticator.CUSec) * time.Microsecond)
+	authenticatorTime := auth.CTime.Add(time.Duration(auth.CUSec) * time.Microsecond)
 	delta := options.CurrentTime.Sub(authenticatorTime)
 	if delta < -options.ClockSkew || delta > options.ClockSkew {
-		return nil, fmt.Errorf("PKINIT authenticator time exceeds permitted clock skew")
+		return errors.New("PKINIT authenticator time exceeds permitted clock skew")
 	}
-	bodyDER, err := req.ReqBody.Marshal()
+	bodyDER, err := body.Marshal()
 	if err != nil {
-		return nil, fmt.Errorf("marshal PKINIT KDC request body: %w", err)
+		return fmt.Errorf("marshal PKINIT KDC request body: %w", err)
 	}
 	checksum := sha1.Sum(bodyDER) // #nosec G401 -- verify the RFC 4556 paChecksum in the signed AuthPack.
-	if !bytes.Equal(checksum[:], authPack.PKAuthenticator.PAChecksum) || authPack.PKAuthenticator.Nonce != int64(req.ReqBody.Nonce) {
-		return nil, fmt.Errorf("PKINIT AuthPack does not bind the KDC request")
+	if !bytes.Equal(checksum[:], auth.PAChecksum) || auth.Nonce != int64(body.Nonce) {
+		return errors.New("PKINIT AuthPack does not bind the KDC request")
 	}
+	return nil
+}
+
+func buildPKINITDHReply(
+	req *messages.ASReq,
+	authPack *AuthPack,
+	options *AcceptorOptions,
+) ([]byte, types.EncryptionKey, error) {
+	var replyKey types.EncryptionKey
 	minimumBits := options.MinimumDHBits
 	if minimumBits == 0 {
-		minimumBits = 2048
+		minimumBits = defaultMinimumDHBits
 	}
 	serverKey, err := GenerateDHKeyForPeer(*authPack.ClientPublicValue, minimumBits, options.Random)
 	if err != nil {
-		return nil, err
+		return nil, replyKey, err
 	}
 	secret, err := serverKey.SharedSecret(*authPack.ClientPublicValue)
 	if err != nil {
-		return nil, err
+		return nil, replyKey, err
 	}
-	etypeID, err := selectPKINITReplyEType(req.ReqBody.EType)
+	replyEType, err := selectPKINITReplyEType(req.ReqBody.EType)
 	if err != nil {
-		return nil, err
+		return nil, replyKey, err
 	}
 	kdf, err := selectPKINITKDF(authPack.SupportedKDFs)
 	if err != nil {
-		return nil, err
+		return nil, replyKey, err
 	}
+	replyPAData, err := marshalPKINITDHReply(serverKey, int64(req.ReqBody.Nonce), &kdf, options.Identity)
+	if err != nil {
+		return nil, replyKey, err
+	}
+	requestDER, err := req.Marshal()
+	if err != nil {
+		return nil, replyKey, fmt.Errorf("marshal PKINIT AS request: %w", err)
+	}
+	replyKey, err = DeriveReplyKey(
+		kdf,
+		secret,
+		KRB5PrincipalName{Realm: req.ReqBody.Realm, PrincipalName: req.ReqBody.CName},
+		KRB5PrincipalName{Realm: req.ReqBody.Realm, PrincipalName: req.ReqBody.SName},
+		requestDER,
+		replyPAData,
+		replyEType,
+	)
+	if err != nil {
+		return nil, replyKey, err
+	}
+	return replyPAData, replyKey, nil
+}
+
+func marshalPKINITDHReply(serverKey *DHKey, nonce int64, kdf *KDFAlgorithmID, identity *Identity) ([]byte, error) {
 	serverPublic, err := serverKey.PublicKey()
 	if err != nil {
 		return nil, err
 	}
-	keyInfoDER, err := (KDCDHKeyInfo{SubjectPublicKey: serverPublic.SubjectPublicKey, Nonce: int64(req.ReqBody.Nonce)}).Marshal()
+	keyInfoDER, err := (KDCDHKeyInfo{
+		SubjectPublicKey: serverPublic.SubjectPublicKey,
+		Nonce:            nonce,
+		DHKeyExpiration:  time.Time{},
+	}).Marshal()
 	if err != nil {
 		return nil, err
 	}
-	signedKeyInfo, err := SignSignedData(OIDPKINITDHKeyData, keyInfoDER, options.Identity.CertificateChain(), options.Identity.Signer)
+	signedKeyInfo, err := SignSignedData(OIDPKINITDHKeyData, keyInfoDER, identity.CertificateChain(), identity.Signer)
 	if err != nil {
 		return nil, err
 	}
-	replyPAData, err := (PAPKAsRep{DHInfo: &DHRepInfo{DHSignedData: signedKeyInfo, KDF: &kdf}}).Marshal()
-	if err != nil {
-		return nil, err
-	}
-	requestDER, err := req.Marshal()
-	if err != nil {
-		return nil, fmt.Errorf("marshal PKINIT AS request: %w", err)
-	}
-	replyKey, err := DeriveReplyKey(
-		kdf, secret,
-		KRB5PrincipalName{Realm: req.ReqBody.Realm, PrincipalName: req.ReqBody.CName},
-		KRB5PrincipalName{Realm: req.ReqBody.Realm, PrincipalName: req.ReqBody.SName},
-		requestDER, replyPAData, etypeID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return &AcceptorResult{ReplyPAData: replyPAData, ReplyKey: replyKey, Signer: signed.Signer, AuthPack: authPack}, nil
+	return (PAPKAsRep{
+		DHInfo:     &DHRepInfo{DHSignedData: signedKeyInfo, ServerDHNonce: nil, KDF: kdf},
+		EncKeyPack: nil,
+	}).Marshal()
 }
 
 func selectPKINITReplyEType(offered []int32) (int32, error) {
@@ -318,7 +436,7 @@ func selectPKINITReplyEType(offered []int32) (int32, error) {
 			return candidate, nil
 		}
 	}
-	return 0, fmt.Errorf("PKINIT request offers no supported AES encryption type")
+	return 0, errors.New("PKINIT request offers no supported AES encryption type")
 }
 
 func selectPKINITKDF(offered []KDFAlgorithmID) (KDFAlgorithmID, error) {
@@ -329,63 +447,35 @@ func selectPKINITKDF(offered []KDFAlgorithmID) (KDFAlgorithmID, error) {
 			}
 		}
 	}
-	return KDFAlgorithmID{}, fmt.Errorf("PKINIT request offers no supported KDF")
-}
-
-// ProcessReply authenticates PA-PK-AS-REP and derives its AS reply key.
-func (exchange *Exchange) ProcessReply(paValue []byte, replyEType int32) (*ExchangeResult, error) {
-	if exchange == nil {
-		return nil, fmt.Errorf("PKINIT exchange is nil")
-	}
-	var reply PAPKAsRep
-	if err := reply.Unmarshal(paValue); err != nil {
-		return nil, fmt.Errorf("decode PA-PK-AS-REP: %w", err)
-	}
-	if reply.DHInfo != nil {
-		return exchange.processDHReply(reply.DHInfo, paValue, replyEType)
-	}
-	return exchange.processRSAReply(reply.EncKeyPack)
+	return KDFAlgorithmID{}, errors.New("PKINIT request offers no supported KDF")
 }
 
 func (exchange *Exchange) processDHReply(reply *DHRepInfo, paValue []byte, replyEType int32) (*ExchangeResult, error) {
 	if exchange.dhKey == nil {
-		return nil, fmt.Errorf("KDC returned a DH reply to an RSA PKINIT request")
+		return nil, errors.New("KDC returned a DH reply to an RSA PKINIT request")
 	}
 	signed, err := VerifySignedData(reply.DHSignedData, OIDPKINITDHKeyData)
 	if err != nil {
 		return nil, err
 	}
-	if exchange.options.ValidateKDCSigner != nil {
-		if ierr := exchange.options.ValidateKDCSigner(signed); ierr != nil {
-			return nil, ierr
-		}
-	} else {
-		if _, ierr := ValidateKDCCertificate(signed, exchange.options.KDCCertificate); ierr != nil {
-			return nil, ierr
-		}
+	if err = exchange.validateDHKDCSigner(signed); err != nil {
+		return nil, err
 	}
 	var keyInfo KDCDHKeyInfo
 	if ierr := keyInfo.Unmarshal(signed.Content); ierr != nil {
 		return nil, fmt.Errorf("decode PKINIT KDC DH key info: %w", ierr)
 	}
-	if keyInfo.DHKeyExpiration.IsZero() {
-		if keyInfo.Nonce != exchange.nonce || len(reply.ServerDHNonce) != 0 {
-			return nil, fmt.Errorf("PKINIT ephemeral KDC DH key has inconsistent nonce or expiration fields")
-		}
-	} else {
-		if keyInfo.Nonce != 0 || !keyInfo.DHKeyExpiration.After(exchange.options.CurrentTime) {
-			return nil, fmt.Errorf("PKINIT reused KDC DH key has an invalid nonce or expiration")
-		}
-		et, kerr := krbcrypto.GetEtype(replyEType)
-		if kerr != nil || len(reply.ServerDHNonce) < et.GetKeyByteSize() {
-			return nil, fmt.Errorf("PKINIT reused KDC DH key has an insufficient server nonce")
-		}
+	if err = exchange.validateDHKeyInfo(&keyInfo, reply.ServerDHNonce, replyEType); err != nil {
+		return nil, err
 	}
 	clientPublic, err := exchange.dhKey.PublicKey()
 	if err != nil {
 		return nil, err
 	}
-	secret, err := exchange.dhKey.SharedSecret(SubjectPublicKeyInfo{Algorithm: clientPublic.Algorithm, SubjectPublicKey: keyInfo.SubjectPublicKey})
+	secret, err := exchange.dhKey.SharedSecret(SubjectPublicKeyInfo{
+		Algorithm:        clientPublic.Algorithm,
+		SubjectPublicKey: keyInfo.SubjectPublicKey,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +483,15 @@ func (exchange *Exchange) processDHReply(reply *DHRepInfo, paValue []byte, reply
 	if reply.KDF == nil {
 		replyKey, err = DeriveLegacyReplyKey(secret, exchange.clientNonce, reply.ServerDHNonce, replyEType)
 	} else {
-		replyKey, err = DeriveReplyKey(*reply.KDF, secret, exchange.client, exchange.server, exchange.request, paValue, replyEType)
+		replyKey, err = DeriveReplyKey(
+			*reply.KDF,
+			secret,
+			exchange.client,
+			exchange.server,
+			exchange.request,
+			paValue,
+			replyEType,
+		)
 	}
 	if err != nil {
 		return nil, err
@@ -401,13 +499,38 @@ func (exchange *Exchange) processDHReply(reply *DHRepInfo, paValue []byte, reply
 	return &ExchangeResult{ReplyKey: replyKey, KDCSigner: signed.Signer, DHKeyExpiration: keyInfo.DHKeyExpiration}, nil
 }
 
+func (exchange *Exchange) validateDHKDCSigner(signed *VerifiedSignedData) error {
+	if exchange.options.ValidateKDCSigner != nil {
+		return exchange.options.ValidateKDCSigner(signed)
+	}
+	_, err := ValidateKDCCertificate(signed, exchange.options.KDCCertificate)
+	return err
+}
+
+func (exchange *Exchange) validateDHKeyInfo(keyInfo *KDCDHKeyInfo, serverNonce []byte, replyEType int32) error {
+	if keyInfo.DHKeyExpiration.IsZero() {
+		if keyInfo.Nonce != exchange.nonce || len(serverNonce) != 0 {
+			return errors.New("PKINIT ephemeral KDC DH key has inconsistent nonce or expiration fields")
+		}
+		return nil
+	}
+	if keyInfo.Nonce != 0 || !keyInfo.DHKeyExpiration.After(exchange.options.CurrentTime) {
+		return errors.New("PKINIT reused KDC DH key has an invalid nonce or expiration")
+	}
+	et, err := krbcrypto.GetEtype(replyEType)
+	if err != nil || len(serverNonce) < et.GetKeyByteSize() {
+		return errors.New("PKINIT reused KDC DH key has an insufficient server nonce")
+	}
+	return nil
+}
+
 func (exchange *Exchange) processRSAReply(encrypted []byte) (*ExchangeResult, error) {
 	if exchange.dhKey != nil {
-		return nil, fmt.Errorf("KDC returned an RSA reply to a DH PKINIT request")
+		return nil, errors.New("KDC returned an RSA reply to a DH PKINIT request")
 	}
 	decrypter, ok := exchange.options.Identity.Signer.(crypto.Decrypter)
 	if !ok {
-		return nil, fmt.Errorf("PKINIT RSA identity does not support decryption")
+		return nil, errors.New("PKINIT RSA identity does not support decryption")
 	}
 	plaintext, err := DecryptEnvelopedData(encrypted, exchange.options.Identity.Certificate, decrypter)
 	if err != nil {
@@ -426,10 +549,15 @@ func (exchange *Exchange) processRSAReply(encrypted []byte) (*ExchangeResult, er
 	}
 	checksumType, err := krbcrypto.GetChksumEtype(pack.ASChecksum.CksumType)
 	if err != nil || checksumType.GetETypeID() != pack.ReplyKey.KeyType {
-		return nil, fmt.Errorf("PKINIT ReplyKeyPack checksum type does not match reply key")
+		return nil, errors.New("PKINIT ReplyKeyPack checksum type does not match reply key")
 	}
-	if !checksumType.VerifyChecksum(pack.ReplyKey.KeyValue, exchange.request, pack.ASChecksum.Checksum, keyusage.TGS_REQ_PA_TGS_REQ_AP_REQ_AUTHENTICATOR_CHKSUM) {
-		return nil, fmt.Errorf("PKINIT ReplyKeyPack request checksum is invalid")
+	if !checksumType.VerifyChecksum(
+		pack.ReplyKey.KeyValue,
+		exchange.request,
+		pack.ASChecksum.Checksum,
+		keyusage.TGS_REQ_PA_TGS_REQ_AP_REQ_AUTHENTICATOR_CHKSUM,
+	) {
+		return nil, errors.New("PKINIT ReplyKeyPack request checksum is invalid")
 	}
-	return &ExchangeResult{ReplyKey: pack.ReplyKey, KDCSigner: signed.Signer}, nil
+	return &ExchangeResult{ReplyKey: pack.ReplyKey, KDCSigner: signed.Signer, DHKeyExpiration: time.Time{}}, nil
 }

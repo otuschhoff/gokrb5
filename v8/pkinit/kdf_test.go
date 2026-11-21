@@ -37,7 +37,14 @@ func TestDeriveLegacyReplyKeyRFC4556Set1(t *testing.T) {
 }
 
 func TestDeriveReplyKeyRejectsUnknownKDF(t *testing.T) {
-	_, err := DeriveReplyKey(KDFAlgorithmID{ID: []int{1, 2, 3}}, nil, KRB5PrincipalName{}, KRB5PrincipalName{}, nil, nil, etypeID.AES256_CTS_HMAC_SHA1_96)
+	var principal KRB5PrincipalName
+	_, err := DeriveReplyKey(
+		KDFAlgorithmID{ID: []int{1, 2, 3}},
+		nil,
+		principal, principal,
+		nil, nil,
+		etypeID.AES256_CTS_HMAC_SHA1_96,
+	)
 	require.ErrorContains(t, err, "unsupported PKINIT KDF OID")
 }
 

@@ -3,7 +3,11 @@ package pku2u
 import "testing"
 
 func FuzzTrustedCertifiersUnmarshal(f *testing.F) {
-	seed, err := (TrustedCertifiers{{SubjectName: []byte{1, 2, 3}}}).Marshal()
+	seed, err := (TrustedCertifiers{{
+		SubjectName:          []byte{1, 2, 3},
+		IssuerAndSerial:      nil,
+		SubjectKeyIdentifier: nil,
+	}}).Marshal()
 	if err != nil {
 		f.Fatal(err)
 	}

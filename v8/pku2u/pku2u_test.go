@@ -33,6 +33,11 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+const (
+	testServiceHost   = "server.example.com"
+	testServiceTarget = "host/" + testServiceHost
+)
+
 func requirePKU2UError[E error](t *testing.T, err error, prefix string) {
 	t.Helper()
 	_, hasCause := errors.AsType[E](err)
@@ -45,7 +50,7 @@ func requirePKU2UError[E error](t *testing.T, err error, prefix string) {
 func TestASExchangeIssuesSelfTicket(t *testing.T) {
 	root, rootKey := newPKU2URoot(t)
 	clientCertificate, clientKey := newPKU2ULeaf(t, root, rootKey, "Alice", nil, upnSAN(t, "alice@example.com"))
-	serverCertificate, serverKey := newPKU2ULeaf(t, root, rootKey, "Server", []string{"server.example.com"}, nil)
+	serverCertificate, serverKey := newPKU2ULeaf(t, root, rootKey, "Server", []string{testServiceHost}, nil)
 	clientIdentity, err := pkinit.NewIdentity(clientCertificate, []*x509.Certificate{root}, clientKey, false)
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +64,7 @@ func TestASExchangeIssuesSelfTicket(t *testing.T) {
 	clientSettings := newSettings(clientIdentity, anchors, nil)
 	serverSettings := newSettings(serverIdentity, anchors, nil)
 
-	requestDER, clientState, err := beginASExchange(clientSettings, "host/server.example.com")
+	requestDER, clientState, err := beginASExchange(clientSettings, testServiceTarget)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,53 +117,44 @@ func requireTicketNames(t *testing.T, ticket *messages.Ticket, requested *messag
 	}
 }
 
-func TestASExchangeRejectsPolicyViolations(t *testing.T) {
+func newExchangeTestIdentities(t *testing.T) (*pkinit.Identity, *pkinit.Identity, *x509.CertPool) {
+	t.Helper()
 	root, rootKey := newPKU2URoot(t)
 	clientCertificate, clientKey := newPKU2ULeaf(t, root, rootKey, "Alice", nil, upnSAN(t, "alice@example.com"))
-	serverCertificate, serverKey := newPKU2ULeaf(t, root, rootKey, "Server", []string{"server.example.com"}, nil)
-	clientIdentity, _ := pkinit.NewIdentity(clientCertificate, []*x509.Certificate{root}, clientKey, false)
-	serverIdentity, _ := pkinit.NewIdentity(serverCertificate, []*x509.Certificate{root}, serverKey, false)
+	serverCertificate, serverKey := newPKU2ULeaf(t, root, rootKey, "Server", []string{testServiceHost}, nil)
+	clientIdentity, err := pkinit.NewIdentity(clientCertificate, []*x509.Certificate{root}, clientKey, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverIdentity, err := pkinit.NewIdentity(serverCertificate, []*x509.Certificate{root}, serverKey, false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	anchors := x509.NewCertPool()
 	anchors.AddCert(root)
+	return clientIdentity, serverIdentity, anchors
+}
+
+func TestASExchangeRejectsInvalidTarget(t *testing.T) {
+	clientIdentity, serverIdentity, anchors := newExchangeTestIdentities(t)
 	clientSettings := newSettings(clientIdentity, anchors, nil)
 	serverSettings := newSettings(serverIdentity, anchors, nil)
-	request := func(t *testing.T, target string) ([]byte, *initiatorASState) {
-		t.Helper()
-		encoded, state, err := beginASExchange(clientSettings, target)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return encoded, state
-	}
-	mutate := func(t *testing.T, encoded []byte, change func(*messages.ASReq)) []byte {
-		t.Helper()
-		var decoded messages.ASReq
-		if err := decoded.Unmarshal(encoded); err != nil {
-			t.Fatal(err)
-		}
-		change(&decoded)
-		encoded, err := decoded.Marshal()
-		if err != nil {
-			t.Fatal(err)
-		}
-		return encoded
-	}
 
 	t.Run("wrong realm", func(t *testing.T) {
-		encoded, _ := request(t, "host/server.example.com")
-		encoded = mutate(t, encoded, func(request *messages.ASReq) { request.ReqBody.Realm = "EXAMPLE.COM" })
+		encoded := makeASRequest(t, clientSettings, testServiceTarget)
+		encoded = changeASRequest(t, encoded, func(request *messages.ASReq) { request.ReqBody.Realm = "EXAMPLE.COM" })
 		if _, _, err := acceptASExchange(encoded, serverSettings); err == nil {
 			t.Fatal("accepted a PKU2U request for another realm")
 		}
 	})
 	t.Run("wrong service certificate", func(t *testing.T) {
-		encoded, _ := request(t, "host/other.example.com")
+		encoded := makeASRequest(t, clientSettings, "host/other.example.com")
 		if _, _, err := acceptASExchange(encoded, serverSettings); err == nil {
 			t.Fatal("accepted a request targeting another service")
 		}
 	})
 	t.Run("missing acceptor identity", func(t *testing.T) {
-		encoded, _ := request(t, "host/server.example.com")
+		encoded := makeASRequest(t, clientSettings, testServiceTarget)
 		acceptor := NewAcceptor(nil, anchors)
 		output, context, done, err := acceptor.AcceptSecContext(encoded)
 		if err == nil || !strings.Contains(err.Error(), "PKU2U acceptor identity is required") {
@@ -168,9 +164,39 @@ func TestASExchangeRejectsPolicyViolations(t *testing.T) {
 			t.Fatal("acceptor advanced without a local identity")
 		}
 	})
+}
+
+func makeASRequest(t *testing.T, clientSettings settings, target string) []byte {
+	t.Helper()
+	encoded, _, err := beginASExchange(clientSettings, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
+}
+
+func changeASRequest(t *testing.T, encoded []byte, change func(*messages.ASReq)) []byte {
+	t.Helper()
+	var decoded messages.ASReq
+	if err := decoded.Unmarshal(encoded); err != nil {
+		t.Fatal(err)
+	}
+	change(&decoded)
+	encoded, err := decoded.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
+}
+
+func TestASExchangeRejectsInvalidPACRequests(t *testing.T) {
+	clientIdentity, serverIdentity, anchors := newExchangeTestIdentities(t)
+	clientSettings := newSettings(clientIdentity, anchors, nil)
+	serverSettings := newSettings(serverIdentity, anchors, nil)
+
 	t.Run("malformed PAC request", func(t *testing.T) {
-		encoded, _ := request(t, "host/server.example.com")
-		encoded = mutate(t, encoded, func(request *messages.ASReq) {
+		encoded := makeASRequest(t, clientSettings, testServiceTarget)
+		encoded = changeASRequest(t, encoded, func(request *messages.ASReq) {
 			for index := range request.PAData {
 				if request.PAData[index].PADataType == patype.PA_PAC_REQUEST {
 					request.PAData[index].PADataValue = []byte{0x30}
@@ -181,8 +207,8 @@ func TestASExchangeRejectsPolicyViolations(t *testing.T) {
 		requirePKU2UError[asn1.SyntaxError](t, err, "decode PKU2U PA-PAC-REQUEST:")
 	})
 	t.Run("missing PAC suppression", func(t *testing.T) {
-		encoded, _ := request(t, "host/server.example.com")
-		encoded = mutate(t, encoded, func(request *messages.ASReq) {
+		encoded := makeASRequest(t, clientSettings, testServiceTarget)
+		encoded = changeASRequest(t, encoded, func(request *messages.ASReq) {
 			filtered := request.PAData[:0]
 			for _, pa := range request.PAData {
 				if pa.PADataType != patype.PA_PAC_REQUEST {
@@ -196,8 +222,8 @@ func TestASExchangeRejectsPolicyViolations(t *testing.T) {
 		}
 	})
 	t.Run("duplicate PAC suppression", func(t *testing.T) {
-		encoded, _ := request(t, "host/server.example.com")
-		encoded = mutate(t, encoded, func(request *messages.ASReq) {
+		encoded := makeASRequest(t, clientSettings, testServiceTarget)
+		encoded = changeASRequest(t, encoded, func(request *messages.ASReq) {
 			for _, pa := range request.PAData {
 				if pa.PADataType == patype.PA_PAC_REQUEST {
 					request.PAData = append(request.PAData, pa)
@@ -210,30 +236,39 @@ func TestASExchangeRejectsPolicyViolations(t *testing.T) {
 		}
 	})
 	t.Run("PAC requested", func(t *testing.T) {
-		encoded, _ := request(t, "host/server.example.com")
-		encoded = mutate(t, encoded, func(request *messages.ASReq) {
-			value, err := (&types.KerbPAPACRequest{IncludePAC: true}).Marshal()
-			if err != nil {
-				t.Fatal(err)
-			}
-			for index := range request.PAData {
-				if request.PAData[index].PADataType == patype.PA_PAC_REQUEST {
-					request.PAData[index].PADataValue = value
-				}
-			}
-		})
+		encoded := makeASRequest(t, clientSettings, testServiceTarget)
+		encoded = changeASRequest(t, encoded, func(request *messages.ASReq) { enablePACRequest(t, request) })
 		if _, _, err := acceptASExchange(encoded, serverSettings); err == nil {
 			t.Fatal("accepted a request enabling PAC issuance")
 		}
 	})
+}
+
+func enablePACRequest(t *testing.T, request *messages.ASReq) {
+	t.Helper()
+	value, err := (&types.KerbPAPACRequest{IncludePAC: true}).Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range request.PAData {
+		if request.PAData[index].PADataType == patype.PA_PAC_REQUEST {
+			request.PAData[index].PADataValue = value
+		}
+	}
+}
+
+func TestASExchangeRejectsUntrustedPeers(t *testing.T) {
+	clientIdentity, serverIdentity, anchors := newExchangeTestIdentities(t)
+	serverSettings := newSettings(serverIdentity, anchors, nil)
+
 	t.Run("untrusted initiator", func(t *testing.T) {
 		otherRoot, otherRootKey := newPKU2URoot(t)
 		certificate, key := newPKU2ULeaf(t, otherRoot, otherRootKey, "Mallory", nil, upnSAN(t, "mallory@example.com"))
-		identity, _ := pkinit.NewIdentity(certificate, []*x509.Certificate{otherRoot}, key, false)
-		encoded, _, err := beginASExchange(newSettings(identity, anchors, nil), "host/server.example.com")
+		identity, err := pkinit.NewIdentity(certificate, []*x509.Certificate{otherRoot}, key, false)
 		if err != nil {
 			t.Fatal(err)
 		}
+		encoded := makeASRequest(t, newSettings(identity, anchors, nil), testServiceTarget)
 		_, _, err = acceptASExchange(encoded, serverSettings)
 		requirePKU2UError[x509.UnknownAuthorityError](t, err, "accept PKU2U PKINIT exchange:")
 	})
@@ -241,7 +276,8 @@ func TestASExchangeRejectsPolicyViolations(t *testing.T) {
 		otherRoot, _ := newPKU2URoot(t)
 		otherAnchors := x509.NewCertPool()
 		otherAnchors.AddCert(otherRoot)
-		encoded, state, err := beginASExchange(newSettings(clientIdentity, otherAnchors, nil), "host/server.example.com")
+		clientSettings := newSettings(clientIdentity, otherAnchors, nil)
+		encoded, state, err := beginASExchange(clientSettings, testServiceTarget)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -249,7 +285,7 @@ func TestASExchangeRejectsPolicyViolations(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = finishASExchange(state, reply, newSettings(clientIdentity, otherAnchors, nil))
+		_, err = finishASExchange(state, reply, clientSettings)
 		requirePKU2UError[x509.UnknownAuthorityError](t, err, "process PKU2U PKINIT reply:")
 	})
 }
@@ -257,7 +293,7 @@ func TestASExchangeRejectsPolicyViolations(t *testing.T) {
 func TestEndToEndContext(t *testing.T) {
 	root, rootKey := newPKU2URoot(t)
 	clientCertificate, clientKey := newPKU2ULeaf(t, root, rootKey, "Alice", nil, upnSAN(t, "alice@example.com"))
-	serverCertificate, serverKey := newPKU2ULeaf(t, root, rootKey, "Server", []string{"server.example.com"}, nil)
+	serverCertificate, serverKey := newPKU2ULeaf(t, root, rootKey, "Server", []string{testServiceHost}, nil)
 	clientIdentity, _ := pkinit.NewIdentity(clientCertificate, []*x509.Certificate{root}, clientKey, false)
 	serverIdentity, _ := pkinit.NewIdentity(serverCertificate, []*x509.Certificate{root}, serverKey, false)
 	anchors := x509.NewCertPool()
@@ -265,7 +301,7 @@ func TestEndToEndContext(t *testing.T) {
 	initiator := NewInitiator(clientIdentity, anchors)
 	acceptor := NewAcceptor(serverIdentity, anchors)
 
-	initiatorMetadata, err := initiator.QueryMetadata("host/server.example.com", true)
+	initiatorMetadata, err := initiator.QueryMetadata(testServiceTarget, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +361,7 @@ func assertAcceptorCredential(t *testing.T, acceptorContext gssapi.Context, clie
 func exchangeTestASMessages(t *testing.T, initiator *Initiator, acceptor *Acceptor) []byte {
 	t.Helper()
 
-	asRequest, _, done, err := initiator.InitSecContext("host/server.example.com", nil)
+	asRequest, _, done, err := initiator.InitSecContext(testServiceTarget, nil)
 	if err != nil || done {
 		t.Fatalf("init AS request: done=%t err=%v", done, err)
 	}
@@ -343,9 +379,9 @@ func exchangeTestAPMessages(
 ) {
 	t.Helper()
 
-	_, _, _, decodeErr := initiator.InitSecContext("host/server.example.com", []byte{0x6b})
+	_, _, _, decodeErr := initiator.InitSecContext(testServiceTarget, []byte{0x6b})
 	requirePKU2UError[asn1.SyntaxError](t, decodeErr, "decode PKU2U AS reply:")
-	apRequest, _, done, err := initiator.InitSecContext("host/server.example.com", asReply)
+	apRequest, _, done, err := initiator.InitSecContext(testServiceTarget, asReply)
 	if err != nil || done {
 		t.Fatalf("init AP request: done=%t err=%v", done, err)
 	}
@@ -356,9 +392,9 @@ func exchangeTestAPMessages(
 		t.Fatalf("accept AP request: done=%t err=%v", done, err)
 	}
 	requireAcceptorEstablished(t, acceptor, apRequest)
-	_, _, _, decodeErr = initiator.InitSecContext("host/server.example.com", []byte{0x6f})
+	_, _, _, decodeErr = initiator.InitSecContext(testServiceTarget, []byte{0x6f})
 	requirePKU2UError[asn1.SyntaxError](t, decodeErr, "decode PKU2U AP reply:")
-	output, initiatorContext, done, err := initiator.InitSecContext("host/server.example.com", apReply)
+	output, initiatorContext, done, err := initiator.InitSecContext(testServiceTarget, apReply)
 	if err != nil || !done || initiatorContext == nil || len(output) != 0 {
 		t.Fatalf("init AP reply: output=%x done=%t err=%v", output, done, err)
 	}
@@ -384,17 +420,19 @@ func requireAcceptorEstablished(t *testing.T, acceptor *Acceptor, input []byte) 
 	}
 }
 
-func TestAPExchangeRejectsInvalidRequests(t *testing.T) {
-	root, rootKey := newPKU2URoot(t)
-	clientCertificate, clientKey := newPKU2ULeaf(t, root, rootKey, "Alice", nil, upnSAN(t, "alice@example.com"))
-	serverCertificate, serverKey := newPKU2ULeaf(t, root, rootKey, "Server", []string{"server.example.com"}, nil)
-	clientIdentity, _ := pkinit.NewIdentity(clientCertificate, []*x509.Certificate{root}, clientKey, false)
-	serverIdentity, _ := pkinit.NewIdentity(serverCertificate, []*x509.Certificate{root}, serverKey, false)
-	anchors := x509.NewCertPool()
-	anchors.AddCert(root)
+type apExchangeFixture struct {
+	clientName     types.PrincipalName
+	clientResult   *asResult
+	serverSettings settings
+	serverState    *asResult
+}
+
+func newAPExchangeFixture(t *testing.T) apExchangeFixture {
+	t.Helper()
+	clientIdentity, serverIdentity, anchors := newExchangeTestIdentities(t)
 	clientSettings := newSettings(clientIdentity, anchors, nil)
 	serverSettings := newSettings(serverIdentity, anchors, nil)
-	asRequest, clientState, err := beginASExchange(clientSettings, "host/server.example.com")
+	asRequest, clientState, err := beginASExchange(clientSettings, testServiceTarget)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,113 +444,141 @@ func TestAPExchangeRejectsInvalidRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	makeRequest := func(t *testing.T, mutate func(*types.Authenticator)) messages.APReq {
-		t.Helper()
-		authenticator, err := types.NewAuthenticator(Realm, clientState.request.ReqBody.CName)
-		if err != nil {
-			t.Fatal(err)
-		}
-		checksum, err := gssapi.NewAuthenticatorChecksum(nil, gssapi.ContextFlagMutual, gssapi.ContextFlagInteg, gssapi.ContextFlagConf).Marshal()
-		if err != nil {
-			t.Fatal(err)
-		}
-		authenticator.Cksum = types.Checksum{CksumType: chksumtype.GSSAPI, Checksum: checksum}
-		if ierr := authenticator.GenerateSeqNumberAndSubKey(clientResult.sessionKey.KeyType, len(clientResult.sessionKey.KeyValue)); ierr != nil {
-			t.Fatal(ierr)
-		}
-		if mutate != nil {
-			mutate(&authenticator)
-		}
-		request, err := messages.NewAPReq(clientResult.ticket, clientResult.sessionKey, authenticator)
-		if err != nil {
-			t.Fatal(err)
-		}
-		types.SetFlag(&request.APOptions, flags.APOptionMutualRequired)
-		return request
+	return apExchangeFixture{
+		clientName:     clientState.request.ReqBody.CName,
+		clientResult:   clientResult,
+		serverSettings: serverSettings,
+		serverState:    serverState,
 	}
-	accept := func(request messages.APReq) error {
-		encoded, err := request.Marshal()
-		if err != nil {
-			return err
-		}
-		acceptor := &Acceptor{settings: serverSettings, asResult: serverState}
-		_, _, err = acceptor.acceptAPRequest(encoded)
+}
+
+func (f apExchangeFixture) makeRequest(t *testing.T, mutate func(*types.Authenticator)) messages.APReq {
+	t.Helper()
+	authenticator, err := types.NewAuthenticator(Realm, f.clientName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checksum, err := gssapi.NewAuthenticatorChecksum(
+		nil, gssapi.ContextFlagMutual, gssapi.ContextFlagInteg, gssapi.ContextFlagConf,
+	).Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticator.Cksum = types.Checksum{CksumType: chksumtype.GSSAPI, Checksum: checksum}
+	key := f.clientResult.sessionKey
+	if subkeyErr := authenticator.GenerateSeqNumberAndSubKey(key.KeyType, len(key.KeyValue)); subkeyErr != nil {
+		t.Fatal(subkeyErr)
+	}
+	if mutate != nil {
+		mutate(&authenticator)
+	}
+	request, err := messages.NewAPReq(f.clientResult.ticket, key, authenticator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	types.SetFlag(&request.APOptions, flags.APOptionMutualRequired)
+	return request
+}
+
+func (f apExchangeFixture) accept(request messages.APReq) error {
+	encoded, err := request.Marshal()
+	if err != nil {
 		return err
 	}
+	acceptor := &Acceptor{
+		settings: f.serverSettings, asResult: f.serverState, metadata: nil, metadataPresent: false, step: 0,
+	}
+	_, _, err = acceptor.acceptAPRequest(encoded)
+	return err
+}
 
+func TestAPExchangeRejectsMissingProtection(t *testing.T) {
+	fixture := newAPExchangeFixture(t)
 	t.Run("mutual authentication missing", func(t *testing.T) {
-		request := makeRequest(t, nil)
+		request := fixture.makeRequest(t, nil)
 		types.UnsetFlag(&request.APOptions, flags.APOptionMutualRequired)
-		if err := accept(request); err == nil {
+		if err := fixture.accept(request); err == nil {
 			t.Fatal("accepted AP request without mutual authentication")
 		}
 	})
 	t.Run("GSS checksum missing", func(t *testing.T) {
-		request := makeRequest(t, func(authenticator *types.Authenticator) { authenticator.Cksum = types.Checksum{} })
-		if err := accept(request); err == nil {
+		request := fixture.makeRequest(t, func(authenticator *types.Authenticator) {
+			authenticator.Cksum = types.Checksum{CksumType: 0, Checksum: nil}
+		})
+		if err := fixture.accept(request); err == nil {
 			t.Fatal("accepted AP request without GSS checksum")
 		}
 	})
 	t.Run("integrity flag missing", func(t *testing.T) {
-		request := makeRequest(t, func(authenticator *types.Authenticator) {
+		request := fixture.makeRequest(t, func(authenticator *types.Authenticator) {
 			checksum, err := gssapi.NewAuthenticatorChecksum(nil, gssapi.ContextFlagMutual).Marshal()
 			if err != nil {
 				t.Fatal(err)
 			}
 			authenticator.Cksum = types.Checksum{CksumType: chksumtype.GSSAPI, Checksum: checksum}
 		})
-		if err := accept(request); err == nil {
+		if err := fixture.accept(request); err == nil {
 			t.Fatal("accepted AP request without integrity protection")
 		}
 	})
+}
+
+func TestAPExchangeRejectsInvalidAuthenticatorFields(t *testing.T) {
+	fixture := newAPExchangeFixture(t)
 	t.Run("wrong client identity", func(t *testing.T) {
-		request := makeRequest(t, func(authenticator *types.Authenticator) {
+		request := fixture.makeRequest(t, func(authenticator *types.Authenticator) {
 			authenticator.CName = types.NewPrincipalName(1, "mallory@example.com")
 		})
-		if err := accept(request); err == nil {
+		if err := fixture.accept(request); err == nil {
 			t.Fatal("accepted authenticator for another client")
 		}
 	})
 	t.Run("stale authenticator", func(t *testing.T) {
-		request := makeRequest(t, func(authenticator *types.Authenticator) {
+		request := fixture.makeRequest(t, func(authenticator *types.Authenticator) {
 			authenticator.CTime = time.Now().UTC().Add(-10 * time.Minute)
 		})
-		if err := accept(request); err == nil {
+		if err := fixture.accept(request); err == nil {
 			t.Fatal("accepted stale authenticator")
 		}
 	})
 	t.Run("invalid microseconds", func(t *testing.T) {
-		request := makeRequest(t, func(authenticator *types.Authenticator) { authenticator.Cusec = 1000000 })
-		if err := accept(request); err == nil {
+		request := fixture.makeRequest(t, func(authenticator *types.Authenticator) { authenticator.Cusec = 1000000 })
+		if err := fixture.accept(request); err == nil {
 			t.Fatal("accepted invalid authenticator microseconds")
 		}
 	})
 	t.Run("missing subkey", func(t *testing.T) {
-		request := makeRequest(t, func(authenticator *types.Authenticator) { authenticator.SubKey = types.EncryptionKey{} })
-		if err := accept(request); err == nil {
+		request := fixture.makeRequest(t, func(authenticator *types.Authenticator) {
+			authenticator.SubKey = types.EncryptionKey{KeyType: 0, KeyValue: nil}
+		})
+		if err := fixture.accept(request); err == nil {
 			t.Fatal("accepted authenticator without a subkey")
 		}
 	})
+}
+
+func TestAPExchangeRejectsTamperedMessages(t *testing.T) {
+	fixture := newAPExchangeFixture(t)
 	t.Run("RC4 subkey", func(t *testing.T) {
-		request := makeRequest(t, func(authenticator *types.Authenticator) {
+		request := fixture.makeRequest(t, func(authenticator *types.Authenticator) {
 			authenticator.SubKey = types.EncryptionKey{KeyType: etypeID.RC4_HMAC, KeyValue: make([]byte, 16)}
 		})
-		if err := accept(request); err == nil {
+		if err := fixture.accept(request); err == nil {
 			t.Fatal("accepted RC4 authenticator subkey")
 		}
 	})
 	t.Run("tampered authenticator", func(t *testing.T) {
-		request := makeRequest(t, nil)
+		request := fixture.makeRequest(t, nil)
 		request.EncryptedAuthenticator.Cipher[len(request.EncryptedAuthenticator.Cipher)-1] ^= 1
-		err := accept(request)
+		err := fixture.accept(request)
 		if err == nil || !strings.HasPrefix(err.Error(), "decrypt PKU2U authenticator:") || errors.Unwrap(err) == nil {
 			t.Fatalf("want contextual authenticator decryption error, got %v", err)
 		}
 	})
 	t.Run("tampered ticket", func(t *testing.T) {
-		request := makeRequest(t, nil)
+		request := fixture.makeRequest(t, nil)
 		request.Ticket.EncPart.Cipher[len(request.Ticket.EncPart.Cipher)-1] ^= 1
-		err := accept(request)
+		err := fixture.accept(request)
 		if err == nil || !strings.HasPrefix(err.Error(), "decrypt PKU2U ticket:") || errors.Unwrap(err) == nil {
 			t.Fatalf("want contextual ticket decryption error, got %v", err)
 		}
@@ -522,13 +588,13 @@ func TestAPExchangeRejectsInvalidRequests(t *testing.T) {
 func TestEndToEndOverNegoEx(t *testing.T) {
 	root, rootKey := newPKU2URoot(t)
 	clientCertificate, clientKey := newPKU2ULeaf(t, root, rootKey, "Alice", nil, upnSAN(t, "alice@example.com"))
-	serverCertificate, serverKey := newPKU2ULeaf(t, root, rootKey, "Server", []string{"server.example.com"}, nil)
+	serverCertificate, serverKey := newPKU2ULeaf(t, root, rootKey, "Server", []string{testServiceHost}, nil)
 	clientIdentity, _ := pkinit.NewIdentity(clientCertificate, []*x509.Certificate{root}, clientKey, false)
 	serverIdentity, _ := pkinit.NewIdentity(serverCertificate, []*x509.Certificate{root}, serverKey, false)
 	anchors := x509.NewCertPool()
 	anchors.AddCert(root)
 	initiator, err := negoex.NewInitiator(
-		"host/server.example.com",
+		testServiceTarget,
 		negoex.NewPKU2UScheme(NewInitiator(clientIdentity, anchors)),
 	)
 	if err != nil {
@@ -580,7 +646,7 @@ func TestEndToEndOverSPNEGO(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			root, rootKey := newPKU2URoot(t)
 			clientCertificate, clientKey := newPKU2ULeaf(t, root, rootKey, "Alice", nil, upnSAN(t, "alice@example.com"))
-			serverCertificate, serverKey := newPKU2ULeaf(t, root, rootKey, "Server", []string{"server.example.com"}, nil)
+			serverCertificate, serverKey := newPKU2ULeaf(t, root, rootKey, "Server", []string{testServiceHost}, nil)
 			clientIdentity, _ := pkinit.NewIdentity(clientCertificate, []*x509.Certificate{root}, clientKey, false)
 			serverIdentity, _ := pkinit.NewIdentity(serverCertificate, []*x509.Certificate{root}, serverKey, false)
 			anchors := x509.NewCertPool()
@@ -596,7 +662,7 @@ func TestEndToEndOverSPNEGO(t *testing.T) {
 func TestEndToEndHTTP(t *testing.T) {
 	root, rootKey := newPKU2URoot(t)
 	clientCertificate, clientKey := newPKU2ULeaf(t, root, rootKey, "Alice", nil, upnSAN(t, "alice@example.com"))
-	serverCertificate, serverKey := newPKU2ULeaf(t, root, rootKey, "Server", []string{"server.example.com"}, nil)
+	serverCertificate, serverKey := newPKU2ULeaf(t, root, rootKey, "Server", []string{testServiceHost}, nil)
 	clientIdentity, _ := pkinit.NewIdentity(clientCertificate, []*x509.Certificate{root}, clientKey, false)
 	serverIdentity, _ := pkinit.NewIdentity(serverCertificate, []*x509.Certificate{root}, serverKey, false)
 	anchors := x509.NewCertPool()
@@ -624,7 +690,7 @@ func TestEndToEndHTTP(t *testing.T) {
 	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
-	client := spnego.NewNegotiatingClient(server.Client(), "host/server.example.com", func() gssapi.ContextMechanism {
+	client := spnego.NewNegotiatingClient(server.Client(), testServiceTarget, func() gssapi.ContextMechanism {
 		return negoex.New(negoex.NewPKU2UScheme(NewInitiator(clientIdentity, anchors)))
 	})
 	request, err := http.NewRequest(http.MethodPost, server.URL, strings.NewReader("payload"))
@@ -648,7 +714,7 @@ func TestEndToEndHTTP(t *testing.T) {
 func TestConcurrentHTTPExchanges(t *testing.T) {
 	root, rootKey := newPKU2URoot(t)
 	clientCertificate, clientKey := newPKU2ULeaf(t, root, rootKey, "Alice", nil, upnSAN(t, "alice@example.com"))
-	serverCertificate, serverKey := newPKU2ULeaf(t, root, rootKey, "Server", []string{"server.example.com"}, nil)
+	serverCertificate, serverKey := newPKU2ULeaf(t, root, rootKey, "Server", []string{testServiceHost}, nil)
 	clientIdentity, _ := pkinit.NewIdentity(clientCertificate, []*x509.Certificate{root}, clientKey, false)
 	serverIdentity, _ := pkinit.NewIdentity(serverCertificate, []*x509.Certificate{root}, serverKey, false)
 	anchors := x509.NewCertPool()
@@ -660,7 +726,7 @@ func TestConcurrentHTTPExchanges(t *testing.T) {
 	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
-	client := spnego.NewNegotiatingClient(server.Client(), "host/server.example.com", func() gssapi.ContextMechanism {
+	client := spnego.NewNegotiatingClient(server.Client(), testServiceTarget, func() gssapi.ContextMechanism {
 		return negoex.New(negoex.NewPKU2UScheme(NewInitiator(clientIdentity, anchors)))
 	})
 	const workerCount = 2
@@ -695,8 +761,6 @@ func TestConcurrentHTTPExchanges(t *testing.T) {
 	}
 }
 
-const spnegoTestTarget = "host/server.example.com"
-
 type spnegoTestExchange struct {
 	token            []byte
 	initiatorContext gssapi.Context
@@ -710,7 +774,7 @@ func establishSPNEGO(t *testing.T, initiator, acceptor *spnego.Negotiator) spneg
 	var exchange spnegoTestExchange
 	var err error
 	exchange.token, exchange.initiatorContext, exchange.initiatorDone, err = initiator.InitSecContext(
-		spnegoTestTarget, nil,
+		testServiceTarget, nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -748,7 +812,7 @@ func (e *spnegoTestExchange) runTurn(
 		return true
 	}
 
-	output, established, done, err = initiator.InitSecContext(spnegoTestTarget, e.token)
+	output, established, done, err = initiator.InitSecContext(testServiceTarget, e.token)
 	if err != nil {
 		t.Fatalf("SPNEGO initiator turn %d: %v", turn, err)
 	}

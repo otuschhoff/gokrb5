@@ -2,6 +2,7 @@ package pkinit
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -11,6 +12,8 @@ import (
 )
 
 // OIDDHPublicNumber is the ASN.1 object identifier for DH public numbers (1.2.840.10046.2.1).
+//
+//nolint:gochecknoglobals // Keep the exported OID variable writable for API compatibility.
 var OIDDHPublicNumber = asn1.ObjectIdentifier{1, 2, 840, 10046, 2, 1}
 
 // MODP group identifiers for PKINIT Diffie-Hellman key exchange.
@@ -22,10 +25,27 @@ const (
 	MODPGroup16 = 16
 )
 
+const (
+	bitsPerByte           = 8
+	dhGenerator           = 2
+	dhMinimumPublicValue  = 2
+	dhMinimumExponent     = 2
+	dhExponentRangeOffset = 3 // Draw from [0, q-3) and add 2 to obtain [2, q-2].
+	dhPrimeRadix          = 16
+)
+
 type dhDomainParameters struct {
 	P *big.Int
 	G *big.Int
 	Q *big.Int
+}
+
+func (p dhDomainParameters) complete() bool {
+	return p.P != nil && p.G != nil && p.Q != nil
+}
+
+func (p dhDomainParameters) matches(known dhDomainParameters) bool {
+	return p.P.Cmp(known.P) == 0 && p.G.Cmp(known.G) == 0 && p.Q.Cmp(known.Q) == 0
 }
 
 // DHKey is an ephemeral finite-field Diffie-Hellman key.
@@ -43,17 +63,17 @@ func SelectDHGroup(parameters TDDHParameters, minimumBits int) (int, error) {
 			continue
 		}
 		var offered dhDomainParameters
-		if err := strictUnmarshal(algorithm.Parameters.FullBytes, &offered); err != nil || offered.P == nil || offered.G == nil || offered.Q == nil {
+		if err := strictUnmarshal(algorithm.Parameters.FullBytes, &offered); err != nil || !offered.complete() {
 			continue
 		}
 		for _, group := range []int{MODPGroup16, MODPGroup14, MODPGroup2} {
 			known, _ := dhParameters(group)
-			if known.P.BitLen() >= minimumBits && offered.P.Cmp(known.P) == 0 && offered.G.Cmp(known.G) == 0 && offered.Q.Cmp(known.Q) == 0 {
+			if known.P.BitLen() >= minimumBits && offered.matches(known) {
 				return group, nil
 			}
 		}
 	}
-	return 0, fmt.Errorf("KDC did not offer an acceptable PKINIT DH group")
+	return 0, errors.New("KDC did not offer an acceptable PKINIT DH group")
 }
 
 // GenerateDHKey creates a PKINIT DH key in a supported RFC MODP group.
@@ -63,17 +83,22 @@ func GenerateDHKey(group, minimumBits int, random io.Reader) (*DHKey, error) {
 		return nil, err
 	}
 	if params.P.BitLen() < minimumBits {
-		return nil, fmt.Errorf("PKINIT DH group %d has %d bits, below policy minimum %d", group, params.P.BitLen(), minimumBits)
+		return nil, fmt.Errorf(
+			"PKINIT DH group %d has %d bits, below policy minimum %d",
+			group,
+			params.P.BitLen(),
+			minimumBits,
+		)
 	}
 	if random == nil {
 		random = rand.Reader
 	}
-	maximum := new(big.Int).Sub(params.Q, big.NewInt(3))
+	maximum := new(big.Int).Sub(params.Q, big.NewInt(dhExponentRangeOffset))
 	private, err := rand.Int(random, maximum)
 	if err != nil {
 		return nil, fmt.Errorf("generate PKINIT DH private exponent: %w", err)
 	}
-	private.Add(private, big.NewInt(2))
+	private.Add(private, big.NewInt(dhMinimumExponent))
 	public := new(big.Int).Exp(params.G, private, params.P)
 	return &DHKey{group: group, params: params, private: private, public: public}, nil
 }
@@ -90,12 +115,11 @@ func GenerateDHKeyForPeer(peer SubjectPublicKeyInfo, minimumBits int, random io.
 	}
 	for _, group := range []int{MODPGroup16, MODPGroup14, MODPGroup2} {
 		known, _ := dhParameters(group)
-		if offered.P != nil && offered.G != nil && offered.Q != nil &&
-			offered.P.Cmp(known.P) == 0 && offered.G.Cmp(known.G) == 0 && offered.Q.Cmp(known.Q) == 0 {
+		if offered.complete() && offered.matches(known) {
 			return GenerateDHKey(group, minimumBits, random)
 		}
 	}
-	return nil, fmt.Errorf("PKINIT peer used unsupported DH parameters")
+	return nil, errors.New("PKINIT peer used unsupported DH parameters")
 }
 
 // PublicKey returns the RFC 3279 SubjectPublicKeyInfo representation.
@@ -111,9 +135,9 @@ func (key *DHKey) PublicKey() (SubjectPublicKeyInfo, error) {
 	return SubjectPublicKeyInfo{
 		Algorithm: AlgorithmIdentifier{
 			Algorithm:  OIDDHPublicNumber,
-			Parameters: asn1.RawValue{FullBytes: parameters},
+			Parameters: asn1.RawValue{Class: 0, Tag: 0, IsCompound: false, Bytes: nil, FullBytes: parameters},
 		},
-		SubjectPublicKey: asn1.BitString{Bytes: public, BitLength: len(public) * 8},
+		SubjectPublicKey: asn1.BitString{Bytes: public, BitLength: len(public) * bitsPerByte},
 	}, nil
 }
 
@@ -126,29 +150,36 @@ func (key *DHKey) SharedSecret(peer SubjectPublicKeyInfo) ([]byte, error) {
 	if err := strictUnmarshal(peer.Algorithm.Parameters.FullBytes, &params); err != nil {
 		return nil, fmt.Errorf("decode PKINIT DH parameters: %w", err)
 	}
-	if params.P == nil || params.G == nil || params.Q == nil ||
-		params.P.Cmp(key.params.P) != 0 || params.G.Cmp(key.params.G) != 0 || params.Q.Cmp(key.params.Q) != 0 {
-		return nil, fmt.Errorf("PKINIT DH peer used different domain parameters")
+	if !params.complete() || !params.matches(key.params) {
+		return nil, errors.New("PKINIT DH peer used different domain parameters")
 	}
-	if peer.SubjectPublicKey.BitLength%8 != 0 {
-		return nil, fmt.Errorf("PKINIT DH public value is not byte-aligned")
-	}
-	var public *big.Int
-	if err := strictUnmarshal(peer.SubjectPublicKey.RightAlign(), &public); err != nil {
-		return nil, fmt.Errorf("decode PKINIT DH public value: %w", err)
-	}
-	upper := new(big.Int).Sub(key.params.P, big.NewInt(2))
-	if public == nil || public.Cmp(big.NewInt(2)) < 0 || public.Cmp(upper) > 0 {
-		return nil, fmt.Errorf("PKINIT DH public value is outside the valid range")
-	}
-	if new(big.Int).Exp(public, key.params.Q, key.params.P).Cmp(big.NewInt(1)) != 0 {
-		return nil, fmt.Errorf("PKINIT DH public value is outside the prime-order subgroup")
+	public, err := key.decodePublicValue(peer.SubjectPublicKey)
+	if err != nil {
+		return nil, err
 	}
 	secret := new(big.Int).Exp(public, key.private, key.params.P).Bytes()
-	width := (key.params.P.BitLen() + 7) / 8
+	width := (key.params.P.BitLen() + bitsPerByte - 1) / bitsPerByte
 	padded := make([]byte, width)
 	copy(padded[width-len(secret):], secret)
 	return padded, nil
+}
+
+func (key *DHKey) decodePublicValue(value asn1.BitString) (*big.Int, error) {
+	if value.BitLength%bitsPerByte != 0 {
+		return nil, errors.New("PKINIT DH public value is not byte-aligned")
+	}
+	var public *big.Int
+	if err := strictUnmarshal(value.RightAlign(), &public); err != nil {
+		return nil, fmt.Errorf("decode PKINIT DH public value: %w", err)
+	}
+	upper := new(big.Int).Sub(key.params.P, big.NewInt(dhMinimumPublicValue))
+	if public == nil || public.Cmp(big.NewInt(dhMinimumPublicValue)) < 0 || public.Cmp(upper) > 0 {
+		return nil, errors.New("PKINIT DH public value is outside the valid range")
+	}
+	if new(big.Int).Exp(public, key.params.Q, key.params.P).Cmp(big.NewInt(1)) != 0 {
+		return nil, errors.New("PKINIT DH public value is outside the prime-order subgroup")
+	}
+	return public, nil
 }
 
 func dhParameters(group int) (dhDomainParameters, error) {
@@ -199,10 +230,10 @@ func dhParameters(group int) (dhDomainParameters, error) {
 	default:
 		return dhDomainParameters{}, fmt.Errorf("unsupported PKINIT DH group %d", group)
 	}
-	p, ok := new(big.Int).SetString(strings.Join(strings.Fields(prime), ""), 16)
+	p, ok := new(big.Int).SetString(strings.Join(strings.Fields(prime), ""), dhPrimeRadix)
 	if !ok {
 		return dhDomainParameters{}, fmt.Errorf("invalid PKINIT DH group %d parameters", group)
 	}
 	q := new(big.Int).Rsh(new(big.Int).Sub(p, big.NewInt(1)), 1)
-	return dhDomainParameters{P: p, G: big.NewInt(2), Q: q}, nil
+	return dhDomainParameters{P: p, G: big.NewInt(dhGenerator), Q: q}, nil
 }

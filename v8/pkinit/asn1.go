@@ -3,6 +3,7 @@ package pkinit
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -13,6 +14,8 @@ import (
 )
 
 // PKINIT and CMS object identifiers.
+//
+//nolint:gochecknoglobals // Keep the exported OID variables writable for API compatibility.
 var (
 	OIDPKINITAuthData   = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 2, 3, 1}
 	OIDPKINITDHKeyData  = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 2, 3, 2}
@@ -24,6 +27,21 @@ var (
 	OIDKDFSHA256        = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 2, 3, 6, 2}
 	OIDKDFSHA512        = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 2, 3, 6, 3}
 	OIDKDFSHA384        = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 2, 3, 6, 4}
+)
+
+const (
+	authPackAuthenticatorTag = iota
+	authPackPublicValueTag
+	authPackCMSTypesTag
+	authPackDHNonceTag
+	authPackKDFsTag
+	authPackFieldCount
+)
+
+const (
+	dhRepSignedDataTag = iota
+	dhRepServerNonceTag
+	dhRepKDFTag
 )
 
 // AlgorithmIdentifier identifies a PKIX or CMS algorithm and its parameters.
@@ -135,13 +153,15 @@ type OtherInfo struct {
 }
 
 // PKINITSuppPubInfo binds an RFC 8636 KDF result to the exchange.
+//
+//revive:disable-next-line:exported Keep the published type name for API compatibility.
 type PKINITSuppPubInfo struct {
 	EType   int32  `asn1:"explicit,tag:0"`
 	ASReq   []byte `asn1:"explicit,tag:1"`
 	PKASRep []byte `asn1:"explicit,tag:2"`
 }
 
-func strictUnmarshal(b []byte, value interface{}) error {
+func strictUnmarshal(b []byte, value any) error {
 	rest, err := asn1.Unmarshal(b, value)
 	if err != nil {
 		return fmt.Errorf("decode PKINIT DER value: %w", err)
@@ -166,22 +186,28 @@ func (m PAPKAsReq) Marshal() ([]byte, error) { return marshalDER("PA-PK-AS-REQ",
 // Unmarshal unmarshals DER bytes into PAPKAsReq.
 func (m *PAPKAsReq) Unmarshal(b []byte) error { return strictUnmarshal(b, m) }
 
-func marshalExplicit(tag int, value interface{}) ([]byte, error) {
+func marshalExplicit(tag int, value any) ([]byte, error) {
 	inner, err := asn1.Marshal(value)
 	if err != nil {
 		return nil, fmt.Errorf("marshal PKINIT field [%d]: %w", tag, err)
 	}
-	der, err := asn1.Marshal(asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: tag, IsCompound: true, Bytes: inner})
+	der, err := asn1.Marshal(contextValue(tag, true, inner))
 	if err != nil {
 		return nil, fmt.Errorf("wrap PKINIT field [%d] in DER: %w", tag, err)
 	}
 	return der, nil
 }
 
+func contextValue(tag int, compound bool, value []byte) asn1.RawValue {
+	return asn1.RawValue{
+		Class: asn1.ClassContextSpecific, Tag: tag, IsCompound: compound, Bytes: value, FullBytes: nil,
+	}
+}
+
 func marshalSequence(fields ...[]byte) ([]byte, error) {
 	return marshalDER("DER sequence", asn1.RawValue{
 		Class: asn1.ClassUniversal, Tag: asn1.TagSequence, IsCompound: true,
-		Bytes: bytes.Join(fields, nil),
+		Bytes: bytes.Join(fields, nil), FullBytes: nil,
 	})
 }
 
@@ -191,7 +217,7 @@ func sequenceFields(b []byte) ([]asn1.RawValue, error) {
 		return nil, err
 	}
 	if sequence.Class != asn1.ClassUniversal || sequence.Tag != asn1.TagSequence || !sequence.IsCompound {
-		return nil, fmt.Errorf("PKINIT value is not a DER SEQUENCE")
+		return nil, errors.New("PKINIT value is not a DER SEQUENCE")
 	}
 	var fields []asn1.RawValue
 	rest := sequence.Bytes
@@ -215,7 +241,7 @@ func sequenceFields(b []byte) ([]asn1.RawValue, error) {
 	return fields, nil
 }
 
-func unmarshalExplicit(field asn1.RawValue, value interface{}) error {
+func unmarshalExplicit(field asn1.RawValue, value any) error {
 	if !field.IsCompound {
 		return fmt.Errorf("PKINIT field [%d] is not explicit", field.Tag)
 	}
@@ -227,39 +253,22 @@ func (m AuthPack) Marshal() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
 	}
-	fields := make([][]byte, 0, 5)
-	field, err := marshalExplicit(0, m.PKAuthenticator)
+	fields := make([][]byte, 0, authPackFieldCount)
+	field, err := marshalExplicit(authPackAuthenticatorTag, m.PKAuthenticator)
 	if err != nil {
 		return nil, err
 	}
 	fields = append(fields, field)
 	if m.ClientPublicValue != nil {
-		field, err = marshalExplicit(1, *m.ClientPublicValue)
+		field, err = marshalExplicit(authPackPublicValueTag, *m.ClientPublicValue)
 		if err != nil {
 			return nil, err
 		}
 		fields = append(fields, field)
 	}
-	if len(m.SupportedCMSTypes) > 0 {
-		field, err = marshalExplicit(2, m.SupportedCMSTypes)
-		if err != nil {
-			return nil, err
-		}
-		fields = append(fields, field)
-	}
-	if len(m.ClientDHNonce) > 0 {
-		field, err = marshalExplicit(3, m.ClientDHNonce)
-		if err != nil {
-			return nil, err
-		}
-		fields = append(fields, field)
-	}
-	if len(m.SupportedKDFs) > 0 {
-		field, err = marshalExplicit(4, m.SupportedKDFs)
-		if err != nil {
-			return nil, err
-		}
-		fields = append(fields, field)
+	fields, err = m.marshalOptionalFields(fields)
+	if err != nil {
+		return nil, err
 	}
 	return marshalSequence(fields...)
 }
@@ -270,33 +279,11 @@ func (m *AuthPack) Unmarshal(b []byte) error {
 	if err != nil {
 		return err
 	}
-	*m = AuthPack{}
+	var empty AuthPack
+	*m = empty
 	for _, field := range fields {
-		switch field.Tag {
-		case 0:
-			if err := unmarshalExplicit(field, &m.PKAuthenticator); err != nil {
-				return err
-			}
-		case 1:
-			var value SubjectPublicKeyInfo
-			if err := unmarshalExplicit(field, &value); err != nil {
-				return err
-			}
-			m.ClientPublicValue = &value
-		case 2:
-			if err := unmarshalExplicit(field, &m.SupportedCMSTypes); err != nil {
-				return err
-			}
-		case 3:
-			if err := unmarshalExplicit(field, &m.ClientDHNonce); err != nil {
-				return err
-			}
-		case 4:
-			if err := unmarshalExplicit(field, &m.SupportedKDFs); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("unsupported AuthPack field tag %d", field.Tag)
+		if err := m.unmarshalField(field); err != nil {
+			return err
 		}
 	}
 	return m.Validate()
@@ -311,28 +298,71 @@ func (m AuthPack) Validate() error {
 		return fmt.Errorf("PKINIT nonce %d is outside uint32", m.PKAuthenticator.Nonce)
 	}
 	if len(m.PKAuthenticator.PAChecksum) == 0 {
-		return fmt.Errorf("PKINIT paChecksum is required")
+		return errors.New("PKINIT paChecksum is required")
 	}
 	return nil
+}
+
+func (m AuthPack) marshalOptionalFields(fields [][]byte) ([][]byte, error) {
+	if len(m.SupportedCMSTypes) > 0 {
+		field, err := marshalExplicit(authPackCMSTypesTag, m.SupportedCMSTypes)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, field)
+	}
+	if len(m.ClientDHNonce) > 0 {
+		field, err := marshalExplicit(authPackDHNonceTag, m.ClientDHNonce)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, field)
+	}
+	if len(m.SupportedKDFs) > 0 {
+		field, err := marshalExplicit(authPackKDFsTag, m.SupportedKDFs)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, field)
+	}
+	return fields, nil
+}
+
+func (m *AuthPack) unmarshalField(field asn1.RawValue) error {
+	switch field.Tag {
+	case authPackAuthenticatorTag:
+		return unmarshalExplicit(field, &m.PKAuthenticator)
+	case authPackPublicValueTag:
+		var value SubjectPublicKeyInfo
+		if err := unmarshalExplicit(field, &value); err != nil {
+			return err
+		}
+		m.ClientPublicValue = &value
+		return nil
+	case authPackCMSTypesTag:
+		return unmarshalExplicit(field, &m.SupportedCMSTypes)
+	case authPackDHNonceTag:
+		return unmarshalExplicit(field, &m.ClientDHNonce)
+	case authPackKDFsTag:
+		return unmarshalExplicit(field, &m.SupportedKDFs)
+	default:
+		return fmt.Errorf("unsupported AuthPack field tag %d", field.Tag)
+	}
 }
 
 // Marshal encodes the PA-PK-AS-REP CHOICE.
 func (m PAPKAsRep) Marshal() ([]byte, error) {
 	if (m.DHInfo == nil) == (m.EncKeyPack == nil) {
-		return nil, fmt.Errorf("PA-PK-AS-REP must contain exactly one reply choice")
+		return nil, errors.New("PA-PK-AS-REP must contain exactly one reply choice")
 	}
 	if m.DHInfo != nil {
 		inner, err := m.DHInfo.Marshal()
 		if err != nil {
 			return nil, err
 		}
-		return marshalDER("PA-PK-AS-REP dhInfo", asn1.RawValue{
-			Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: inner,
-		})
+		return marshalDER("PA-PK-AS-REP dhInfo", contextValue(0, true, inner))
 	}
-	return marshalDER("PA-PK-AS-REP encKeyPack", asn1.RawValue{
-		Class: asn1.ClassContextSpecific, Tag: 1, Bytes: m.EncKeyPack,
-	})
+	return marshalDER("PA-PK-AS-REP encKeyPack", contextValue(1, false, m.EncKeyPack))
 }
 
 // Unmarshal decodes one supported PA-PK-AS-REP CHOICE arm.
@@ -349,7 +379,7 @@ func (m *PAPKAsRep) Unmarshal(b []byte) error {
 	switch raw.Tag {
 	case 0:
 		if !raw.IsCompound {
-			return fmt.Errorf("PA-PK-AS-REP dhInfo is not constructed")
+			return errors.New("PA-PK-AS-REP dhInfo is not constructed")
 		}
 		var info DHRepInfo
 		if err := info.Unmarshal(raw.Bytes); err != nil {
@@ -358,7 +388,7 @@ func (m *PAPKAsRep) Unmarshal(b []byte) error {
 		m.DHInfo = &info
 	case 1:
 		if raw.IsCompound {
-			return fmt.Errorf("PA-PK-AS-REP encKeyPack is constructed")
+			return errors.New("PA-PK-AS-REP encKeyPack is constructed")
 		}
 		m.EncKeyPack = append([]byte(nil), raw.Bytes...)
 	default:
@@ -370,24 +400,22 @@ func (m *PAPKAsRep) Unmarshal(b []byte) error {
 // Marshal encodes DHRepInfo with its RFC 8636 optional KDF extension.
 func (m DHRepInfo) Marshal() ([]byte, error) {
 	if len(m.DHSignedData) == 0 {
-		return nil, fmt.Errorf("PKINIT dhSignedData is required")
+		return nil, errors.New("PKINIT dhSignedData is required")
 	}
-	field, err := marshalDER("dhSignedData", asn1.RawValue{
-		Class: asn1.ClassContextSpecific, Tag: 0, Bytes: m.DHSignedData,
-	})
+	field, err := marshalDER("dhSignedData", contextValue(dhRepSignedDataTag, false, m.DHSignedData))
 	if err != nil {
 		return nil, err
 	}
 	fields := [][]byte{field}
 	if len(m.ServerDHNonce) > 0 {
-		field, err = marshalExplicit(1, m.ServerDHNonce)
+		field, err = marshalExplicit(dhRepServerNonceTag, m.ServerDHNonce)
 		if err != nil {
 			return nil, err
 		}
 		fields = append(fields, field)
 	}
 	if m.KDF != nil {
-		field, err = marshalExplicit(2, *m.KDF)
+		field, err = marshalExplicit(dhRepKDFTag, *m.KDF)
 		if err != nil {
 			return nil, err
 		}
@@ -402,32 +430,39 @@ func (m *DHRepInfo) Unmarshal(b []byte) error {
 	if err != nil {
 		return err
 	}
-	*m = DHRepInfo{}
+	var empty DHRepInfo
+	*m = empty
 	for _, field := range fields {
-		switch field.Tag {
-		case 0:
-			if field.IsCompound {
-				return fmt.Errorf("PKINIT dhSignedData is constructed")
-			}
-			m.DHSignedData = append([]byte(nil), field.Bytes...)
-		case 1:
-			if err := unmarshalExplicit(field, &m.ServerDHNonce); err != nil {
-				return err
-			}
-		case 2:
-			var kdf KDFAlgorithmID
-			if err := unmarshalExplicit(field, &kdf); err != nil {
-				return err
-			}
-			m.KDF = &kdf
-		default:
-			return fmt.Errorf("unsupported DHRepInfo field tag %d", field.Tag)
+		if err := m.unmarshalField(field); err != nil {
+			return err
 		}
 	}
 	if len(m.DHSignedData) == 0 {
-		return fmt.Errorf("PKINIT dhSignedData is required")
+		return errors.New("PKINIT dhSignedData is required")
 	}
 	return nil
+}
+
+func (m *DHRepInfo) unmarshalField(field asn1.RawValue) error {
+	switch field.Tag {
+	case dhRepSignedDataTag:
+		if field.IsCompound {
+			return errors.New("PKINIT dhSignedData is constructed")
+		}
+		m.DHSignedData = append([]byte(nil), field.Bytes...)
+		return nil
+	case dhRepServerNonceTag:
+		return unmarshalExplicit(field, &m.ServerDHNonce)
+	case dhRepKDFTag:
+		var kdf KDFAlgorithmID
+		if err := unmarshalExplicit(field, &kdf); err != nil {
+			return err
+		}
+		m.KDF = &kdf
+		return nil
+	default:
+		return fmt.Errorf("unsupported DHRepInfo field tag %d", field.Tag)
+	}
 }
 
 // Marshal marshals KDCDHKeyInfo to its DER encoding.

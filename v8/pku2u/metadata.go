@@ -64,6 +64,7 @@ func TrustedCertifiersFromPool(pool *x509.CertPool) TrustedCertifiers {
 	if pool == nil {
 		return nil
 	}
+	//nolint:staticcheck // Subjects exposes explicitly added roots from the caller's pool.
 	subjects := pool.Subjects()
 	certifiers := make(TrustedCertifiers, 0, len(subjects))
 	for _, subject := range subjects {
