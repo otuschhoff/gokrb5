@@ -820,6 +820,25 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 155 (2026-11-21, complete v8 IANA lint cleanup; Q-10):
+Preserve the published protocol identifiers and exported encryption-type
+maps. Use 13 rule-scoped Revive directives for legacy names and four
+declaration-scoped global-variable exceptions for lookup tables. Simplify
+encryption-type membership and make NTSTATUS names table-driven without
+changing the known strings or the unknown-code format. No lint profile
+or dependency changes.
+
+Both pinned profiles report zero findings under `v8/iana`, down from
+294 canonical and 10 supplemental. Diagnostics elsewhere are unchanged;
+whole-v8 totals are 46 canonical and 354 supplemental, all in the deferred
+PKINIT and PKU2U packages. Compiled API comparison confirms all exported
+declarations and all 402 constant values are unchanged. Revised tests
+pass against baseline and final code, including caller overrides of both
+exported maps. The three tested IANA packages retain 100% statement
+coverage. The full v8 build, vet, offline race suite, 25 shuffled IANA
+race runs, Linux/386 tests, and both changed-line gates pass. Windows/amd64
+and interop-tagged tests compile but were not run.
+
 Slice 154 (2026-11-21, complete v8 kadmin lint cleanup; Q-10):
 Name the password-change frame and policy field sizes, preallocate the
 length-prefixed request buffer, and separate KRB-PRIV payload construction

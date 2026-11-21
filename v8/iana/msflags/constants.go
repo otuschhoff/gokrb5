@@ -4,12 +4,15 @@ package msflags
 // APOptions are the little-endian KERB-AD-AUTH-DATA-AP-OPTIONS flags.
 type APOptions uint32
 
+//revive:disable:var-naming Preserve published MS-KILE AP-OPTIONS identifiers.
 const (
 	// KERB_AP_OPTIONS_CBT is the channel-bindings AP-OPTIONS bit (MS-KILE 2.2.6).
 	KERB_AP_OPTIONS_CBT APOptions = 0x00004000
 	// KERB_AP_OPTIONS_UNVERIFIED_TARGET_NAME permits an unverified target name in AP-OPTIONS (MS-KILE 2.2.6).
 	KERB_AP_OPTIONS_UNVERIFIED_TARGET_NAME APOptions = 0x00008000
 )
+
+//revive:enable:var-naming
 
 // SupportedEncTypes is the little-endian MS-KILE supported encryption types mask.
 type SupportedEncTypes uint32
@@ -33,6 +36,8 @@ const (
 )
 
 // Names used by the MS-KILE Supported Encryption Types Bit Flags table.
+//
+//revive:disable:var-naming Preserve published aliases for the MS-KILE flag names.
 const (
 	DES_CBC_CRC                       = SupportedEncTypeDESCBCRC
 	DES_CBC_MD5                       = SupportedEncTypeDESCBCMD5
@@ -48,15 +53,20 @@ const (
 	RESOURCE_SID_COMPRESSION_DISABLED = SupportedEncTypeResourceSIDCompressionOff
 )
 
+//revive:enable:var-naming
+
 // KerbErrorDataType identifies the payload carried by KERB-ERROR-DATA.
 type KerbErrorDataType int32
 
+//revive:disable:var-naming Preserve published MS-KILE error data identifiers.
 const (
 	// KERB_AP_ERR_TYPE_SKEW_RECOVERY identifies KERB-ERROR-DATA carrying clock-skew recovery information.
 	KERB_AP_ERR_TYPE_SKEW_RECOVERY KerbErrorDataType = 2
 	// KERB_ERR_TYPE_EXTENDED identifies KERB-ERROR-DATA carrying an extended error.
 	KERB_ERR_TYPE_EXTENDED KerbErrorDataType = 3
 )
+
+//revive:enable:var-naming
 
 // TokenInfoFlags identify the kind of LSAP token information.
 type TokenInfoFlags uint32
@@ -67,7 +77,8 @@ const (
 	TokenInfoFull TokenInfoFlags = 0
 	// TokenInfoUACRestricted requests UAC-restricted token information (LSAP_TOKEN_INFO_INTEGRITY).
 	TokenInfoUACRestricted TokenInfoFlags = 1
-	UAC_RESTRICTED         TokenInfoFlags = TokenInfoUACRestricted
+	//revive:disable-next-line:var-naming Preserve the published MS-KILE token flag alias.
+	UAC_RESTRICTED TokenInfoFlags = TokenInfoUACRestricted
 )
 
 // TokenIntegrityLevel identifies a Windows process integrity level.

@@ -2,6 +2,8 @@
 package nametype
 
 // Kerberos name type IDs.
+//
+//revive:disable:var-naming Preserve published Kerberos principal name type identifiers.
 const (
 	KRB_NT_UNKNOWN              int32 = 0  // Name type not known
 	KRB_NT_PRINCIPAL            int32 = 1  // Just the name of the principal as in DCE,  or for users
@@ -17,3 +19,5 @@ const (
 	KRB_NT_MS_PRINCIPAL_AND_ID  int32 = -129
 	KRB_NT_ENT_PRINCIPAL_AND_ID int32 = -130
 )
+
+//revive:enable:var-naming

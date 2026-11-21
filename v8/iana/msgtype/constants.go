@@ -2,6 +2,8 @@
 package msgtype
 
 // KRB message type IDs.
+//
+//revive:disable:var-naming Preserve published Kerberos message identifiers.
 const (
 	KRB_AS_REQ     = 10 // Request for initial authentication
 	KRB_AS_REP     = 11 // Response to KRB_AS_REQ request
@@ -16,3 +18,5 @@ const (
 	KRB_CRED       = 22 // Private (encrypted) message to forward credentials
 	KRB_ERROR      = 30 // Error response
 )
+
+//revive:enable:var-naming

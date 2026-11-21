@@ -1,9 +1,14 @@
 // Package etypeID provides Kerberos 5 encryption type assigned numbers.
 package etypeID
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // Kerberos encryption type assigned numbers.
+//
+//revive:disable:var-naming Preserve published encryption-type identifiers.
 const (
 	// RESERVED : 0
 	DES_CBC_CRC                  int32 = 1
@@ -36,7 +41,11 @@ const (
 	// UNASSIGNED : 66-2147483647
 )
 
+//revive:enable:var-naming
+
 // ETypesByName is a map of EncType names to their assigned EncType number.
+//
+//nolint:gochecknoglobals // Preserve the exported map and caller overrides used by EtypeSupported.
 var ETypesByName = map[string]int32{
 	"des-cbc-crc":                  DES_CBC_CRC,
 	"des-cbc-md4":                  DES_CBC_MD4,
@@ -79,6 +88,8 @@ var ETypesByName = map[string]int32{
 }
 
 // ETypesByID maps encryption type IDs to the canonical names used by MIT Kerberos tools.
+//
+//nolint:gochecknoglobals // Preserve the exported map and caller overrides used by ETypeToString.
 var ETypesByID = map[int32]string{
 	DES_CBC_CRC:                  "des-cbc-crc",
 	DES_CBC_MD4:                  "des-cbc-md4",
@@ -128,13 +139,8 @@ func EtypeSupported(etype string) int32 {
 		RC4_HMAC,
 	}
 	id := ETypesByName[etype]
-	if id == 0 {
+	if slices.Contains(s, id) {
 		return id
-	}
-	for _, sid := range s {
-		if id == sid {
-			return id
-		}
 	}
 	return 0
 }

@@ -2,6 +2,8 @@
 package keyusage
 
 // Key usage numbers.
+//
+//revive:disable:var-naming Preserve published key usage identifiers and aliases.
 const (
 	AS_REQ_PA_ENC_TIMESTAMP                        = 1
 	KDC_REP_TICKET                                 = 2
@@ -55,3 +57,5 @@ const (
 	ENC_CHALLENGE_CLIENT = KEY_USAGE_ENC_CHALLENGE_CLIENT
 	ENC_CHALLENGE_KDC    = KEY_USAGE_ENC_CHALLENGE_KDC
 )
+
+//revive:enable:var-naming

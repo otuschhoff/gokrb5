@@ -2,6 +2,8 @@
 package patype
 
 // Kerberos pre-authentication type assigned numbers.
+//
+//revive:disable:var-naming Preserve published Kerberos pre-authentication identifiers.
 const (
 	PA_TGS_REQ       int32 = 1
 	PA_ENC_TIMESTAMP int32 = 2
@@ -83,3 +85,5 @@ const (
 	PA_SUPERSEDED_BY_USER int32 = 170
 	PA_DMSA_KEY_PACKAGE   int32 = 171
 )
+
+//revive:enable:var-naming

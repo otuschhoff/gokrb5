@@ -2,6 +2,8 @@
 package chksumtype
 
 // Checksum type IDs.
+//
+//revive:disable:var-naming Preserve published checksum identifiers.
 const (
 	// RESERVED : 0
 	CRC32         int32 = 1
@@ -27,6 +29,9 @@ const (
 	// UNASSIGNED : 21-32770
 	GSSAPI int32 = 32771
 	// UNASSIGNED : 32772-2147483647
-	KERB_CHECKSUM_HMAC_MD5_UNSIGNED uint32 = 4294967158 // 0xFFFFFF76 documentation says this is -138 but in an unsigned int this is 4294967158
+	// This is the unsigned representation (0xFFFFFF76) of the documented value -138.
+	KERB_CHECKSUM_HMAC_MD5_UNSIGNED uint32 = 4294967158
 	KERB_CHECKSUM_HMAC_MD5          int32  = -138
 )
+
+//revive:enable:var-naming
