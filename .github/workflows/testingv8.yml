@@ -384,6 +384,7 @@ jobs:
 
       - name: Start Samba AD domain controller
         run: |
+          bash v8/test/testdata/docker/samba-ad-dc/pkinit-certs.sh "${RUNNER_TEMP}/gokrb5-ad-pkinit"
           mkdir -p "${RUNNER_TEMP}/gokrb5-ad"
           chmod 0777 "${RUNNER_TEMP}/gokrb5-ad"
           docker run -d --privileged \
@@ -391,8 +392,10 @@ jobs:
             --name gokrb5-samba-ad \
             --hostname dc.samba.gokrb5.test \
             -v "${RUNNER_TEMP}/gokrb5-ad:/artifacts" \
-            -p 88:88/tcp -p 88:88/udp \
-            -p 464:464/tcp -p 464:464/udp \
+            --mount "type=bind,source=${RUNNER_TEMP}/gokrb5-ad-pkinit/kdc,target=/pkinit,readonly" \
+            -e SAMBA_PKINIT_DIR=/pkinit \
+            -p 127.0.0.1:88:88/tcp -p 127.0.0.1:88:88/udp \
+            -p 127.0.0.1:464:464/tcp -p 127.0.0.1:464:464/udp \
             gokrb5-samba-ad
           for attempt in $(seq 1 120); do
             status=$(docker inspect --format '{{.State.Health.Status}}' gokrb5-samba-ad)
@@ -418,7 +421,13 @@ jobs:
           source "${RUNNER_TEMP}/gokrb5-ad/environment"
           set +a
           cd v8
-          TESTAD_DIR="${RUNNER_TEMP}/gokrb5-ad" go test -race -tags adintegration ./...
+          TESTAD_DIR="${RUNNER_TEMP}/gokrb5-ad" go test -race -count=1 -tags adintegration ./...
+
+      - name: Require Samba PKINIT with RFC 8636
+        working-directory: v8
+        run: |
+          TESTAD_KDC=127.0.0.1:88 TESTAD_PKINIT_DIR="${RUNNER_TEMP}/gokrb5-ad-pkinit/client" \
+            go test -race -count=1 -v -tags adintegration -run '^TestSambaPKINITRFC8636$' ./test/adintegration
 
       - name: Show Samba logs on failure
         if: failure()
@@ -426,4 +435,10 @@ jobs:
 
       - name: Stop Samba AD domain controller
         if: always()
-        run: docker rm -f gokrb5-samba-ad || true
+        run: |
+          if docker container inspect gokrb5-samba-ad >/dev/null 2>&1; then
+            docker rm -fv gokrb5-samba-ad
+          fi
+          pkinit="${RUNNER_TEMP}/gokrb5-ad-pkinit"
+          rm -f -- "${pkinit}/kdc/kdc.key" "${pkinit}/client/client.key" \
+            "${pkinit}/kdc.key" "${pkinit}/client.key" "${pkinit}/ca.key"
