@@ -820,6 +820,23 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 152 (2026-11-21, complete v8 fileio lint cleanup; Q-10):
+Name the existing `0o600` temporary-file mode without changing atomic
+replacement or cleanup behavior. Retain all fault cases and the typed
+error-precedence test. Assert operation order, paths, and close counts
+alongside the primary and cleanup errors. No new lint exceptions or
+dependency changes.
+
+Both pinned profiles report zero findings in `v8/internal/fileio`, down
+from 20 supplemental and zero canonical. Diagnostics outside the package
+are unchanged; whole-v8 totals are 340 canonical and 398 supplemental.
+The revised tests pass against both baseline and final production code,
+with statement coverage unchanged at 87.2%. The full v8 build, vet, and
+offline race suite pass, as do 25 shuffled race-enabled package runs,
+Linux/386 tests, and both canonical changed-line gates. Windows/amd64
+and interop-tagged package tests compile; native Windows execution and
+live interoperability were not tested.
+
 Slice 151 (2026-11-21, complete v8 AD test-helper lint cleanup; Q-10):
 Separate realm and domain resolution and Kerberos configuration from AD
 test environment discovery. Preserve credential lookup order, error

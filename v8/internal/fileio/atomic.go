@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 )
 
+const privateFileMode os.FileMode = 0o600
+
 type temporaryFile interface {
 	io.WriteCloser
 	Name() string
@@ -54,7 +56,7 @@ func atomicWrite(path string, data []byte, syncDir func(string) error, ops fileO
 }
 
 func writeTemporary(tmp temporaryFile, data []byte) error {
-	err := tmp.Chmod(0o600)
+	err := tmp.Chmod(privateFileMode)
 	if err == nil {
 		var written int
 		written, err = tmp.Write(data)

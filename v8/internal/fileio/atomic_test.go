@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -43,9 +44,11 @@ func (f *faultFile) Close() error {
 func TestAtomicWriteRetainsFirstTypedCause(t *testing.T) {
 	primary := &os.PathError{Op: "write", Path: "cache", Err: io.ErrClosedPipe}
 	cleanup := &os.PathError{Op: "close", Path: "cache", Err: os.ErrPermission}
-	file := &faultFile{writeErr: primary, closeErr: cleanup}
+	var file faultFile
+	file.writeErr = primary
+	file.closeErr = cleanup
 	ops := fileOps{
-		create: func(_, _ string) (temporaryFile, error) { return file, nil },
+		create: func(_, _ string) (temporaryFile, error) { return &file, nil },
 		remove: func(_ string) error { return nil },
 		rename: func(_, _ string) error { t.Fatal("renamed failed file"); return nil },
 	}
@@ -59,64 +62,131 @@ func TestAtomicWriteRetainsFirstTypedCause(t *testing.T) {
 	}
 }
 
-func TestAtomicWriteFailures(t *testing.T) {
+type writeFaults struct {
+	file      faultFile
+	createErr error
+	renameErr error
+	dirErr    error
+	removeErr error
+}
+
+func (f *writeFaults) run(t *testing.T) (string, error) {
+	t.Helper()
+
+	const dir = "directory"
+	path := filepath.Join(dir, "cache")
+	var calls []string
+	ops := fileOps{
+		create: func(gotDir, pattern string) (temporaryFile, error) {
+			calls = append(calls, "create")
+			if gotDir != dir || pattern != ".cache.tmp-" {
+				t.Fatalf("temporary location = %q, %q", gotDir, pattern)
+			}
+			return &f.file, f.createErr
+		},
+		rename: func(from, to string) error {
+			calls = append(calls, "rename")
+			if from != f.file.Name() || to != path {
+				t.Fatalf("rename paths = %q, %q", from, to)
+			}
+			return f.renameErr
+		},
+		remove: func(path string) error {
+			calls = append(calls, "remove")
+			if path != f.file.Name() {
+				t.Fatalf("removed path = %q", path)
+			}
+			return f.removeErr
+		},
+	}
+	syncDirectory := func(gotDir string) error {
+		calls = append(calls, "sync directory")
+		if gotDir != dir {
+			t.Fatalf("synced directory = %q, want %q", gotDir, dir)
+		}
+		return f.dirErr
+	}
+	err := atomicWrite(path, []byte("data"), syncDirectory, ops)
+	return strings.Join(calls, ", "), err
+}
+
+type atomicWriteCase struct {
+	name        string
+	inject      func(*writeFaults)
+	wantErr     error
+	wantCleanup error
+	wantCalls   string
+	wantCloses  int
+}
+
+func atomicWriteCases() []atomicWriteCase {
 	primary := errors.New("injected operation failure")
 	cleanup := errors.New("injected cleanup failure")
-	tests := []struct {
-		name      string
-		file      faultFile
-		createErr error
-		renameErr error
-		dirErr    error
-		removeErr error
-		wantErr   error
-		wantClean bool
-	}{
-		{name: "success"},
-		{name: "create", createErr: primary, wantErr: primary},
-		{name: "permissions", file: faultFile{chmodErr: primary}, wantErr: primary, wantClean: true},
-		{name: "write and close", file: faultFile{writeErr: primary, closeErr: cleanup}, wantErr: primary, wantClean: true},
-		{name: "short write", file: faultFile{short: true}, wantErr: io.ErrShortWrite, wantClean: true},
-		{name: "sync", file: faultFile{syncErr: primary}, wantErr: primary, wantClean: true},
-		{name: "close", file: faultFile{closeErr: primary}, wantErr: primary, wantClean: true},
-		{name: "rename", renameErr: primary, wantErr: primary, wantClean: true},
-		{name: "rename and remove", renameErr: primary, removeErr: cleanup, wantErr: primary, wantClean: true},
-		{name: "directory sync after commit", dirErr: primary, wantErr: primary},
+	const (
+		committed    = "create, rename, sync directory"
+		abandoned    = "create, remove"
+		renameFailed = "create, rename, remove"
+	)
+	return []atomicWriteCase{
+		{name: "success", inject: nil, wantErr: nil, wantCleanup: nil, wantCalls: committed, wantCloses: 1},
+		{
+			name: "create", inject: func(f *writeFaults) { f.createErr = primary },
+			wantErr: primary, wantCleanup: nil, wantCalls: "create", wantCloses: 0,
+		},
+		{
+			name: "permissions", inject: func(f *writeFaults) { f.file.chmodErr = primary },
+			wantErr: primary, wantCleanup: nil, wantCalls: abandoned, wantCloses: 1,
+		},
+		{
+			name: "write and close", inject: func(f *writeFaults) { f.file.writeErr, f.file.closeErr = primary, cleanup },
+			wantErr: primary, wantCleanup: cleanup, wantCalls: abandoned, wantCloses: 1,
+		},
+		{
+			name: "short write", inject: func(f *writeFaults) { f.file.short = true },
+			wantErr: io.ErrShortWrite, wantCleanup: nil, wantCalls: abandoned, wantCloses: 1,
+		},
+		{
+			name: "sync", inject: func(f *writeFaults) { f.file.syncErr = primary },
+			wantErr: primary, wantCleanup: nil, wantCalls: abandoned, wantCloses: 1,
+		},
+		{
+			name: "close", inject: func(f *writeFaults) { f.file.closeErr = primary },
+			wantErr: primary, wantCleanup: nil, wantCalls: abandoned, wantCloses: 1,
+		},
+		{
+			name: "rename", inject: func(f *writeFaults) { f.renameErr = primary },
+			wantErr: primary, wantCleanup: nil, wantCalls: renameFailed, wantCloses: 1,
+		},
+		{
+			name: "rename and remove", inject: func(f *writeFaults) { f.renameErr, f.removeErr = primary, cleanup },
+			wantErr: primary, wantCleanup: cleanup, wantCalls: renameFailed, wantCloses: 1,
+		},
+		{
+			name: "directory sync after commit", inject: func(f *writeFaults) { f.dirErr = primary },
+			wantErr: primary, wantCleanup: nil, wantCalls: committed, wantCloses: 1,
+		},
 	}
-	for _, tt := range tests {
+}
+
+func TestAtomicWriteFailures(t *testing.T) {
+	for _, tt := range atomicWriteCases() {
 		t.Run(tt.name, func(t *testing.T) {
-			removed, renamed, synced := false, false, false
-			ops := fileOps{
-				create: func(dir, pattern string) (temporaryFile, error) {
-					if dir != "directory" || pattern != ".cache.tmp-" {
-						t.Fatalf("temporary location = %q, %q", dir, pattern)
-					}
-					return &tt.file, tt.createErr
-				},
-				rename: func(_, _ string) error { renamed = true; return tt.renameErr },
-				remove: func(_ string) error { removed = true; return tt.removeErr },
+			var faults writeFaults
+			if tt.inject != nil {
+				tt.inject(&faults)
 			}
-			err := atomicWrite(filepath.Join("directory", "cache"), []byte("data"), func(_ string) error {
-				synced = true
-				return tt.dirErr
-			}, ops)
-			if !errors.Is(err, tt.wantErr) || removed != tt.wantClean {
-				t.Fatalf("write = %v, removed = %v; want %v, %v", err, removed, tt.wantErr, tt.wantClean)
+			calls, err := faults.run(t)
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("write error = %v, want %v", err, tt.wantErr)
 			}
-			if tt.createErr == nil && tt.file.closes != 1 {
-				t.Fatalf("Close called %d times", tt.file.closes)
+			if tt.wantCleanup != nil && !errors.Is(err, tt.wantCleanup) {
+				t.Errorf("write error = %v, missing cleanup cause %v", err, tt.wantCleanup)
 			}
-			if tt.file.closeErr != nil && !errors.Is(err, tt.file.closeErr) {
-				t.Fatal("close failure was lost")
+			if calls != tt.wantCalls {
+				t.Errorf("operation trace = %q, want %q", calls, tt.wantCalls)
 			}
-			if tt.removeErr != nil && !errors.Is(err, tt.removeErr) {
-				t.Fatal("cleanup failure was lost")
-			}
-			if (tt.file.chmodErr != nil || tt.file.writeErr != nil || tt.file.short || tt.file.syncErr != nil || tt.file.closeErr != nil) && renamed {
-				t.Fatal("renamed an incomplete credential file")
-			}
-			if synced && (!renamed || tt.renameErr != nil) {
-				t.Fatal("directory sync preceded a successful replacement")
+			if faults.file.closes != tt.wantCloses {
+				t.Errorf("Close called %d times, want %d", faults.file.closes, tt.wantCloses)
 			}
 		})
 	}
