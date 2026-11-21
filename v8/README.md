@@ -114,11 +114,21 @@ If you are interested in contributing to gokrb5, great! Please read the [contrib
 Thank you for your interest in contributing to gokrb5 please read the 
 [contribution guide](https://github.com/otuschhoff/gokrb5/blob/master/CONTRIBUTING.md) as it should help you get started.
 
-## Known Issues
-| Issue | Worked around? | References |
-|-------|-------------|------------|
-| The Go standard library's encoding/asn1 package cannot unmarshal into slice of asn1.RawValue | Yes | https://github.com/golang/go/issues/17321 |
-| The Go standard library's encoding/asn1 package cannot marshal into a GeneralString | Yes - using https://github.com/jcmturner/gofork/tree/master/encoding/asn1 | https://github.com/golang/go/issues/18832 |
-| The Go standard library's encoding/asn1 package cannot marshal into slice of strings and pass stringtype parameter tags to members | Yes - using https://github.com/jcmturner/gofork/tree/master/encoding/asn1 | https://github.com/golang/go/issues/18834 |
-| The Go standard library's encoding/asn1 package cannot marshal with application tags | Yes | |
-| The Go standard library's x/crypto/pbkdf2.Key function uses the int type for iteraction count limiting meaning the 4294967296 count specified in https://tools.ietf.org/html/rfc3962 section 4 cannot be met on 32bit systems | Yes - using https://github.com/jcmturner/gofork/tree/master/x/crypto/pbkdf2 | https://go-review.googlesource.com/c/crypto/+/85535 |
+## Why v8 still uses gofork
+
+PKINIT uses Go's `encoding/asn1` to encode DH parameters, the DH public
+integer, and the RFC 8636 supplemental KDF data. Other paths still use
+the fork; its ASN.1 types also appear in the public Go API and are not
+interchangeable with the standard library types.
+
+On Go 1.26 and 1.27, the standard library can decode a sequence into
+`[]asn1.RawValue` and marshal an explicit application tag with
+`MarshalWithParams`. It still does not emit the required GeneralString
+tag for Kerberos realms or principal-name components from `generalstring`
+struct tags ([golang/go#18832](https://github.com/golang/go/issues/18832),
+[golang/go#18834](https://github.com/golang/go/issues/18834)).
+
+The RFC 3962 key derivation uses the fork's `pbkdf2.Key64` to pass a
+64-bit iteration count on all architectures. The standard library's
+`crypto/pbkdf2.Key` takes an `int`, which cannot represent every count
+from that path on 32-bit systems.

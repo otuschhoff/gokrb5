@@ -4,6 +4,7 @@ import (
 	"crypto/sha1" // #nosec G505 -- RFC 4556 legacy KDF and RFC 8636 SHA-1 KDF OID.
 	"crypto/sha256"
 	"crypto/sha512"
+	stdasn1 "encoding/asn1"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -45,7 +46,7 @@ func DeriveReplyKey(
 		return types.EncryptionKey{}, fmt.Errorf("marshal PKINIT KDF server principal: %w", err)
 	}
 
-	suppPubInfo, err := asn1.Marshal(PKINITSuppPubInfo{EType: etypeID, ASReq: asReq, PKASRep: pkAsRep})
+	suppPubInfo, err := stdasn1.Marshal(PKINITSuppPubInfo{EType: etypeID, ASReq: asReq, PKASRep: pkAsRep})
 	if err != nil {
 		return types.EncryptionKey{}, fmt.Errorf("marshal PKINIT KDF supplemental public info: %w", err)
 	}

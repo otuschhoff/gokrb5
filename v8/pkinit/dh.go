@@ -2,6 +2,7 @@ package pkinit
 
 import (
 	"crypto/rand"
+	stdasn1 "encoding/asn1"
 	"errors"
 	"fmt"
 	"io"
@@ -124,11 +125,11 @@ func GenerateDHKeyForPeer(peer SubjectPublicKeyInfo, minimumBits int, random io.
 
 // PublicKey returns the RFC 3279 SubjectPublicKeyInfo representation.
 func (key *DHKey) PublicKey() (SubjectPublicKeyInfo, error) {
-	parameters, err := asn1.Marshal(key.params)
+	parameters, err := stdasn1.Marshal(key.params)
 	if err != nil {
 		return SubjectPublicKeyInfo{}, fmt.Errorf("marshal PKINIT DH parameters: %w", err)
 	}
-	public, err := asn1.Marshal(key.public)
+	public, err := stdasn1.Marshal(key.public)
 	if err != nil {
 		return SubjectPublicKeyInfo{}, fmt.Errorf("marshal PKINIT DH public value: %w", err)
 	}
