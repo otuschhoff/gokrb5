@@ -820,6 +820,23 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 154 (2026-11-21, complete v8 kadmin lint cleanup; Q-10):
+Name the password-change frame and policy field sizes, preallocate the
+length-prefixed request buffer, and separate KRB-PRIV payload construction
+from encryption. Preserve the public API, wire bytes, and error handling.
+Split request and reply checks into focused subtests and verify that the
+server error is returned intact. No new lint exceptions or dependencies.
+
+Both pinned profiles report zero findings in `v8/kadmin`, down from 17
+supplemental and zero canonical. Diagnostics outside the package are
+unchanged; whole-v8 totals are 340 canonical and 364 supplemental.
+Revised tests pass against baseline and final production code. Statement
+coverage is 83.5% on baseline and 84.3% on the final code. The full v8
+build, vet, and offline race suite pass, as do 25 shuffled race-enabled
+package runs, Linux/386 tests, and both canonical changed-line gates.
+Windows/amd64 and interop-tagged tests compile but were not run natively
+or against a live environment.
+
 Slice 153 (2026-11-21, complete v8 asn1tools lint cleanup; Q-10):
 Name the ASN.1 length masks, octet radix, and long-form byte offset.
 Make the application wrapper's zero-value field explicit and retain the

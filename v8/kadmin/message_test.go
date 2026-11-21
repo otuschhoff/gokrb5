@@ -204,43 +204,81 @@ func FuzzReplyUnmarshal(f *testing.F) {
 }
 
 func TestChangePasswordRequestAndReply(t *testing.T) {
+	t.Parallel()
+	const realm = "EXAMPLE.ORG"
 	now := time.Now().UTC().Truncate(time.Second)
 	cname := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, "alice")
 	sname := types.NewPrincipalName(nametype.KRB_NT_SRV_INST, "kadmin/changepw")
 	serviceKey := types.EncryptionKey{KeyType: etypeID.AES256_CTS_HMAC_SHA1_96, KeyValue: bytes.Repeat([]byte{1}, 32)}
-	ticket, sessionKey, err := messages.NewTicketWithKey(cname, "EXAMPLE.ORG", sname, "EXAMPLE.ORG", types.NewKrbFlags(), serviceKey, 1, now, now, now.Add(time.Hour), now.Add(time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	request, replyKey, err := ChangePasswdMsg(cname, "EXAMPLE.ORG", "new-password", ticket, sessionKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	encoded, err := request.Marshal()
-	if err != nil || len(encoded) < 6 || int(binary.BigEndian.Uint16(encoded[:2])) != len(encoded) || binary.BigEndian.Uint16(encoded[2:4]) != 0xff80 {
-		t.Fatalf("marshaled request = %x, %v", encoded, err)
-	}
+	ticket, sessionKey, err := messages.NewTicketWithKey(
+		cname,
+		realm,
+		sname,
+		realm,
+		types.NewKrbFlags(),
+		serviceKey,
+		1,
+		now,
+		now,
+		now.Add(time.Hour),
+		now.Add(time.Hour),
+	)
+	require.NoError(t, err)
+	request, replyKey, err := ChangePasswdMsg(
+		cname,
+		realm,
+		"new-password",
+		ticket,
+		sessionKey,
+	)
+	require.NoError(t, err)
 
-	part := messages.EncKrbPrivPart{UserData: []byte{0, 0, 'o', 'k'}, Timestamp: now}
+	t.Run("request frame", func(t *testing.T) {
+		encoded, err := request.Marshal()
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, len(encoded), 6)
+		assert.Equal(t, len(encoded), int(binary.BigEndian.Uint16(encoded[:2])))
+		assert.Equal(t, uint16(0xff80), binary.BigEndian.Uint16(encoded[2:4]))
+	})
+	t.Run("protected reply", func(t *testing.T) {
+		checkProtectedReply(t, now, replyKey)
+	})
+	t.Run("error reply", func(t *testing.T) {
+		var reply Reply
+		reply.IsKRBError = true
+		reply.KRBError = messages.NewKRBError(sname, realm, 1, "denied")
+		var serverErr messages.KRBError
+		require.ErrorAs(t, reply.Decrypt(replyKey), &serverErr)
+		assert.Equal(t, reply.KRBError, serverErr)
+	})
+	t.Run("unsupported session key", func(t *testing.T) {
+		_, _, err := ChangePasswdMsg(
+			cname,
+			realm,
+			"password",
+			ticket,
+			types.EncryptionKey{KeyType: -1, KeyValue: nil},
+		)
+		assert.ErrorContains(t, err, "error generating subkey etype")
+	})
+}
+
+func checkProtectedReply(t *testing.T, now time.Time, replyKey types.EncryptionKey) {
+	t.Helper()
+	var part messages.EncKrbPrivPart
+	part.UserData = []byte{0, 0, 'o', 'k'}
+	part.Timestamp = now
 	private := messages.NewKRBPriv(part)
-	if err := private.EncryptEncPart(replyKey); err != nil {
-		t.Fatal(err)
-	}
-	reply := Reply{KRBPriv: private}
-	if err := reply.Decrypt(replyKey); err != nil || reply.ResultCode != 0 || reply.Result != "ok" {
-		t.Fatalf("decrypted reply = %d/%q, %v", reply.ResultCode, reply.Result, err)
-	}
+	require.NoError(t, private.EncryptEncPart(replyKey))
+
+	var reply Reply
+	reply.KRBPriv = private
+	require.NoError(t, reply.Decrypt(replyKey))
+	assert.Zero(t, reply.ResultCode)
+	assert.Equal(t, "ok", reply.Result)
+	require.NotEmpty(t, reply.KRBPriv.EncPart.Cipher)
 	reply.KRBPriv.EncPart.Cipher[0] ^= 0xff
 	decryptErr := reply.Decrypt(replyKey)
 	assert.ErrorContains(t, decryptErr, "decrypt kpasswd KRB-PRIV:")
 	assert.Error(t, errors.Unwrap(decryptErr), "kpasswd decryption error lost its cause")
-
-	krbError := messages.NewKRBError(sname, "EXAMPLE.ORG", 1, "denied")
-	errorReply := Reply{IsKRBError: true, KRBError: krbError}
-	if err := errorReply.Decrypt(replyKey); err == nil {
-		t.Fatal("KRB error reply returned no error")
-	}
-	if _, _, err := ChangePasswdMsg(cname, "EXAMPLE.ORG", "password", ticket, types.EncryptionKey{KeyType: -1}); err == nil {
-		t.Fatal("unsupported session key accepted")
-	}
 }

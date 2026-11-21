@@ -12,7 +12,12 @@ import (
 )
 
 // ChangePasswdMsg builds a password-change request and returns its reply decryption key.
-func ChangePasswdMsg(cname types.PrincipalName, realm, password string, tkt messages.Ticket, sessionKey types.EncryptionKey) (Request, types.EncryptionKey, error) {
+func ChangePasswdMsg(
+	cname types.PrincipalName,
+	realm, password string,
+	tkt messages.Ticket,
+	sessionKey types.EncryptionKey,
+) (Request, types.EncryptionKey, error) {
 	var (
 		r Request
 		k types.EncryptionKey
@@ -55,14 +60,7 @@ func ChangePasswdMsg(cname types.PrincipalName, realm, password string, tkt mess
 		return r, k, fmt.Errorf("build kpasswd AP-REQ: %w", err)
 	}
 
-	// Form the KRBPriv encpart data
-	kp := messages.EncKrbPrivPart{
-		UserData:       chpwdb,
-		Timestamp:      auth.CTime,
-		Usec:           auth.Cusec,
-		SequenceNumber: auth.SeqNumber,
-	}
-	kpriv := messages.NewKRBPriv(kp)
+	kpriv := newChangePasswdKRBPriv(chpwdb, auth)
 	err = kpriv.EncryptEncPart(k)
 	if err != nil {
 		err = krberror.Errorf(err, krberror.EncryptingError, "error encrypting change passwd data")
@@ -74,4 +72,13 @@ func ChangePasswdMsg(cname types.PrincipalName, realm, password string, tkt mess
 		KRBPriv: kpriv,
 	}
 	return r, k, err
+}
+
+func newChangePasswdKRBPriv(data []byte, auth types.Authenticator) messages.KRBPriv {
+	var part messages.EncKrbPrivPart
+	part.UserData = data
+	part.Timestamp = auth.CTime
+	part.Usec = auth.Cusec
+	part.SequenceNumber = auth.SeqNumber
+	return messages.NewKRBPriv(part)
 }

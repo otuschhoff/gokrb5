@@ -10,6 +10,11 @@ import (
 	"github.com/otuschhoff/gokrb5/v8/types"
 )
 
+const (
+	uint16Bytes         = 2
+	passwordPolicyBytes = 30
+)
+
 // Request message for changing password.
 type Request struct {
 	APREQ   messages.APReq
@@ -62,7 +67,7 @@ func (m *Request) Marshal() ([]byte, error) {
 		err = errors.New("length of AP_REQ greater then max Uint16 size")
 		return b, err
 	}
-	al := make([]byte, 2)
+	al := make([]byte, uint16Bytes)
 	apReqLength, err := kadminUint16("AP_REQ", len(ab))
 	if err != nil {
 		return b, err
@@ -76,15 +81,16 @@ func (m *Request) Marshal() ([]byte, error) {
 		return b, err
 	}
 	b = append(b, pb...)
-	if len(b)+2 > math.MaxUint16 {
+	frameLength := len(b) + uint16Bytes
+	if frameLength > math.MaxUint16 {
 		err = errors.New("length of message greater then max Uint16 size")
 		return b, err
 	}
-	ml := make([]byte, 2)
-	messageLength, err := kadminUint16("message", len(b)+2)
+	messageLength, err := kadminUint16("message", frameLength)
 	if err != nil {
 		return b, err
 	}
+	ml := make([]byte, uint16Bytes, frameLength)
 	binary.BigEndian.PutUint16(ml, messageLength)
 	b = append(ml, b...)
 	return b, err
@@ -156,13 +162,13 @@ func (m *Reply) decodeResult(b []byte) error {
 }
 
 func parseResponse(b []byte) (uint16, string, *PasswordPolicy, error) {
-	if len(b) < 2 {
+	if len(b) < uint16Bytes {
 		return 0, "", nil, errors.New("kadmin response is shorter than the result code")
 	}
-	resultCode := binary.BigEndian.Uint16(b[:2])
-	result := b[2:]
-	if len(result) >= 30 {
-		policyOffset := len(result) - 30
+	resultCode := binary.BigEndian.Uint16(b[:uint16Bytes])
+	result := b[uint16Bytes:]
+	if len(result) >= passwordPolicyBytes {
+		policyOffset := len(result) - passwordPolicyBytes
 		policyData := result[policyOffset:]
 		if policyData[0] == 0 && policyData[1] == 0 {
 			policy := &PasswordPolicy{
