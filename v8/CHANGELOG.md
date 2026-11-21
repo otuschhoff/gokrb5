@@ -1,80 +1,52 @@
 # Changelog
 
-## Unreleased
+## [v8.6.0] - 2026-11-21
+
+### Upgrade notes
+
+- The minimum Go version remains **1.26.0**. The module path is
+  `github.com/otuschhoff/gokrb5/v8`.
+- The built-in client enctype lists now contain only AES. If your deployment
+  still needs RC4 or Triple-DES, explicitly list the required enctypes and set
+  `allow_weak_crypto = true` in `[libdefaults]`. The flag alone does not add
+  them. The exported `config.WeakETypeList` constant retains its v8.5.4 value.
+- The legacy SPNEGO HTTP client requires `http.Request.GetBody` when it needs
+  to replay a nonempty body during authentication. The authentication exchange
+  is limited to ten round trips, with a separate redirect budget per request.
 
 ### Added
 
-- MIT-compatible keytab creation, modification, lookup, default-path, locking,
-  and display APIs.
-- Hardened MIT FILE ccache parsing plus creation, configuration metadata,
-  KDC-time-offset, atomic writing, and client export support.
-- Per-request AS exchange options, keytab enctype negotiation, KDC clock-skew
-  recovery, typed principal construction, service-only cache round trips, and
-  explicit TGT renewal.
-- `gokinit`, `goklist`, and `gokdestroy` command-line tools.
-- MIT Kerberos interoperability and parser fuzz test suites.
-- Complete PAC buffer 16-19 parsing, deterministic PAC marshaling and signing,
-  UPN/DNS SAM and SID extensions, and options-aware checksum verification.
-- Ticket-bound PAC identity validation and expanded Active Directory
-  credentials for claims, device, delegation, requestor, and SID metadata.
-- MS-SFU S4U2self, S4U2proxy, resource-based constrained delegation, referral
-  handling, user-specific ticket caching, and typed policy errors.
-- FAST armor settings `FASTArmor`, `FASTArmorWithIdentity`,
-  `FASTArmorFromKeytab`, and `RequireFAST`, including encrypted challenge,
-  armored errors, cookies, and reply-key strengthening.
-- MS-KKDCP HTTPS transport and the `KKDCPClient` setting.
-- PKINIT DH and RSA authentication with certificate policy, KDF negotiation,
-  freshness, OCSP, and the `PKINITIdentity`, `PKINITAnchors`,
-  `PKINITKDCCertificatePolicy`, `PKINITMode`, `PKINITMinimumDHBits`,
-  `PKINITRequireFreshness`, and `PKINITOCSPResponse` settings.
-- GSS channel bindings, extended-protection policy, service-principal binding,
-  delegation, mutual authentication, DCE style, and RFC 4121 security contexts.
-- Generic multi-round SPNEGO, NEGOEX, and AES-only PKU2U certificate
-  authentication for initiators and acceptors.
-- A pinned Samba AD integration environment, `adintegration` test suite,
-  `TESTAD_KIND` environment classification, deterministic KDC/SPN overrides,
-  and 60-second CI jobs for every fuzz target.
+- `client.KDCTimeOffset` sets an initial client offset for KDC clock skew.
+- New GSS interfaces describe token-based contexts, message protection, and
+  NEGOEX key export. NEGOEX exports `ErrInvalidConversationState`.
+- CI verifies certificate-only PKINIT against a pinned Samba AD fixture with
+  MIT Kerberos. The test requires an RFC 8636 KDF and has verified SHA-256;
+  it does not cover native Windows AD or Samba with Heimdal.
 
 ### Changed
 
-- Legacy HTTP authentication now requires `Request.GetBody` to replay a request
-  body, matching the generic negotiating client; unsafe partial tee-buffer
-  replay is no longer attempted. Authentication is limited to ten round trips,
-  with redirect budgets isolated per request.
-- Error chains preserve underlying causes across crypto, protocol decoding,
-  endpoint failover, and cleanup, allowing `errors.Is`/`errors.As` inspection.
-- Client diagnostics return JSON encoding and output failures, including short
-  writes. The signature-compatible `Print` method stops and logs failures
-  through the configured logger.
-- The minimum Go version is now 1.18, matching the supported CI matrix and
-  native parser fuzz tests.
-- `keytab.Keytab.AddEntry` now accepts a `uint32` KVNO so values greater than
-  255 can be represented. Calls using typed `uint8` values require conversion.
+- KDC and password-change SRV discovery uses Go's standard resolver instead
+  of `dnsutils/v2`. Gorilla session support remains in the checkout examples,
+  outside the v8 library module.
+- Selected DER encoders, including RFC 8636 KDF principal encoding, now use
+  the standard library. `gofork` remains for public types, legacy decoding,
+  and other compatibility requirements.
+- More crypto, protocol, and I/O errors preserve their causes for
+  `errors.Is` and `errors.As`, including failures during cleanup.
 
 ### Fixed
 
-- Preserve primary and cleanup failures during atomic keytab/ccache replacement,
-  keytab append/unlock, KDC connection closure, and HTTPS response closure.
 - Receive UDP KDC replies larger than 4 KiB without silently truncating them.
-- Retain NDR malformed-stream classification and underlying truncation errors,
-  and reject invalid decode targets or unsettable fields without reflection
-  panics.
-- Close intermediate HTTP negotiation responses on failure without taking
-  ownership of final returned bodies; reopen redirected file bodies correctly.
-- Return explicit errors when exporting an incompletely initialized client or
+- Close intermediate HTTP negotiation responses without taking ownership of
+  the final response body. Reopen replayable bodies when following redirects.
+- Make replay-cache checks and updates atomic and distinguish exact client
+  principals, realms, and services.
+- Bound PAC/NDR multidimensional array handling and return errors for invalid
+  decode targets rather than panicking in reflection.
+- Return errors when exporting an incompletely initialized client or
   importing a nil credential cache.
-- Decode empty multidimensional NDR arrays without indexing element zero, bound
-  dimension products before allocation, and honor conformant-varying offsets.
-- Retain NDR alignment and union-discriminant read errors instead of discarding
-  them.
-- Make replay-cache checks and updates atomic, retain updated authenticator
-  metadata, and isolate records by client realm, exact principal components,
-  service, and authenticator time.
 
-### Deprecated
+For earlier changes, see the [changelog at v8.5.4].
 
-- The unexported compatibility aliases `keytab.entry` and `keytab.principal`
-  remain available inside the package while callers migrate to `keytab.Entry`
-  and `keytab.Principal`.
-- `client.DisablePAFXFAST` remains as an alias for
-  `client.DisablePAReqEncPARep`.
+[v8.6.0]: https://github.com/otuschhoff/gokrb5/compare/v8.5.4...v8.6.0
+[changelog at v8.5.4]: https://github.com/otuschhoff/gokrb5/blob/v8.5.4/v8/CHANGELOG.md
