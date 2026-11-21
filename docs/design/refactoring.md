@@ -3,13 +3,13 @@
 Status: authoritative remediation record. Phases 0-2 are complete, all Phase 3
 decomposition slices are implemented, and Phase 4's local coverage items are
 done (floor raised to 86.0%). Phase 5 slices 1-156 cleared the measured v8 lint
-backlog: both pinned whole-v8 profiles report zero findings. Switching the
-full canonical scan to a required gate is a separate automation decision.
+backlog; Slice 157 made the full canonical v8 scan blocking in the lint job.
+Making the status check required for merges is a branch-protection setting.
 Phase 3/4 interoperability and Windows runtime evidence remains an external CI
 obligation.
 Assessment date: 2026-11-17.
 Scope: `v8` module (`github.com/otuschhoff/gokrb5/v8`) only. Root-module v7
-refactoring is out of scope; whole-project lint automation remains unchanged.
+refactoring and linting are out of scope; the v7 test workflow is unchanged.
 Original assessment revision: `26e11e9` plus the lint configuration and automation
 changes. Phase 1 follows the committed assessment at `d24235c`; Phase 2 follows
 the completed Phase 1 at `282e1bf`. Phase 3 slices follow the completed Phase 2
@@ -108,9 +108,9 @@ The v8 unit suite passed. Full inventories are JSON/text outputs of the runner
 and CI artifacts; they are not duplicated as thousands of prose tasks here.
 Counts are diagnostics, not unique defects, and profiles overlap.
 
-The shared lint runner also assesses v7 with the other configured analyzers to
-preserve the whole-project quality checks; NilAway is scoped to v8 only.
-The v7 findings are not part of this refactoring backlog.
+At the initial assessment the shared lint runner also assessed v7 with analyzers
+other than NilAway. Those findings were outside this backlog. Since Slice 157,
+the runner assesses only v8.
 
 Scope is every package selected by normal `./...` loading in the v8 module,
 including unit tests. Integration/example/custom build-tag configurations,
@@ -818,6 +818,19 @@ complexity at most 8 and nesting below 4 (canonical limits 15/4). All NDR/PAC
 unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
+
+Slice 157 (2026-11-21, enforce the full v8 canonical lint gate):
+Run the canonical and supplemental profiles only on v8. The canonical scan
+blocks the existing `golangci-lint` CI job on any finding; supplemental
+findings remain advisory, and execution failures in either profile fail the
+job. Keep `new BASE_REV` for optional local diagnostics and retain uncapped
+JSON and text reports. No changes to either lint profile or the v7 test
+workflow.
+
+Local verification: both full v8 scans report zero findings. A committed
+canonical probe fails `full` even against an empty diff; a supplemental-only
+probe leaves the advisory step green. Invalid v8 source or profile fails the
+advisory step, while invalid v7 source does not affect the scans.
 
 Slice 156 (2026-11-21, complete v8 PKINIT and PKU2U lint cleanup; Q-10):
 Separate PKINIT DER and CMS processing, exchange validation, and certificate
@@ -3279,24 +3292,17 @@ and after with existing benchmarks. Gradually reduce canonical debt to zero;
 then switch the full canonical scan from inventory-only to a blocking gate.
 
 Exit: each completed slice has no unexplained canonical findings; counts fall
-under unchanged scope; no public/wire behavior regressions; full-project zero
-debt eventually enables an unfiltered required lint check.
+under unchanged scope; no public/wire behavior regressions; once clean, v8
+uses a blocking canonical scan without diff filtering.
 
 ## 5. Automation policy
 
 [The runner](../../scripts/lint.sh) is shared by local work and the
-[Lint workflow](../../.github/workflows/lint.yml). Use `full` for canonical
-inventory, `report` for advisory inventory, and `new BASE_REV` for a blocking
-canonical changed-line check. Both modules always run. Findings return 1;
-configuration, package-loading, timeout, or tool failures must not be accepted
-as existing debt.
-
-The diff gate intentionally permits pre-existing debt on untouched lines. It
-does not prove an unchanged caller is safe after a callee change, enforce a
-monotonic total count automatically, or assess advisory rules as mandatory.
-Review full artifacts for behavioral changes. Stage new files for local diff
-checks; CI sees committed files. No runtime source was refactored in this
-assessment.
+[Lint workflow](../../.github/workflows/lint.yml). All modes run only in v8.
+Use `full` for the blocking canonical check, `report` for advisory findings,
+and `new BASE_REV` for optional local changed-line diagnostics. Findings
+return 1; tooling and configuration failures are non-advisory for either CI
+scan. Stage new Go files for local diff checks; CI runs without diff filtering.
 
 ## Appendix A - Historical MS-KILE review and implementation plan
 

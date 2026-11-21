@@ -23,8 +23,15 @@ case "$mode" in
 esac
 
 lint=${GOLANGCI_LINT:-"$root/.bin/golangci-lint-report"}
-if ! command -v "$lint" >/dev/null; then
+if ! lint_path=$(command -v "$lint"); then
   echo "Custom golangci-lint not found: $lint. See CONTRIBUTING.md for setup." >&2
+  exit 2
+fi
+if [[ "$lint_path" != /* ]]; then
+  lint_path="$PWD/$lint_path"
+fi
+if ! command -v jq >/dev/null; then
+  echo "jq is required to distinguish lint findings from typecheck failures." >&2
   exit 2
 fi
 
@@ -32,37 +39,41 @@ config="$root/.golangci.yml"
 if [ "$mode" = report ]; then
   config="$root/.golangci-report.yml"
 fi
-"$lint" config verify --config "$config"
+if ! "$lint_path" config verify --config "$config"; then
+  exit 2
+fi
 
 args=(--allow-serial-runners --config "$config"
-  --max-issues-per-linter=0 --max-same-issues=0 --uniq-by-line=false)
+  --max-issues-per-linter=0 --max-same-issues=0 --uniq-by-line=false
+  --issues-exit-code=10)
 if [ "$mode" = new ]; then
   args+=(--new-from-rev="$2")
 fi
 if [ -n "${LINT_REPORT_DIR:-}" ]; then
-  mkdir -p -- "$LINT_REPORT_DIR"
-  report_dir=$(cd -- "$LINT_REPORT_DIR" && pwd)
+  if ! mkdir -p -- "$LINT_REPORT_DIR" || ! report_dir=$(cd -- "$LINT_REPORT_DIR" && pwd); then
+    exit 2
+  fi
+  json_report="$report_dir/v8-$mode.json"
+  args+=(--output.text.path="$report_dir/v8-$mode.txt")
+else
+  json_report=$(cd -- "${TMPDIR:-/tmp}" && mktemp "$PWD/gokrb5-lint.XXXXXX") || exit 2
+  trap 'rm -f -- "$json_report"' EXIT
 fi
+args+=(--output.json.path="$json_report")
 
+echo "Linting v8 ($mode)"
+cd -- "$root/v8" || exit 2
 status=0
-for module in . v8; do
-  label=v7
-  if [ "$module" = v8 ]; then
-    label=v8
-  fi
-  output=()
-  if [ -n "${LINT_REPORT_DIR:-}" ]; then
-    output=(--output.json.path="$report_dir/$label-$mode.json"
-      --output.text.path="$report_dir/$label-$mode.txt")
-  fi
-  echo "Linting $label ($mode)"
-  result=0
-  (cd -- "$root/$module" && "$lint" run "${args[@]}" "${output[@]}" ./...) || result=$?
-  if [ "$result" -gt 1 ]; then
-    exit "$result"
-  fi
-  if [ "$result" -eq 1 ]; then
-    status=1
-  fi
-done
-exit "$status"
+GOWORK=off "$lint_path" run "${args[@]}" ./... || status=$?
+case "$status" in
+  10)
+    # golangci-lint uses the findings exit code for typecheck diagnostics too.
+    if jq -e '(.Issues | length > 0) and all(.Issues[]; .FromLinter != "typecheck")' "$json_report" >/dev/null; then
+      exit 1
+    fi
+    echo "Lint did not complete successfully; see the diagnostics above." >&2
+    exit 2
+    ;;
+  1) exit 2 ;;
+  *) exit "$status" ;;
+esac

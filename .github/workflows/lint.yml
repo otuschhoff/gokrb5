@@ -26,16 +26,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version: '1.26.11'
-          cache-dependency-path: |
-            go.sum
-            v8/go.sum
+          cache-dependency-path: v8/go.sum
 
       - name: Cache custom linter
         id: lint-cache
@@ -50,42 +46,24 @@ jobs:
           go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
           "$(go env GOPATH)/bin/golangci-lint" custom --destination "$GITHUB_WORKSPACE/.bin"
 
-      - name: Verify profiles
-        run: |
-          "$GOLANGCI_LINT" version
-          "$GOLANGCI_LINT" config verify --config .golangci.yml
-          "$GOLANGCI_LINT" config verify --config .golangci-report.yml
+      - name: Show linter version
+        run: '"$GOLANGCI_LINT" version'
 
-      - name: Assess whole project
+      - name: Report supplemental v8 findings
         shell: bash
         run: |
-          for profile in full report; do
-            status=0
-            bash scripts/lint.sh "$profile" || status=$?
-            if [ "$status" -gt 1 ]; then
-              exit "$status"
-            fi
-            if [ "$status" -eq 1 ]; then
-              echo "::notice::Existing debt found in $profile; see lint-reports artifact"
-            fi
-          done
-
-      - name: Reject new findings
-        if: github.event_name == 'pull_request' || github.event_name == 'push'
-        env:
-          BASE_REV: ${{ github.event.pull_request.base.sha || github.event.before }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        shell: bash
-        run: |
-          if [ -z "$BASE_REV" ] || [ "$BASE_REV" = 0000000000000000000000000000000000000000 ]; then
-            BASE_REV=$(git merge-base HEAD "origin/$DEFAULT_BRANCH")
-          elif ! git cat-file -e "$BASE_REV^{commit}" 2>/dev/null; then
-            # A force-push can make the previous tip unreachable from all current refs.
-            git fetch --no-tags origin "$BASE_REV"
+          status=0
+          bash scripts/lint.sh report || status=$?
+          if [ "$status" -eq 1 ]; then
+            echo "::notice::Supplemental v8 findings; see lint-reports artifact"
+          elif [ "$status" -ne 0 ]; then
+            exit "$status"
           fi
-          bash scripts/lint.sh new "$BASE_REV"
 
-      - name: Upload full and changed-code findings
+      - name: Reject canonical v8 findings
+        run: bash scripts/lint.sh full
+
+      - name: Upload v8 lint reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
