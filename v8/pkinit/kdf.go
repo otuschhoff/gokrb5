@@ -37,11 +37,11 @@ func DeriveReplyKey(
 	if seedBits <= 0 || seedBits%bitsPerByte != 0 {
 		return types.EncryptionKey{}, fmt.Errorf("PKINIT enctype %d has invalid key seed length %d", etypeID, seedBits)
 	}
-	partyUInfo, err := asn1.Marshal(client)
+	partyUInfo, err := marshalKDFPrincipal(client)
 	if err != nil {
 		return types.EncryptionKey{}, fmt.Errorf("marshal PKINIT KDF client principal: %w", err)
 	}
-	partyVInfo, err := asn1.Marshal(server)
+	partyVInfo, err := marshalKDFPrincipal(server)
 	if err != nil {
 		return types.EncryptionKey{}, fmt.Errorf("marshal PKINIT KDF server principal: %w", err)
 	}
@@ -67,6 +67,45 @@ func DeriveReplyKey(
 		return types.EncryptionKey{}, err
 	}
 	return types.EncryptionKey{KeyType: etypeID, KeyValue: et.RandomToKey(seed)}, nil
+}
+
+func marshalKDFPrincipal(name KRB5PrincipalName) ([]byte, error) {
+	realm, err := stdasn1.Marshal(generalString(name.Realm))
+	if err != nil {
+		return nil, fmt.Errorf("marshal realm: %w", err)
+	}
+
+	var wire struct {
+		Realm     stdasn1.RawValue
+		Principal struct {
+			NameType   int32              `asn1:"explicit,tag:0"`
+			Components []stdasn1.RawValue `asn1:"explicit,tag:1"`
+		} `asn1:"explicit,tag:1"`
+	}
+	// RawValue bypasses struct tags, so supply the explicit [0] wrapper.
+	wire.Realm = stdasn1.RawValue{
+		Class: stdasn1.ClassContextSpecific, Tag: 0, IsCompound: true,
+		Bytes: realm, FullBytes: nil,
+	}
+	wire.Principal.NameType = name.PrincipalName.NameType
+	wire.Principal.Components = make([]stdasn1.RawValue, len(name.PrincipalName.NameString))
+	for i, component := range name.PrincipalName.NameString {
+		wire.Principal.Components[i] = generalString(component)
+	}
+	der, err := stdasn1.Marshal(wire)
+	if err != nil {
+		return nil, fmt.Errorf("marshal principal sequence: %w", err)
+	}
+	return der, nil
+}
+
+func generalString(value string) stdasn1.RawValue {
+	// GeneralString is universal tag 27. Preserve the input octets verbatim.
+	const generalStringTag = 27
+	return stdasn1.RawValue{
+		Class: stdasn1.ClassUniversal, Tag: generalStringTag, IsCompound: false,
+		Bytes: []byte(value), FullBytes: nil,
+	}
 }
 
 // DeriveLegacyReplyKey applies octetstring2key from RFC 4556 section 3.2.3.1.
