@@ -820,6 +820,22 @@ unit and race tests pass; `FuzzDecodeArrays` passes a 90-second run (9.39
 million executions); the changed-line lint gate is clean for both modules.
 The v8 canonical total is 1,869.
 
+Slice 153 (2026-11-21, complete v8 asn1tools lint cleanup; Q-10):
+Name the ASN.1 length masks, octet radix, and long-form byte offset.
+Make the application wrapper's zero-value field explicit and retain the
+length and tag test vectors in clearer fixtures. No wire-format, public
+API, dependency, or lint configuration changes; no new lint exceptions.
+
+Both pinned profiles report zero findings in `v8/asn1tools`, down
+from 17 supplemental and zero canonical. Diagnostics outside the
+package are unchanged; whole-v8 totals are 340 canonical and 381
+supplemental. The revised tests pass against both baseline and final
+production code at 100% statement coverage. The full v8 build, vet,
+and offline race suite pass, as do 25 shuffled race-enabled package
+runs, Linux/386 tests, and both canonical changed-line gates.
+Windows/amd64 and interop-tagged package tests compile; native Windows
+execution and live interoperability were not tested.
+
 Slice 152 (2026-11-21, complete v8 fileio lint cleanup; Q-10):
 Name the existing `0o600` temporary-file mode without changing atomic
 replacement or cleanup behavior. Retain all fault cases and the typed

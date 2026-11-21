@@ -9,20 +9,24 @@ import (
 
 func TestMarshalLengthBytes(t *testing.T) {
 	tests := []struct {
+		name   string
 		length int
 		want   []byte
 	}{
-		{length: -1, want: nil},
-		{length: 0, want: []byte{0}},
-		{length: 127, want: []byte{127}},
-		{length: 128, want: []byte{0x81, 0x80}},
-		{length: 256, want: []byte{0x82, 0x01, 0x00}},
-		{length: 65535, want: []byte{0x82, 0xff, 0xff}},
+		{name: "negative", length: -1, want: nil},
+		{name: "zero", length: 0, want: []byte{0}},
+		{name: "largest short form", length: 127, want: []byte{127}},
+		{name: "smallest long form", length: 128, want: []byte{0x81, 0x80}},
+		{name: "first two octet length", length: 256, want: []byte{0x82, 0x01, 0x00}},
+		{name: "last two octet length", length: 65535, want: []byte{0x82, 0xff, 0xff}},
 	}
 	for _, test := range tests {
-		if got := MarshalLengthBytes(test.length); !bytes.Equal(got, test.want) {
-			t.Errorf("MarshalLengthBytes(%d) = %x, want %x", test.length, got, test.want)
-		}
+		t.Run(test.name, func(t *testing.T) {
+			got := MarshalLengthBytes(test.length)
+			if !bytes.Equal(got, test.want) || (got == nil) != (test.want == nil) {
+				t.Errorf("MarshalLengthBytes(%d) = %#v, want %#v", test.length, got, test.want)
+			}
+		})
 	}
 }
 
@@ -36,10 +40,15 @@ func TestASNLengthHeader(t *testing.T) {
 		{name: "short", encoded: []byte{0x30, 0x7f}, wantLength: 127, wantHeader: 1},
 		{name: "long one byte", encoded: []byte{0x30, 0x81, 0x80}, wantLength: 128, wantHeader: 2},
 		{name: "long two bytes", encoded: []byte{0x30, 0x82, 0x01, 0x00}, wantLength: 256, wantHeader: 3},
-		{name: "missing header", encoded: []byte{0x30}},
-		{name: "indefinite", encoded: []byte{0x30, 0x80}},
-		{name: "truncated long form", encoded: []byte{0x30, 0x82, 0x01}},
-		{name: "oversized long form", encoded: append([]byte{0x30, 0x89}, bytes.Repeat([]byte{0xff}, 9)...)},
+		{name: "missing header", encoded: []byte{0x30}, wantLength: 0, wantHeader: 0},
+		{name: "indefinite", encoded: []byte{0x30, 0x80}, wantLength: 0, wantHeader: 0},
+		{name: "truncated long form", encoded: []byte{0x30, 0x82, 0x01}, wantLength: 0, wantHeader: 0},
+		{
+			name:       "oversized long form",
+			encoded:    append([]byte{0x30, 0x89}, bytes.Repeat([]byte{0xff}, 9)...),
+			wantLength: 0,
+			wantHeader: 0,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -58,13 +67,15 @@ func TestAddASNAppTag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded := AddASNAppTag(payload, 14)
+	const tag = 14
+	encoded := AddASNAppTag(payload, tag)
 	var raw asn1.RawValue
 	rest, err := asn1.Unmarshal(encoded, &raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rest) != 0 || raw.Class != asn1.ClassApplication || !raw.IsCompound || raw.Tag != 14 || !bytes.Equal(raw.Bytes, payload) {
+	isApplicationWrapper := raw.Class == asn1.ClassApplication && raw.IsCompound && raw.Tag == tag
+	if !isApplicationWrapper || len(rest) != 0 || !bytes.Equal(raw.Bytes, payload) {
 		t.Fatalf("application wrapper = %#v, trailing bytes = %x", raw, rest)
 	}
 }
