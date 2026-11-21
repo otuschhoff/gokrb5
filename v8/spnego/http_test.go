@@ -15,11 +15,11 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/gorilla/sessions"
 	"github.com/jcmturner/goidentity/v6"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -377,21 +377,18 @@ func TestService_SPNEGOKRB_Upload(t *testing.T) {
 	r.Header.Set("Content-Type", bodyWriter.FormDataContentType())
 
 	cl := getClient()
-	cookieJar, _ := cookiejar.New(nil)
-	httpCl := http.DefaultClient
+	cookieJar, err := cookiejar.New(nil)
+	require.NoError(t, err)
+	httpCl := s.Client()
 	httpCl.Jar = cookieJar
 	spnegoCl := NewClient(cl, httpCl, "HTTP/host.test.gokrb5")
 	httpResp, err := spnegoCl.Do(r)
-	if err != nil {
-		t.Fatalf("Request error: %v\n", err)
-	}
+	require.NoError(t, err)
+	defer httpResp.Body.Close() //nolint:errcheck // Best-effort test cleanup.
 	if httpResp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(httpResp.Body)
-		bodyString := string(bodyBytes)
-		if err := httpResp.Body.Close(); err != nil {
-			t.Fatal(err)
-		}
-		t.Errorf("unexpected code from http server (%d): %s", httpResp.StatusCode, bodyString)
+		bodyBytes, readErr := io.ReadAll(httpResp.Body)
+		require.NoError(t, readErr)
+		t.Fatalf("unexpected code from http server (%d): %s", httpResp.StatusCode, bodyBytes)
 	}
 }
 
@@ -453,7 +450,7 @@ func httpServer() *httptest.Server {
 		th,
 		kt,
 		service.Logger(l),
-		service.SessionManager(NewSessionMgr("gokrb5")),
+		service.SessionManager(new(testHTTPSessions)),
 	))
 	return s
 }
@@ -509,41 +506,49 @@ func getClient() *client.Client {
 	return cl
 }
 
-type SessionMgr struct {
-	skey       []byte
-	store      sessions.Store
-	cookieName string
+const testSessionCookie = "gokrb5-test-session"
+
+type testSessionEntry struct {
+	key   string
+	value []byte
 }
 
-func NewSessionMgr(cookieName string) SessionMgr {
-	skey := []byte("thisistestsecret") // Best practice is to load this key from a secure location.
-	return SessionMgr{
-		skey:       skey,
-		store:      sessions.NewCookieStore(skey),
-		cookieName: cookieName,
-	}
+// testHTTPSessions keeps credentials in memory; the test cookie only carries an opaque ID.
+type testHTTPSessions struct {
+	mu      sync.Mutex
+	entries map[string]testSessionEntry
 }
 
-func (smgr SessionMgr) Get(r *http.Request, k string) ([]byte, error) {
-	s, err := smgr.store.Get(r, smgr.cookieName)
+func (sessions *testHTTPSessions) Get(r *http.Request, key string) ([]byte, error) {
+	cookie, err := r.Cookie(testSessionCookie)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read test session cookie: %w", err)
 	}
-	if s == nil {
-		return nil, errors.New("nil session")
+	sessions.mu.Lock()
+	defer sessions.mu.Unlock()
+	entry, ok := sessions.entries[cookie.Value]
+	if !ok || entry.key != key {
+		return nil, errors.New("test session entry not found")
 	}
-	b, ok := s.Values[k].([]byte)
-	if !ok {
-		return nil, fmt.Errorf("could not get bytes held in session at %s", k)
-	}
-	return b, nil
+	return slices.Clone(entry.value), nil
 }
 
-func (smgr SessionMgr) New(w http.ResponseWriter, r *http.Request, k string, v []byte) error {
-	s, err := smgr.store.New(r, smgr.cookieName)
-	if err != nil {
-		return fmt.Errorf("could not get new session from session manager: %w", err)
+func (sessions *testHTTPSessions) New(w http.ResponseWriter, r *http.Request, key string, value []byte) error {
+	id := rand.Text()
+	sessions.mu.Lock()
+	if sessions.entries == nil {
+		sessions.entries = make(map[string]testSessionEntry)
 	}
-	s.Values[k] = v
-	return s.Save(r, w)
+	sessions.entries[id] = testSessionEntry{key: key, value: slices.Clone(value)}
+	sessions.mu.Unlock()
+	// #nosec G124 -- The test cookie must also work over loopback HTTP.
+	var cookie http.Cookie
+	cookie.Name = testSessionCookie
+	cookie.Value = id
+	cookie.Path = "/"
+	cookie.HttpOnly = true
+	cookie.SameSite = http.SameSiteStrictMode
+	cookie.Secure = r.TLS != nil
+	http.SetCookie(w, &cookie)
+	return nil
 }

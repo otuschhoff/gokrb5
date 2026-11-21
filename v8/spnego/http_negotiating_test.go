@@ -185,7 +185,7 @@ func TestLegacyHTTPMiddlewareUsesAuthenticatedSession(t *testing.T) {
 	}
 }
 
-func TestLegacyHTTPMiddlewareAuthenticatesAndCreatesSession(t *testing.T) {
+func TestLegacyHTTPMiddlewareAuthenticatesAndReusesSession(t *testing.T) {
 	_, _, initial := newContextExchange(t, []int{gssapi.ContextFlagInteg})
 	tokenBytes, err := initial.Marshal()
 	if err != nil {
@@ -199,14 +199,14 @@ func TestLegacyHTTPMiddlewareAuthenticatesAndCreatesSession(t *testing.T) {
 	if err := kt.Unmarshal(keytabBytes); err != nil {
 		t.Fatal(err)
 	}
-	manager := new(coverageSessionManager)
-	called := false
+	manager := new(testHTTPSessions)
+	var users []string
 	handler := SPNEGOKRB5Authenticate(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		called = true
 		identity := goidentity.FromHTTPRequestContext(request)
 		if identity == nil || !identity.Authenticated() {
 			t.Fatalf("authenticated identity missing from request context: %#v", identity)
 		}
+		users = append(users, identity.UserName()+"@"+identity.Domain())
 		writer.WriteHeader(http.StatusNoContent)
 	}), kt, service.SessionManager(manager), service.DecodePAC(false))
 	request := httptest.NewRequest(http.MethodGet, "http://server.example", nil)
@@ -214,12 +214,29 @@ func TestLegacyHTTPMiddlewareAuthenticatesAndCreatesSession(t *testing.T) {
 	request.Header.Set(HTTPHeaderAuthRequest, "Negotiate "+base64.StdEncoding.EncodeToString(tokenBytes))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if !called || response.Code != http.StatusNoContent || len(manager.saved) == 0 {
-		t.Fatalf("authenticated request = called %v, status %d, session bytes %d", called, response.Code, len(manager.saved))
-	}
-	if response.Header().Get(HTTPHeaderAuthResponse) == "" {
-		t.Fatal("successful response omitted the SPNEGO completion token")
-	}
+	require.Equal(t, http.StatusNoContent, response.Code)
+	require.NotEmpty(t, response.Header().Get(HTTPHeaderAuthResponse), "expected a SPNEGO completion token")
+	result := response.Result()
+	defer result.Body.Close() //nolint:errcheck // Best-effort test cleanup.
+	cookies := result.Cookies()
+	require.Len(t, cookies, 1)
+	require.Equal(t, testSessionCookie, cookies[0].Name)
+	require.NotEmpty(t, cookies[0].Value)
+
+	noSession := httptest.NewRequest(http.MethodGet, request.URL.String(), nil)
+	noSession.RemoteAddr = testRemoteAddress
+	withoutCookie := httptest.NewRecorder()
+	handler.ServeHTTP(withoutCookie, noSession)
+	require.Equal(t, http.StatusUnauthorized, withoutCookie.Code)
+
+	followUp := httptest.NewRequest(http.MethodGet, request.URL.String(), nil)
+	followUp.RemoteAddr = testRemoteAddress
+	followUp.AddCookie(cookies[0])
+	resumed := httptest.NewRecorder()
+	handler.ServeHTTP(resumed, followUp)
+	require.Equal(t, http.StatusNoContent, resumed.Code)
+	require.Len(t, users, 2)
+	require.Equal(t, users[0], users[1])
 }
 
 func TestNegotiatingClientHTTPExchange(t *testing.T) {

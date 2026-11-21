@@ -482,7 +482,20 @@ handler as below:
 http.Handler("/", spnego.SPNEGOKRB5Authenticate(h, &kt, service.Logger(l), service.SessionManager(sm)))
 ```
 
-The ``httpServer.go`` source file in the examples directory shows how this can be used with the popular gorilla web toolkit.
+[`examples/httpServer.go`](examples/httpServer.go) shows how to use a Gorilla
+session store with SPNEGO. The examples use a separate Go module so Gorilla
+is not a dependency of the v8 library. From the repository root, build an
+example against the checked-out v8 source:
+
+```sh
+cd v8/examples
+GOWORK=off go build -tags=examples httpServer.go
+```
+
+Build or run one source file at a time; each is a separate program.
+For example, `GOWORK=off go run -tags=examples example.go` runs the
+client/server demo when the `TEST.GOKRB5` integration KDC and DNS fixtures
+are available.
 
 ##### Validating Users and Accessing Users' Details
 If authentication succeeds then the request's context will have a credentials objected added to it.
