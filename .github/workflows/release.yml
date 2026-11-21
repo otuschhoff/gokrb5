@@ -13,8 +13,23 @@ jobs:
     name: Register GitHub Release
     runs-on: ubuntu-latest
     steps:
-      - name: Create or update release
+      - name: Create release if missing
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" --verify-tag --generate-notes || gh release edit "$TAG" --generate-notes
+        shell: bash
+        run: |
+          tag_path=$(jq -rn --arg tag "$TAG" '$tag | @uri')
+          if response=$(gh api --include "repos/$GH_REPO/releases/tags/$tag_path" 2>&1); then
+            printf 'Release %s already exists; leaving it unchanged.\n' "$TAG"
+            exit 0
+          fi
+
+          status_line=${response%%$'\n'*}
+          if [[ ! "$status_line" =~ ^HTTP/[^[:space:]]+[[:space:]]404([[:space:]]|$) ]]; then
+            printf 'Could not check release %s: %s\n' "$TAG" "$status_line" >&2
+            exit 1
+          fi
+
+          gh release create --verify-tag --generate-notes -- "$TAG"
